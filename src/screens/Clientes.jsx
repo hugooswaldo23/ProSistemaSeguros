@@ -1,3 +1,4 @@
+const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
 
@@ -142,62 +143,17 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 
 const ModuloClientes = () => {
   // Estados principales del módulo de clientes
-  const [clientes, setClientes] = useState([
-    {
-      id: 1,
-      codigo: 'CL001',
-      tipoPersona: 'Persona Física',
-      nombre: 'Juan Carlos',
-      apellidoPaterno: 'Hernández',
-      apellidoMaterno: 'García',
-      rfc: 'HEGJ850615HD7',
-      curp: 'HEGJ850615HDFRRC09',
-      fechaNacimiento: '1985-06-15',
-      email: 'juan.hernandez@email.com',
-      telefonoFijo: '55 5555 1234',
-      telefonoMovil: '55 1234 5678',
-      direccion: 'Av. Reforma 123, Col. Centro',
-      ciudad: 'Ciudad de México',
-      estado: 'Ciudad de México',
-      codigoPostal: '06000',
-      pais: 'México',
-      segmento: 'Premium',
-      fechaAlta: '2024-01-15',
-      activo: true,
-      notas: 'Cliente preferencial con historial excelente',
-      documentos: [
-        {
-          id: 101,
-          tipo: 'Identificación Oficial (INE/Pasaporte)',
-          nombre: 'Identificacion_Oficial_INE_Pasaporte_2025-08-11.pdf',
-          fechaSubida: '2025-08-11',
-          estado: 'Vigente',
-          tipoArchivo: 'application/pdf',
-          tamaño: '1.8 MB'
-        },
-        {
-          id: 102,
-          tipo: 'Comprobante de Domicilio',
-          nombre: 'Comprobante_de_Domicilio_2025-08-11.pdf',
-          fechaSubida: '2025-08-11',
-          estado: 'Vigente',
-          tipoArchivo: 'application/pdf',
-          tamaño: '2.1 MB'
-        },
-        {
-          id: 103,
-          tipo: 'CURP',
-          nombre: 'CURP_2025-08-11.pdf',
-          fechaSubida: '2025-08-11',
-          estado: 'Vigente',
-          tipoArchivo: 'application/pdf',
-          tamaño: '856 KB'
-        }
-      ],
-      expedientesRelacionados: [1, 4],
-      contactos: []
-    }
-  ]);
+  const [clientes, setClientes] = useState([]);
+  // Cargar clientes desde el backend al montar el componente
+  useEffect(() => {
+  fetch(`${API_URL}/api/clientes`)
+      .then(res => res.json())
+      .then(data => setClientes(data))
+      .catch(err => {
+        console.error('Error al cargar clientes:', err);
+        setClientes([]);
+      });
+  }, []);
   const [vistaActual, setVistaActual] = useState('clientes');
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -349,7 +305,7 @@ const ModuloClientes = () => {
   }, []);
 
   // Función para guardar cliente
-  const guardarCliente = useCallback(() => {
+  const guardarCliente = useCallback(async () => {
     if (formularioCliente.tipoPersona === 'Persona Física') {
       if (!formularioCliente.nombre || !formularioCliente.apellidoPaterno) {
         alert('Por favor complete los campos obligatorios: Nombre y Apellido Paterno');
@@ -362,27 +318,34 @@ const ModuloClientes = () => {
       }
     }
 
-    const codigo = generarCodigoCliente();
-
-    if (modoEdicion) {
-      setClientes(prev => prev.map(cliente => 
-        cliente.id === formularioCliente.id ? 
-          { ...formularioCliente, codigo: cliente.codigo } : 
-          cliente
-      ));
-    } else {
-      const nuevoCliente = {
-        ...formularioCliente,
-        codigo: codigo,
-        id: Date.now(),
-        fechaAlta: new Date().toISOString().split('T')[0]
-      };
-      setClientes(prev => [...prev, nuevoCliente]);
+    try {
+      if (modoEdicion) {
+        // Actualizar cliente
+  const res = await fetch(`${API_URL}/api/clientes/${formularioCliente.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formularioCliente)
+        });
+        if (!res.ok) throw new Error('Error al actualizar cliente');
+        const actualizado = await res.json();
+        setClientes(prev => prev.map(c => c.id === actualizado.id ? actualizado : c));
+      } else {
+        // Crear cliente
+  const res = await fetch(`${API_URL}/api/clientes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formularioCliente)
+        });
+        if (!res.ok) throw new Error('Error al crear cliente');
+        const nuevo = await res.json();
+        setClientes(prev => [...prev, nuevo]);
+      }
+      limpiarFormularioCliente();
+      setVistaActual('clientes');
+    } catch (err) {
+      alert('Error al guardar cliente: ' + err.message);
     }
-    
-    limpiarFormularioCliente();
-    setVistaActual('clientes');
-  }, [formularioCliente, modoEdicion, generarCodigoCliente, limpiarFormularioCliente]);
+  }, [formularioCliente, modoEdicion, limpiarFormularioCliente]);
 
   // Función para editar cliente
   const editarCliente = useCallback((cliente) => {
@@ -392,26 +355,25 @@ const ModuloClientes = () => {
   }, []);
 
   // Función para eliminar cliente
-  const eliminarCliente = useCallback((id) => {
+  const eliminarCliente = useCallback(async (id) => {
     const cliente = clientes.find(c => c.id === id);
     if (cliente?.expedientesRelacionados?.length > 0) {
       alert('No se puede eliminar el cliente porque tiene expedientes relacionados.');
       return;
     }
-
-    // Usar un modal personalizado en lugar de confirm
-    // Por ahora usamos un alert y eliminamos directamente
-    // En producción, deberías implementar un modal de confirmación similar
     const nombreCliente = cliente.tipoPersona === 'Persona Física' ? 
       `${cliente.nombre} ${cliente.apellidoPaterno}` : 
       cliente.razonSocial;
-    
-    // Como no podemos usar confirm(), mostramos un mensaje y eliminamos
-    // En un sistema real, aquí abriríamos un modal de confirmación
-    alert(`⚠️ Eliminando cliente: ${nombreCliente}`);
-    
-    setClientes(prev => prev.filter(c => c.id !== id));
-    alert(`✅ Cliente "${nombreCliente}" eliminado correctamente`);
+    try {
+  const res = await fetch(`${API_URL}/api/clientes/${id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Error al eliminar cliente');
+      setClientes(prev => prev.filter(c => c.id !== id));
+      alert(`✅ Cliente "${nombreCliente}" eliminado correctamente`);
+    } catch (err) {
+      alert('Error al eliminar cliente: ' + err.message);
+    }
   }, [clientes]);
 
   // Función para ver detalles

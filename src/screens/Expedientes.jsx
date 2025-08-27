@@ -1,3 +1,4 @@
+const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader } from 'lucide-react';
 
@@ -121,7 +122,7 @@ const CampoFechaCalculada = React.memo(({
 const InfoCliente = React.memo(({ expediente }) => (
   <div>
     <div className="fw-semibold">
-      {expediente.nombre} {expediente.apellidoPaterno}
+      {expediente.nombre} {expediente.apellido_paterno || expediente.apellidoPaterno} {expediente.apellido_materno || expediente.apellidoMaterno}
     </div>
     <small className="text-muted">{expediente.email}</small>
     {expediente.producto === 'Autos' && expediente.marca && (
@@ -1210,8 +1211,8 @@ const Formulario = React.memo(({
                 <input
                   type="text"
                   className="form-control"
-                  value={formulario.apellidoPaterno}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, apellidoPaterno: e.target.value }))}
+                  value={formulario.apellido_paterno || formulario.apellidoPaterno}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, apellido_paterno: e.target.value, apellidoPaterno: e.target.value }))}
                   required
                 />
               </div>
@@ -1220,8 +1221,8 @@ const Formulario = React.memo(({
                 <input
                   type="text"
                   className="form-control"
-                  value={formulario.apellidoMaterno}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, apellidoMaterno: e.target.value }))}
+                  value={formulario.apellido_materno || formulario.apellidoMaterno}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, apellido_materno: e.target.value, apellidoMaterno: e.target.value }))}
                 />
               </div>
               <div className="col-md-6">
@@ -1874,7 +1875,7 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Información del Cliente</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Nombre completo:</strong>
-                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellidoPaterno} {expedienteSeleccionado.apellidoMaterno}
+                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellido_paterno || expedienteSeleccionado.apellidoPaterno} {expedienteSeleccionado.apellido_materno || expedienteSeleccionado.apellidoMaterno}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Email:</strong>
@@ -2006,6 +2007,14 @@ const DetallesExpediente = React.memo(({
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
   const [expedientes, setExpedientes] = useState([]);
+
+  // Cargar expedientes desde el backend al montar
+  useEffect(() => {
+  fetch(`${API_URL}/api/expedientes`)
+      .then(res => res.json())
+      .then(data => setExpedientes(data))
+      .catch(err => console.error('Error al cargar expedientes:', err));
+  }, []);
   const [agentes] = useState([
     { id: 1, codigoAgente: 'AG001', nombre: 'Juan', apellidoPaterno: 'Pérez', activo: true },
     { id: 2, codigoAgente: 'AG002', nombre: 'María', apellidoPaterno: 'García', activo: true }
@@ -2017,7 +2026,14 @@ const ModuloExpedientes = () => {
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
   const [expedienteACancelar, setExpedienteACancelar] = useState(null);
 
-  const companias = useMemo(() => ['Qualitas', 'Banorte', 'HDI', 'El Aguila', 'Mapfre', 'Chubb', 'Afirme'], []);
+  const [aseguradoras, setAseguradoras] = useState([]);
+  useEffect(() => {
+  fetch(`${API_URL}/api/aseguradoras`)
+      .then(res => res.json())
+      .then(data => setAseguradoras(data))
+      .catch(err => console.error('Error al cargar aseguradoras:', err));
+  }, []);
+  const companias = useMemo(() => aseguradoras.map(a => a.nombre), [aseguradoras]);
   const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
   const etapasActivas = useMemo(() => [
     'En cotización',
@@ -2053,46 +2069,46 @@ const ModuloExpedientes = () => {
   ], []);
 
   const estadoInicialFormulario = useMemo(() => ({
-    nombre: '',
-    apellidoPaterno: '',
-    apellidoMaterno: '',
-    telefonoFijo: '',
-    telefonoMovil: '',
-    email: '',
-    compania: '',
-    producto: '',
-    etapaActiva: 'En cotización',
-    agente: '',
-    subAgente: '',
-    inicioVigencia: '',
-    terminoVigencia: '',
-    primaPagada: '',
-    cargoPagoFraccionado: '',
-    iva: '',
-    total: '',
-    motivoCancelacion: '',
-    tipoPago: 'Anual',
-    frecuenciaPago: '',
-    periodoGracia: 14,
-    proximoPago: '',
-    estatusPago: 'Sin definir',
-    fechaUltimoPago: '',
-    marca: '',
-    modelo: '',
-    año: '',
-    numeroSerie: '',
-    placas: '',
-    color: '',
-    tipoVehiculo: '',
-    numeroPoliza: '',
-    tipoCobertura: '',
-    deducible: '',
-    sumaAsegurada: '',
-    conductorHabitual: '',
-    edadConductor: '',
-    licenciaConducir: '',
-    fechaCreacion: new Date().toISOString().split('T')[0],
-    id: null
+  nombre: '',
+  apellido_paterno: '',
+  apellido_materno: '',
+  telefono_fijo: '',
+  telefono_movil: '',
+  email: '',
+  compania: '',
+  producto: '',
+  etapa_activa: 'En cotización',
+  agente: '',
+  sub_agente: '',
+  inicio_vigencia: '',
+  termino_vigencia: '',
+  prima_pagada: '',
+  cargo_pago_fraccionado: '',
+  iva: '',
+  total: '',
+  motivo_cancelacion: '',
+  tipo_pago: 'Anual',
+  frecuencia_pago: '',
+  periodo_gracia: 14,
+  proximo_pago: '',
+  estatus_pago: 'Sin definir',
+  fecha_ultimo_pago: '',
+  marca: '',
+  modelo: '',
+  anio: '',
+  numero_serie: '',
+  placas: '',
+  color: '',
+  tipo_vehiculo: '',
+  numero_poliza: '',
+  tipo_cobertura: '',
+  deducible: '',
+  suma_asegurada: '',
+  conductor_habitual: '',
+  edad_conductor: '',
+  licencia_conducir: '',
+  fecha_creacion: new Date().toISOString().split('T')[0],
+  id: null
   }), []);
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
@@ -2292,26 +2308,54 @@ const ModuloExpedientes = () => {
     if (!validarFormulario()) return;
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
+    // Normalizar apellidos para backend
+    const expedientePayload = {
+      ...formularioConCalculos,
+      apellido_paterno: formularioConCalculos.apellido_paterno || formularioConCalculos.apellidoPaterno,
+      apellido_materno: formularioConCalculos.apellido_materno || formularioConCalculos.apellidoMaterno
+    };
 
     if (modoEdicion) {
-      setExpedientes(prev => prev.map(exp => 
-        exp.id === formularioConCalculos.id ? { ...formularioConCalculos } : exp
-      ));
+  fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expedientePayload)
+      })
+        .then(() => {
+          limpiarFormulario();
+          recargarExpedientes();
+          setVistaActual('lista');
+        })
+        .catch(err => alert('Error al actualizar expediente'));
     } else {
-      const nuevoExpediente = {
-        ...formularioConCalculos,
-        id: Date.now(),
-        fechaCreacion: new Date().toISOString().split('T')[0]
-      };
-      setExpedientes(prev => [...prev, nuevoExpediente]);
+  fetch(`${API_URL}/api/expedientes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...expedientePayload,
+          fechaCreacion: new Date().toISOString().split('T')[0]
+        })
+      })
+        .then(() => {
+          limpiarFormulario();
+          recargarExpedientes();
+          setVistaActual('lista');
+        })
+        .catch(err => alert('Error al crear expediente'));
     }
-    
-    limpiarFormulario();
-    setVistaActual('lista');
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario]);
-
+  const recargarExpedientes = useCallback(() => {
+  fetch(`${API_URL}/api/expedientes`)
+      .then(res => res.json())
+      .then(data => setExpedientes(data))
+      .catch(err => console.error('Error al recargar expedientes:', err));
+  }, []);
   const editarExpediente = useCallback((expediente) => {
-    setFormulario(expediente);
+    setFormulario({
+      ...expediente,
+      apellidoPaterno: expediente.apellido_paterno || expediente.apellidoPaterno,
+      apellidoMaterno: expediente.apellido_materno || expediente.apellidoMaterno
+    });
     setModoEdicion(true);
     setVistaActual('formulario');
   }, []);

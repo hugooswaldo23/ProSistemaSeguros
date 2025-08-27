@@ -1,27 +1,28 @@
 import React, { useMemo } from 'react';
-import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings } from 'lucide-react';
-import { useNavigate, useLocation, useParams, redirect } from "react-router-dom";
+import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2 } from 'lucide-react';
+import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
-const Sidebar = ({ vistaActual, setVistaActual }) =>  {
+const Sidebar = () =>  {
     const navigate = useNavigate();
+    const location = useLocation();
 
     const modulos = useMemo(() => [
-        { key: '', nombre: 'Dashboard', icono: Home, activo: true },
-        { key: 'clientes', nombre: 'Clientes', icono: Users, activo: true },
-        { key: 'expedientes', nombre: 'Expedientes', icono: FileText, activo: true },
-        { key: 'agentes', nombre: 'Agentes', icono: UserCheck, activo: true },
-        { key: 'seguros', nombre: 'Seguros', icono: Shield, activo: false },
-        { key: 'productos', nombre: 'Productos', icono: Package, activo: true },
-        { key: 'reportes', nombre: 'Reportes', icono: PieChart, activo: false },
-        { key: 'configuracion', nombre: 'Configuración', icono: Settings, activo: true }
+        { key: '/', nombre: 'Dashboard', icono: Home, activo: true },
+        { key: '/clientes', nombre: 'Clientes', icono: Users, activo: true },
+        { key: '/expedientes', nombre: 'Expedientes', icono: FileText, activo: true },
+        { key: '/tramites', nombre: 'Trámites', icono: Clipboard, activo: true },
+        { key: '/equipo-de-trabajo', nombre: 'Equipo de Trabajo', icono: UserCheck, activo: true },
+        { key: '/aseguradoras', nombre: 'Aseguradoras', icono: Building2, activo: true },
+        { key: '/configuracion-tablas', nombre: 'Configuración de Tablas', icono: Database, activo: true },
+        { key: '/configuracion', nombre: 'Configuración', icono: Settings, activo: true }
     ], []);
 
     return (
-        <div className="d-flex flex-column bg-dark text-white" >
-            <div className="py-3 px-5 border-bottom border-secondary">
+        <div className="d-flex flex-column bg-dark text-white" style={{ width: '280px', minHeight: '100vh' }}>
+            <div className="py-3 px-4 border-bottom border-secondary">
                 <h5 className="mb-0 text-center">
-                <Shield className="me-2" size={24} />
+                    <Shield className="me-2" size={24} />
                     Sistema Seguros
                 </h5>
             </div>
@@ -29,12 +30,13 @@ const Sidebar = ({ vistaActual, setVistaActual }) =>  {
             <nav className="flex-grow-1 py-3">
                 {modulos.map(modulo => {
                     const IconoModulo = modulo.icono;
+                    const isActive = location.pathname === modulo.key;
                     return (
                         <button
                             key={modulo.key}
                             onClick={() => navigate(modulo.key)}
                             className={`btn w-100 text-start text-white d-flex align-items-center px-4 py-2 border-0 ${
-                                vistaActual === modulo.key ? 'bg-primary' : 'bg-transparent'
+                                isActive ? 'bg-primary' : 'bg-transparent'
                             } ${!modulo.activo ? 'opacity-50' : ''}`}
                             style={{ borderRadius: '0' }}
                             disabled={!modulo.activo}
@@ -58,4 +60,5 @@ const Sidebar = ({ vistaActual, setVistaActual }) =>  {
         </div>
     );
 };
+
 export default Sidebar;

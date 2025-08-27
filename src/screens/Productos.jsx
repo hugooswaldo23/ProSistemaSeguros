@@ -1,57 +1,48 @@
 import React, { useMemo, useState,useCallback,useEffect } from 'react'; 
-import { Plus, Eye, Home, Users, FileText, UserCheck, Package, PieChart, Settings } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Home, Users, FileText, UserCheck, Package, PieChart, Settings } from 'lucide-react';
 import { useNavigate, useLocation, useParams, redirect } from "react-router-dom";
-
-// Hook personalizado para paginación
-const usePaginacion = (items, itemsPorPagina = 10) => {
-  const [paginaActual, setPaginaActual] = useState(1);
-  const [busqueda, setBusqueda] = useState('');
-
-  const itemsFiltrados = useMemo(() => {
-    if (!busqueda) return items;
-    
-    const busquedaLower = busqueda.toLowerCase();
-    return items.filter(item => 
-      JSON.stringify(item).toLowerCase().includes(busquedaLower)
-    );
-  }, [items, busqueda]);
-
-  const totalPaginas = Math.ceil(itemsFiltrados.length / itemsPorPagina);
-  
-  const itemsPaginados = useMemo(() => {
-    const inicio = (paginaActual - 1) * itemsPorPagina;
-    const fin = inicio + itemsPorPagina;
-    return itemsFiltrados.slice(inicio, fin);
-  }, [itemsFiltrados, paginaActual, itemsPorPagina]);
-
-  const irAPagina = useCallback((pagina) => {
-    setPaginaActual(Math.max(1, Math.min(pagina, totalPaginas)));
-  }, [totalPaginas]);
-
-  useEffect(() => {
-    setPaginaActual(1);
-  }, [busqueda]);
-
-  return {
-    itemsPaginados,
-    paginaActual,
-    totalPaginas,
-    setPaginaActual: irAPagina,
-    busqueda,
-    setBusqueda,
-    totalItems: itemsFiltrados.length
-  };
-};
+import { usePaginacion } from '../hooks/usePaginacion';
+import { Paginacion } from '../components/Paginacion';
+import { BarraBusqueda } from '../components/BarraBusqueda';
 
 const Productos = () => {
   const navigate = useNavigate();
   const [productosPersonalizados, setProductosPersonalizados] = useState([]);
+  const [vistaActual, setVistaActual] = useState('lista');
+  const [formularioProducto, setFormularioProducto] = useState({});
+  const [modoEdicionProducto, setModoEdicionProducto] = useState(false);
   const paginacion = usePaginacion(productosPersonalizados, 10);
   const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
   const companias = useMemo(() => ['Qualitas', 'Banorte', 'HDI', 'El Aguila', 'Mapfre', 'Chubb', 'Afirme'], []);
   const [expedientes, setExpedientes] = useState([]);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
     
+  const limpiarFormularioProducto = useCallback(() => {
+    setFormularioProducto({
+      codigo: '',
+      nombre: '',
+      categoria: '',
+      descripcion: '',
+      companiasDisponibles: [],
+      activo: true,
+      comisionBase: '',
+      vigenciaDias: 365
+    });
+    setModoEdicionProducto(false);
+  }, []);
+
+  const editarProducto = useCallback((producto) => {
+    setFormularioProducto(producto);
+    setModoEdicionProducto(true);
+    setVistaActual('formulario-producto');
+  }, []);
+
+  const eliminarProducto = useCallback((id) => {
+    if (window.confirm('¿Estás seguro de que deseas eliminar este producto?')) {
+      setProductosPersonalizados(prev => prev.filter(p => p.id !== id));
+    }
+  }, []);
+
   // Agregar productos base predefinidos a los personalizados
   const todosLosProductos = useMemo(() => {
     const productosBase = productos.map((prod, index) => ({

@@ -1,19 +1,17 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Sidebar from '../components/Sidebar';
 
 const Layout = ({ children }) => {
-  const [vistaActual, setVistaActual] = useState('dashboard');
-
   return (
     <div className="d-flex">
-        <link 
-            href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" 
-            rel="stylesheet" 
-        />
-        <Sidebar vistaActual={vistaActual} setVistaActual={setVistaActual} />
-        <main className="flex-grow-1 p-4" style={{ minHeight: '100vh'}}>
-            {children}
-        </main>
+      <link 
+        href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" 
+        rel="stylesheet" 
+      />
+      <Sidebar />
+      <main className="flex-grow-1" style={{ minHeight: '100vh', backgroundColor: '#f8f9fa' }}>
+        {children}
+      </main>
     </div>
   );
 };
