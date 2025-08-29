@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
+import { LogOut } from 'lucide-react';
 import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2 } from 'lucide-react';
 import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
-const Sidebar = () =>  {
+const Sidebar = ({ onLogout }) =>  {
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -49,13 +50,20 @@ const Sidebar = () =>  {
             </nav>
         
             <div className="border-top border-secondary p-3">
-                <div className="d-flex align-items-center">
+                <div className="d-flex align-items-center mb-3">
                     <User size={20} className="me-2" />
                     <div>
                         <small className="d-block">Admin Usuario</small>
                         <small className="text-muted">Promotoria</small>
                     </div>
                 </div>
+                <button
+                    className="btn btn-danger w-100 d-flex align-items-center justify-content-center"
+                    onClick={onLogout}
+                >
+                    <LogOut size={18} className="me-2" />
+                    Cerrar sesión
+                </button>
             </div>
         </div>
     );

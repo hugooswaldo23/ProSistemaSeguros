@@ -7,6 +7,11 @@ import {
 } from '../services/equipoDeTrabajoService';
 
 export const useEquipoDeTrabajo = () => {
+  // Obtener asignaciones de ejecutivos por producto
+  const obtenerEjecutivosPorProducto = useCallback(async (usuarioId) => {
+    const { obtenerEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+    return await obtenerEjecutivosPorProducto(usuarioId);
+  }, []);
   const [equipoDeTrabajo, setEquipoDeTrabajo] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -20,18 +25,40 @@ export const useEquipoDeTrabajo = () => {
     
     if (resultado.success) {
       // Transformar datos de la BD al formato del frontend
-      const equipoTransformado = resultado.data.map(miembro => ({
-        id: miembro.id,
-        codigoAgente: miembro.codigo_agente,
-        nombre: miembro.nombre,
-        apellidoPaterno: miembro.apellido_paterno,
-        apellidoMaterno: miembro.apellido_materno,
-        email: miembro.email,
-        telefono: miembro.telefono,
-        activo: miembro.activo,
-        fechaRegistro: new Date(miembro.created_at).toISOString().split('T')[0]
-      }));
-      
+      const equipoTransformado = resultado.data.map(miembro => {
+        let fechaRegistro = null;
+        if (miembro.created_at && !isNaN(new Date(miembro.created_at))) {
+          fechaRegistro = new Date(miembro.created_at).toISOString().split('T')[0];
+        }
+        return {
+          id: miembro.id,
+          codigo: miembro.codigo,
+          nombre: miembro.nombre,
+          apellidoPaterno: miembro.apellidoPaterno,
+          apellidoMaterno: miembro.apellidoMaterno,
+          email: miembro.email,
+          telefono: miembro.telefono,
+          activo: miembro.activo,
+          fechaNacimiento: miembro.fechaNacimiento,
+          fechaIngreso: miembro.fechaIngreso,
+          fechaRegistro: miembro.fechaRegistro,
+          perfil: miembro.perfil,
+          usuario: miembro.usuario,
+          horarioEntrada: miembro.horarioEntrada,
+          horarioSalida: miembro.horarioSalida,
+          diasTrabajo: miembro.diasTrabajo ? JSON.parse(miembro.diasTrabajo) : [],
+          sueldoDiario: miembro.sueldoDiario,
+          tipoPago: miembro.tipoPago,
+          metodoPago: miembro.metodoPago,
+          banco: miembro.banco,
+          cuentaBancaria: miembro.cuentaBancaria,
+          notas: miembro.notas,
+          agentesSupervisados: miembro.agentesSupervisados ? JSON.parse(miembro.agentesSupervisados) : [],
+          ejecutivoAsignado: miembro.ejecutivoAsignado,
+          ejecutivosPorProducto: miembro.ejecutivosPorProducto,
+          tiposProductosDisponibles: miembro.tiposProductosDisponibles
+        };
+      });
       setEquipoDeTrabajo(equipoTransformado);
     } else {
       setError(resultado.error);
@@ -84,7 +111,7 @@ export const useEquipoDeTrabajo = () => {
     
     const numeros = equipoDeTrabajo
       .map(miembro => {
-        const match = miembro.codigoAgente.match(/AG(\d+)/);
+        const match = miembro.codigoAgente ? miembro.codigoAgente.match(/AG(\d+)/) : null;
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(num => !isNaN(num));
@@ -100,14 +127,22 @@ export const useEquipoDeTrabajo = () => {
     cargarEquipoDeTrabajo();
   }, [cargarEquipoDeTrabajo]);
 
+  // Guardar asignaciones de ejecutivos por producto
+  const guardarEjecutivosPorProducto = useCallback(async (asignaciones) => {
+    const { guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+    return await guardarEjecutivosPorProducto(asignaciones);
+  }, []);
+
   return {
-    equipoDeTrabajo,
-    loading,
-    error,
-    cargarEquipoDeTrabajo,
-    crear,
-    actualizar,
-    eliminar,
-    generarCodigo
+  equipoDeTrabajo,
+  loading,
+  error,
+  cargarEquipoDeTrabajo,
+  crear,
+  actualizar,
+  eliminar,
+  generarCodigo,
+  guardarEjecutivosPorProducto,
+  obtenerEjecutivosPorProducto
   };
 };

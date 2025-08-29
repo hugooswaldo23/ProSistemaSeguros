@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader } from 'lucide-react';
-
+import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
   MIN_YEAR: 1900,
@@ -57,7 +57,7 @@ const utils = {
         'Pago por vencer': 'bg-warning',
         'Sin definir': 'bg-secondary'
       },
-      tipoPago: {
+      tipo_pago: {
         'Fraccionado': 'bg-info',
         'Anual': 'bg-primary'
       }
@@ -122,7 +122,7 @@ const CampoFechaCalculada = React.memo(({
 const InfoCliente = React.memo(({ expediente }) => (
   <div>
     <div className="fw-semibold">
-      {expediente.nombre} {expediente.apellido_paterno || expediente.apellidoPaterno} {expediente.apellido_materno || expediente.apellidoMaterno}
+      {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
     </div>
     <small className="text-muted">{expediente.email}</small>
     {expediente.producto === 'Autos' && expediente.marca && (
@@ -137,7 +137,7 @@ const InfoCliente = React.memo(({ expediente }) => (
 
 const EstadoPago = React.memo(({ expediente }) => (
   <div>
-    <small className="fw-semibold text-primary">{expediente.tipoPago || 'Sin definir'}</small>
+    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
     {expediente.frecuenciaPago && (
       <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
     )}
@@ -162,7 +162,7 @@ const CalendarioPagos = React.memo(({
   mostrarResumen = true,
   compacto = false 
 }) => {
-  if (!expediente.tipoPago === 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicioVigencia) {
+  if (!expediente.tipo_pago === 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicio_vigencia) {
     return null;
   }
 
@@ -171,8 +171,8 @@ const CalendarioPagos = React.memo(({
   
   for (let i = 1; i <= numeroPagos; i++) {
     const fechaPago = calcularProximoPago(
-      expediente.inicioVigencia,
-      expediente.tipoPago,
+      expediente.inicio_vigencia,
+      expediente.tipo_pago,
       expediente.frecuenciaPago,
       expediente.periodoGracia,
       i
@@ -480,50 +480,50 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
       const datosSimulados = {
         // INFORMACIÓN DEL ASEGURADO (Página 2 - Sección superior)
         nombre: 'ADAN',
-        apellidoPaterno: 'LUNA',
-        apellidoMaterno: 'MAGDALENO',
+        apellido_paterno: 'LUNA',
+        apellido_materno: 'MAGDALENO',
         email: '',
-        telefonoFijo: '',
-        telefonoMovil: '',
+        telefono_fijo: '',
+        telefono_movil: '',
         
         // DATOS DE LA PÓLIZA (Página 1 - Encabezado)
         compania: 'Qualitas',
         producto: 'Autos',
-        etapaActiva: 'Emitida',
+        etapa_activa: 'Emitida',
         agente: 'GUZMAN GONZALEZ Y ASOCIADOS AGTE DE SEGU',
-        subAgente: '',
-        numeroPoliza: '0971416046',
+        sub_agente: '',
+        numero_poliza: '0971416046',
         
         // VIGENCIA (Página 2 - Sección de vigencia)
-        inicioVigencia: '2025-07-08',
-        terminoVigencia: '2026-07-08',
+        inicio_vigencia: '2025-07-08',
+        termino_vigencia: '2026-07-08',
         
         // INFORMACIÓN FINANCIERA (Página 2 - Sección inferior)
-        primaPagada: '31749.06',
-        cargoPagoFraccionado: '',
+        prima_pagada: '31749.06',
+        cargo_pago_fraccionado: '',
         iva: '5080.65',
         total: '36834.73',
-        tipoPago: 'Contado',
-        periodoGracia: 14,
+        tipo_pago: 'Contado',
+        periodo_gracia: 14,
         
         // DESCRIPCIÓN DEL VEHÍCULO (Página 2 - Sección media)
         marca: 'BYD',
         modelo: 'M9 BASE 5P L4 1.5T PHEV AUT',
-        año: '2026',
-        numeroSerie: 'LC0C74C4XT4005854',
+        anio: '2026',
+        numero_serie: 'LC0C74C4XT4005854',
         placas: 'SN',
         color: '',
-        tipoVehiculo: 'Automóviles Especiales',
+        tipo_vehiculo: 'Automóviles Especiales',
         
         // COBERTURAS
-        tipoCobertura: 'AMPLIADA',
+        tipo_cobertura: 'AMPLIADA',
         deducible: '5',
-        sumaAsegurada: '978800.00',
+        suma_asegurada: '978800.00',
         
         // CONDUCTOR
-        conductorHabitual: 'ADAN LUNA MAGDALENO',
-        edadConductor: '',
-        licenciaConducir: ''
+        conductor_habitual: 'ADAN LUNA MAGDALENO',
+        edad_conductor: '',
+        licencia_conducir: ''
       };
 
       setDatosExtraidos(datosSimulados);
@@ -531,14 +531,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
       
       // Mensajes informativos sobre la extracción
       const mensajesExtraccion = [
-        '✅ Extracción simulada completada exitosamente',
-        '📄 Datos identificados de póliza Qualitas',
-        `👤 Asegurado: ${datosSimulados.nombre} ${datosSimulados.apellidoPaterno} ${datosSimulados.apellidoMaterno}`,
-        `🚗 Vehículo: ${datosSimulados.marca} ${datosSimulados.modelo} ${datosSimulados.año}`,
-        `📋 Póliza: ${datosSimulados.numeroPoliza}`,
-        `💰 Total: ${datosSimulados.total}`,
-        '',
-        '⚠️ Nota: En producción, estos datos se extraerían directamente del PDF'
       ];
       
       setErrores(mensajesExtraccion);
@@ -657,11 +649,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                           <div className="row g-2">
                             <div className="col-md-12">
                               <small className="text-muted">Nombre Completo:</small><br/>
-                              <strong>{datosExtraidos.nombre} {datosExtraidos.apellidoPaterno} {datosExtraidos.apellidoMaterno}</strong>
+                              <strong>{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</strong>
                             </div>
                             <div className="col-md-12">
                               <small className="text-muted">Conductor Habitual:</small><br/>
-                              <strong>{datosExtraidos.conductorHabitual || 'Mismo que asegurado'}</strong>
+                              <strong>{datosExtraidos.conductor_habitual || 'Mismo que asegurado'}</strong>
                             </div>
                           </div>
                         </div>
@@ -678,7 +670,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Número de Póliza:</small><br/>
-                              <strong>{datosExtraidos.numeroPoliza}</strong>
+                              <strong>{datosExtraidos.numero_poliza}</strong>
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Producto:</small><br/>
@@ -686,7 +678,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Tipo de Pago:</small><br/>
-                              <strong>{datosExtraidos.tipoPago}</strong>
+                              <strong>{datosExtraidos.tipo_pago}</strong>
                             </div>
                           </div>
                           <div className="row g-2 mt-2">
@@ -705,11 +697,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                           <div className="row g-2">
                             <div className="col-md-6">
                               <small className="text-muted">Desde las 12:00 P.M. del:</small><br/>
-                              <strong>{datosExtraidos.inicioVigencia ? new Date(datosExtraidos.inicioVigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
+                              <strong>{datosExtraidos.inicio_vigencia ? new Date(datosExtraidos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
                             </div>
                             <div className="col-md-6">
                               <small className="text-muted">Hasta las 12:00 P.M. del:</small><br/>
-                              <strong>{datosExtraidos.terminoVigencia ? new Date(datosExtraidos.terminoVigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
+                              <strong>{datosExtraidos.termino_vigencia ? new Date(datosExtraidos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
                             </div>
                           </div>
                         </div>
@@ -730,13 +722,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Año:</small><br/>
-                              <strong>{datosExtraidos.año}</strong>
+                              <strong>{datosExtraidos.anio}</strong>
                             </div>
                           </div>
                           <div className="row g-2 mt-2">
                             <div className="col-md-6">
                               <small className="text-muted">Serie (VIN):</small><br/>
-                              <strong className="font-monospace">{datosExtraidos.numeroSerie}</strong>
+                              <strong className="font-monospace">{datosExtraidos.numero_serie}</strong>
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Placas:</small><br/>
@@ -744,7 +736,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Tipo:</small><br/>
-                              <strong>{datosExtraidos.tipoVehiculo}</strong>
+                              <strong>{datosExtraidos.tipo_vehiculo}</strong>
                             </div>
                           </div>
                         </div>
@@ -757,11 +749,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                           <div className="row g-2">
                             <div className="col-md-4">
                               <small className="text-muted">Tipo de Cobertura:</small><br/>
-                              <strong className="text-uppercase">{datosExtraidos.tipoCobertura}</strong>
+                              <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
                             </div>
                             <div className="col-md-4">
                               <small className="text-muted">Suma Asegurada:</small><br/>
-                              <strong>{utils.formatearMoneda(datosExtraidos.sumaAsegurada)}</strong>
+                              <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
                             </div>
                             <div className="col-md-4">
                               <small className="text-muted">Deducible:</small><br/>
@@ -778,7 +770,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                           <div className="row g-2">
                             <div className="col-md-3">
                               <small className="text-muted">Prima Neta:</small><br/>
-                              <strong>{utils.formatearMoneda(datosExtraidos.primaPagada)}</strong>
+                              <strong>{utils.formatearMoneda(datosExtraidos.prima_pagada)}</strong>
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">I.V.A. 16%:</small><br/>
@@ -786,7 +778,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Forma de Pago:</small><br/>
-                              <strong className="text-uppercase">{datosExtraidos.tipoPago}</strong>
+                              <strong className="text-uppercase">{datosExtraidos.tipo_pago}</strong>
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">IMPORTE TOTAL:</small><br/>
@@ -873,7 +865,7 @@ const ModalCancelacion = React.memo(({
               ></button>
             </div>
             <div className="modal-body">
-              <p>¿Está seguro de cancelar el expediente de <strong>{expedienteACancelar?.nombre} {expedienteACancelar?.apellidoPaterno}</strong>?</p>
+              <p>¿Está seguro de cancelar el expediente de <strong>{expedienteACancelar?.nombre} {expedienteACancelar?.apellido_paterno}</strong>?</p>
               
               <div className="mb-3">
                 <label className="form-label">Motivo de cancelación *</label>
@@ -1003,15 +995,15 @@ const ListaExpedientes = React.memo(({
                         <td>
                           <div>
                             {expediente.producto}
-                            {expediente.producto === 'Autos' && expediente.tipoCobertura && (
+                            {expediente.producto === 'Autos' && expediente.tipo_cobertura && (
                               <div>
-                                <small className="text-muted">{expediente.tipoCobertura}</small>
+                                <small className="text-muted">{expediente.tipo_cobertura}</small>
                               </div>
                             )}
                           </div>
                         </td>
                         <td>
-                          <Badge tipo="etapa" valor={expediente.etapaActiva} />
+                          <Badge tipo="etapa" valor={expediente.etapa_activa} />
                           {expediente.motivoCancelacion && (
                             <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
@@ -1026,11 +1018,11 @@ const ListaExpedientes = React.memo(({
                           />
                         </td>
                         <td>
-                          <small>{expediente.fechaCreacion}</small>
+                          <small>{expediente.fecha_creacion}</small>
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
-                            {(expediente.etapaActiva === 'Emitida' || expediente.etapaActiva === 'Pendiente de pago' || expediente.etapaActiva === 'Pagado') && 
+                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Pendiente de pago' || expediente.etapa_activa === 'Pagado') && 
                              expediente.estatusPago !== 'Pagado' && (
                               <button
                                 onClick={() => aplicarPago(expediente.id)}
@@ -1041,17 +1033,17 @@ const ListaExpedientes = React.memo(({
                               </button>
                             )}
 
-                            {puedeAvanzarEstado(expediente.etapaActiva) && (
+                            {puedeAvanzarEstado(expediente.etapa_activa) && (
                               <button
                                 onClick={() => avanzarEstado(expediente)}
                                 className="btn btn-success btn-sm"
-                                title={`Avanzar a: ${obtenerSiguienteEstado(expediente.etapaActiva)}`}
+                                title={`Avanzar a: ${obtenerSiguienteEstado(expediente.etapa_activa)}`}
                               >
                                 <ArrowRight size={14} />
                               </button>
                             )}
                             
-                            {puedeCancelar(expediente.etapaActiva) && (
+                            {puedeCancelar(expediente.etapa_activa) && (
                               <button
                                 onClick={() => iniciarCancelacion(expediente)}
                                 className="btn btn-danger btn-sm"
@@ -1124,7 +1116,7 @@ const Formulario = React.memo(({
   marcasVehiculo,
   tiposVehiculo,
   tiposCobertura,
-  calcularTerminoVigencia,
+  calculartermino_vigencia,
   calcularProximoPago,
   CONSTANTS
 }) => {
@@ -1135,12 +1127,12 @@ const Formulario = React.memo(({
     setFormulario(prev => ({
       ...prev,
       ...datosExtraidos,
-      fechaCreacion: prev.fechaCreacion,
+      fecha_creacion: prev.fecha_creacion,
       id: prev.id,
-      etapaActiva: datosExtraidos.etapaActiva || prev.etapaActiva
+      etapa_activa: datosExtraidos.etapa_activa || prev.etapa_activa
     }));
     
-    if (datosExtraidos.inicioVigencia) {
+    if (datosExtraidos.inicio_vigencia) {
       const formularioActualizado = actualizarCalculosAutomaticos({
         ...formulario,
         ...datosExtraidos
@@ -1211,8 +1203,8 @@ const Formulario = React.memo(({
                 <input
                   type="text"
                   className="form-control"
-                  value={formulario.apellido_paterno || formulario.apellidoPaterno}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, apellido_paterno: e.target.value, apellidoPaterno: e.target.value }))}
+                  value={formulario.apellido_paterno}
+                  onChange={(e) => setFormulario(prev => ({ ...prev }))}
                   required
                 />
               </div>
@@ -1221,8 +1213,8 @@ const Formulario = React.memo(({
                 <input
                   type="text"
                   className="form-control"
-                  value={formulario.apellido_materno || formulario.apellidoMaterno}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, apellido_materno: e.target.value, apellidoMaterno: e.target.value }))}
+                  value={formulario.apellido_materno}
+                  onChange={(e) => setFormulario(prev => ({ ...prev}))}
                 />
               </div>
               <div className="col-md-6">
@@ -1239,8 +1231,8 @@ const Formulario = React.memo(({
                 <input
                   type="tel"
                   className="form-control"
-                  value={formulario.telefonoFijo}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, telefonoFijo: e.target.value }))}
+                  value={formulario.telefono_fijo}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, telefono_fijo: e.target.value }))}
                 />
               </div>
               <div className="col-md-6">
@@ -1248,8 +1240,8 @@ const Formulario = React.memo(({
                 <input
                   type="tel"
                   className="form-control"
-                  value={formulario.telefonoMovil}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, telefonoMovil: e.target.value }))}
+                  value={formulario.telefono_movil}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, telefono_movil: e.target.value }))}
                 />
               </div>
             </div>
@@ -1286,18 +1278,18 @@ const Formulario = React.memo(({
                         producto: nuevoProducto,
                         marca: '',
                         modelo: '',
-                        año: '',
-                        numeroSerie: '',
+                        anio: '',
+                        numero_serie: '',
                         placas: '',
                         color: '',
-                        tipoVehiculo: '',
-                        numeroPoliza: '',
-                        tipoCobertura: '',
+                        tipo_vehiculo: '',
+                        numero_poliza: '',
+                        tipo_cobertura: '',
                         deducible: '',
-                        sumaAsegurada: '',
-                        conductorHabitual: '',
-                        edadConductor: '',
-                        licenciaConducir: ''
+                        suma_asegurada: '',
+                        conductor_habitual: '',
+                        edad_conductor: '',
+                        licencia_conducir: ''
                       }));
                     } else {
                       setFormulario(prev => ({ ...prev, producto: nuevoProducto }));
@@ -1315,8 +1307,8 @@ const Formulario = React.memo(({
                 <label className="form-label">Etapa Activa</label>
                 <select
                   className="form-select"
-                  value={formulario.etapaActiva}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, etapaActiva: e.target.value }))}
+                  value={formulario.etapa_activa}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, etapa_activa: e.target.value }))}
                 >
                   {etapasActivas.map(etapa => (
                     <option key={etapa} value={etapa}>{etapa}</option>
@@ -1350,9 +1342,9 @@ const Formulario = React.memo(({
                   onChange={(e) => setFormulario(prev => ({ ...prev, agente: e.target.value }))}
                 >
                   <option value="">Seleccionar agente</option>
-                  {agentes.filter(agente => agente.activo).map(agente => (
-                    <option key={agente.id} value={agente.codigoAgente}>
-                      {agente.codigoAgente} - {agente.nombre} {agente.apellidoPaterno}
+                  {agentes.map(agente => (
+                    <option key={agente.id} value={agente.codigo}>
+                      {agente.codigo} - {agente.nombre} {agente.apellido_paterno} {agente.apellido_materno}
                     </option>
                   ))}
                 </select>
@@ -1375,8 +1367,8 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.primaPagada}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, primaPagada: e.target.value }))}
+                    value={formulario.prima_pagada}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, prima_pagada: e.target.value }))}
                     placeholder="0.00"
                   />
                 </div>
@@ -1428,9 +1420,9 @@ const Formulario = React.memo(({
                 <input
                   type="date"
                   className="form-control"
-                  value={formulario.inicioVigencia}
+                  value={formulario.inicio_vigencia}
                   onChange={(e) => {
-                    const nuevoFormulario = { ...formulario, inicioVigencia: e.target.value };
+                    const nuevoFormulario = { ...formulario, inicio_vigencia: e.target.value };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                     setFormulario(formularioActualizado);
                   }}
@@ -1439,13 +1431,13 @@ const Formulario = React.memo(({
               <div className="col-md-6">
                 <CampoFechaCalculada
                   label="Término de Vigencia"
-                  value={formulario.terminoVigencia}
-                  onChange={(valor) => setFormulario(prev => ({ ...prev, terminoVigencia: valor }))}
+                  value={formulario.termino_vigencia}
+                  onChange={(valor) => setFormulario(prev => ({ ...prev, termino_vigencia: valor }))}
                   onCalculate={() => {
-                    const terminoCalculado = calcularTerminoVigencia(formulario.inicioVigencia);
-                    setFormulario(prev => ({ ...prev, terminoVigencia: terminoCalculado }));
+                    const terminoCalculado = calculartermino_vigencia(formulario.inicio_vigencia);
+                    setFormulario(prev => ({ ...prev, termino_vigencia: terminoCalculado }));
                   }}
-                  disabled={!formulario.inicioVigencia}
+                  disabled={!formulario.inicio_vigencia}
                   helpText="La vigencia siempre es de 1 año"
                 />
               </div>
@@ -1485,8 +1477,8 @@ const Formulario = React.memo(({
                   <input
                     type="number"
                     className="form-control"
-                    value={formulario.año}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, año: e.target.value }))}
+                    value={formulario.anio}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, anio: e.target.value }))}
                     min={CONSTANTS.MIN_YEAR}
                     max={CONSTANTS.MAX_YEAR}
                     placeholder="Ej: 2023"
@@ -1497,8 +1489,8 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.numeroSerie}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numeroSerie: e.target.value.toUpperCase() }))}
+                    value={formulario.numero_serie}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_serie: e.target.value.toUpperCase() }))}
                     placeholder={`${CONSTANTS.VIN_LENGTH} caracteres`}
                     maxLength={CONSTANTS.VIN_LENGTH}
                   />
@@ -1527,8 +1519,8 @@ const Formulario = React.memo(({
                   <label className="form-label">Tipo de Vehículo</label>
                   <select
                     className="form-select"
-                    value={formulario.tipoVehiculo}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipoVehiculo: e.target.value }))}
+                    value={formulario.tipo_vehiculo}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_vehiculo: e.target.value }))}
                   >
                     <option value="">Seleccionar tipo</option>
                     {tiposVehiculo.map(tipo => (
@@ -1550,8 +1542,8 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.numeroPoliza}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numeroPoliza: e.target.value }))}
+                    value={formulario.numero_poliza}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_poliza: e.target.value }))}
                     placeholder="Número asignado por la aseguradora"
                   />
                 </div>
@@ -1559,8 +1551,8 @@ const Formulario = React.memo(({
                   <label className="form-label">Tipo de Cobertura</label>
                   <select
                     className="form-select"
-                    value={formulario.tipoCobertura}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipoCobertura: e.target.value }))}
+                    value={formulario.tipo_cobertura}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_cobertura: e.target.value }))}
                   >
                     <option value="">Seleccionar cobertura</option>
                     {tiposCobertura.map(tipo => (
@@ -1589,8 +1581,8 @@ const Formulario = React.memo(({
                     <input
                       type="number"
                       className="form-control"
-                      value={formulario.sumaAsegurada}
-                      onChange={(e) => setFormulario(prev => ({ ...prev, sumaAsegurada: e.target.value }))}
+                      value={formulario.suma_asegurada}
+                      onChange={(e) => setFormulario(prev => ({ ...prev, suma_asegurada: e.target.value }))}
                       placeholder="Valor del vehículo"
                       step="0.01"
                     />
@@ -1610,8 +1602,8 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.conductorHabitual}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, conductorHabitual: e.target.value }))}
+                    value={formulario.conductor_habitual}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, conductor_habitual: e.target.value }))}
                     placeholder="Nombre completo"
                   />
                 </div>
@@ -1620,8 +1612,8 @@ const Formulario = React.memo(({
                   <input
                     type="number"
                     className="form-control"
-                    value={formulario.edadConductor}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, edadConductor: e.target.value }))}
+                    value={formulario.edad_conductor}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, edad_conductor: e.target.value }))}
                     min="18"
                     max="100"
                     placeholder="Años"
@@ -1632,8 +1624,8 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.licenciaConducir}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, licenciaConducir: e.target.value }))}
+                    value={formulario.licencia_conducir}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, licencia_conducir: e.target.value }))}
                     placeholder="Número de licencia"
                   />
                 </div>
@@ -1649,11 +1641,11 @@ const Formulario = React.memo(({
                 <label className="form-label">Tipo de Pago</label>
                 <select
                   className="form-select"
-                  value={formulario.tipoPago}
+                  value={formulario.tipo_pago}
                   onChange={(e) => {
                     const nuevoFormulario = {
                       ...formulario, 
-                      tipoPago: e.target.value,
+                      tipo_pago: e.target.value,
                       frecuenciaPago: e.target.value === 'Anual' ? '' : formulario.frecuenciaPago
                     };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
@@ -1666,7 +1658,7 @@ const Formulario = React.memo(({
                 </select>
               </div>
               
-              {formulario.tipoPago === 'Fraccionado' && (
+              {formulario.tipo_pago === 'Fraccionado' && (
                 <div className="col-md-3">
                   <label className="form-label">Frecuencia de Pago</label>
                   <select
@@ -1740,7 +1732,7 @@ const Formulario = React.memo(({
                 </div>
               </div>
 
-              {formulario.tipoPago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicioVigencia && (
+              {formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicio_vigencia && (
                 <div className="col-12 mt-3">
                   <CalendarioPagos 
                     expediente={formulario} 
@@ -1793,7 +1785,7 @@ const DetallesExpediente = React.memo(({
   iniciarCancelacion,
   editarExpediente,
   calcularSiguientePago,
-  calcularTerminoVigencia,
+  calculartermino_vigencia,
   calcularProximoPago
 }) => (
   <div className="p-4">
@@ -1801,9 +1793,9 @@ const DetallesExpediente = React.memo(({
       <h3 className="mb-0">Detalles del Expediente</h3>
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
-         (expedienteSeleccionado.etapaActiva === 'Emitida' || 
-          expedienteSeleccionado.etapaActiva === 'Pendiente de pago' || 
-          expedienteSeleccionado.etapaActiva === 'Pagado') && 
+         (expedienteSeleccionado.etapa_activa === 'Emitida' || 
+          expedienteSeleccionado.etapa_activa === 'Pendiente de pago' || 
+          expedienteSeleccionado.etapa_activa === 'Pagado') && 
          expedienteSeleccionado.estatusPago !== 'Pagado' && (
           <button
             onClick={() => {
@@ -1831,17 +1823,17 @@ const DetallesExpediente = React.memo(({
           </button>
         )}
 
-        {expedienteSeleccionado && puedeAvanzarEstado(expedienteSeleccionado.etapaActiva) && (
+        {expedienteSeleccionado && puedeAvanzarEstado(expedienteSeleccionado.etapa_activa) && (
           <button
             onClick={() => avanzarEstado(expedienteSeleccionado)}
             className="btn btn-success d-flex align-items-center"
           >
             <ArrowRight size={16} className="me-2" />
-            Avanzar a: {obtenerSiguienteEstado(expedienteSeleccionado.etapaActiva)}
+            Avanzar a: {obtenerSiguienteEstado(expedienteSeleccionado.etapa_activa)}
           </button>
         )}
         
-        {expedienteSeleccionado && puedeCancelar(expedienteSeleccionado.etapaActiva) && (
+        {expedienteSeleccionado && puedeCancelar(expedienteSeleccionado.etapa_activa) && (
           <button
             onClick={() => iniciarCancelacion(expedienteSeleccionado)}
             className="btn btn-danger d-flex align-items-center"
@@ -1875,7 +1867,7 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Información del Cliente</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Nombre completo:</strong>
-                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellido_paterno || expedienteSeleccionado.apellidoPaterno} {expedienteSeleccionado.apellido_materno || expedienteSeleccionado.apellidoMaterno}
+                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellido_paterno} {expedienteSeleccionado.apellido_materno}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Email:</strong>
@@ -1883,11 +1875,11 @@ const DetallesExpediente = React.memo(({
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono fijo:</strong>
-                {expedienteSeleccionado.telefonoFijo || '-'}
+                {expedienteSeleccionado.telefono_fijo || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono móvil:</strong>
-                {expedienteSeleccionado.telefonoMovil || '-'}
+                {expedienteSeleccionado.telefono_movil || '-'}
               </div>
             </div>
 
@@ -1903,7 +1895,7 @@ const DetallesExpediente = React.memo(({
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Etapa Activa:</strong>
-                <Badge tipo="etapa" valor={expedienteSeleccionado.etapaActiva} />
+                <Badge tipo="etapa" valor={expedienteSeleccionado.etapa_activa} />
                 {expedienteSeleccionado.motivoCancelacion && (
                   <div className="mt-1">
                     <small className="text-danger">Motivo: {expedienteSeleccionado.motivoCancelacion}</small>
@@ -1920,7 +1912,7 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Información Financiera</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Prima pagada:</strong>
-                {utils.formatearMoneda(expedienteSeleccionado.primaPagada)}
+                {utils.formatearMoneda(expedienteSeleccionado.prima_pagada)}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">IVA:</strong>
@@ -1938,21 +1930,21 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Vigencia</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Inicio de vigencia:</strong>
-                {expedienteSeleccionado.inicioVigencia || '-'}
+                {expedienteSeleccionado.inicio_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Término de vigencia:</strong>
-                {expedienteSeleccionado.terminoVigencia || '-'}
+                {expedienteSeleccionado.termino_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Fecha de creación:</strong>
-                {expedienteSeleccionado.fechaCreacion}
+                {expedienteSeleccionado.fecha_creacion}
               </div>
             </div>
 
-            {expedienteSeleccionado.tipoPago === 'Fraccionado' && 
+            {expedienteSeleccionado.tipo_pago === 'Fraccionado' && 
              expedienteSeleccionado.frecuenciaPago && 
-             expedienteSeleccionado.inicioVigencia && (
+             expedienteSeleccionado.inicio_vigencia && (
               <div className="col-12">
                 <CalendarioPagos 
                   expediente={expedienteSeleccionado}
@@ -1976,7 +1968,7 @@ const DetallesExpediente = React.memo(({
                   </div>
                   <div className="mb-3">
                     <strong className="d-block text-muted">Año:</strong>
-                    {expedienteSeleccionado.año || '-'}
+                    {expedienteSeleccionado.anio || '-'}
                   </div>
                 </div>
 
@@ -1984,7 +1976,7 @@ const DetallesExpediente = React.memo(({
                   <h5 className="card-title border-bottom pb-2">Identificación del Vehículo</h5>
                   <div className="mb-3">
                     <strong className="d-block text-muted">Número de Serie (VIN):</strong>
-                    {expedienteSeleccionado.numeroSerie || '-'}
+                    {expedienteSeleccionado.numero_serie || '-'}
                   </div>
                   <div className="mb-3">
                     <strong className="d-block text-muted">Placas:</strong>
@@ -2007,7 +1999,15 @@ const DetallesExpediente = React.memo(({
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
   const [expedientes, setExpedientes] = useState([]);
-
+  const [agentes, setAgentes] = useState([]);
+  useEffect(() => {
+    const fetchAgentes = async () => {
+      const resultado = await obtenerAgentesEquipo();
+      console.log('Agentes cargados:', resultado.data);
+      if (resultado.success) setAgentes(resultado.data);
+    };
+    fetchAgentes();
+  }, []);
   // Cargar expedientes desde el backend al montar
   useEffect(() => {
   fetch(`${API_URL}/api/expedientes`)
@@ -2015,10 +2015,6 @@ const ModuloExpedientes = () => {
       .then(data => setExpedientes(data))
       .catch(err => console.error('Error al cargar expedientes:', err));
   }, []);
-  const [agentes] = useState([
-    { id: 1, codigoAgente: 'AG001', nombre: 'Juan', apellidoPaterno: 'Pérez', activo: true },
-    { id: 2, codigoAgente: 'AG002', nombre: 'María', apellidoPaterno: 'García', activo: true }
-  ]);
   const [vistaActual, setVistaActual] = useState('lista');
   const [expedienteSeleccionado, setExpedienteSeleccionado] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -2067,8 +2063,7 @@ const ModuloExpedientes = () => {
     'Mitsubishi', 'Nissan', 'Peugeot', 'Renault', 'Seat', 'Suzuki', 
     'Toyota', 'Volkswagen', 'Volvo', 'Otra'
   ], []);
-
-  const estadoInicialFormulario = useMemo(() => ({
+const estadoInicialFormulario = {
   nombre: '',
   apellido_paterno: '',
   apellido_materno: '',
@@ -2109,24 +2104,24 @@ const ModuloExpedientes = () => {
   licencia_conducir: '',
   fecha_creacion: new Date().toISOString().split('T')[0],
   id: null
-  }), []);
+};
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
 
-  const calcularTerminoVigencia = useCallback((inicioVigencia) => {
-    if (!inicioVigencia) return '';
+  const calculartermino_vigencia = useCallback((inicio_vigencia) => {
+    if (!inicio_vigencia) return '';
     
-    const fechaInicio = new Date(inicioVigencia);
+    const fechaInicio = new Date(inicio_vigencia);
     const fechaTermino = new Date(fechaInicio);
     fechaTermino.setFullYear(fechaTermino.getFullYear() + 1);
     
     return fechaTermino.toISOString().split('T')[0];
   }, []);
 
-  const calcularProximoPago = useCallback((inicioVigencia, tipoPago, frecuenciaPago, periodoGracia, numeroPago = 1) => {
-    if (!inicioVigencia) return '';
+  const calcularProximoPago = useCallback((inicio_vigencia, tipo_pago, frecuenciaPago, periodoGracia, numeroPago = 1) => {
+    if (!inicio_vigencia) return '';
     
-    const fechaInicio = new Date(inicioVigencia);
+    const fechaInicio = new Date(inicio_vigencia);
     let fechaPago = new Date(fechaInicio);
     
     if (numeroPago === 1) {
@@ -2134,9 +2129,9 @@ const ModuloExpedientes = () => {
       return fechaPago.toISOString().split('T')[0];
     }
     
-    if (tipoPago === 'Anual') return '';
+    if (tipo_pago === 'Anual') return '';
     
-    if (tipoPago === 'Fraccionado' && frecuenciaPago) {
+    if (tipo_pago === 'Fraccionado' && frecuenciaPago) {
       const fechaPrimerPago = new Date(fechaInicio);
       fechaPrimerPago.setDate(fechaPrimerPago.getDate() + (periodoGracia || 0));
       
@@ -2161,18 +2156,18 @@ const ModuloExpedientes = () => {
   }, []);
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
-    const terminoVigencia = formularioActual.terminoVigencia || calcularTerminoVigencia(formularioActual.inicioVigencia);
+    const termino_vigencia = formularioActual.termino_vigencia || calculartermino_vigencia(formularioActual.inicio_vigencia);
     const proximoPago = calcularProximoPago(
-      formularioActual.inicioVigencia,
-      formularioActual.tipoPago,
+      formularioActual.inicio_vigencia,
+      formularioActual.tipo_pago,
       formularioActual.frecuenciaPago,
       formularioActual.periodoGracia,
       1
     );
     const estatusPago = calcularEstatusPago(proximoPago, formularioActual.estatusPago);
     
-    return { ...formularioActual, terminoVigencia, proximoPago, estatusPago };
-  }, [calcularTerminoVigencia, calcularProximoPago, calcularEstatusPago]);
+    return { ...formularioActual, termino_vigencia, proximoPago, estatusPago };
+  }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
 
   const obtenerSiguienteEstado = useCallback((estadoActual) => {
     const flujo = {
@@ -2197,13 +2192,13 @@ const ModuloExpedientes = () => {
   const cambiarEstadoExpediente = useCallback((expedienteId, nuevoEstado, motivo = '') => {
     setExpedientes(prev => prev.map(exp => 
       exp.id === expedienteId 
-        ? { ...exp, etapaActiva: nuevoEstado, motivoCancelacion: motivo, fechaActualizacion: new Date().toISOString().split('T')[0] }
+        ? { ...exp, etapa_activa: nuevoEstado, motivoCancelacion: motivo, fechaActualizacion: new Date().toISOString().split('T')[0] }
         : exp
     ));
   }, []);
 
   const avanzarEstado = useCallback((expediente) => {
-    const siguienteEstado = obtenerSiguienteEstado(expediente.etapaActiva);
+    const siguienteEstado = obtenerSiguienteEstado(expediente.etapa_activa);
     if (siguienteEstado) {
       cambiarEstadoExpediente(expediente.id, siguienteEstado);
     }
@@ -2224,15 +2219,15 @@ const ModuloExpedientes = () => {
   }, [motivoCancelacion, expedienteACancelar, cambiarEstadoExpediente]);
 
   const calcularSiguientePago = useCallback((expediente) => {
-    if (!expediente.inicioVigencia || expediente.tipoPago === 'Anual') return '';
+    if (!expediente.inicio_vigencia || expediente.tipo_pago === 'Anual') return '';
     
-    if (expediente.tipoPago === 'Fraccionado' && expediente.frecuenciaPago) {
-      const fechaInicio = new Date(expediente.inicioVigencia);
+    if (expediente.tipo_pago === 'Fraccionado' && expediente.frecuenciaPago) {
+      const fechaInicio = new Date(expediente.inicio_vigencia);
       const fechaPrimerPago = new Date(fechaInicio);
       fechaPrimerPago.setDate(fechaPrimerPago.getDate() + (expediente.periodoGracia || 0));
       
       if (!expediente.fechaUltimoPago) {
-        return calcularProximoPago(expediente.inicioVigencia, expediente.tipoPago, expediente.frecuenciaPago, expediente.periodoGracia, 2);
+        return calcularProximoPago(expediente.inicio_vigencia, expediente.tipo_pago, expediente.frecuenciaPago, expediente.periodoGracia, 2);
       }
       
       const fechaUltimoPago = new Date(expediente.fechaUltimoPago);
@@ -2243,8 +2238,8 @@ const ModuloExpedientes = () => {
       const numeroPagoActual = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
       
       return calcularProximoPago(
-        expediente.inicioVigencia,
-        expediente.tipoPago,
+        expediente.inicio_vigencia,
+        expediente.tipo_pago,
         expediente.frecuenciaPago,
         expediente.periodoGracia,
         numeroPagoActual + 1
@@ -2278,24 +2273,24 @@ const ModuloExpedientes = () => {
   }, [estadoInicialFormulario]);
 
   const validarFormulario = useCallback(() => {
-    if (!formulario.nombre || !formulario.apellidoPaterno || !formulario.compania || !formulario.producto) {
+    if (!formulario.nombre || !formulario.apellido_paterno || !formulario.compania || !formulario.producto) {
       alert('Por favor complete los campos obligatorios');
       return false;
     }
 
     if (formulario.producto === 'Autos') {
-      if (!formulario.marca || !formulario.modelo || !formulario.año) {
+      if (!formulario.marca || !formulario.modelo || !formulario.anio) {
         alert('Para seguros de Autos, complete: Marca, Modelo y Año');
         return false;
       }
       
-      const añoVehiculo = parseInt(formulario.año);
-      if (añoVehiculo < CONSTANTS.MIN_YEAR || añoVehiculo > CONSTANTS.MAX_YEAR) {
+      const anioVehiculo = parseInt(formulario.anio);
+      if (anioVehiculo < CONSTANTS.MIN_YEAR || anioVehiculo > CONSTANTS.MAX_YEAR) {
         alert('Ingrese un año válido para el vehículo');
         return false;
       }
       
-      if (formulario.numeroSerie && formulario.numeroSerie.length !== CONSTANTS.VIN_LENGTH) {
+      if (formulario.numero_serie && formulario.numero_serie.length !== CONSTANTS.VIN_LENGTH) {
         alert(`El VIN debe tener ${CONSTANTS.VIN_LENGTH} caracteres`);
         return false;
       }
@@ -2310,9 +2305,7 @@ const ModuloExpedientes = () => {
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
     // Normalizar apellidos para backend
     const expedientePayload = {
-      ...formularioConCalculos,
-      apellido_paterno: formularioConCalculos.apellido_paterno || formularioConCalculos.apellidoPaterno,
-      apellido_materno: formularioConCalculos.apellido_materno || formularioConCalculos.apellidoMaterno
+      ...formularioConCalculos
     };
 
     if (modoEdicion) {
@@ -2333,7 +2326,7 @@ const ModuloExpedientes = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...expedientePayload,
-          fechaCreacion: new Date().toISOString().split('T')[0]
+          fecha_creacion: new Date().toISOString().split('T')[0]
         })
       })
         .then(() => {
@@ -2352,19 +2345,27 @@ const ModuloExpedientes = () => {
   }, []);
   const editarExpediente = useCallback((expediente) => {
     setFormulario({
-      ...expediente,
-      apellidoPaterno: expediente.apellido_paterno || expediente.apellidoPaterno,
-      apellidoMaterno: expediente.apellido_materno || expediente.apellidoMaterno
+      ...expediente
     });
     setModoEdicion(true);
     setVistaActual('formulario');
   }, []);
 
-  const eliminarExpediente = useCallback((id) => {
-    if (confirm('¿Está seguro de eliminar este expediente?')) {
-      setExpedientes(prev => prev.filter(exp => exp.id !== id));
-    }
-  }, []);
+const eliminarExpediente = useCallback((id) => {
+  if (confirm('¿Está seguro de eliminar este expediente?')) {
+    fetch(`${API_URL}/api/expedientes/${id}`, {
+      method: 'DELETE'
+    })
+      .then(res => {
+        if (res.ok) {
+          setExpedientes(prev => prev.filter(exp => exp.id !== id));
+        } else {
+          alert('Error al eliminar expediente en la base de datos');
+        }
+      })
+      .catch(() => alert('Error de conexión al eliminar expediente'));
+  }
+}, []);
 
   const verDetalles = useCallback((expediente) => {
     setExpedienteSeleccionado(expediente);
@@ -2417,7 +2418,7 @@ const ModuloExpedientes = () => {
             marcasVehiculo={marcasVehiculo}
             tiposVehiculo={tiposVehiculo}
             tiposCobertura={tiposCobertura}
-            calcularTerminoVigencia={calcularTerminoVigencia}
+            calculartermino_vigencia={calculartermino_vigencia}
             calcularProximoPago={calcularProximoPago}
             CONSTANTS={CONSTANTS}
           />
@@ -2436,7 +2437,7 @@ const ModuloExpedientes = () => {
             iniciarCancelacion={iniciarCancelacion}
             editarExpediente={editarExpediente}
             calcularSiguientePago={calcularSiguientePago}
-            calcularTerminoVigencia={calcularTerminoVigencia}
+            calculartermino_vigencia={calculartermino_vigencia}
             calcularProximoPago={calcularProximoPago}
           />
         )}

@@ -440,20 +440,6 @@ const FormularioTramite = ({
                       ✅ Usando catálogo personalizado ({tiposTramite.length} tipos disponibles de {tiposTramiteGuardados.length} totales)
                     </small>
                   )}
-                  {/* Debug info */}
-                  <div className="mt-2">
-                    <details>
-                      <summary className="text-muted small">🔍 Debug - Ver datos del catálogo</summary>
-                      <div className="mt-2 p-2 bg-light rounded">
-                        <small>
-                          <strong>Total en localStorage:</strong> {tiposTramiteGuardados.length}<br/>
-                          <strong>Tipos disponibles:</strong> {tiposTramite.length}<br/>
-                          <strong>Key localStorage:</strong> sistemaseguros_tiposTramite<br/>
-                          <strong>Tipos filtrados:</strong> {JSON.stringify(tiposTramite, null, 2)}
-                        </small>
-                      </div>
-                    </details>
-                  </div>
                 </div>
                 
                 <div className="col-md-4">

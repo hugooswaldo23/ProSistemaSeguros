@@ -9,27 +9,41 @@ import {
   FolderOpen, Activity, BarChart3, Zap, Award, ClipboardList, Clock, Info,
   Car, Heart, Home
 } from 'lucide-react';
-
+// Agregue estos imports al inicio del archivo
+import {
+  obtenerTiposProductos,
+  crearTipoProducto,
+  actualizarTipoProducto,
+  eliminarTipoProducto,
+  obtenerTipoProductoPorId,
+  obtenerTiposProductosActivos,
+  cambiarEstadoTipoProducto
+} from '../services/tiposProductosService'; 
 // Hook de paginación reutilizable
 const usePaginacion = (items, itemsPorPagina = 10) => {
   const [paginaActual, setPaginaActual] = useState(1);
   const [busqueda, setBusqueda] = useState('');
 
+  // Aseguramos que items siempre sea un array
+  const itemsArray = Array.isArray(items) ? items : [];
+
   const itemsFiltrados = useMemo(() => {
-    if (!busqueda) return items;
+    if (!busqueda) return itemsArray;
     const busquedaLower = busqueda.toLowerCase();
-    return items.filter(item =>
+    return itemsArray.filter(item =>
       JSON.stringify(item).toLowerCase().includes(busquedaLower)
     );
-  }, [items, busqueda]);
+  }, [itemsArray, busqueda]);
 
-  const totalPaginas = Math.ceil(itemsFiltrados.length / itemsPorPagina);
+  // Aseguramos que itemsFiltrados siempre sea un array
+  const safeItemsFiltrados = Array.isArray(itemsFiltrados) ? itemsFiltrados : [];
+  const totalPaginas = Math.ceil(safeItemsFiltrados.length / itemsPorPagina);
 
   const itemsPaginados = useMemo(() => {
     const inicio = (paginaActual - 1) * itemsPorPagina;
     const fin = inicio + itemsPorPagina;
-    return itemsFiltrados.slice(inicio, fin);
-  }, [itemsFiltrados, paginaActual, itemsPorPagina]);
+    return safeItemsFiltrados.slice(inicio, fin);
+  }, [safeItemsFiltrados, paginaActual, itemsPorPagina]);
 
   const irAPagina = useCallback((pagina) => {
     setPaginaActual(Math.max(1, Math.min(pagina, totalPaginas)));
@@ -46,7 +60,7 @@ const usePaginacion = (items, itemsPorPagina = 10) => {
     setPaginaActual: irAPagina,
     busqueda,
     setBusqueda,
-    totalItems: itemsFiltrados.length
+    totalItems: safeItemsFiltrados.length
   };
 };
 
@@ -217,16 +231,7 @@ const ModuloConfiguracionCatalogos = () => {
   ]);
 
   // 6. Tipos de Productos
-  const [tiposProductos, setTiposProductos] = useState([
-    { id: 1, nombre: 'Autos Individual', codigo: 'PROD_001', descripcion: 'Seguros para vehículos individuales', icono: 'car', color: 'primary', activo: true, orden: 1 },
-    { id: 2, nombre: 'Autos Flotilla', codigo: 'PROD_002', descripcion: 'Seguros para flotillas de vehículos', icono: 'car', color: 'info', activo: true, orden: 2 },
-    { id: 3, nombre: 'Equipo Pesado Individual', codigo: 'PROD_003', descripcion: 'Seguros para maquinaria pesada individual', icono: 'package', color: 'warning', activo: true, orden: 3 },
-    { id: 4, nombre: 'Equipo Pesado Flotilla', codigo: 'PROD_004', descripcion: 'Seguros para flotillas de equipo pesado', icono: 'package', color: 'secondary', activo: true, orden: 4 },
-    { id: 5, nombre: 'Maquinaria', codigo: 'PROD_005', descripcion: 'Seguros para maquinaria industrial y equipo especializado', icono: 'activity', color: 'dark', activo: true, orden: 5 },
-    { id: 6, nombre: 'Vida', codigo: 'PROD_006', descripcion: 'Seguros de vida y planes de protección personal', icono: 'heart', color: 'danger', activo: true, orden: 6 },
-    { id: 7, nombre: 'Daños', codigo: 'PROD_007', descripcion: 'Seguros para bienes inmuebles y patrimoniales', icono: 'home', color: 'success', activo: true, orden: 7 },
-    { id: 8, nombre: 'Gastos Médicos', codigo: 'PROD_008', descripcion: 'Seguros de gastos médicos mayores y menores', icono: 'shield', color: 'primary', activo: true, orden: 8 }
-  ]);
+  const [tiposProductos, setTiposProductos] = useState([]);
 
   // Estados de formularios
   const [formularioDocumento, setFormularioDocumento] = useState({
@@ -288,8 +293,13 @@ const ModuloConfiguracionCatalogos = () => {
   const paginacionCanales = usePaginacion(canalesVenta, 10);
   const paginacionCategorias = usePaginacion(categoriasClientes, 10);
   const paginacionTramites = usePaginacion(tiposTramites, 10);
-  const paginacionProductos = usePaginacion(tiposProductos, 10);
+  // Aseguramos que tiposProductos siempre sea un array
+  const tiposProductosArray = Array.isArray(tiposProductos) ? tiposProductos : [];
+  const paginacionProductos = usePaginacion(tiposProductosArray, 10);
 
+  // Estados para productos (reemplazar el array estático)
+  const [cargandoProductos, setCargandoProductos] = useState(false);
+  const [errorProductos, setErrorProductos] = useState(null);
   // Iconos disponibles para canales
   const iconosDisponibles = [
     { valor: 'UserCheck', icono: <UserCheck size={16} />, nombre: 'Usuario Check' },
@@ -332,7 +342,32 @@ const ModuloConfiguracionCatalogos = () => {
     { valor: 'dark', nombre: 'Negro', clase: 'bg-dark' },
     { valor: 'light', nombre: 'Blanco', clase: 'bg-light border' }
   ];
+// Función para cargar tipos de productos desde la API
+  const cargarTiposProductos = async () => {
+    setCargandoProductos(true);
+    setErrorProductos(null);
+    try {
+      const resultado = await obtenerTiposProductos();
+      console.log('Resultado obtenerTiposProductos:', resultado);
+      if (resultado.success) {
+        // Si la respuesta tiene la estructura { success, data: { success, data: [...] } }
+        const productos = resultado.data?.data || [];
+        setTiposProductos(productos);
+      } else {
+        setErrorProductos(resultado.error || 'Error al cargar tipos de productos');
+      }
+    } catch (error) {
+      setErrorProductos('Error de conexión al cargar productos');
+      console.error('Error cargando productos:', error);
+    } finally {
+      setCargandoProductos(false);
+    }
+  };
 
+  // Cargar productos al montar el componente
+  useEffect(() => {
+    cargarTiposProductos();
+  }, []);
   // Función para generar código automático
   const generarCodigo = (prefijo, lista) => {
     const numeros = lista.map(item => {
@@ -416,7 +451,14 @@ const ModuloConfiguracionCatalogos = () => {
 
     if (formulario.id) {
       // Editar
-      if (tipo === 'tramite') {
+      if (tipo === 'producto') {
+        // Llamar al backend para editar producto
+        actualizarTipoProducto(formulario.id, formulario)
+          .then(res => {
+            if (res.success) cargarTiposProductos();
+            else alert(res.error || 'Error al editar producto');
+          });
+      } else if (tipo === 'tramite') {
         // Para trámites, mantener el código original y limpiar documentos si no requiere
         const itemOriginal = datos.find(item => item.id === formulario.id);
         const tramiteActualizado = {
@@ -434,24 +476,33 @@ const ModuloConfiguracionCatalogos = () => {
       }
     } else {
       // Crear nuevo
-      let nuevoItem;
-      if (tipo === 'tramite') {
-        nuevoItem = {
-          ...formulario,
-          id: Date.now(),
-          codigo: generarCodigo(prefijo, datos),
-          documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : [],
-          orden: datos.length + 1
-        };
+      if (tipo === 'producto') {
+        // Llamar al backend para crear producto
+        crearTipoProducto(formulario)
+          .then(res => {
+            if (res.success) cargarTiposProductos();
+            else alert(res.error || 'Error al crear producto');
+          });
       } else {
-        nuevoItem = {
-          ...formulario,
-          id: Date.now(),
-          codigo: formulario.codigo || generarCodigo(prefijo, datos),
-          orden: datos.length + 1
-        };
+        let nuevoItem;
+        if (tipo === 'tramite') {
+          nuevoItem = {
+            ...formulario,
+            id: Date.now(),
+            codigo: generarCodigo(prefijo, datos),
+            documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : [],
+            orden: datos.length + 1
+          };
+        } else {
+          nuevoItem = {
+            ...formulario,
+            id: Date.now(),
+            codigo: formulario.codigo || generarCodigo(prefijo, datos),
+            orden: datos.length + 1
+          };
+        }
+        setDatos([...datos, nuevoItem]);
       }
-      setDatos([...datos, nuevoItem]);
     }
 
     // Limpiar formulario
@@ -573,7 +624,12 @@ const ModuloConfiguracionCatalogos = () => {
         setTiposTramites(prev => prev.filter(item => item.id !== id));
         break;
       case 'producto':
-        setTiposProductos(prev => prev.filter(item => item.id !== id));
+        // Llamar al backend para eliminar producto
+        eliminarTipoProducto(id)
+          .then(res => {
+            if (res.success) cargarTiposProductos();
+            else alert(res.error || 'Error al eliminar producto');
+          });
         break;
       default:
         console.error('Tipo no reconocido:', tipo);
@@ -625,7 +681,7 @@ const ModuloConfiguracionCatalogos = () => {
       canalesVenta,
       categoriasClientes,
       tiposTramites,
-      tiposProductos,
+  tiposProductos: tiposProductosArray,
       fechaExportacion: new Date().toISOString()
     };
 
@@ -877,7 +933,7 @@ const ModuloConfiguracionCatalogos = () => {
                     <span className="fw-semibold">Gestionar Productos</span>
                   </div>
                   <div>
-                    <span className="badge bg-dark">{tiposProductos.length} productos</span>
+                    <span className="badge bg-dark">{tiposProductosArray.length} productos</span>
                     <ChevronRight size={20} className="ms-2" />
                   </div>
                 </div>
@@ -885,14 +941,14 @@ const ModuloConfiguracionCatalogos = () => {
               <div className="mt-3">
                 <small className="text-muted d-block mb-2">Productos disponibles:</small>
                 <div className="d-flex flex-wrap gap-1">
-                  {tiposProductos.filter(p => p.activo).slice(0, 6).map(producto => (
+                  {tiposProductosArray.filter(p => p.activo).slice(0, 6).map(producto => (
                     <span key={producto.id} className={`badge bg-${producto.color} bg-opacity-75`}>
                       {obtenerIcono(producto.icono, 'producto')}
                       <span className="ms-1">{producto.nombre}</span>
                     </span>
                   ))}
-                  {tiposProductos.filter(p => p.activo).length > 6 && (
-                    <span className="badge bg-secondary">+{tiposProductos.filter(p => p.activo).length - 6} más</span>
+                  {tiposProductosArray.filter(p => p.activo).length > 6 && (
+                    <span className="badge bg-secondary">+{tiposProductosArray.filter(p => p.activo).length - 6} más</span>
                   )}
                 </div>
                 <small className="text-info d-block mt-2">
@@ -973,7 +1029,7 @@ const ModuloConfiguracionCatalogos = () => {
                       </div>
                     </div>
                     <div className="ms-3">
-                      <h4 className="mb-0">{tiposProductos.filter(p => p.activo).length}</h4>
+                      <h4 className="mb-0">{tiposProductosArray.filter(p => p.activo).length}</h4>
                       <small className="text-muted">Productos Activos</small>
                     </div>
                   </div>
@@ -993,7 +1049,7 @@ const ModuloConfiguracionCatalogos = () => {
                           canalesVenta.filter(c => c.activo).length +
                           categoriasClientes.filter(c => c.activo).length +
                           tiposTramites.filter(t => t.activo).length +
-                          tiposProductos.filter(p => p.activo).length
+                          tiposProductosArray.filter(p => p.activo).length
                         ) / (
                           documentosPersonaFisica.length +
                           documentosPersonaMoral.length +
