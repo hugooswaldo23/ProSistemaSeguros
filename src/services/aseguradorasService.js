@@ -3,7 +3,7 @@ import { apiGet, apiPost, apiPut, apiDelete, handleDatabaseError, handleDatabase
 // Obtener todas las aseguradoras
 export const obtenerAseguradoras = async () => {
   try {
-    const resultado = await apiGet('/aseguradoras');
+  const resultado = await apiGet('/api/aseguradoras');
 
     if (!resultado.success) return handleDatabaseError(resultado.error);
 
@@ -17,7 +17,7 @@ export const obtenerAseguradoras = async () => {
 export const crearAseguradora = async (aseguradora) => {
   try {
 
-    const resultado = await apiPost('/aseguradoras', aseguradora);
+  const resultado = await apiPost('/api/aseguradoras', aseguradora);
     
     if (!resultado.success) return handleDatabaseError(resultado.error);
     return handleDatabaseSuccess(resultado.data);
@@ -30,7 +30,7 @@ export const crearAseguradora = async (aseguradora) => {
 export const actualizarAseguradora = async (id, aseguradora) => {
   try {
 
-    const resultado = await apiPut(`/aseguradoras/${id}`, aseguradora);
+  const resultado = await apiPut(`/api/aseguradoras/${id}`, aseguradora);
     
     if (!resultado.success) return handleDatabaseError(resultado.error);
     return handleDatabaseSuccess(resultado.data);
@@ -42,7 +42,7 @@ export const actualizarAseguradora = async (id, aseguradora) => {
 // Eliminar aseguradora
 export const eliminarAseguradora = async (id) => {
   try {
-    const resultado = await apiDelete(`/aseguradoras/${id}`);
+  const resultado = await apiDelete(`/api/aseguradoras/${id}`);
 
     if (!resultado.success) return handleDatabaseError(resultado.error);
     return handleDatabaseSuccess(true);
@@ -54,7 +54,7 @@ export const eliminarAseguradora = async (id) => {
 // Obtener aseguradora por ID
 export const obtenerAseguradoraPorId = async (id) => {
   try {
-    const resultado = await apiGet(`/aseguradoras/${id}`);
+  const resultado = await apiGet(`/api/aseguradoras/${id}`);
 
     if (!resultado.success) return handleDatabaseError(resultado.error);
 

@@ -26,13 +26,25 @@ export const useEquipoDeTrabajo = () => {
     if (resultado.success) {
       // Transformar datos de la BD al formato del frontend
       const equipoTransformado = resultado.data.map(miembro => {
+        // Fecha de registro preferible desde created_at si existe
         let fechaRegistro = null;
         if (miembro.created_at && !isNaN(new Date(miembro.created_at))) {
           fechaRegistro = new Date(miembro.created_at).toISOString().split('T')[0];
         }
+
+        // Parsear campos que pueden venir como JSON strings desde la BD
+        let diasTrabajo = [];
+        try { diasTrabajo = miembro.diasTrabajo ? (typeof miembro.diasTrabajo === 'string' ? JSON.parse(miembro.diasTrabajo) : miembro.diasTrabajo) : []; } catch (e) { diasTrabajo = []; }
+        let agentesSupervisados = [];
+        try { agentesSupervisados = miembro.agentesSupervisados ? (typeof miembro.agentesSupervisados === 'string' ? JSON.parse(miembro.agentesSupervisados) : miembro.agentesSupervisados) : []; } catch (e) { agentesSupervisados = []; }
+        let tiposProductosDisponibles = [];
+        try { tiposProductosDisponibles = miembro.tiposProductosDisponibles ? (typeof miembro.tiposProductosDisponibles === 'string' ? JSON.parse(miembro.tiposProductosDisponibles) : miembro.tiposProductosDisponibles) : []; } catch (e) { tiposProductosDisponibles = []; }
+        let ejecutivosPorProducto = {};
+        try { ejecutivosPorProducto = miembro.ejecutivosPorProducto ? (typeof miembro.ejecutivosPorProducto === 'string' ? JSON.parse(miembro.ejecutivosPorProducto) : miembro.ejecutivosPorProducto) : {}; } catch (e) { ejecutivosPorProducto = {}; }
+
         return {
           id: miembro.id,
-          codigo: miembro.codigo,
+          codigo: miembro.codigo || miembro.codigoAgente || '',
           nombre: miembro.nombre,
           apellidoPaterno: miembro.apellidoPaterno,
           apellidoMaterno: miembro.apellidoMaterno,
@@ -41,22 +53,22 @@ export const useEquipoDeTrabajo = () => {
           activo: miembro.activo,
           fechaNacimiento: miembro.fechaNacimiento,
           fechaIngreso: miembro.fechaIngreso,
-          fechaRegistro: miembro.fechaRegistro,
+          fechaRegistro: fechaRegistro,
           perfil: miembro.perfil,
           usuario: miembro.usuario,
           horarioEntrada: miembro.horarioEntrada,
           horarioSalida: miembro.horarioSalida,
-          diasTrabajo: miembro.diasTrabajo ? JSON.parse(miembro.diasTrabajo) : [],
+          diasTrabajo: diasTrabajo,
           sueldoDiario: miembro.sueldoDiario,
           tipoPago: miembro.tipoPago,
           metodoPago: miembro.metodoPago,
           banco: miembro.banco,
           cuentaBancaria: miembro.cuentaBancaria,
           notas: miembro.notas,
-          agentesSupervisados: miembro.agentesSupervisados ? JSON.parse(miembro.agentesSupervisados) : [],
+          agentesSupervisados: agentesSupervisados,
           ejecutivoAsignado: miembro.ejecutivoAsignado,
-          ejecutivosPorProducto: miembro.ejecutivosPorProducto,
-          tiposProductosDisponibles: miembro.tiposProductosDisponibles
+          ejecutivosPorProducto: ejecutivosPorProducto,
+          tiposProductosDisponibles: tiposProductosDisponibles
         };
       });
       setEquipoDeTrabajo(equipoTransformado);

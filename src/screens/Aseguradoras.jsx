@@ -1,21 +1,28 @@
-const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { obtenerTiposProductos } from '../services/tiposProductosService';
 import { Plus, Edit, Trash2, Eye, Shield, X, Save, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import { obtenerTiposProductos } from '../services/tiposProductosService';
+
+// Base URL configurable por env Vite
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 const useProductosDB = () => {
   const [productosDB, setProductosDB] = useState([]);
   useEffect(() => {
     const fetchProductos = async () => {
-      const res = await obtenerTiposProductos();
-      // Si la respuesta tiene la estructura { success, data: { success, data: [...] } }
-      const productos = res.data?.data || [];
-      setProductosDB(productos);
+      try {
+        const res = await obtenerTiposProductos();
+        const productos = res?.data?.data || res?.data || [];
+        setProductosDB(productos);
+      } catch (err) {
+        console.error('Error al cargar tipos de productos:', err);
+        setProductosDB([]);
+      }
     };
     fetchProductos();
   }, []);
   return productosDB;
 };
+
 // Hook personalizado para paginación
 const usePaginacion = (items, itemsPorPagina = 10) => {
   const [paginaActual, setPaginaActual] = useState(1);
@@ -155,7 +162,7 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
   </div>
 ));
 
-// Componente Lista de Aseguradoras (MOVIDO FUERA)
+// Componente Lista de Aseguradoras
 const ListaAseguradorasComponent = ({ 
   aseguradoras, 
   expedientes, 
@@ -250,7 +257,6 @@ const ListaAseguradorasComponent = ({
                       <th>RFC</th>
                       <th>Contacto</th>
                       <th>Productos</th>
-                      <th>Comisión</th>
                       <th>Estado</th>
                       <th>Expedientes</th>
                       <th width="150">Acciones</th>
@@ -281,15 +287,14 @@ const ListaAseguradorasComponent = ({
                           </td>
                           <td>
                             {aseguradora.productos_disponibles?.length > 0 ? (
-                              <small>{aseguradora.productos_disponibles.length} productos</small>
+                              <div>
+                                <span className="badge bg-primary">
+                                  {aseguradora.productos_disponibles.length} productos
+                                </span>
+                              </div>
                             ) : (
-                              <small className="text-muted">Todos</small>
+                              <small className="text-muted">Sin productos</small>
                             )}
-                          </td>
-                          <td>
-                            {aseguradora.comisionBase ? (
-                              <span className="badge bg-success">{aseguradora.comisionBase}%</span>
-                            ) : '-'}
                           </td>
                           <td>
                             <span className={`badge ${aseguradora.activo ? 'bg-success' : 'bg-secondary'}`}>
@@ -347,7 +352,7 @@ const ListaAseguradorasComponent = ({
   );
 };
 
-// Componente Formulario de Aseguradora (MOVIDO FUERA)
+// Componente Formulario de Aseguradora - COMPLETAMENTE ACTUALIZADO
 const FormularioAseguradora = ({
   modoEdicionAseguradora,
   formularioAseguradora,
@@ -356,16 +361,30 @@ const FormularioAseguradora = ({
   setVistaActual,
   guardarAseguradora,
   productos,
-  productosSeleccionTemp,
-  setProductosSeleccionTemp,
 }) => {
-  useEffect(() => {
-    console.log(formularioAseguradora.productos_disponibles)
-    setProductosSeleccionTemp((formularioAseguradora.productos_disponibles || []).map(id => String(id)));
-  }, [formularioAseguradora.productos_disponibles, setProductosSeleccionTemp]);
   const productosDB = useProductosDB();
   const [showProductosModal, setShowProductosModal] = useState(false);
-  // productosSeleccionTemp y setProductosSeleccionTemp vienen por props
+  const [productosSeleccionadosTemp, setProductosSeleccionadosTemp] = useState([]);
+  
+  // Sincronizar productos seleccionados cuando cambia el formulario
+  useEffect(() => {
+    if (formularioAseguradora.productos_disponibles) {
+      // Si es array de objetos con estructura {producto_id, comision}
+      if (formularioAseguradora.productos_disponibles.length > 0 && 
+          typeof formularioAseguradora.productos_disponibles[0] === 'object') {
+        setProductosSeleccionadosTemp(
+          formularioAseguradora.productos_disponibles.map(p => String(p.producto_id))
+        );
+      } 
+      // Si es array simple de IDs
+      else {
+        setProductosSeleccionadosTemp(
+          formularioAseguradora.productos_disponibles.map(id => String(id))
+        );
+      }
+    }
+  }, [formularioAseguradora.productos_disponibles]);
+
   const siguienteCodigo = !modoEdicionAseguradora ? generarCodigoAseguradora() : formularioAseguradora.codigo;
   const estadosMexico = [
     'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 
@@ -562,112 +581,42 @@ const FormularioAseguradora = ({
               </div>
             </div>
 
-            {/* Configuración Comercial */}
+            {/* CONFIGURACIÓN COMERCIAL ACTUALIZADA */}
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Configuración Comercial</h5>
-              <div className="row g-3">
-                <div className="col-md-6">
+              
+              {/* Selección de Productos y Tiempo de Emisión */}
+              <div className="row g-3 mb-3">
+                <div className="col-md-8">
                   <label className="form-label">Productos Disponibles</label>
-                  <div className="d-flex align-items-center gap-2 flex-wrap">
-                    <button type="button" className="btn btn-outline-primary" onClick={() => {
-                      setProductosSeleccionTemp((formularioAseguradora.productos_disponibles || []).map(id => String(id)));
-                      setShowProductosModal(true);
-                    }}>
-                      Seleccionar productos
+                  <div>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline-primary"
+                      onClick={() => {
+                        // Preparar array temporal con solo IDs
+                        const ids = formularioAseguradora.productos_disponibles?.map(p => 
+                          typeof p === 'object' ? String(p.producto_id) : String(p)
+                        ) || [];
+                        setProductosSeleccionadosTemp(ids);
+                        setShowProductosModal(true);
+                      }}
+                    >
+                      <Plus size={16} className="me-2" />
+                      Seleccionar Productos
                     </button>
                     {formularioAseguradora.productos_disponibles?.length > 0 && (
-                      <div className="d-flex flex-wrap gap-1">
-                        {formularioAseguradora.productos_disponibles.map(id => {
-                          const prod = (Array.isArray(productosDB) ? productosDB : []).find(p => String(p.id) === String(id));
-                          return (
-                            <span key={id} className="badge bg-info text-dark">
-                              {prod ? prod.nombre : id}
-                            </span>
-                          );
-                        })}
-                      </div>
+                      <span className="ms-3 text-muted">
+                        {formularioAseguradora.productos_disponibles.length} producto(s) seleccionado(s)
+                      </span>
                     )}
                   </div>
                   <small className="form-text text-muted">
-                    Si no selecciona ninguno, la aseguradora estará disponible para todos los productos
+                    Seleccione los productos que manejará esta aseguradora
                   </small>
-
-                  {/* Modal de selección de productos */}
-                  {showProductosModal && (
-                    <div className="modal fade show" style={{ display: 'block', background: 'rgba(0,0,0,0.4)' }} tabIndex="-1">
-                      <div className="modal-dialog modal-lg modal-dialog-centered">
-                        <div className="modal-content shadow-lg">
-                          <div className="modal-header bg-primary text-white">
-                            <h5 className="modal-title">Selecciona los productos disponibles</h5>
-                            <button type="button" className="btn-close btn-close-white" onClick={() => setShowProductosModal(false)}></button>
-                          </div>
-                          <div className="modal-body">
-                            <div className="row g-3">
-                              {productosDB.length === 0 ? (
-                                <div className="text-center w-100 text-muted">No hay productos disponibles</div>
-                              ) : (
-                                productosDB.map(producto => (
-                                  <div key={producto.id} className="col-md-4">
-                                    <div className="card card-body border shadow-sm d-flex flex-row align-items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        className="form-check-input"
-                                        id={`modal-prod-${producto.id}`}
-                                        checked={productosSeleccionTemp.includes(String(producto.id))}
-                                        onChange={e => {
-                                          if (e.target.checked) {
-                                            setProductosSeleccionTemp(prev => [...prev, String(producto.id)]);
-                                          } else {
-                                            setProductosSeleccionTemp(prev => prev.filter(id => id !== String(producto.id)));
-                                          }
-                                        }}
-                                      />
-                                      <label htmlFor={`modal-prod-${producto.id}`} className="form-check-label mb-0">
-                                        <strong>{producto.nombre}</strong>
-                                        <br />
-                                        <span className="text-muted small">{producto.descripcion || ''}</span>
-                                      </label>
-                                    </div>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-                          </div>
-                          <div className="modal-footer d-flex justify-content-between">
-                            <button type="button" className="btn btn-outline-secondary" onClick={() => setShowProductosModal(false)}>
-                              Cancelar
-                            </button>
-                            <button type="button" className="btn btn-primary" onClick={() => {
-                              setFormularioAseguradora({
-                                ...formularioAseguradora,
-                                productos_disponibles: productosSeleccionTemp
-                              });
-                              setShowProductosModal(false);
-                            }}>
-                              Guardar selección
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
                 
-                <div className="col-md-3">
-                  <label className="form-label">Comisión Base (%)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={formularioAseguradora.comisionBase}
-                    onChange={(e) => setFormularioAseguradora({...formularioAseguradora, comisionBase: e.target.value})}
-                    min="0"
-                    max="100"
-                    step="0.1"
-                    placeholder="Ej: 10"
-                  />
-                </div>
-                
-                <div className="col-md-3">
+                <div className="col-md-4">
                   <label className="form-label">Tiempo Emisión (días)</label>
                   <input
                     type="number"
@@ -679,6 +628,195 @@ const FormularioAseguradora = ({
                   />
                 </div>
               </div>
+
+              {/* Tabla de Comisiones - SIEMPRE VISIBLE SI HAY PRODUCTOS */}
+              {formularioAseguradora.productos_disponibles?.length > 0 && (
+                <div className="mt-4">
+                  <div className="d-flex align-items-center mb-3">
+                    <Shield size={20} className="text-primary me-2" />
+                    <strong>Comisiones por Producto</strong>
+                  </div>
+                  <div className="alert alert-info">
+                    <small>Defina el porcentaje de comisión del agente para cada producto seleccionado</small>
+                  </div>
+                  <div className="table-responsive">
+                    <table className="table table-bordered">
+                      <thead className="table-light">
+                        <tr>
+                          <th width="60">#</th>
+                          <th>Producto</th>
+                          <th width="250">Comisión del Agente (%)</th>
+                          <th width="100">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {formularioAseguradora.productos_disponibles.map((item, index) => {
+                          const productoId = typeof item === 'object' ? item.producto_id : item;
+                          const comision = typeof item === 'object' ? item.comision : '0';
+                          const producto = productosDB.find(p => String(p.id) === String(productoId));
+                          
+                          return (
+                            <tr key={productoId}>
+                              <td className="text-center">{index + 1}</td>
+                              <td>
+                                <div>
+                                  <strong>{producto?.nombre || `Producto ${productoId}`}</strong>
+                                  {producto?.descripcion && (
+                                    <div className="text-muted small">{producto.descripcion}</div>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="input-group">
+                                  <input
+                                    type="number"
+                                    className="form-control"
+                                    value={comision}
+                                    onChange={(e) => {
+                                      const nuevosProductos = [...formularioAseguradora.productos_disponibles];
+                                      nuevosProductos[index] = {
+                                        producto_id: String(productoId),
+                                        comision: e.target.value
+                                      };
+                                      setFormularioAseguradora({
+                                        ...formularioAseguradora,
+                                        productos_disponibles: nuevosProductos
+                                      });
+                                    }}
+                                    min="0"
+                                    max="100"
+                                    step="0.1"
+                                    placeholder="0.0"
+                                  />
+                                  <span className="input-group-text">%</span>
+                                </div>
+                              </td>
+                              <td className="text-center">
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-danger"
+                                  onClick={() => {
+                                    const nuevosProductos = formularioAseguradora.productos_disponibles.filter(
+                                      (_, i) => i !== index
+                                    );
+                                    setFormularioAseguradora({
+                                      ...formularioAseguradora,
+                                      productos_disponibles: nuevosProductos
+                                    });
+                                  }}
+                                  title="Eliminar producto"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal de Selección de Productos */}
+              {showProductosModal && (
+                <div className="modal fade show" style={{ display: 'block', background: 'rgba(0,0,0,0.5)' }} tabIndex="-1">
+                  <div className="modal-dialog modal-lg modal-dialog-centered">
+                    <div className="modal-content">
+                      <div className="modal-header bg-primary text-white">
+                        <h5 className="modal-title">Seleccionar Productos</h5>
+                        <button 
+                          type="button" 
+                          className="btn-close btn-close-white"
+                          onClick={() => setShowProductosModal(false)}
+                        ></button>
+                      </div>
+                      <div className="modal-body">
+                        <div className="alert alert-info">
+                          <small>Seleccione los productos disponibles para esta aseguradora. Podrá configurar las comisiones después de cerrar este modal.</small>
+                        </div>
+                        <div className="row g-3">
+                          {productosDB.map(producto => (
+                            <div key={producto.id} className="col-md-6">
+                              <div className={`card ${productosSeleccionadosTemp.includes(String(producto.id)) ? 'border-primary bg-light' : ''}`}>
+                                <div className="card-body">
+                                  <div className="form-check">
+                                    <input
+                                      type="checkbox"
+                                      className="form-check-input"
+                                      id={`producto-${producto.id}`}
+                                      checked={productosSeleccionadosTemp.includes(String(producto.id))}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setProductosSeleccionadosTemp([...productosSeleccionadosTemp, String(producto.id)]);
+                                        } else {
+                                          setProductosSeleccionadosTemp(
+                                            productosSeleccionadosTemp.filter(id => id !== String(producto.id))
+                                          );
+                                        }
+                                      }}
+                                    />
+                                    <label htmlFor={`producto-${producto.id}`} className="form-check-label">
+                                      <strong>{producto.nombre}</strong>
+                                      {producto.descripcion && (
+                                        <div className="text-muted small">{producto.descripcion}</div>
+                                      )}
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="modal-footer">
+                        <div className="w-100 d-flex justify-content-between align-items-center">
+                          <span className="text-muted">
+                            {productosSeleccionadosTemp.length} producto(s) seleccionado(s)
+                          </span>
+                          <div>
+                            <button 
+                              type="button" 
+                              className="btn btn-outline-secondary me-2"
+                              onClick={() => setShowProductosModal(false)}
+                            >
+                              Cancelar
+                            </button>
+                            <button 
+                              type="button" 
+                              className="btn btn-primary"
+                              onClick={() => {
+                                // Crear nueva estructura manteniendo comisiones existentes
+                                const nuevosProductos = productosSeleccionadosTemp.map(id => {
+                                  const productoExistente = formularioAseguradora.productos_disponibles?.find(p => 
+                                    (typeof p === 'object' ? p.producto_id : p) === id
+                                  );
+                                  
+                                  if (productoExistente && typeof productoExistente === 'object') {
+                                    return productoExistente; // Mantener comisión existente
+                                  }
+                                  return {
+                                    producto_id: id,
+                                    comision: '0' // Comisión por defecto
+                                  };
+                                });
+                                
+                                setFormularioAseguradora({
+                                  ...formularioAseguradora,
+                                  productos_disponibles: nuevosProductos
+                                });
+                                setShowProductosModal(false);
+                              }}
+                            >
+                              Aceptar Selección
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Contacto Principal */}
@@ -755,7 +893,7 @@ const FormularioAseguradora = ({
   );
 };
 
-// Componente Detalles de Aseguradora (MOVIDO FUERA)
+// Componente Detalles de Aseguradora
 const DetallesAseguradora = ({ 
   aseguradoraSeleccionada, 
   expedientes, 
@@ -846,83 +984,6 @@ const DetallesAseguradora = ({
                   </div>
                 </div>
               </div>
-
-              {/* Información de Contacto */}
-              <div className="card mt-3">
-                <div className="card-body">
-                  <h5 className="card-title border-bottom pb-2">Información de Contacto</h5>
-                  <div className="row g-3">
-                    <div className="col-md-4">
-                      <strong className="d-block text-muted">Teléfono:</strong>
-                      {aseguradoraSeleccionada.telefono || '-'}
-                    </div>
-                    <div className="col-md-4">
-                      <strong className="d-block text-muted">Email:</strong>
-                      {aseguradoraSeleccionada.email || '-'}
-                    </div>
-                    <div className="col-md-4">
-                      <strong className="d-block text-muted">Sitio Web:</strong>
-                      {aseguradoraSeleccionada.sitioWeb ? (
-                        <a href={aseguradoraSeleccionada.sitioWeb} target="_blank" rel="noopener noreferrer">
-                          {aseguradoraSeleccionada.sitioWeb}
-                        </a>
-                      ) : '-'}
-                    </div>
-                    {aseguradoraSeleccionada.direccion && (
-                      <div className="col-12">
-                        <strong className="d-block text-muted">Dirección:</strong>
-                        {aseguradoraSeleccionada.direccion}
-                        {(aseguradoraSeleccionada.ciudad || aseguradoraSeleccionada.estado || aseguradoraSeleccionada.codigoPostal) && (
-                          <div>
-                            {aseguradoraSeleccionada.ciudad && `${aseguradoraSeleccionada.ciudad}, `}
-                            {aseguradoraSeleccionada.estado} 
-                            {aseguradoraSeleccionada.codigoPostal && ` C.P. ${aseguradoraSeleccionada.codigoPostal}`}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Contacto Principal */}
-              {(aseguradoraSeleccionada.contactoPrincipal || aseguradoraSeleccionada.telefonoContacto || aseguradoraSeleccionada.emailContacto) && (
-                <div className="card mt-3">
-                  <div className="card-body">
-                    <h5 className="card-title border-bottom pb-2">Contacto Principal</h5>
-                    <div className="row g-3">
-                      {aseguradoraSeleccionada.contactoPrincipal && (
-                        <div className="col-md-4">
-                          <strong className="d-block text-muted">Nombre:</strong>
-                          {aseguradoraSeleccionada.contactoPrincipal}
-                        </div>
-                      )}
-                      {aseguradoraSeleccionada.telefonoContacto && (
-                        <div className="col-md-4">
-                          <strong className="d-block text-muted">Teléfono:</strong>
-                          {aseguradoraSeleccionada.telefonoContacto}
-                        </div>
-                      )}
-                      {aseguradoraSeleccionada.emailContacto && (
-                        <div className="col-md-4">
-                          <strong className="d-block text-muted">Email:</strong>
-                          {aseguradoraSeleccionada.emailContacto}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Notas */}
-              {aseguradoraSeleccionada.notas && (
-                <div className="card mt-3">
-                  <div className="card-body">
-                    <h5 className="card-title border-bottom pb-2">Notas</h5>
-                    <p>{aseguradoraSeleccionada.notas}</p>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* Estadísticas y Configuración */}
@@ -935,18 +996,6 @@ const DetallesAseguradora = ({
                       <div className="h2 text-primary mb-0">{estadisticas.total}</div>
                       <small className="text-muted">Total Expedientes</small>
                     </div>
-                    <div className="mb-3">
-                      <div className="h4 text-success mb-0">{estadisticas.vigentes}</div>
-                      <small className="text-muted">Vigentes</small>
-                    </div>
-                    <div className="mb-3">
-                      <div className="h4 text-warning mb-0">{estadisticas.enProceso}</div>
-                      <small className="text-muted">En Proceso</small>
-                    </div>
-                    <div>
-                      <div className="h4 text-danger mb-0">{estadisticas.cancelados}</div>
-                      <small className="text-muted">Cancelados</small>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -956,124 +1005,41 @@ const DetallesAseguradora = ({
                 <div className="card-body">
                   <h5 className="card-title border-bottom pb-2">Configuración Comercial</h5>
                   <div className="mb-3">
-                    <strong className="d-block text-muted">Comisión Base:</strong>
-                    <span className="h4 text-success">
-                      {aseguradoraSeleccionada.comisionBase ? `${aseguradoraSeleccionada.comisionBase}%` : 'No definida'}
-                    </span>
-                  </div>
-                  <div className="mb-3">
                     <strong className="d-block text-muted">Tiempo de Emisión:</strong>
                     {aseguradoraSeleccionada.tiempoEmision ? `${aseguradoraSeleccionada.tiempoEmision} días` : 'No definido'}
                   </div>
                   <div>
-                    <strong className="d-block text-muted">Productos Disponibles:</strong>
+                    <strong className="d-block text-muted mb-2">Productos y Comisiones:</strong>
                     {aseguradoraSeleccionada.productos_disponibles?.length > 0 ? (
-                      <div className="mt-2">
-                        {aseguradoraSeleccionada.productos_disponibles.map(id => {
-                          const prod = (Array.isArray(productosDB) ? productosDB : []).find(p => String(p.id) === String(id));
-                          return (
-                            <span key={id} className="badge bg-primary me-1 mb-1">
-                              {prod ? prod.nombre : id}
-                            </span>
-                          );
-                        })}
+                      <div className="table-responsive">
+                        <table className="table table-sm table-bordered">
+                          <thead className="table-light">
+                            <tr>
+                              <th>Producto</th>
+                              <th>Comisión</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {aseguradoraSeleccionada.productos_disponibles.map(item => {
+                              const productoId = typeof item === 'object' ? item.producto_id : item;
+                              const comision = typeof item === 'object' ? item.comision : '0';
+                              const prod = productosDB.find(p => String(p.id) === String(productoId));
+                              return (
+                                <tr key={productoId}>
+                                  <td>{prod ? prod.nombre : 'Producto ' + productoId}</td>
+                                  <td>
+                                    <span className="badge bg-success">{comision}%</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
                       </div>
                     ) : (
-                      <span className="text-muted">Todos los productos</span>
+                      <span className="text-muted">Sin productos configurados</span>
                     )}
                   </div>
-                </div>
-              </div>
-
-              {/* Distribución por Producto */}
-              <div className="card mt-3">
-                <div className="card-body">
-                  <h5 className="card-title border-bottom pb-2">Expedientes por Producto</h5>
-                  {Object.entries(estadisticas.porProducto).filter(([_, count]) => count > 0).map(([producto, count]) => (
-                    <div key={producto} className="d-flex justify-content-between mb-2">
-                      <span>{producto}:</span>
-                      <span className="badge bg-info">{count}</span>
-                    </div>
-                  ))}
-                  {Object.values(estadisticas.porProducto).every(count => count === 0) && (
-                    <p className="text-muted text-center mb-0">Sin expedientes</p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Lista de Expedientes */}
-            <div className="col-12">
-              <div className="card">
-                <div className="card-header">
-                  <h5 className="mb-0">Expedientes con esta Aseguradora</h5>
-                </div>
-                <div className="card-body">
-                  {expedientesDeAseguradora.length === 0 ? (
-                    <p className="text-muted text-center py-4">No hay expedientes con esta aseguradora</p>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="table table-sm">
-                        <thead>
-                          <tr>
-                            <th>Cliente</th>
-                            <th>Producto</th>
-                            <th>Agente</th>
-                            <th>Etapa Activa</th>
-                            <th>Estatus Pago</th>
-                            <th>Fecha</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {expedientesDeAseguradora.slice(0, 10).map(expediente => (
-                            <tr key={expediente.id}>
-                              <td>{expediente.nombre} {expediente.apellidoPaterno}</td>
-                              <td>{expediente.producto}</td>
-                              <td>{expediente.agente || '-'}</td>
-                              <td>
-                                <span className={`badge ${
-                                  expediente.etapaActiva === 'Pagado' ? 'bg-success' :
-                                  expediente.etapaActiva === 'Cancelado' ? 'bg-danger' :
-                                  expediente.etapaActiva === 'Emitida' ? 'bg-info' :
-                                  expediente.etapaActiva === 'Autorizado' ? 'bg-primary' :
-                                  'bg-warning'
-                                }`}>
-                                  {expediente.etapaActiva}
-                                </span>
-                              </td>
-                              <td>
-                                <span className={`badge ${
-                                  expediente.estatusPago === 'Pagado' ? 'bg-success' :
-                                  expediente.estatusPago === 'Vencido' ? 'bg-danger' :
-                                  expediente.estatusPago === 'Pago en período de gracia' ? 'bg-warning' :
-                                  'bg-secondary'
-                                }`}>
-                                  {expediente.estatusPago || 'Sin definir'}
-                                </span>
-                              </td>
-                              <td><small>{expediente.fechaCreacion}</small></td>
-                              <td>
-                                <button
-                                  className="btn btn-outline-primary btn-sm"
-                                  title="Ver detalles"
-                                >
-                                  <Eye size={12} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      {expedientesDeAseguradora.length > 10 && (
-                        <div className="text-center mt-2">
-                          <small className="text-muted">
-                            Mostrando 10 de {expedientesDeAseguradora.length} expedientes
-                          </small>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
@@ -1084,36 +1050,16 @@ const DetallesAseguradora = ({
   );
 };
 
-// Componente principal para la gestión de Aseguradoras
-export const Aseguradoras = () => {
-  // Estado para productos seleccionados en el modal, ahora global
-  const [productosSeleccionTemp, setProductosSeleccionTemp] = useState([]);
-  // Cargar aseguradoras desde el backend al montar el componente
-  useEffect(() => {
-  fetch(`${API_URL}/api/aseguradoras`)
-      .then(res => res.json())
-      .then(data => setAseguradoras(data))
-      .catch(err => console.error('Error al cargar aseguradoras:', err));
-  }, []);
-
-  // Refrescar aseguradoras tras operaciones CRUD
-  const cargarAseguradoras = useCallback(() => {
-  fetch(`${API_URL}/api/aseguradoras`)
-      .then(res => res.json())
-      .then(data => setAseguradoras(data))
-      .catch(err => console.error('Error al cargar aseguradoras:', err));
-  }, []);
-  // Estados principales para aseguradoras
+// Componente principal
+export default function Aseguradoras() {
   const [aseguradoras, setAseguradoras] = useState([]);
+  const [expedientes, setExpedientes] = useState([]);
   const [aseguradoraSeleccionada, setAseguradoraSeleccionada] = useState(null);
   const [vistaActual, setVistaActual] = useState('aseguradoras');
   const [modoEdicionAseguradora, setModoEdicionAseguradora] = useState(false);
-
-  // Estados para datos relacionados
-  const [expedientes, setExpedientes] = useState([]);
+  
   const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
 
-  // Estado del formulario de aseguradora
   const [formularioAseguradora, setFormularioAseguradora] = useState({
     codigo: '',
     nombre: '',
@@ -1126,8 +1072,7 @@ export const Aseguradoras = () => {
     ciudad: '',
     estado: '',
     codigoPostal: '',
-    productos_disponibles: [],
-    comisionBase: '',
+    productos_disponibles: [], // Array de {producto_id, comision}
     tiempoEmision: '',
     contactoPrincipal: '',
     telefonoContacto: '',
@@ -1138,7 +1083,37 @@ export const Aseguradoras = () => {
     id: null
   });
 
-  // Función para generar códigos de aseguradora
+  // Cargar aseguradoras desde la API
+  const cargarAseguradoras = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/aseguradoras`);
+      const data = await res.json();
+      const list = data?.data || data || [];
+      setAseguradoras(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.error('Error cargando aseguradoras:', err);
+    }
+  }, []);
+
+  // Opcional: cargar expedientes si existe endpoint
+  const cargarExpedientes = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/expedientes`);
+      const data = await res.json();
+      const list = data?.data || data || [];
+      setExpedientes(Array.isArray(list) ? list : []);
+    } catch (err) {
+      // dejar expedientes vacíos si falla
+      console.warn('No se pudieron cargar expedientes:', err);
+      setExpedientes([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargarAseguradoras();
+    cargarExpedientes();
+  }, [cargarAseguradoras, cargarExpedientes]);
+
   const generarCodigoAseguradora = useCallback(() => {
     if (aseguradoras.length === 0) {
       return 'AS001';
@@ -1157,7 +1132,6 @@ export const Aseguradoras = () => {
     return `AS${siguienteNumero.toString().padStart(3, '0')}`;
   }, [aseguradoras]);
 
-  // Funciones CRUD para Aseguradoras
   const limpiarFormularioAseguradora = useCallback(() => {
     setFormularioAseguradora({
       codigo: '',
@@ -1172,7 +1146,6 @@ export const Aseguradoras = () => {
       estado: '',
       codigoPostal: '',
       productos_disponibles: [],
-      comisionBase: '',
       tiempoEmision: '',
       contactoPrincipal: '',
       telefonoContacto: '',
@@ -1186,90 +1159,80 @@ export const Aseguradoras = () => {
     setAseguradoraSeleccionada(null);
   }, []);
 
-  // Guardar aseguradora en el backend
-  const guardarAseguradora = useCallback(() => {
+  const guardarAseguradora = useCallback(async () => {
     if (!formularioAseguradora.nombre || !formularioAseguradora.rfc) {
       alert('Por favor complete los campos obligatorios: Nombre y RFC');
       return;
     }
+
     const codigoAseguradora = formularioAseguradora.codigo || generarCodigoAseguradora();
-    const codigoExiste = aseguradoras.some(aseguradora => 
-      aseguradora.codigo === codigoAseguradora && 
-      aseguradora.id !== formularioAseguradora.id
-    );
-    if (codigoExiste) {
-      alert('El código de aseguradora ya existe. Por favor ingrese uno diferente.');
-      return;
-    }
-    // Guardar productos_disponibles como array de ids (números)
-    const productosIds = (formularioAseguradora.productos_disponibles || []).map(id => Number(id));
-    const aseguradoraPayload = {
+    const payload = {
       ...formularioAseguradora,
-      productos_disponibles: productosIds,
-      codigo: codigoAseguradora
+      codigo: codigoAseguradora,
+      productos_disponibles: (formularioAseguradora.productos_disponibles || []).map(p => {
+        // Normalizar a { producto_id, comision }
+        return typeof p === 'object' ? p : { producto_id: String(p), comision: '0' };
+      })
     };
+
     if (modoEdicionAseguradora) {
-  fetch(`${API_URL}/api/aseguradoras/${formularioAseguradora.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(aseguradoraPayload)
-      })
-        .then(() => {
-          cargarAseguradoras();
-          limpiarFormularioAseguradora();
-          setVistaActual('aseguradoras');
-        })
-        .catch(err => alert('Error al actualizar aseguradora'));
+      try {
+        const res = await fetch(`${API_URL}/api/aseguradoras/${formularioAseguradora.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Error al actualizar');
+        await cargarAseguradoras();
+        limpiarFormularioAseguradora();
+        setVistaActual('aseguradoras');
+      } catch (err) {
+        console.error(err);
+        alert('Error al actualizar aseguradora');
+      }
     } else {
-  fetch(`${API_URL}/api/aseguradoras`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(aseguradoraPayload)
-      })
-        .then(() => {
-          cargarAseguradoras();
-          limpiarFormularioAseguradora();
-          setVistaActual('aseguradoras');
-        })
-        .catch(err => alert('Error al crear aseguradora'));
+      try {
+        const res = await fetch(`${API_URL}/api/aseguradoras`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error('Error al crear');
+        await cargarAseguradoras();
+        limpiarFormularioAseguradora();
+        setVistaActual('aseguradoras');
+      } catch (err) {
+        console.error(err);
+        alert('Error al crear aseguradora');
+      }
     }
-  }, [formularioAseguradora, aseguradoras, modoEdicionAseguradora, generarCodigoAseguradora, limpiarFormularioAseguradora, cargarAseguradoras]);
+  }, [formularioAseguradora, modoEdicionAseguradora, generarCodigoAseguradora, limpiarFormularioAseguradora, cargarAseguradoras]);
 
   const editarAseguradora = useCallback((aseguradora) => {
     setFormularioAseguradora(aseguradora);
     setModoEdicionAseguradora(true);
     setVistaActual('formulario-aseguradora');
-    // Sincroniza productos seleccionados visualmente al editar
-    if (aseguradora.productos_disponibles) {
-      setProductosSeleccionTemp((aseguradora.productos_disponibles || []).map(id => String(id)));
-    } else {
-      setProductosSeleccionTemp([]);
-    }
   }, []);
 
-  // Eliminar aseguradora en el backend
   const eliminarAseguradora = useCallback((id) => {
-    const aseguradoraAEliminar = aseguradoras.find(a => a.id === id);
-    const tieneExpedientes = expedientes.some(exp => exp.compania === aseguradoraAEliminar?.nombre);
-    if (tieneExpedientes) {
-      alert('No se puede eliminar la aseguradora porque tiene expedientes asociados.');
-      return;
-    }
-    if (confirm('¿Está seguro de eliminar esta aseguradora?')) {
-  fetch(`${API_URL}/api/aseguradoras/${id}`, {
-        method: 'DELETE'
-      })
-        .then(() => cargarAseguradoras())
-        .catch(err => alert('Error al eliminar aseguradora'));
-    }
-  }, [expedientes, aseguradoras, cargarAseguradoras]);
+    if (!confirm('¿Está seguro de eliminar esta aseguradora?')) return;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/aseguradoras/${id}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Error al eliminar');
+        await cargarAseguradoras();
+      } catch (err) {
+        console.error(err);
+        alert('Error al eliminar aseguradora');
+      }
+    })();
+  }, [cargarAseguradoras]);
 
   const verDetallesAseguradora = useCallback((aseguradora) => {
     setAseguradoraSeleccionada(aseguradora);
     setVistaActual('detalles-aseguradora');
   }, []);
 
-  // Renderizado condicional basado en la vista actual
   return (
     <div>
       {vistaActual === 'aseguradoras' && (
@@ -1292,8 +1255,6 @@ export const Aseguradoras = () => {
           setVistaActual={setVistaActual}
           guardarAseguradora={guardarAseguradora}
           productos={productos}
-          productosSeleccionTemp={productosSeleccionTemp}
-          setProductosSeleccionTemp={setProductosSeleccionTemp}
         />
       )}
       {vistaActual === 'detalles-aseguradora' && aseguradoraSeleccionada && (
@@ -1307,6 +1268,4 @@ export const Aseguradoras = () => {
       )}
     </div>
   );
-};
-
-export default Aseguradoras;
+}

@@ -1,4 +1,5 @@
-const API_URL = `${import.meta.env.VITE_API_URL}/api/equipoDeTrabajo`;
+const BASE = import.meta.env.VITE_API_URL || '';
+const API_URL = `${BASE.replace(/\/$/, '')}/api/equipoDeTrabajo`;
 // Obtener asignaciones de ejecutivos por producto
 export const obtenerEjecutivosPorProducto = async (usuarioId) => {
   try {
@@ -11,17 +12,7 @@ export const obtenerEjecutivosPorProducto = async (usuarioId) => {
     return { success: false, error: error.message };
   }
 };
-export const obtenerEjecutivosPorProductoEjecutivo = async (usuarioId) => {
-  try {
-    console.log('Fetching ejecutivosPorProducto for usuarioId:', `${API_URL}/ejecutivosPorProductoEjecutivo/${usuarioId}`);
-    const res = await fetch(`${API_URL}/ejecutivosPorProducto/${usuarioId}`);
-    if (!res.ok) throw new Error('Error al obtener asignaciones');
-    const data = await res.json();
-    return { success: true, data };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-};
+// Nota: no hay ruta separada para "ejecutivosPorProductoEjecutivo" — usar obtenerEjecutivosPorProducto
 // Guardar asignaciones de ejecutivos por producto
 export const guardarEjecutivosPorProducto = async (asignaciones) => {
   try {

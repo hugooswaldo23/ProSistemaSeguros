@@ -3,11 +3,16 @@ import { apiGet, apiPost, apiPut, apiDelete, handleDatabaseError, handleDatabase
 // Obtener todos los tipos de productos
 export const obtenerTiposProductos = async () => {
   try {
-    const resultado = await apiGet('/api/tiposProductos');
-    
-    if (!resultado.success) return handleDatabaseError(resultado.error);
-    
-    return handleDatabaseSuccess(resultado.data);
+  const resultado = await apiGet('/api/tiposProductos');
+
+  if (!resultado.success) return handleDatabaseError(resultado.error);
+
+  // Algunos endpoints devuelven { success: true, data: [...] } desde el backend
+  // y apiGet devuelve { success: true, data: <respuesta_backend> }.
+  // Normalizamos para devolver directamente el array de tipos de producto.
+  const payload = resultado.data;
+  const productos = (payload && payload.data) ? payload.data : payload;
+  return handleDatabaseSuccess(productos);
   } catch (error) {
     return handleDatabaseError(error);
   }
@@ -63,10 +68,12 @@ export const eliminarTipoProducto = async (id) => {
 export const obtenerTipoProductoPorId = async (id) => {
   try {
   const resultado = await apiGet(`/api/tiposProductos/${id}`);
-    
-    if (!resultado.success) return handleDatabaseError(resultado.error);
-    
-    return handleDatabaseSuccess(resultado.data);
+
+  if (!resultado.success) return handleDatabaseError(resultado.error);
+
+  const payload = resultado.data;
+  const tipo = (payload && payload.data) ? payload.data : payload;
+  return handleDatabaseSuccess(tipo);
   } catch (error) {
     return handleDatabaseError(error);
   }
@@ -76,10 +83,12 @@ export const obtenerTipoProductoPorId = async (id) => {
 export const obtenerTiposProductosActivos = async () => {
   try {
   const resultado = await apiGet('/api/tiposProductos/activos');
-    
-    if (!resultado.success) return handleDatabaseError(resultado.error);
-    
-    return handleDatabaseSuccess(resultado.data);
+
+  if (!resultado.success) return handleDatabaseError(resultado.error);
+
+  const payload = resultado.data;
+  const productos = (payload && payload.data) ? payload.data : payload;
+  return handleDatabaseSuccess(productos);
   } catch (error) {
     return handleDatabaseError(error);
   }
