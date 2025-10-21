@@ -165,7 +165,7 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 // Componente Lista de Aseguradoras
 const ListaAseguradorasComponent = ({ 
   aseguradoras, 
-  expedientes, 
+  polizas, 
   limpiarFormularioAseguradora, 
   setVistaActual, 
   verDetallesAseguradora, 
@@ -206,7 +206,7 @@ const ListaAseguradorasComponent = ({
                 <Shield className="me-2" size={20} />
                 <div>
                   <strong>Gestión de Aseguradoras:</strong> Aquí puedes administrar las compañías con las que trabajas. 
-                  Las aseguradoras activas aparecerán automáticamente en los formularios de expedientes.
+                  Las aseguradoras activas aparecerán automáticamente en los formularios de pólizas.
                 </div>
               </div>
             </div>
@@ -258,13 +258,13 @@ const ListaAseguradorasComponent = ({
                       <th>Contacto</th>
                       <th>Productos</th>
                       <th>Estado</th>
-                      <th>Expedientes</th>
+                      <th>Pólizas</th>
                       <th width="150">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginacion.itemsPaginados.map((aseguradora) => {
-                      const expedientesAseguradora = expedientes.filter(exp => exp.compania === aseguradora.nombre).length;
+                      const polizasAseguradora = polizas.filter(exp => exp.compania === aseguradora.nombre).length;
                       return (
                         <tr key={aseguradora.id}>
                           <td>
@@ -302,7 +302,7 @@ const ListaAseguradorasComponent = ({
                             </span>
                           </td>
                           <td>
-                            <span className="badge bg-info">{expedientesAseguradora}</span>
+                            <span className="badge bg-info">{polizasAseguradora}</span>
                           </td>
                           <td>
                             <div className="btn-group btn-group-sm" role="group">
@@ -896,29 +896,29 @@ const FormularioAseguradora = ({
 // Componente Detalles de Aseguradora
 const DetallesAseguradora = ({ 
   aseguradoraSeleccionada, 
-  expedientes, 
+  polizas, 
   productos, 
   editarAseguradora, 
   setVistaActual 
 }) => {
   const productosDB = useProductosDB();
-  const expedientesDeAseguradora = useMemo(() => 
-    expedientes.filter(exp => exp.compania === aseguradoraSeleccionada?.nombre),
-    [expedientes, aseguradoraSeleccionada]
+  const polizasDeAseguradora = useMemo(() => 
+    polizas.filter(exp => exp.compania === aseguradoraSeleccionada?.nombre),
+    [polizas, aseguradoraSeleccionada]
   );
 
   const estadisticas = useMemo(() => ({
-    total: expedientesDeAseguradora.length,
-    vigentes: expedientesDeAseguradora.filter(exp => exp.etapaActiva === 'Pagado').length,
-    enProceso: expedientesDeAseguradora.filter(exp => 
+    total: polizasDeAseguradora.length,
+    vigentes: polizasDeAseguradora.filter(exp => exp.etapaActiva === 'Pagado').length,
+    enProceso: polizasDeAseguradora.filter(exp => 
       ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión', 'Emitida', 'Pendiente de pago'].includes(exp.etapaActiva)
     ).length,
-    cancelados: expedientesDeAseguradora.filter(exp => exp.etapaActiva === 'Cancelado').length,
+    cancelados: polizasDeAseguradora.filter(exp => exp.etapaActiva === 'Cancelado').length,
     porProducto: productos.reduce((acc, producto) => {
-      acc[producto] = expedientesDeAseguradora.filter(exp => exp.producto === producto).length;
+      acc[producto] = polizasDeAseguradora.filter(exp => exp.producto === producto).length;
       return acc;
     }, {})
-  }), [expedientesDeAseguradora, productos]);
+  }), [polizasDeAseguradora, productos]);
 
   return (
     <div>
@@ -994,7 +994,7 @@ const DetallesAseguradora = ({
                   <div className="text-center">
                     <div className="mb-3">
                       <div className="h2 text-primary mb-0">{estadisticas.total}</div>
-                      <small className="text-muted">Total Expedientes</small>
+                      <small className="text-muted">Total Pólizas</small>
                     </div>
                   </div>
                 </div>
@@ -1053,7 +1053,7 @@ const DetallesAseguradora = ({
 // Componente principal
 export default function Aseguradoras() {
   const [aseguradoras, setAseguradoras] = useState([]);
-  const [expedientes, setExpedientes] = useState([]);
+  const [polizas, setPolizas] = useState([]);
   const [aseguradoraSeleccionada, setAseguradoraSeleccionada] = useState(null);
   const [vistaActual, setVistaActual] = useState('aseguradoras');
   const [modoEdicionAseguradora, setModoEdicionAseguradora] = useState(false);
@@ -1095,24 +1095,24 @@ export default function Aseguradoras() {
     }
   }, []);
 
-  // Opcional: cargar expedientes si existe endpoint
-  const cargarExpedientes = useCallback(async () => {
+  // Opcional: cargar pólizas si existe endpoint
+  const cargarPolizas = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/api/expedientes`);
       const data = await res.json();
       const list = data?.data || data || [];
-      setExpedientes(Array.isArray(list) ? list : []);
+      setPolizas(Array.isArray(list) ? list : []);
     } catch (err) {
-      // dejar expedientes vacíos si falla
-      console.warn('No se pudieron cargar expedientes:', err);
-      setExpedientes([]);
+      // dejar pólizas vacías si falla
+      console.warn('No se pudieron cargar pólizas:', err);
+      setPolizas([]);
     }
   }, []);
 
   useEffect(() => {
     cargarAseguradoras();
-    cargarExpedientes();
-  }, [cargarAseguradoras, cargarExpedientes]);
+    cargarPolizas();
+  }, [cargarAseguradoras, cargarPolizas]);
 
   const generarCodigoAseguradora = useCallback(() => {
     if (aseguradoras.length === 0) {
@@ -1238,7 +1238,7 @@ export default function Aseguradoras() {
       {vistaActual === 'aseguradoras' && (
         <ListaAseguradorasComponent 
           aseguradoras={aseguradoras}
-          expedientes={expedientes}
+          polizas={polizas}
           limpiarFormularioAseguradora={limpiarFormularioAseguradora}
           setVistaActual={setVistaActual}
           verDetallesAseguradora={verDetallesAseguradora}
@@ -1260,7 +1260,7 @@ export default function Aseguradoras() {
       {vistaActual === 'detalles-aseguradora' && aseguradoraSeleccionada && (
         <DetallesAseguradora 
           aseguradoraSeleccionada={aseguradoraSeleccionada}
-          expedientes={expedientes}
+          polizas={polizas}
           productos={productos}
           editarAseguradora={editarAseguradora}
           setVistaActual={setVistaActual}

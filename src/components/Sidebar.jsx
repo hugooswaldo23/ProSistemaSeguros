@@ -11,7 +11,7 @@ const Sidebar = ({ onLogout }) =>  {
     const modulos = useMemo(() => [
         { key: '/', nombre: 'Dashboard', icono: Home, activo: true },
         { key: '/clientes', nombre: 'Clientes', icono: Users, activo: true },
-        { key: '/expedientes', nombre: 'Expedientes', icono: FileText, activo: true },
+        { key: '/polizas', nombre: 'Pólizas', icono: FileText, activo: true },
         { key: '/tramites', nombre: 'Trámites', icono: Clipboard, activo: true },
         { key: '/equipo-de-trabajo', nombre: 'Equipo de Trabajo', icono: UserCheck, activo: true },
         { key: '/aseguradoras', nombre: 'Aseguradoras', icono: Building2, activo: true },

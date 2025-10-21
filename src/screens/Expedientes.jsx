@@ -926,7 +926,7 @@ const ListaExpedientes = React.memo(({
   return (
     <div className="p-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">Gestión de Expedientes</h3>
+        <h3 className="mb-0">Gestión de Pólizas</h3>
         <button
           onClick={() => {
             limpiarFormulario();
@@ -935,7 +935,7 @@ const ListaExpedientes = React.memo(({
           className="btn btn-primary"
         >
           <Plus size={16} className="me-2" />
-          Nuevo Expediente
+          Nueva Póliza
         </button>
       </div>
 
@@ -945,12 +945,12 @@ const ListaExpedientes = React.memo(({
             <BarraBusqueda 
               busqueda={paginacion.busqueda}
               setBusqueda={paginacion.setBusqueda}
-              placeholder="Buscar expedientes..."
+              placeholder="Buscar pólizas..."
             />
           </div>
           <div className="col-md-6 text-end">
             <small className="text-muted">
-              Mostrando {paginacion.itemsPaginados.length} de {paginacion.totalItems} expedientes
+              Mostrando {paginacion.itemsPaginados.length} de {paginacion.totalItems} pólizas
             </small>
           </div>
         </div>
@@ -960,8 +960,8 @@ const ListaExpedientes = React.memo(({
         {expedientes.length === 0 ? (
           <div className="card-body text-center py-5">
             <FileText size={48} className="text-muted mb-3" />
-            <h5 className="text-muted">No hay expedientes registrados</h5>
-            <p className="text-muted">Crea tu primer expediente para comenzar</p>
+            <h5 className="text-muted">No hay pólizas registradas</h5>
+            <p className="text-muted">Crea tu primera póliza para comenzar</p>
           </div>
         ) : paginacion.itemsPaginados.length === 0 ? (
           <div className="card-body text-center py-5">

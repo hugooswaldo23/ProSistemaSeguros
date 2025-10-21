@@ -14,7 +14,7 @@ const Productos = () => {
   const paginacion = usePaginacion(productosPersonalizados, 10);
   const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
   const companias = useMemo(() => ['Qualitas', 'Banorte', 'HDI', 'El Aguila', 'Mapfre', 'Chubb', 'Afirme'], []);
-  const [expedientes, setExpedientes] = useState([]);
+  const [polizas, setPolizas] = useState([]);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
     
   const limpiarFormularioProducto = useCallback(() => {
@@ -123,13 +123,13 @@ const Productos = () => {
                   <th>Compañías</th>
                   <th>Comisión Base</th>
                   <th>Estado</th>
-                  <th>Expedientes</th>
+                  <th>Pólizas</th>
                   <th width="150">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {todosLosProductos.map((producto) => {
-                  const expedientesProducto = expedientes.filter(exp => 
+                  const polizasProducto = polizas.filter(exp => 
                     exp.producto === producto.nombre || exp.producto === producto.codigo
                   ).length;
                   
@@ -174,7 +174,7 @@ const Productos = () => {
                         </span>
                       </td>
                       <td>
-                        <span className="badge bg-info">{expedientesProducto}</span>
+                        <span className="badge bg-info">{polizasProducto}</span>
                       </td>
                       <td>
                         <div className="btn-group btn-group-sm" role="group">

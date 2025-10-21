@@ -179,14 +179,15 @@ const ModuloClientes = () => {
   const [modoEdicion, setModoEdicion] = useState(false);
   const [mostrarModalDocumento, setMostrarModalDocumento] = useState(false);
   const [tipoDocumentoASubir, setTipoDocumentoASubir] = useState('');
+  const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
   const [mostrarModalRelacionar, setMostrarModalRelacionar] = useState(false);
   const [mostrarModalVerDocumento, setMostrarModalVerDocumento] = useState(false);
   const [documentoAVer, setDocumentoAVer] = useState(null);
   const [mostrarModalConfirmarEliminar, setMostrarModalConfirmarEliminar] = useState(false);
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
   
-  // Simulación de expedientes existentes (en tu sistema real vendrían del estado principal)
-  const [expedientes] = useState([
+  // Simulación de pólizas existentes (en tu sistema real vendrían del estado principal)
+  const [polizas] = useState([
     { id: 1, nombre: 'Juan', apellidoPaterno: 'Pérez', producto: 'Autos', compania: 'Qualitas', etapaActiva: 'Pagado', clienteId: null },
     { id: 2, nombre: 'María', apellidoPaterno: 'González', producto: 'Vida', compania: 'Banorte', etapaActiva: 'Pagado', clienteId: null },
     { id: 3, nombre: 'Carlos', apellidoPaterno: 'López', producto: 'Daños', compania: 'HDI', etapaActiva: 'En cotización', clienteId: null },
@@ -259,7 +260,7 @@ const ModuloClientes = () => {
     activo: true,
     notas: '',
     documentos: [], // Solo para UI
-    expedientesRelacionados: [], // Solo para UI
+    polizasRelacionadas: [], // Solo para UI
     representanteLegal: '',
     puestoRepresentante: '',
     telefonoRepresentante: '',
@@ -313,7 +314,7 @@ const ModuloClientes = () => {
       activo: true,
       notas: '',
       documentos: [], // Solo para UI
-      expedientesRelacionados: [], // Solo para UI
+      polizasRelacionadas: [], // Solo para UI
       representanteLegal: '',
       puestoRepresentante: '',
       telefonoRepresentante: '',
@@ -341,12 +342,12 @@ const ModuloClientes = () => {
 
     try {
       // Preparar datos para enviar - removiendo solo campos de UI
-      const { documentos, expedientesRelacionados, contactos, ...datosBase } = formularioCliente;
+      const { documentos, polizasRelacionadas, contactos, ...datosBase } = formularioCliente;
       
       const datosCliente = {
         ...datosBase,
-        // Generar código si no existe (para creación)
-        codigo: formularioCliente.codigo || `CL${String(clientes.length + 1).padStart(3, '0')}`,
+        // Generar código si no existe (para creación) - usa la función generarCodigoCliente
+        codigo: formularioCliente.codigo || generarCodigoCliente(),
         // Enviar categoria_id
         categoria_id: formularioCliente.categoria_id
       };
@@ -406,8 +407,8 @@ const ModuloClientes = () => {
   // Función para eliminar cliente
   const eliminarCliente = useCallback(async (id) => {
     const cliente = clientes.find(c => c.id === id);
-    if (cliente?.expedientesRelacionados?.length > 0) {
-      alert('No se puede eliminar el cliente porque tiene expedientes relacionados.');
+    if (cliente?.polizasRelacionadas?.length > 0) {
+      alert('No se puede eliminar el cliente porque tiene pólizas relacionadas.');
       return;
     }
     const nombreCliente = cliente.tipoPersona === 'Persona Física' ? 
@@ -426,78 +427,93 @@ const ModuloClientes = () => {
   }, [clientes]);
 
   // Función para ver detalles
-  const verDetallesCliente = useCallback((cliente) => {
+  const verDetallesCliente = useCallback(async (cliente) => {
     setClienteSeleccionado(cliente);
     setVistaActual('detalles-cliente');
+    
+    // Cargar documentos del cliente desde el backend
+    try {
+      const response = await fetch(`${API_URL}/api/clientes/${cliente.id}/documentos`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Actualizar el cliente con sus documentos
+        const clienteConDocumentos = {
+          ...cliente,
+          documentos: data.data || []
+        };
+        setClienteSeleccionado(clienteConDocumentos);
+      }
+    } catch (error) {
+      console.error('Error al cargar documentos:', error);
+      // No mostramos error al usuario, solo no se cargan los documentos
+    }
   }, []);
 
   // Función para agregar documento
-  const agregarDocumento = useCallback((tipoDocumento, nombreArchivo = null) => {
-    // Simular que siempre son PDFs para este ejemplo
-    // En un sistema real, esto vendría del input file
-    const extension = '.pdf';
-    const nombreBase = tipoDocumento.replace(/[^a-zA-Z0-9]/g, '_');
-    
-    const nuevoDocumento = {
-      id: Date.now() + Math.random(), // ID único más robusto
-      tipo: tipoDocumento,
-      nombre: nombreArchivo || `${nombreBase}_${new Date().toISOString().split('T')[0]}${extension}`,
-      fechaSubida: new Date().toISOString().split('T')[0],
-      estado: 'Vigente',
-      tipoArchivo: 'application/pdf', // En un sistema real vendría del file.type
-      tamaño: '2.5 MB' // Simulado
-    };
-
-    if (modoEdicion || clienteSeleccionado) {
-      const clienteActual = modoEdicion ? formularioCliente : clienteSeleccionado;
-      
-      // Verificar si ya existe un documento del mismo tipo
-      const documentosExistentes = clienteActual.documentos || [];
-      const indiceExistente = documentosExistentes.findIndex(doc => doc.tipo === tipoDocumento);
-      
-      let documentosActualizados;
-      let esActualizacion = false;
-      
-      if (indiceExistente !== -1) {
-        // Reemplazar el documento existente
-        documentosActualizados = [...documentosExistentes];
-        documentosActualizados[indiceExistente] = nuevoDocumento;
-        esActualizacion = true;
-      } else {
-        // Agregar nuevo documento
-        documentosActualizados = [...documentosExistentes, nuevoDocumento];
-      }
-      
-      if (modoEdicion) {
-        setFormularioCliente(prev => ({
-          ...prev,
-          documentos: documentosActualizados
-        }));
-      } else {
-        const clienteActualizado = {
-          ...clienteSeleccionado,
-          documentos: documentosActualizados
-        };
-        setClienteSeleccionado(clienteActualizado);
-        setClientes(prev => prev.map(c => 
-          c.id === clienteActualizado.id ? clienteActualizado : c
-        ));
-      }
-      
-      // Mensaje de confirmación
-      if (esActualizacion) {
-        alert(`✅ Documento "${tipoDocumento}" actualizado correctamente`);
-      } else {
-        alert(`✅ Documento "${tipoDocumento}" agregado correctamente`);
-      }
+  const agregarDocumento = useCallback(async (tipoDocumento, archivo = null) => {
+    if (!clienteSeleccionado) {
+      alert('❌ Error: No hay cliente seleccionado');
+      return;
     }
-    
-    setMostrarModalDocumento(false);
-    setTipoDocumentoASubir('');
-  }, [modoEdicion, clienteSeleccionado, formularioCliente]);
+
+    if (!archivo) {
+      alert('❌ Error: Debe seleccionar un archivo');
+      return;
+    }
+
+    try {
+      // Crear FormData para enviar el archivo
+      const formData = new FormData();
+      formData.append('archivo', archivo);
+      formData.append('tipo', tipoDocumento);
+      formData.append('estado', 'Vigente');
+
+      // Subir documento al backend
+      const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}/documentos`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al subir el documento');
+      }
+
+      const resultado = await response.json();
+      
+      // Actualizar la lista de documentos del cliente
+      const documentosActualizados = [...(clienteSeleccionado.documentos || []), resultado.data];
+      
+      const clienteActualizado = {
+        ...clienteSeleccionado,
+        documentos: documentosActualizados
+      };
+      
+      setClienteSeleccionado(clienteActualizado);
+      setClientes(prev => prev.map(c => 
+        c.id === clienteActualizado.id ? clienteActualizado : c
+      ));
+
+      alert(`✅ Documento "${tipoDocumento}" subido correctamente`);
+      setMostrarModalDocumento(false);
+      setTipoDocumentoASubir('');
+      
+    } catch (error) {
+      console.error('Error al subir documento:', error);
+      alert(`❌ Error al subir documento: ${error.message}`);
+    }
+  }, [clienteSeleccionado]);
 
   // Función para eliminar documento
-  const eliminarDocumento = useCallback((documentoId) => {
+  const eliminarDocumento = useCallback(async (documentoId) => {
     if (!clienteSeleccionado) {
       alert('❌ Error: No hay cliente seleccionado');
       return;
@@ -514,37 +530,60 @@ const ModuloClientes = () => {
       return;
     }
     
-    // Filtrar los documentos para eliminar el seleccionado
-    const documentosActualizados = clienteSeleccionado.documentos.filter(doc => doc.id !== documentoId);
-    
-    // Crear el cliente actualizado con los nuevos documentos
-    const clienteActualizado = {
-      ...clienteSeleccionado,
-      documentos: documentosActualizados
-    };
-    
-    // Actualizar el estado del cliente seleccionado
-    setClienteSeleccionado(clienteActualizado);
-    
-    // Actualizar la lista de clientes
-    setClientes(prevClientes => 
-      prevClientes.map(cliente => 
-        cliente.id === clienteActualizado.id ? clienteActualizado : cliente
-      )
-    );
-    
-    // Cerrar el modal si estaba abierto
-    if (mostrarModalVerDocumento && documentoAVer?.id === documentoId) {
-      setMostrarModalVerDocumento(false);
-      setDocumentoAVer(null);
+    try {
+      // Eliminar documento del backend
+      const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}/documentos/${documentoId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Error al eliminar el documento');
+      }
+
+      // Filtrar los documentos para eliminar el seleccionado
+      const documentosActualizados = clienteSeleccionado.documentos.filter(doc => doc.id !== documentoId);
+      
+      // Crear el cliente actualizado con los nuevos documentos
+      const clienteActualizado = {
+        ...clienteSeleccionado,
+        documentos: documentosActualizados
+      };
+      
+      // Actualizar el estado del cliente seleccionado
+      setClienteSeleccionado(clienteActualizado);
+      
+      // Actualizar la lista de clientes
+      setClientes(prevClientes => 
+        prevClientes.map(cliente => 
+          cliente.id === clienteActualizado.id ? clienteActualizado : cliente
+        )
+      );
+      
+      // Cerrar el modal si estaba abierto
+      if (mostrarModalVerDocumento && documentoAVer?.id === documentoId) {
+        setMostrarModalVerDocumento(false);
+        setDocumentoAVer(null);
+      }
+      
+      // Cerrar modal de confirmación
+      setMostrarModalConfirmarEliminar(false);
+      setDocumentoAEliminar(null);
+      
+      // Mensaje de confirmación
+      alert(`✅ Documento "${documentoAEliminar.tipo}" eliminado correctamente`);
+      
+    } catch (error) {
+      console.error('Error al eliminar documento:', error);
+      alert(`❌ Error al eliminar documento: ${error.message}`);
+      
+      // Cerrar modal de confirmación incluso si hay error
+      setMostrarModalConfirmarEliminar(false);
+      setDocumentoAEliminar(null);
     }
-    
-    // Cerrar modal de confirmación
-    setMostrarModalConfirmarEliminar(false);
-    setDocumentoAEliminar(null);
-    
-    // Mensaje de confirmación
-    alert(`✅ Documento "${documentoAEliminar.tipo}" eliminado correctamente`);
   }, [clienteSeleccionado, mostrarModalVerDocumento, documentoAVer]);
 
   // Función para mostrar modal de confirmación de eliminación
@@ -553,13 +592,13 @@ const ModuloClientes = () => {
     setMostrarModalConfirmarEliminar(true);
   }, []);
 
-  // Función para relacionar expediente
-  const relacionarExpediente = useCallback((expedienteId) => {
+  // Función para relacionar póliza
+  const relacionarPoliza = useCallback((polizaId) => {
     if (clienteSeleccionado) {
-      const expedientesActualizados = [...(clienteSeleccionado.expedientesRelacionados || []), expedienteId];
+      const polizasActualizadas = [...(clienteSeleccionado.polizasRelacionadas || []), polizaId];
       const clienteActualizado = {
         ...clienteSeleccionado,
-        expedientesRelacionados: expedientesActualizados
+        polizasRelacionadas: polizasActualizadas
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -571,13 +610,13 @@ const ModuloClientes = () => {
     setMostrarModalRelacionar(false);
   }, [clienteSeleccionado]);
 
-  // Función para desrelacionar expediente
-  const desrelacionarExpediente = useCallback((expedienteId) => {
+  // Función para desrelacionar póliza
+  const desrelacionarPoliza = useCallback((polizaId) => {
     if (clienteSeleccionado) {
-      const expedientesActualizados = clienteSeleccionado.expedientesRelacionados.filter(id => id !== expedienteId);
+      const polizasActualizadas = clienteSeleccionado.polizasRelacionadas.filter(id => id !== polizaId);
       const clienteActualizado = {
         ...clienteSeleccionado,
-        expedientesRelacionados: expedientesActualizados
+        polizasRelacionadas: polizasActualizadas
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -592,17 +631,17 @@ const ModuloClientes = () => {
   // Hook de paginación para la lista de clientes (debe estar aquí, no dentro de la función)
   const paginacionClientes = usePaginacion(clientes, 10);
 
-  // Memos para los expedientes
-  const expedientesDelCliente = useMemo(() => 
-    expedientes.filter(exp => clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)),
-    [expedientes, clienteSeleccionado]
+  // Memos para las pólizas
+  const polizasDelCliente = useMemo(() => 
+    polizas.filter(exp => clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)),
+    [polizas, clienteSeleccionado]
   );
 
-  const expedientesNoRelacionados = useMemo(() => 
-    expedientes.filter(exp => 
-      !exp.clienteId && !clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)
+  const polizasNoRelacionadas = useMemo(() => 
+    polizas.filter(exp => 
+      !exp.clienteId && !clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)
     ),
-    [expedientes, clienteSeleccionado]
+    [polizas, clienteSeleccionado]
   );
 
   // Renderizado de Lista de Clientes
@@ -685,8 +724,8 @@ const ModuloClientes = () => {
                   </thead>
                   <tbody>
                     {paginacionClientes.itemsPaginados.map((cliente) => {
-                      const expedientesCliente = expedientes.filter(exp => 
-                        cliente.expedientesRelacionados?.includes(exp.id)
+                      const polizasCliente = polizas.filter(exp => 
+                        cliente.polizasRelacionadas?.includes(exp.id)
                       );
                       
                       return (
@@ -734,7 +773,7 @@ const ModuloClientes = () => {
                           </td>
                           <td>
                             <span className="badge bg-primary">
-                              {expedientesCliente.length} productos
+                              {polizasCliente.length} productos
                             </span>
                           </td>
                           <td>
@@ -1631,7 +1670,7 @@ const ModuloClientes = () => {
                     <button
                       onClick={() => setMostrarModalRelacionar(true)}
                       className="btn btn-outline-success"
-                      disabled={expedientesNoRelacionados.length === 0}
+                      disabled={polizasNoRelacionadas.length === 0}
                     >
                       <Plus size={16} className="me-2" />
                       Relacionar Expediente
@@ -1880,7 +1919,7 @@ const ModuloClientes = () => {
               </div>
             </div>
 
-            {/* Productos/Expedientes Relacionados */}
+            {/* Productos/Pólizas Relacionadas */}
             <div className="col-12">
               <div className="card">
                 <div className="card-header d-flex justify-content-between align-items-center">
@@ -1891,18 +1930,18 @@ const ModuloClientes = () => {
                   <button
                     onClick={() => setMostrarModalRelacionar(true)}
                     className="btn btn-sm btn-success"
-                    disabled={expedientesNoRelacionados.length === 0}
+                    disabled={polizasNoRelacionadas.length === 0}
                   >
                     <Plus size={14} className="me-1" />
                     Relacionar Producto
                   </button>
                 </div>
                 <div className="card-body">
-                  {expedientesDelCliente.length === 0 ? (
+                  {polizasDelCliente.length === 0 ? (
                     <div className="text-center py-4">
                       <Package size={48} className="text-muted mb-3" />
                       <p className="text-muted">No hay productos relacionados con este cliente</p>
-                      {expedientesNoRelacionados.length > 0 && (
+                      {polizasNoRelacionadas.length > 0 && (
                         <button
                           onClick={() => setMostrarModalRelacionar(true)}
                           className="btn btn-outline-success"
@@ -1926,7 +1965,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {expedientesDelCliente.map(expediente => (
+                          {polizasDelCliente.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.producto}</td>
                               <td>{expediente.compania}</td>
@@ -1954,7 +1993,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => desrelacionarExpediente(expediente.id)}
+                                  onClick={() => desrelacionarPoliza(expediente.id)}
                                   className="btn btn-sm btn-outline-danger"
                                   title="Desrelacionar"
                                 >
@@ -2376,14 +2415,20 @@ const ModuloClientes = () => {
                   </div>
                   
                   <div className="mb-3">
-                    <label className="form-label">Archivo</label>
+                    <label className="form-label">Archivo *</label>
                     <input 
                       type="file" 
                       className="form-control"
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => setArchivoSeleccionado(e.target.files[0])}
                     />
-                    <small className="text-muted">
-                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX
+                    {archivoSeleccionado && (
+                      <small className="text-success d-block mt-2">
+                        ✅ {archivoSeleccionado.name} ({(archivoSeleccionado.size / 1024 / 1024).toFixed(2)} MB)
+                      </small>
+                    )}
+                    <small className="text-muted d-block mt-1">
+                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX (Máx. 10MB)
                     </small>
                   </div>
                 </div>
@@ -2394,6 +2439,7 @@ const ModuloClientes = () => {
                     onClick={() => {
                       setMostrarModalDocumento(false);
                       setTipoDocumentoASubir('');
+                      setArchivoSeleccionado(null);
                     }}
                   >
                     Cancelar
@@ -2401,8 +2447,8 @@ const ModuloClientes = () => {
                   <button 
                     type="button" 
                     className="btn btn-primary"
-                    onClick={() => agregarDocumento(tipoDocumentoASubir)}
-                    disabled={!tipoDocumentoASubir}
+                    onClick={() => agregarDocumento(tipoDocumentoASubir, archivoSeleccionado)}
+                    disabled={!tipoDocumentoASubir || !archivoSeleccionado}
                   >
                     <FileUp size={16} className="me-2" />
                     {clienteSeleccionado?.documentos?.find(doc => doc.tipo === tipoDocumentoASubir) ? 
@@ -2414,13 +2460,13 @@ const ModuloClientes = () => {
           </div>
         )}
 
-        {/* Modal para relacionar expedientes */}
+        {/* Modal para relacionar pólizas */}
         {mostrarModalRelacionar && (
           <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
             <div className="modal-dialog modal-lg">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title">Relacionar Expediente/Producto</h5>
+                  <h5 className="modal-title">Relacionar Póliza/Producto</h5>
                   <button 
                     type="button" 
                     className="btn-close"
@@ -2428,12 +2474,12 @@ const ModuloClientes = () => {
                   ></button>
                 </div>
                 <div className="modal-body">
-                  <p>Selecciona los expedientes que deseas relacionar con este cliente:</p>
+                  <p>Selecciona las pólizas que deseas relacionar con este cliente:</p>
                   
-                  {expedientesNoRelacionados.length === 0 ? (
+                  {polizasNoRelacionadas.length === 0 ? (
                     <div className="text-center py-4">
                       <CheckCircle2 size={48} className="text-success mb-3" />
-                      <p className="text-muted">No hay expedientes disponibles para relacionar</p>
+                      <p className="text-muted">No hay pólizas disponibles para relacionar</p>
                     </div>
                   ) : (
                     <div className="table-responsive">
@@ -2448,7 +2494,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {expedientesNoRelacionados.map(expediente => (
+                          {polizasNoRelacionadas.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.nombre} {expediente.apellidoPaterno}</td>
                               <td>{expediente.producto}</td>
@@ -2464,7 +2510,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => relacionarExpediente(expediente.id)}
+                                  onClick={() => relacionarPoliza(expediente.id)}
                                   className="btn btn-sm btn-success"
                                 >
                                   <Plus size={14} className="me-1" />
