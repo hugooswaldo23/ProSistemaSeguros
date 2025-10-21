@@ -3,23 +3,32 @@
 // Descripción: Manejo de tipos de documentos para personas físicas y morales
 // ============================================================================
 
-import { API_URL } from '../constants/apiUrl';
+// src/services/tiposDocumentosService.js
+
+import API_URL from '../constants/apiUrl.js';
 
 // Obtener todos los tipos de documentos
 export const obtenerTiposDocumentos = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      }
-    });
+    const response = await fetch(`${API_URL}/api/tiposDocumentos`);
     
     if (!response.ok) {
       throw new Error('Error al obtener tipos de documentos');
     }
     
     const data = await response.json();
-    return { success: true, data };
+    console.log('Respuesta completa del backend:', data);
+    
+    // Verificar si la respuesta tiene la estructura esperada
+    if (data.success && Array.isArray(data.data)) {
+      return { success: true, data: data.data };
+    } else if (data.success && data.data && Array.isArray(data.data.data)) {
+      // Caso de respuesta anidada
+      return { success: true, data: data.data.data };
+    } else {
+      console.error('Estructura de respuesta inesperada:', data);
+      return { success: false, error: 'Formato de respuesta inválido' };
+    }
   } catch (error) {
     console.error('Error en obtenerTiposDocumentos:', error);
     return { success: false, error: error.message };
@@ -29,14 +38,10 @@ export const obtenerTiposDocumentos = async () => {
 // Obtener tipos de documentos por tipo de persona
 export const obtenerTiposDocumentosPorTipo = async (tipoPersona) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos?tipo_persona=${encodeURIComponent(tipoPersona)}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      }
-    });
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/tipo/${encodeURIComponent(tipoPersona)}`);
     
     if (!response.ok) {
-      throw new Error('Error al obtener tipos de documentos');
+      throw new Error('Error al obtener tipos de documentos por tipo');
     }
     
     const data = await response.json();
@@ -47,14 +52,10 @@ export const obtenerTiposDocumentosPorTipo = async (tipoPersona) => {
   }
 };
 
-// Obtener solo documentos activos
-export const obtenerTiposDocumentosActivos = async () => {
+// Obtener tipos de documentos ordenados (para formularios)
+export const obtenerTiposDocumentosOrdenados = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos?activo=true`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      }
-    });
+    const response = await fetch(`${API_URL}/api/tiposDocumentos`);
     
     if (!response.ok) {
       throw new Error('Error al obtener tipos de documentos activos');
@@ -68,14 +69,10 @@ export const obtenerTiposDocumentosActivos = async () => {
   }
 };
 
-// Obtener un tipo de documento por ID
+// Obtener tipo de documento por ID
 export const obtenerTipoDocumentoPorId = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos/${id}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      }
-    });
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/${id}`);
     
     if (!response.ok) {
       throw new Error('Error al obtener tipo de documento');
@@ -92,11 +89,10 @@ export const obtenerTipoDocumentoPorId = async (id) => {
 // Crear nuevo tipo de documento
 export const crearTipoDocumento = async (tipoDocumento) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos`, {
+    const response = await fetch(`${API_URL}/api/tiposDocumentos`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
       },
       body: JSON.stringify(tipoDocumento)
     });
@@ -117,11 +113,10 @@ export const crearTipoDocumento = async (tipoDocumento) => {
 // Actualizar tipo de documento
 export const actualizarTipoDocumento = async (id, tipoDocumento) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos/${id}`, {
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
       },
       body: JSON.stringify(tipoDocumento)
     });
@@ -142,11 +137,8 @@ export const actualizarTipoDocumento = async (id, tipoDocumento) => {
 // Eliminar tipo de documento
 export const eliminarTipoDocumento = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos/${id}`, {
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/${id}`, {
       method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      }
     });
     
     if (!response.ok) {
@@ -162,21 +154,18 @@ export const eliminarTipoDocumento = async (id) => {
   }
 };
 
-// Cambiar estado de tipo de documento (activo/inactivo)
-export const cambiarEstadoTipoDocumento = async (id, activo) => {
+// Cambiar estado (activo/inactivo) de tipo de documento
+export const cambiarEstadoTipoDocumento = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/tipos-documentos/${id}/estado`, {
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/${id}/toggle-activo`, {
       method: 'PATCH',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-      },
-      body: JSON.stringify({ activo })
+        'Content-Type': 'application/json'
+      }
     });
     
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || 'Error al cambiar estado');
+      throw new Error('Error al cambiar estado del tipo de documento');
     }
     
     const data = await response.json();

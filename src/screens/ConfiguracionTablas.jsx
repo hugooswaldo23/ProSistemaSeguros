@@ -19,6 +19,39 @@ import {
   obtenerTiposProductosActivos,
   cambiarEstadoTipoProducto
 } from '../services/tiposProductosService'; 
+// Imports para tipos de documentos
+import {
+  obtenerTiposDocumentos,
+  obtenerTiposDocumentosPorTipo,
+  crearTipoDocumento,
+  actualizarTipoDocumento,
+  eliminarTipoDocumento,
+  cambiarEstadoTipoDocumento
+} from '../services/tiposDocumentosService';
+// Imports para canales de venta
+import {
+  obtenerCanalesVenta,
+  crearCanalVenta,
+  actualizarCanalVenta,
+  eliminarCanalVenta,
+  cambiarEstadoCanalVenta
+} from '../services/canalesVentaService';
+// Imports para categorías de clientes
+import {
+  obtenerCategoriasClientes,
+  crearCategoriaCliente,
+  actualizarCategoriaCliente,
+  eliminarCategoriaCliente,
+  cambiarEstadoCategoriaCliente
+} from '../services/categoriasClientesService';
+// Imports para tipos de trámites
+import {
+  obtenerTiposTramites,
+  crearTipoTramite,
+  actualizarTipoTramite,
+  eliminarTipoTramite,
+  cambiarEstadoTipoTramite
+} from '../services/tiposTramitesService';
 // Hook de paginación reutilizable
 const usePaginacion = (items, itemsPorPagina = 10) => {
   const [paginaActual, setPaginaActual] = useState(1);
@@ -350,9 +383,7 @@ const ModuloConfiguracionCatalogos = () => {
       const resultado = await obtenerTiposProductos();
       console.log('Resultado obtenerTiposProductos:', resultado);
       if (resultado.success) {
-        // Si la respuesta tiene la estructura { success, data: { success, data: [...] } }
-        const productos = resultado.data?.data || [];
-        setTiposProductos(productos);
+        setTiposProductos(resultado.data);
       } else {
         setErrorProductos(resultado.error || 'Error al cargar tipos de productos');
       }
@@ -364,9 +395,132 @@ const ModuloConfiguracionCatalogos = () => {
     }
   };
 
-  // Cargar productos al montar el componente
+  // Función para cargar tipos de documentos desde la API
+  const cargarTiposDocumentos = async () => {
+    try {
+      const resultado = await obtenerTiposDocumentos();
+      console.log('Resultado obtenerTiposDocumentos:', resultado);
+      console.log('Tipo de resultado.data:', typeof resultado.data);
+      console.log('Es array resultado.data:', Array.isArray(resultado.data));
+      
+      if (resultado.success) {
+        const documentos = resultado.data || [];
+        console.log('Documentos después de extracción:', documentos);
+        console.log('Tipo de documentos:', typeof documentos);
+        console.log('Es array documentos:', Array.isArray(documentos));
+        
+        if (!Array.isArray(documentos)) {
+          console.error('Los documentos no son un array:', documentos);
+          alert('Error: Los datos recibidos no tienen el formato esperado');
+          return;
+        }
+        
+        // Separar documentos por tipo de persona (nota: el backend usa tipo_persona, no tipoPersona)
+        const docsFisica = documentos.filter(doc => doc.tipo_persona === 'Persona Física');
+        const docsMoral = documentos.filter(doc => doc.tipo_persona === 'Persona Moral');
+        
+        console.log('Docs Física:', docsFisica.length);
+        console.log('Docs Moral:', docsMoral.length);
+        
+        setDocumentosPersonaFisica(docsFisica);
+        setDocumentosPersonaMoral(docsMoral);
+      } else {
+        alert('Error al cargar tipos de documentos: ' + (resultado.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      alert('Error de conexión al cargar documentos');
+      console.error('Error cargando documentos:', error);
+    }
+  };
+
+  // Función para cargar canales de venta desde la API
+  const cargarCanalesVenta = async () => {
+    try {
+      const resultado = await obtenerCanalesVenta();
+      console.log('Resultado obtenerCanalesVenta:', resultado);
+      console.log('Tipo de resultado.data:', typeof resultado.data);
+      console.log('Es array resultado.data:', Array.isArray(resultado.data));
+      
+      if (resultado.success) {
+        const canales = resultado.data || [];
+        console.log('Canales después de extracción:', canales);
+        console.log('Tipo de canales:', typeof canales);
+        console.log('Es array canales:', Array.isArray(canales));
+        
+        if (!Array.isArray(canales)) {
+          console.error('Los canales no son un array:', canales);
+          alert('Error: Los datos de canales no tienen el formato esperado');
+          return;
+        }
+        
+        console.log('Canales de venta cargados:', canales.length);
+        setCanalesVenta(canales);
+      } else {
+        alert('Error al cargar canales de venta: ' + (resultado.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      alert('Error de conexión al cargar canales de venta');
+      console.error('Error cargando canales de venta:', error);
+    }
+  };
+
+  // Función para cargar categorías de clientes desde la API
+  const cargarCategoriasClientes = async () => {
+    try {
+      const resultado = await obtenerCategoriasClientes();
+      console.log('Resultado obtenerCategoriasClientes:', resultado);
+      console.log('Tipo de resultado.data:', typeof resultado.data);
+      console.log('Es array resultado.data:', Array.isArray(resultado.data));
+      
+      if (resultado.success) {
+        const categorias = resultado.data || [];
+        console.log('Categorías después de extracción:', categorias);
+        console.log('Tipo de categorías:', typeof categorias);
+        console.log('Es array categorías:', Array.isArray(categorias));
+        
+        if (!Array.isArray(categorias)) {
+          console.error('Las categorías no son un array:', categorias);
+          alert('Error: Los datos de categorías no tienen el formato esperado');
+          return;
+        }
+        
+        console.log('Categorías de clientes cargadas:', categorias.length);
+        setCategoriaClientes(categorias);
+      } else {
+        alert('Error al cargar categorías de clientes: ' + (resultado.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      alert('Error de conexión al cargar categorías de clientes');
+      console.error('Error cargando categorías de clientes:', error);
+    }
+  };
+
+  // Función para cargar tipos de trámites
+  const cargarTiposTramites = async () => {
+    try {
+      const resultado = await obtenerTiposTramites();
+      console.log('Resultado obtenerTiposTramites:', resultado);
+      
+      if (resultado.success) {
+        const tramites = resultado.data || [];
+        console.log('Tipos de trámites cargados:', tramites.length);
+        setTiposTramites(tramites);
+      } else {
+        alert('Error al cargar tipos de trámites: ' + (resultado.error || 'Error desconocido'));
+      }
+    } catch (error) {
+      alert('Error de conexión al cargar tipos de trámites');
+      console.error('Error cargando tipos de trámites:', error);
+    }
+  };
+
+  // Cargar datos al montar el componente
   useEffect(() => {
     cargarTiposProductos();
+    cargarTiposDocumentos();
+    cargarCanalesVenta();
+    cargarCategoriasClientes();
+    cargarTiposTramites();
   }, []);
   // Función para generar código automático
   const generarCodigo = (prefijo, lista) => {
@@ -458,17 +612,42 @@ const ModuloConfiguracionCatalogos = () => {
             if (res.success) cargarTiposProductos();
             else alert(res.error || 'Error al editar producto');
           });
-      } else if (tipo === 'tramite') {
-        // Para trámites, mantener el código original y limpiar documentos si no requiere
-        const itemOriginal = datos.find(item => item.id === formulario.id);
-        const tramiteActualizado = {
+      } else if (tipo === 'docFisica' || tipo === 'docMoral') {
+        // Llamar al backend para editar documento
+        const documentoData = {
           ...formulario,
-          codigo: itemOriginal.codigo,
+          tipo_persona: tipo === 'docFisica' ? 'Persona Física' : 'Persona Moral'
+        };
+        actualizarTipoDocumento(formulario.id, documentoData)
+          .then(res => {
+            if (res.success) cargarTiposDocumentos();
+            else alert(res.error || 'Error al editar documento');
+          });
+      } else if (tipo === 'canal') {
+        // Llamar al backend para editar canal de venta
+        actualizarCanalVenta(formulario.id, formulario)
+          .then(res => {
+            if (res.success) cargarCanalesVenta();
+            else alert(res.error || 'Error al editar canal de venta');
+          });
+      } else if (tipo === 'categoria') {
+        // Llamar al backend para editar categoría de cliente
+        actualizarCategoriaCliente(formulario.id, formulario)
+          .then(res => {
+            if (res.success) cargarCategoriasClientes();
+            else alert(res.error || 'Error al editar categoría de cliente');
+          });
+      } else if (tipo === 'tramite') {
+        // Llamar al backend para editar tipo de trámite
+        const tramiteData = {
+          ...formulario,
           documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : []
         };
-        setDatos(datos.map(item =>
-          item.id === formulario.id ? tramiteActualizado : item
-        ));
+        actualizarTipoTramite(formulario.id, tramiteData)
+          .then(res => {
+            if (res.success) cargarTiposTramites();
+            else alert(res.error || 'Error al editar tipo de trámite');
+          });
       } else {
         setDatos(datos.map(item =>
           item.id === formulario.id ? { ...formulario } : item
@@ -483,24 +662,49 @@ const ModuloConfiguracionCatalogos = () => {
             if (res.success) cargarTiposProductos();
             else alert(res.error || 'Error al crear producto');
           });
+      } else if (tipo === 'docFisica' || tipo === 'docMoral') {
+        // Llamar al backend para crear documento
+        const documentoData = {
+          ...formulario,
+          tipo_persona: tipo === 'docFisica' ? 'Persona Física' : 'Persona Moral'
+        };
+        crearTipoDocumento(documentoData)
+          .then(res => {
+            if (res.success) cargarTiposDocumentos();
+            else alert(res.error || 'Error al crear documento');
+          });
+      } else if (tipo === 'canal') {
+        // Llamar al backend para crear canal de venta
+        crearCanalVenta(formulario)
+          .then(res => {
+            if (res.success) cargarCanalesVenta();
+            else alert(res.error || 'Error al crear canal de venta');
+          });
+      } else if (tipo === 'categoria') {
+        // Llamar al backend para crear categoría de cliente
+        crearCategoriaCliente(formulario)
+          .then(res => {
+            if (res.success) cargarCategoriasClientes();
+            else alert(res.error || 'Error al crear categoría de cliente');
+          });
+      } else if (tipo === 'tramite') {
+        // Llamar al backend para crear tipo de trámite
+        const tramiteData = {
+          ...formulario,
+          documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : []
+        };
+        crearTipoTramite(tramiteData)
+          .then(res => {
+            if (res.success) cargarTiposTramites();
+            else alert(res.error || 'Error al crear tipo de trámite');
+          });
       } else {
-        let nuevoItem;
-        if (tipo === 'tramite') {
-          nuevoItem = {
-            ...formulario,
-            id: Date.now(),
-            codigo: generarCodigo(prefijo, datos),
-            documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : [],
-            orden: datos.length + 1
-          };
-        } else {
-          nuevoItem = {
-            ...formulario,
-            id: Date.now(),
-            codigo: formulario.codigo || generarCodigo(prefijo, datos),
-            orden: datos.length + 1
-          };
-        }
+        let nuevoItem = {
+          ...formulario,
+          id: Date.now(),
+          codigo: formulario.codigo || generarCodigo(prefijo, datos),
+          orden: datos.length + 1
+        };
         setDatos([...datos, nuevoItem]);
       }
     }
@@ -609,19 +813,37 @@ const ModuloConfiguracionCatalogos = () => {
 
     switch(tipo) {
       case 'docFisica':
-        setDocumentosPersonaFisica(prev => prev.filter(item => item.id !== id));
-        break;
       case 'docMoral':
-        setDocumentosPersonaMoral(prev => prev.filter(item => item.id !== id));
+        // Llamar al backend para eliminar documento
+        eliminarTipoDocumento(id)
+          .then(res => {
+            if (res.success) cargarTiposDocumentos();
+            else alert(res.error || 'Error al eliminar documento');
+          });
         break;
       case 'canal':
-        setCanalesVenta(prev => prev.filter(item => item.id !== id));
+        // Llamar al backend para eliminar canal de venta
+        eliminarCanalVenta(id)
+          .then(res => {
+            if (res.success) cargarCanalesVenta();
+            else alert(res.error || 'Error al eliminar canal de venta');
+          });
         break;
       case 'categoria':
-        setCategoriaClientes(prev => prev.filter(item => item.id !== id));
+        // Llamar al backend para eliminar categoría de cliente
+        eliminarCategoriaCliente(id)
+          .then(res => {
+            if (res.success) cargarCategoriasClientes();
+            else alert(res.error || 'Error al eliminar categoría de cliente');
+          });
         break;
       case 'tramite':
-        setTiposTramites(prev => prev.filter(item => item.id !== id));
+        // Llamar al backend para eliminar tipo de trámite
+        eliminarTipoTramite(id)
+          .then(res => {
+            if (res.success) cargarTiposTramites();
+            else alert(res.error || 'Error al eliminar tipo de trámite');
+          });
         break;
       case 'producto':
         // Llamar al backend para eliminar producto
@@ -639,29 +861,37 @@ const ModuloConfiguracionCatalogos = () => {
   const cambiarEstado = (id, tipo) => {
     switch(tipo) {
       case 'docFisica':
-        setDocumentosPersonaFisica(prev => prev.map(item =>
-          item.id === id ? { ...item, activo: !item.activo } : item
-        ));
-        break;
       case 'docMoral':
-        setDocumentosPersonaMoral(prev => prev.map(item =>
-          item.id === id ? { ...item, activo: !item.activo } : item
-        ));
+        // Llamar al backend para cambiar estado del documento
+        cambiarEstadoTipoDocumento(id)
+          .then(res => {
+            if (res.success) cargarTiposDocumentos();
+            else alert(res.error || 'Error al cambiar estado del documento');
+          });
         break;
       case 'canal':
-        setCanalesVenta(prev => prev.map(item =>
-          item.id === id ? { ...item, activo: !item.activo } : item
-        ));
+        // Llamar al backend para cambiar estado del canal de venta
+        cambiarEstadoCanalVenta(id)
+          .then(res => {
+            if (res.success) cargarCanalesVenta();
+            else alert(res.error || 'Error al cambiar estado del canal de venta');
+          });
         break;
       case 'categoria':
-        setCategoriaClientes(prev => prev.map(item =>
-          item.id === id ? { ...item, activo: !item.activo } : item
-        ));
+        // Llamar al backend para cambiar estado de la categoría de cliente
+        cambiarEstadoCategoriaCliente(id)
+          .then(res => {
+            if (res.success) cargarCategoriasClientes();
+            else alert(res.error || 'Error al cambiar estado de la categoría de cliente');
+          });
         break;
       case 'tramite':
-        setTiposTramites(prev => prev.map(item =>
-          item.id === id ? { ...item, activo: !item.activo } : item
-        ));
+        // Llamar al backend para cambiar estado del tipo de trámite
+        cambiarEstadoTipoTramite(id)
+          .then(res => {
+            if (res.success) cargarTiposTramites();
+            else alert(res.error || 'Error al cambiar estado del tipo de trámite');
+          });
         break;
       case 'producto':
         setTiposProductos(prev => prev.map(item =>

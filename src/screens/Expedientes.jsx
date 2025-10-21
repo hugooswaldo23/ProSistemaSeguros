@@ -2,6 +2,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader } from 'lucide-react';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
+import { obtenerTiposProductosActivos } from '../services/tiposProductosService';
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
   MIN_YEAR: 1900,
@@ -2023,14 +2024,52 @@ const ModuloExpedientes = () => {
   const [expedienteACancelar, setExpedienteACancelar] = useState(null);
 
   const [aseguradoras, setAseguradoras] = useState([]);
+  const [tiposProductos, setTiposProductos] = useState([]);
+  
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
       .then(res => res.json())
       .then(data => setAseguradoras(data))
       .catch(err => console.error('Error al cargar aseguradoras:', err));
   }, []);
+
+  useEffect(() => {
+    const cargarTiposProductos = async () => {
+      try {
+        const resultado = await obtenerTiposProductosActivos();
+        if (resultado.success) {
+          setTiposProductos(resultado.data);
+        } else {
+          console.error('Error al cargar tipos de productos:', resultado.error);
+          // Fallback a productos estáticos si hay error
+          setTiposProductos([
+            { id: 1, nombre: 'Autos' },
+            { id: 2, nombre: 'Vida' },
+            { id: 3, nombre: 'Daños' },
+            { id: 4, nombre: 'Equipo pesado' },
+            { id: 5, nombre: 'Embarcaciones' },
+            { id: 6, nombre: 'Ahorro' }
+          ]);
+        }
+      } catch (error) {
+        console.error('Error cargando productos:', error);
+        // Fallback a productos estáticos si hay error
+        setTiposProductos([
+          { id: 1, nombre: 'Autos' },
+          { id: 2, nombre: 'Vida' },
+          { id: 3, nombre: 'Daños' },
+          { id: 4, nombre: 'Equipo pesado' },
+          { id: 5, nombre: 'Embarcaciones' },
+          { id: 6, nombre: 'Ahorro' }
+        ]);
+      }
+    };
+
+    cargarTiposProductos();
+  }, []);
+
   const companias = useMemo(() => aseguradoras.map(a => a.nombre), [aseguradoras]);
-  const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
+  const productos = useMemo(() => tiposProductos.map(p => p.nombre), [tiposProductos]);
   const etapasActivas = useMemo(() => [
     'En cotización',
     'Cotización enviada', 
