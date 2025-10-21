@@ -1,0 +1,312 @@
+{
+  "tabla": "clientes",
+  "descripcion": "Estructura actualizada de la tabla clientes con nuevos campos",
+  "cambios": {
+    "campos_nuevos": [
+      {
+        "nombre": "codigo",
+        "tipo": "VARCHAR(20)",
+        "null": false,
+        "unique": true,
+        "posicion": "AFTER id",
+        "descripcion": "Código visual del cliente (ej: CL001, CL002)",
+        "ejemplo": "CL001"
+      },
+      {
+        "nombre": "categoria_id",
+        "tipo": "INT",
+        "null": true,
+        "default": null,
+        "posicion": "AFTER codigo",
+        "foreign_key": {
+          "tabla_referencia": "categorias_clientes",
+          "campo_referencia": "id",
+          "on_delete": "SET NULL",
+          "on_update": "CASCADE"
+        },
+        "descripcion": "ID de la categoría del cliente",
+        "ejemplo": 1
+      }
+    ],
+    "indices": [
+      {
+        "nombre": "idx_categoria_id",
+        "campos": ["categoria_id"],
+        "tipo": "INDEX"
+      }
+    ],
+    "constraints": [
+      {
+        "nombre": "fk_clientes_categoria",
+        "tipo": "FOREIGN KEY",
+        "campo": "categoria_id",
+        "referencia": "categorias_clientes(id)",
+        "on_delete": "SET NULL",
+        "on_update": "CASCADE"
+      }
+    ]
+  },
+  "estructura_completa_recomendada": {
+    "id": {
+      "tipo": "INT",
+      "auto_increment": true,
+      "primary_key": true,
+      "null": false
+    },
+    "codigo": {
+      "tipo": "VARCHAR(20)",
+      "null": false,
+      "unique": true,
+      "descripcion": "Código único del cliente"
+    },
+    "categoria_id": {
+      "tipo": "INT",
+      "null": true,
+      "foreign_key": "categorias_clientes.id",
+      "descripcion": "Categoría del cliente"
+    },
+    "tipoPersona": {
+      "tipo": "ENUM('Persona Física', 'Persona Moral')",
+      "null": false,
+      "default": "Persona Física"
+    },
+    "nombre": {
+      "tipo": "VARCHAR(100)",
+      "null": true,
+      "descripcion": "Nombre (solo para Persona Física)"
+    },
+    "apellidoPaterno": {
+      "tipo": "VARCHAR(100)",
+      "null": true,
+      "descripcion": "Apellido Paterno (solo para Persona Física)"
+    },
+    "apellidoMaterno": {
+      "tipo": "VARCHAR(100)",
+      "null": true,
+      "descripcion": "Apellido Materno (solo para Persona Física)"
+    },
+    "razonSocial": {
+      "tipo": "VARCHAR(200)",
+      "null": true,
+      "descripcion": "Razón Social (solo para Persona Moral)"
+    },
+    "nombreComercial": {
+      "tipo": "VARCHAR(200)",
+      "null": true,
+      "descripcion": "Nombre Comercial (solo para Persona Moral)"
+    },
+    "rfc": {
+      "tipo": "VARCHAR(13)",
+      "null": true,
+      "descripcion": "RFC del cliente"
+    },
+    "curp": {
+      "tipo": "VARCHAR(18)",
+      "null": true,
+      "descripcion": "CURP (solo para Persona Física)"
+    },
+    "fechaNacimiento": {
+      "tipo": "DATE",
+      "null": true,
+      "descripcion": "Fecha de Nacimiento (solo para Persona Física)"
+    },
+    "email": {
+      "tipo": "VARCHAR(100)",
+      "null": true
+    },
+    "telefonoFijo": {
+      "tipo": "VARCHAR(20)",
+      "null": true
+    },
+    "telefonoMovil": {
+      "tipo": "VARCHAR(20)",
+      "null": true
+    },
+    "direccion": {
+      "tipo": "VARCHAR(255)",
+      "null": true
+    },
+    "ciudad": {
+      "tipo": "VARCHAR(100)",
+      "null": true
+    },
+    "estado": {
+      "tipo": "VARCHAR(100)",
+      "null": true
+    },
+    "codigoPostal": {
+      "tipo": "VARCHAR(10)",
+      "null": true
+    },
+    "pais": {
+      "tipo": "VARCHAR(100)",
+      "null": true,
+      "default": "México"
+    },
+    "fechaAlta": {
+      "tipo": "DATE",
+      "null": false,
+      "default": "CURRENT_DATE"
+    },
+    "activo": {
+      "tipo": "BOOLEAN",
+      "null": false,
+      "default": true
+    },
+    "notas": {
+      "tipo": "TEXT",
+      "null": true
+    },
+    "representanteLegal": {
+      "tipo": "VARCHAR(200)",
+      "null": true,
+      "descripcion": "Nombre del Representante Legal (solo para Persona Moral)"
+    },
+    "puestoRepresentante": {
+      "tipo": "VARCHAR(100)",
+      "null": true,
+      "descripcion": "Puesto del Representante Legal (solo para Persona Moral)"
+    },
+    "telefonoRepresentante": {
+      "tipo": "VARCHAR(20)",
+      "null": true
+    },
+    "emailRepresentante": {
+      "tipo": "VARCHAR(100)",
+      "null": true
+    },
+    "created_at": {
+      "tipo": "TIMESTAMP",
+      "null": false,
+      "default": "CURRENT_TIMESTAMP"
+    },
+    "updated_at": {
+      "tipo": "TIMESTAMP",
+      "null": false,
+      "default": "CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
+    }
+  },
+  "ejemplo_datos_frontend_a_backend": {
+    "persona_fisica": {
+      "tipoPersona": "Persona Física",
+      "codigo": "CL001",
+      "categoria_id": 1,
+      "nombre": "Juan",
+      "apellidoPaterno": "Pérez",
+      "apellidoMaterno": "García",
+      "rfc": "PEGJ850101XXX",
+      "curp": "PEGJ850101HDFRNN09",
+      "fechaNacimiento": "1985-01-01",
+      "email": "juan.perez@example.com",
+      "telefonoMovil": "3331234567",
+      "telefonoFijo": "3336547890",
+      "direccion": "Calle Principal #123",
+      "ciudad": "Guadalajara",
+      "estado": "Jalisco",
+      "codigoPostal": "44100",
+      "pais": "México",
+      "fechaAlta": "2025-10-20",
+      "activo": true,
+      "notas": "Cliente preferente"
+    },
+    "persona_moral": {
+      "tipoPersona": "Persona Moral",
+      "codigo": "CL002",
+      "categoria_id": 2,
+      "razonSocial": "Empresa Ejemplo S.A. de C.V.",
+      "nombreComercial": "Empresa Ejemplo",
+      "rfc": "EEJ850101XXX",
+      "email": "contacto@empresa.com",
+      "telefonoMovil": "3331234567",
+      "telefonoFijo": "3336547890",
+      "direccion": "Av. Empresarial #456",
+      "ciudad": "Guadalajara",
+      "estado": "Jalisco",
+      "codigoPostal": "44100",
+      "pais": "México",
+      "fechaAlta": "2025-10-20",
+      "activo": true,
+      "representanteLegal": "María González López",
+      "puestoRepresentante": "Director General",
+      "telefonoRepresentante": "3339876543",
+      "emailRepresentante": "maria.gonzalez@empresa.com",
+      "notas": "Cliente corporativo"
+    }
+  },
+  "validaciones_backend": {
+    "codigo": {
+      "requerido": true,
+      "unico": true,
+      "formato": "^CL\\d{3,}$",
+      "generacion_automatica": "Si no se proporciona, generar como: 'CL' + LPAD(id, 3, '0')"
+    },
+    "categoria_id": {
+      "requerido": false,
+      "validacion": "Debe existir en tabla categorias_clientes",
+      "default": 1
+    },
+    "persona_fisica": {
+      "campos_requeridos": ["nombre", "apellidoPaterno"],
+      "campos_opcionales": ["apellidoMaterno", "curp", "fechaNacimiento"]
+    },
+    "persona_moral": {
+      "campos_requeridos": ["razonSocial", "rfc"],
+      "campos_opcionales": ["nombreComercial", "representanteLegal", "puestoRepresentante"]
+    },
+    "rfc": {
+      "persona_fisica": "13 caracteres",
+      "persona_moral": "12 caracteres",
+      "formato": "^[A-ZÑ&]{3,4}\\d{6}[A-Z0-9]{3}$"
+    },
+    "curp": {
+      "longitud": 18,
+      "formato": "^[A-Z]{4}\\d{6}[HM][A-Z]{5}[0-9A-Z]\\d$",
+      "solo_persona_fisica": true
+    }
+  },
+  "endpoints_api": {
+    "GET /api/clientes": {
+      "descripcion": "Obtener lista de clientes",
+      "incluye_relacion": "categoria",
+      "ejemplo_respuesta": [
+        {
+          "id": 1,
+          "codigo": "CL001",
+          "categoria_id": 1,
+          "categoria": {
+            "id": 1,
+            "nombre": "Normal"
+          },
+          "tipoPersona": "Persona Física",
+          "nombre": "Juan",
+          "apellidoPaterno": "Pérez",
+          "email": "juan@example.com"
+        }
+      ]
+    },
+    "POST /api/clientes": {
+      "descripcion": "Crear nuevo cliente",
+      "validaciones": "Ver sección validaciones_backend",
+      "genera_automaticamente": ["id", "codigo (si no se envía)", "created_at", "updated_at"]
+    },
+    "PUT /api/clientes/:id": {
+      "descripcion": "Actualizar cliente existente",
+      "nota": "El código NO debe cambiar una vez creado"
+    },
+    "DELETE /api/clientes/:id": {
+      "descripcion": "Eliminar cliente",
+      "validacion": "Verificar que no tenga expedientes relacionados antes de eliminar"
+    },
+    "GET /api/categorias-clientes": {
+      "descripcion": "Obtener lista de categorías de clientes",
+      "ejemplo_respuesta": [
+        { "id": 1, "nombre": "Normal" },
+        { "id": 2, "nombre": "VIP" },
+        { "id": 3, "nombre": "Premium" },
+        { "id": 4, "nombre": "Digital" },
+        { "id": 5, "nombre": "Empresarial" },
+        { "id": 6, "nombre": "Gobierno" }
+      ]
+    }
+  }
+}

@@ -144,14 +144,34 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 const ModuloClientes = () => {
   // Estados principales del módulo de clientes
   const [clientes, setClientes] = useState([]);
-  // Cargar clientes desde el backend al montar el componente
+  const [categorias, setCategorias] = useState([]);
+  
+  // Cargar clientes y categorías desde el backend al montar el componente
   useEffect(() => {
-  fetch(`${API_URL}/api/clientes`)
+    // Cargar clientes
+    fetch(`${API_URL}/api/clientes`)
       .then(res => res.json())
       .then(data => setClientes(data))
       .catch(err => {
         console.error('Error al cargar clientes:', err);
         setClientes([]);
+      });
+
+    // Cargar categorías de clientes
+    fetch(`${API_URL}/api/categorias-clientes`)
+      .then(res => res.json())
+      .then(data => setCategorias(data))
+      .catch(err => {
+        console.error('Error al cargar categorías:', err);
+        // Valores por defecto si falla la carga
+        setCategorias([
+          { id: 1, nombre: 'Normal' },
+          { id: 2, nombre: 'VIP' },
+          { id: 3, nombre: 'Premium' },
+          { id: 4, nombre: 'Digital' },
+          { id: 5, nombre: 'Empresarial' },
+          { id: 6, nombre: 'Gobierno' }
+        ]);
       });
   }, []);
   const [vistaActual, setVistaActual] = useState('clientes');
@@ -176,7 +196,6 @@ const ModuloClientes = () => {
 
   // Tipos de cliente
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
-  const segmentosCliente = useMemo(() => ['Premium', 'Estándar', 'Básico', 'VIP'], []);
   
   // Tipos de documentos
   const tiposDocumentosPersonaFisica = useMemo(() => [
@@ -234,17 +253,18 @@ const ModuloClientes = () => {
     estado: '',
     codigoPostal: '',
     pais: 'México',
-    segmento: 'Estándar',
+    categoria_id: categorias.length > 0 ? categorias[0].id : 1, // Solo para UI
+    codigo: '', // Solo para UI
     fechaAlta: new Date().toISOString().split('T')[0],
     activo: true,
     notas: '',
-    documentos: [],
-    expedientesRelacionados: [],
+    documentos: [], // Solo para UI
+    expedientesRelacionados: [], // Solo para UI
     representanteLegal: '',
     puestoRepresentante: '',
     telefonoRepresentante: '',
     emailRepresentante: '',
-    contactos: [], // Array para múltiples contactos
+    contactos: [], // Solo para UI - Array para múltiples contactos
     id: null
   });
 
@@ -287,22 +307,23 @@ const ModuloClientes = () => {
       estado: '',
       codigoPostal: '',
       pais: 'México',
-      segmento: 'Estándar',
+      categoria_id: categorias.length > 0 ? categorias[0].id : 1, // Solo para UI
+      codigo: '', // Solo para UI
       fechaAlta: new Date().toISOString().split('T')[0],
       activo: true,
       notas: '',
-      documentos: [],
-      expedientesRelacionados: [],
+      documentos: [], // Solo para UI
+      expedientesRelacionados: [], // Solo para UI
       representanteLegal: '',
       puestoRepresentante: '',
       telefonoRepresentante: '',
       emailRepresentante: '',
-      contactos: [],
+      contactos: [], // Solo para UI
       id: null
     });
     setModoEdicion(false);
     setClienteSeleccionado(null);
-  }, []);
+  }, [categorias]);
 
   // Función para guardar cliente
   const guardarCliente = useCallback(async () => {
@@ -319,33 +340,61 @@ const ModuloClientes = () => {
     }
 
     try {
+      // Preparar datos para enviar - removiendo solo campos de UI
+      const { documentos, expedientesRelacionados, contactos, ...datosBase } = formularioCliente;
+      
+      const datosCliente = {
+        ...datosBase,
+        // Generar código si no existe (para creación)
+        codigo: formularioCliente.codigo || `CL${String(clientes.length + 1).padStart(3, '0')}`,
+        // Enviar categoria_id
+        categoria_id: formularioCliente.categoria_id
+      };
+
+      console.log('Datos a enviar:', datosCliente);
+
       if (modoEdicion) {
         // Actualizar cliente
-  const res = await fetch(`${API_URL}/api/clientes/${formularioCliente.id}`, {
+        const res = await fetch(`${API_URL}/api/clientes/${formularioCliente.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formularioCliente)
+          body: JSON.stringify(datosCliente)
         });
-        if (!res.ok) throw new Error('Error al actualizar cliente');
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          console.error('Error del servidor:', errorData);
+          throw new Error(errorData.message || errorData.error || 'Error al actualizar cliente');
+        }
+        
         const actualizado = await res.json();
         setClientes(prev => prev.map(c => c.id === actualizado.id ? actualizado : c));
+        alert('✅ Cliente actualizado correctamente');
       } else {
         // Crear cliente
-  const res = await fetch(`${API_URL}/api/clientes`, {
+        const res = await fetch(`${API_URL}/api/clientes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formularioCliente)
+          body: JSON.stringify(datosCliente)
         });
-        if (!res.ok) throw new Error('Error al crear cliente');
+        
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          console.error('Error del servidor:', errorData);
+          throw new Error(errorData.message || errorData.error || 'Error al crear cliente');
+        }
+        
         const nuevo = await res.json();
         setClientes(prev => [...prev, nuevo]);
+        alert('✅ Cliente creado correctamente');
       }
       limpiarFormularioCliente();
       setVistaActual('clientes');
     } catch (err) {
-      alert('Error al guardar cliente: ' + err.message);
+      console.error('Error completo:', err);
+      alert('❌ Error al guardar cliente: ' + err.message);
     }
-  }, [formularioCliente, modoEdicion, limpiarFormularioCliente]);
+  }, [formularioCliente, modoEdicion, limpiarFormularioCliente, generarCodigoCliente]);
 
   // Función para editar cliente
   const editarCliente = useCallback((cliente) => {
@@ -627,7 +676,7 @@ const ModuloClientes = () => {
                       <th>Cliente</th>
                       <th>RFC</th>
                       <th>Contacto</th>
-                      <th>Segmento</th>
+                      <th>Categoría</th>
                       <th>Productos</th>
                       <th>Documentos</th>
                       <th>Estado</th>
@@ -643,7 +692,7 @@ const ModuloClientes = () => {
                       return (
                         <tr key={cliente.id}>
                           <td>
-                            <strong className="text-primary">{cliente.codigo}</strong>
+                            <strong className="text-primary">{cliente.codigo || `CL${String(cliente.id).padStart(3, '0')}`}</strong>
                           </td>
                           <td>
                             <div>
@@ -673,12 +722,14 @@ const ModuloClientes = () => {
                           </td>
                           <td>
                             <span className={`badge ${
-                              cliente.segmento === 'VIP' ? 'bg-purple' :
-                              cliente.segmento === 'Premium' ? 'bg-warning' :
-                              cliente.segmento === 'Estándar' ? 'bg-info' :
+                              cliente.categoria?.nombre === 'VIP' ? 'bg-purple' :
+                              cliente.categoria?.nombre === 'Premium' ? 'bg-warning' :
+                              cliente.categoria?.nombre === 'Digital' ? 'bg-info' :
+                              cliente.categoria?.nombre === 'Empresarial' ? 'bg-success' :
+                              cliente.categoria?.nombre === 'Gobierno' ? 'bg-primary' :
                               'bg-secondary'
                             }`}>
-                              {cliente.segmento}
+                              {cliente.categoria?.nombre || 'Normal'}
                             </span>
                           </td>
                           <td>
@@ -747,7 +798,7 @@ const ModuloClientes = () => {
 
   // Renderizado de Formulario de Cliente
   const renderFormularioCliente = () => {
-    const siguienteCodigo = !modoEdicion ? generarCodigoCliente() : formularioCliente.codigo;
+    const siguienteCodigo = !modoEdicion ? generarCodigoCliente() : (formularioCliente.codigo || 'CL-Auto');
     const estadosMexico = [
       'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 
       'Chihuahua', 'Ciudad de México', 'Coahuila', 'Colima', 'Durango', 'Guanajuato', 
@@ -858,14 +909,14 @@ const ModuloClientes = () => {
                 </div>
                 
                 <div className="col-md-4">
-                  <label className="form-label">Segmento</label>
+                  <label className="form-label">Categoría</label>
                   <select
                     className="form-select"
-                    value={formularioCliente.segmento}
-                    onChange={(e) => setFormularioCliente({...formularioCliente, segmento: e.target.value})}
+                    value={formularioCliente.categoria_id}
+                    onChange={(e) => setFormularioCliente({...formularioCliente, categoria_id: parseInt(e.target.value)})}
                   >
-                    {segmentosCliente.map(segmento => (
-                      <option key={segmento} value={segmento}>{segmento}</option>
+                    {categorias.map(categoria => (
+                      <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
                     ))}
                   </select>
                 </div>
@@ -1390,14 +1441,16 @@ const ModuloClientes = () => {
                       </div>
                     )}
                     <div className="col-md-6">
-                      <strong className="d-block text-muted">Segmento:</strong>
+                      <strong className="d-block text-muted">Categoría:</strong>
                       <span className={`badge ${
-                        clienteSeleccionado.segmento === 'VIP' ? 'bg-purple' :
-                        clienteSeleccionado.segmento === 'Premium' ? 'bg-warning' :
-                        clienteSeleccionado.segmento === 'Estándar' ? 'bg-info' :
+                        clienteSeleccionado.categoria?.nombre === 'VIP' ? 'bg-purple' :
+                        clienteSeleccionado.categoria?.nombre === 'Premium' ? 'bg-warning' :
+                        clienteSeleccionado.categoria?.nombre === 'Digital' ? 'bg-info' :
+                        clienteSeleccionado.categoria?.nombre === 'Empresarial' ? 'bg-success' :
+                        clienteSeleccionado.categoria?.nombre === 'Gobierno' ? 'bg-primary' :
                         'bg-secondary'
                       }`}>
-                        {clienteSeleccionado.segmento}
+                        {clienteSeleccionado.categoria?.nombre || 'Normal'}
                       </span>
                     </div>
                     <div className="col-md-6">
