@@ -345,7 +345,12 @@ const FormularioTramite = ({
   setFormularioTramite, 
   generarCodigoTramite, 
   setVistaActual, 
-  guardarTramite 
+  guardarTramite,
+  clientes,
+  polizasCliente,
+  cargandoPolizas,
+  cargarPolizasCliente,
+  setPolizasCliente
 }) => {
   const siguienteCodigo = !modoEdicionTramite ? generarCodigoTramite() : formularioTramite.codigo;
   
@@ -1112,6 +1117,11 @@ export const Tramites = () => {
           generarCodigoTramite={generarCodigoTramite}
           setVistaActual={setVistaActual}
           guardarTramite={guardarTramite}
+          clientes={clientes}
+          polizasCliente={polizasCliente}
+          cargandoPolizas={cargandoPolizas}
+          cargarPolizasCliente={cargarPolizasCliente}
+          setPolizasCliente={setPolizasCliente}
         />
       )}
       {vistaActual === 'detalles-tramite' && tramiteSeleccionado && (
