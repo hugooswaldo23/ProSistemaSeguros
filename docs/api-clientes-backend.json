@@ -1,0 +1,542 @@
+{
+  "api": {
+    "base_url": "/api",
+    "version": "1.0",
+    "descripcion": "API para gestión de clientes del Sistema de Seguros"
+  },
+  "endpoints": {
+    "clientes": {
+      "list": {
+        "method": "GET",
+        "path": "/api/clientes",
+        "descripcion": "Obtener lista de todos los clientes",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "query_params": {
+          "page": {
+            "tipo": "integer",
+            "requerido": false,
+            "default": 1,
+            "descripcion": "Número de página para paginación"
+          },
+          "limit": {
+            "tipo": "integer",
+            "requerido": false,
+            "default": 10,
+            "descripcion": "Cantidad de registros por página"
+          },
+          "search": {
+            "tipo": "string",
+            "requerido": false,
+            "descripcion": "Búsqueda por nombre, RFC, código"
+          },
+          "categoria_id": {
+            "tipo": "integer",
+            "requerido": false,
+            "descripcion": "Filtrar por categoría"
+          },
+          "activo": {
+            "tipo": "boolean",
+            "requerido": false,
+            "descripcion": "Filtrar por estado activo/inactivo"
+          }
+        },
+        "response_success": {
+          "status": 200,
+          "body": {
+            "success": true,
+            "data": [
+              {
+                "id": 1,
+                "codigo": "CL001",
+                "categoria_id": 1,
+                "categoria": {
+                  "id": 1,
+                  "nombre": "Normal",
+                  "descripcion": "Cliente normal"
+                },
+                "tipoPersona": "Persona Física",
+                "nombre": "Juan",
+                "apellidoPaterno": "Pérez",
+                "apellidoMaterno": "García",
+                "nombreCompleto": "Juan Pérez García",
+                "rfc": "PEGJ850101XXX",
+                "curp": "PEGJ850101HDFRNN09",
+                "email": "juan.perez@example.com",
+                "telefonoMovil": "3331234567",
+                "activo": true,
+                "fechaAlta": "2025-10-20",
+                "created_at": "2025-10-20T10:30:00Z",
+                "updated_at": "2025-10-20T10:30:00Z"
+              }
+            ],
+            "pagination": {
+              "total": 100,
+              "page": 1,
+              "limit": 10,
+              "total_pages": 10
+            }
+          }
+        },
+        "response_error": {
+          "status": 500,
+          "body": {
+            "success": false,
+            "error": "Error al obtener clientes",
+            "message": "Descripción detallada del error"
+          }
+        }
+      },
+      "get": {
+        "method": "GET",
+        "path": "/api/clientes/:id",
+        "descripcion": "Obtener un cliente específico por ID",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "params": {
+          "id": {
+            "tipo": "integer",
+            "requerido": true,
+            "descripcion": "ID del cliente"
+          }
+        },
+        "response_success": {
+          "status": 200,
+          "body": {
+            "success": true,
+            "data": {
+              "id": 1,
+              "codigo": "CL001",
+              "categoria_id": 1,
+              "categoria": {
+                "id": 1,
+                "nombre": "Normal"
+              },
+              "tipoPersona": "Persona Física",
+              "nombre": "Juan",
+              "apellidoPaterno": "Pérez",
+              "apellidoMaterno": "García",
+              "razonSocial": null,
+              "nombreComercial": null,
+              "rfc": "PEGJ850101XXX",
+              "curp": "PEGJ850101HDFRNN09",
+              "fechaNacimiento": "1985-01-01",
+              "email": "juan.perez@example.com",
+              "telefonoFijo": "3336547890",
+              "telefonoMovil": "3331234567",
+              "direccion": "Calle Principal #123",
+              "ciudad": "Guadalajara",
+              "estado": "Jalisco",
+              "codigoPostal": "44100",
+              "pais": "México",
+              "fechaAlta": "2025-10-20",
+              "activo": true,
+              "notas": "Cliente preferente",
+              "representanteLegal": null,
+              "puestoRepresentante": null,
+              "telefonoRepresentante": null,
+              "emailRepresentante": null,
+              "created_at": "2025-10-20T10:30:00Z",
+              "updated_at": "2025-10-20T10:30:00Z"
+            }
+          }
+        },
+        "response_error": {
+          "status": 404,
+          "body": {
+            "success": false,
+            "error": "Cliente no encontrado",
+            "message": "No existe un cliente con el ID proporcionado"
+          }
+        }
+      },
+      "create": {
+        "method": "POST",
+        "path": "/api/clientes",
+        "descripcion": "Crear un nuevo cliente",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "request_body": {
+          "tipoPersona": "Persona Física",
+          "codigo": "CL001",
+          "categoria_id": 1,
+          "nombre": "Juan",
+          "apellidoPaterno": "Pérez",
+          "apellidoMaterno": "García",
+          "rfc": "PEGJ850101XXX",
+          "curp": "PEGJ850101HDFRNN09",
+          "fechaNacimiento": "1985-01-01",
+          "email": "juan.perez@example.com",
+          "telefonoFijo": "3336547890",
+          "telefonoMovil": "3331234567",
+          "direccion": "Calle Principal #123",
+          "ciudad": "Guadalajara",
+          "estado": "Jalisco",
+          "codigoPostal": "44100",
+          "pais": "México",
+          "fechaAlta": "2025-10-20",
+          "activo": true,
+          "notas": "Cliente preferente"
+        },
+        "validaciones": {
+          "tipoPersona": {
+            "requerido": true,
+            "valores_permitidos": ["Persona Física", "Persona Moral"]
+          },
+          "codigo": {
+            "requerido": false,
+            "nota": "Si no se envía, se genera automáticamente como CL001, CL002, etc."
+          },
+          "categoria_id": {
+            "requerido": false,
+            "default": 1,
+            "validacion": "Debe existir en tabla categorias_clientes"
+          },
+          "persona_fisica": {
+            "campos_requeridos": ["nombre", "apellidoPaterno"],
+            "validacion": "Solo aplica cuando tipoPersona = 'Persona Física'"
+          },
+          "persona_moral": {
+            "campos_requeridos": ["razonSocial", "rfc"],
+            "validacion": "Solo aplica cuando tipoPersona = 'Persona Moral'"
+          },
+          "rfc": {
+            "longitud_persona_fisica": 13,
+            "longitud_persona_moral": 12,
+            "formato": "^[A-ZÑ&]{3,4}\\d{6}[A-Z0-9]{3}$"
+          },
+          "curp": {
+            "longitud": 18,
+            "formato": "^[A-Z]{4}\\d{6}[HM][A-Z]{5}[0-9A-Z]\\d$",
+            "solo_persona_fisica": true
+          },
+          "email": {
+            "formato": "email_valido"
+          }
+        },
+        "response_success": {
+          "status": 201,
+          "body": {
+            "success": true,
+            "message": "Cliente creado exitosamente",
+            "data": {
+              "id": 1,
+              "codigo": "CL001",
+              "categoria_id": 1,
+              "tipoPersona": "Persona Física",
+              "nombre": "Juan",
+              "apellidoPaterno": "Pérez",
+              "email": "juan.perez@example.com",
+              "created_at": "2025-10-20T10:30:00Z"
+            }
+          }
+        },
+        "response_error_validacion": {
+          "status": 400,
+          "body": {
+            "success": false,
+            "error": "Error de validación",
+            "message": "Los datos enviados no son válidos",
+            "errors": {
+              "nombre": ["El campo nombre es requerido"],
+              "apellidoPaterno": ["El campo apellido paterno es requerido"],
+              "email": ["El formato del email no es válido"]
+            }
+          }
+        },
+        "response_error_duplicate": {
+          "status": 409,
+          "body": {
+            "success": false,
+            "error": "Cliente duplicado",
+            "message": "Ya existe un cliente con ese código o RFC"
+          }
+        }
+      },
+      "update": {
+        "method": "PUT",
+        "path": "/api/clientes/:id",
+        "descripcion": "Actualizar un cliente existente",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "params": {
+          "id": {
+            "tipo": "integer",
+            "requerido": true,
+            "descripcion": "ID del cliente a actualizar"
+          }
+        },
+        "request_body": {
+          "categoria_id": 2,
+          "nombre": "Juan Carlos",
+          "apellidoPaterno": "Pérez",
+          "apellidoMaterno": "García",
+          "email": "juan.perez.nuevo@example.com",
+          "telefonoMovil": "3331234567",
+          "direccion": "Nueva Dirección #456",
+          "ciudad": "Guadalajara",
+          "estado": "Jalisco",
+          "activo": true,
+          "notas": "Cliente actualizado"
+        },
+        "notas": [
+          "Solo se deben enviar los campos que se van a actualizar",
+          "El campo 'codigo' NO debe ser modificable una vez creado",
+          "El campo 'id' NO debe enviarse en el body"
+        ],
+        "response_success": {
+          "status": 200,
+          "body": {
+            "success": true,
+            "message": "Cliente actualizado exitosamente",
+            "data": {
+              "id": 1,
+              "codigo": "CL001",
+              "categoria_id": 2,
+              "nombre": "Juan Carlos",
+              "apellidoPaterno": "Pérez",
+              "email": "juan.perez.nuevo@example.com",
+              "updated_at": "2025-10-20T11:30:00Z"
+            }
+          }
+        },
+        "response_error": {
+          "status": 404,
+          "body": {
+            "success": false,
+            "error": "Cliente no encontrado",
+            "message": "No existe un cliente con el ID proporcionado"
+          }
+        }
+      },
+      "delete": {
+        "method": "DELETE",
+        "path": "/api/clientes/:id",
+        "descripcion": "Eliminar un cliente",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "params": {
+          "id": {
+            "tipo": "integer",
+            "requerido": true,
+            "descripcion": "ID del cliente a eliminar"
+          }
+        },
+        "validaciones": [
+          "Verificar que el cliente no tenga expedientes relacionados",
+          "Verificar que el cliente no tenga pólizas activas",
+          "Solo permitir eliminación si no hay dependencias"
+        ],
+        "response_success": {
+          "status": 200,
+          "body": {
+            "success": true,
+            "message": "Cliente eliminado exitosamente"
+          }
+        },
+        "response_error_dependencies": {
+          "status": 409,
+          "body": {
+            "success": false,
+            "error": "No se puede eliminar",
+            "message": "El cliente tiene expedientes o pólizas relacionadas",
+            "dependencies": {
+              "expedientes": 3,
+              "polizas": 5
+            }
+          }
+        },
+        "response_error_not_found": {
+          "status": 404,
+          "body": {
+            "success": false,
+            "error": "Cliente no encontrado",
+            "message": "No existe un cliente con el ID proporcionado"
+          }
+        }
+      }
+    },
+    "categorias_clientes": {
+      "list": {
+        "method": "GET",
+        "path": "/api/categorias-clientes",
+        "descripcion": "Obtener lista de categorías de clientes",
+        "headers": {
+          "Authorization": "Bearer {token}",
+          "Content-Type": "application/json"
+        },
+        "response_success": {
+          "status": 200,
+          "body": {
+            "success": true,
+            "data": [
+              {
+                "id": 1,
+                "nombre": "Normal",
+                "descripcion": "Cliente estándar",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "id": 2,
+                "nombre": "VIP",
+                "descripcion": "Cliente VIP con beneficios especiales",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "id": 3,
+                "nombre": "Premium",
+                "descripcion": "Cliente premium",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "id": 4,
+                "nombre": "Digital",
+                "descripcion": "Cliente que opera solo digitalmente",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "id": 5,
+                "nombre": "Empresarial",
+                "descripcion": "Cliente empresarial",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              },
+              {
+                "id": 6,
+                "nombre": "Gobierno",
+                "descripcion": "Cliente de gobierno",
+                "activo": true,
+                "created_at": "2025-01-01T00:00:00Z"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "configuracion_backend": {
+    "base_datos": {
+      "tabla_principal": "clientes",
+      "tabla_categorias": "categorias_clientes",
+      "relaciones": [
+        {
+          "tabla": "clientes",
+          "campo": "categoria_id",
+          "referencia": "categorias_clientes.id",
+          "tipo": "belongsTo",
+          "incluir_en_queries": true
+        }
+      ]
+    },
+    "generacion_codigo": {
+      "descripcion": "Si el frontend no envía el campo 'codigo', el backend debe generarlo automáticamente",
+      "logica": [
+        "1. Obtener el último cliente creado",
+        "2. Extraer el número del código (ejemplo: CL005 -> 5)",
+        "3. Incrementar en 1",
+        "4. Formatear como 'CL' + número_con_padding_3_digitos",
+        "5. Ejemplo: Si último es CL005, nuevo será CL006"
+      ],
+      "implementacion_sql": "INSERT INTO clientes (codigo, ...) VALUES (CONCAT('CL', LPAD((SELECT COALESCE(MAX(CAST(SUBSTRING(codigo, 3) AS UNSIGNED)), 0) + 1 FROM clientes), 3, '0')), ...)",
+      "implementacion_programatica": {
+        "ejemplo_nodejs": "const ultimoCodigo = await Cliente.findOne({ order: [['id', 'DESC']] }); const numero = ultimoCodigo ? parseInt(ultimoCodigo.codigo.substring(2)) + 1 : 1; const nuevoCodigo = `CL${numero.toString().padStart(3, '0')}`;"
+      }
+    },
+    "middleware_validacion": {
+      "validar_tipo_persona": {
+        "descripcion": "Validar que los campos requeridos correspondan al tipo de persona",
+        "persona_fisica": ["nombre", "apellidoPaterno"],
+        "persona_moral": ["razonSocial", "rfc"]
+      },
+      "validar_rfc": {
+        "descripcion": "Validar formato y longitud según tipo de persona",
+        "regex": "^[A-ZÑ&]{3,4}\\d{6}[A-Z0-9]{3}$"
+      },
+      "validar_curp": {
+        "descripcion": "Solo para Persona Física",
+        "regex": "^[A-Z]{4}\\d{6}[HM][A-Z]{5}[0-9A-Z]\\d$"
+      },
+      "validar_categoria": {
+        "descripcion": "Verificar que categoria_id existe en categorias_clientes",
+        "query": "SELECT id FROM categorias_clientes WHERE id = ?"
+      }
+    },
+    "campos_calculados": {
+      "nombreCompleto": {
+        "descripcion": "Para Persona Física, concatenar nombre + apellidos",
+        "formula": "CONCAT(nombre, ' ', apellidoPaterno, ' ', COALESCE(apellidoMaterno, ''))"
+      },
+      "displayName": {
+        "descripcion": "Nombre a mostrar según tipo de persona",
+        "persona_fisica": "nombreCompleto",
+        "persona_moral": "nombreComercial OR razonSocial"
+      }
+    },
+    "permisos": {
+      "nota": "Todos los endpoints requieren autenticación con Bearer token",
+      "roles": {
+        "admin": ["list", "get", "create", "update", "delete"],
+        "usuario": ["list", "get", "create", "update"],
+        "lectura": ["list", "get"]
+      }
+    }
+  },
+  "errores_comunes": {
+    "400": {
+      "descripcion": "Bad Request - Error de validación",
+      "causas": [
+        "Campos requeridos faltantes",
+        "Formato de datos incorrecto",
+        "Valores fuera de rango"
+      ]
+    },
+    "401": {
+      "descripcion": "Unauthorized - No autenticado",
+      "causas": [
+        "Token no proporcionado",
+        "Token inválido o expirado"
+      ]
+    },
+    "403": {
+      "descripcion": "Forbidden - Sin permisos",
+      "causas": [
+        "Usuario sin permisos para esta acción"
+      ]
+    },
+    "404": {
+      "descripcion": "Not Found - Recurso no encontrado",
+      "causas": [
+        "Cliente con ese ID no existe"
+      ]
+    },
+    "409": {
+      "descripcion": "Conflict - Conflicto de datos",
+      "causas": [
+        "Código duplicado",
+        "RFC duplicado",
+        "Cliente con dependencias no puede eliminarse"
+      ]
+    },
+    "500": {
+      "descripcion": "Internal Server Error",
+      "causas": [
+        "Error en base de datos",
+        "Error no controlado en el servidor"
+      ]
+    }
+  }
+}
