@@ -204,7 +204,7 @@ const ListaTramitesComponent = ({
                 <FileText className="me-2" size={20} />
                 <div>
                   <strong>Gestión de Trámites:</strong> Aquí puedes administrar todos los trámites, 
-                  documentos y procesos administrativos relacionados con los expedientes de seguros.
+                  documentos y procesos administrativos relacionados con las pólizas de seguros.
                 </div>
               </div>
             </div>

@@ -186,8 +186,8 @@ const ModuloClientes = () => {
   const [mostrarModalConfirmarEliminar, setMostrarModalConfirmarEliminar] = useState(false);
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
   
-  // Simulación de expedientes existentes (en tu sistema real vendrían del estado principal)
-  const [expedientes] = useState([
+  // Simulación de pólizas existentes (en tu sistema real vendrían del estado principal)
+  const [polizas] = useState([
     { id: 1, nombre: 'Juan', apellidoPaterno: 'Pérez', producto: 'Autos', compania: 'Qualitas', etapaActiva: 'Pagado', clienteId: null },
     { id: 2, nombre: 'María', apellidoPaterno: 'González', producto: 'Vida', compania: 'Banorte', etapaActiva: 'Pagado', clienteId: null },
     { id: 3, nombre: 'Carlos', apellidoPaterno: 'López', producto: 'Daños', compania: 'HDI', etapaActiva: 'En cotización', clienteId: null },
@@ -260,7 +260,7 @@ const ModuloClientes = () => {
     activo: true,
     notas: '',
     documentos: [], // Solo para UI
-    expedientesRelacionados: [], // Solo para UI
+    polizasRelacionadas: [], // Solo para UI
     representanteLegal: '',
     puestoRepresentante: '',
     telefonoRepresentante: '',
@@ -314,7 +314,7 @@ const ModuloClientes = () => {
       activo: true,
       notas: '',
       documentos: [], // Solo para UI
-      expedientesRelacionados: [], // Solo para UI
+      polizasRelacionadas: [], // Solo para UI
       representanteLegal: '',
       puestoRepresentante: '',
       telefonoRepresentante: '',
@@ -342,7 +342,7 @@ const ModuloClientes = () => {
 
     try {
       // Preparar datos para enviar - removiendo solo campos de UI
-      const { documentos, expedientesRelacionados, contactos, ...datosBase } = formularioCliente;
+      const { documentos, polizasRelacionadas, contactos, ...datosBase } = formularioCliente;
       
       const datosCliente = {
         ...datosBase,
@@ -407,8 +407,8 @@ const ModuloClientes = () => {
   // Función para eliminar cliente
   const eliminarCliente = useCallback(async (id) => {
     const cliente = clientes.find(c => c.id === id);
-    if (cliente?.expedientesRelacionados?.length > 0) {
-      alert('No se puede eliminar el cliente porque tiene expedientes relacionados.');
+    if (cliente?.polizasRelacionadas?.length > 0) {
+      alert('No se puede eliminar el cliente porque tiene pólizas relacionadas.');
       return;
     }
     const nombreCliente = cliente.tipoPersona === 'Persona Física' ? 
@@ -592,13 +592,13 @@ const ModuloClientes = () => {
     setMostrarModalConfirmarEliminar(true);
   }, []);
 
-  // Función para relacionar expediente
-  const relacionarExpediente = useCallback((expedienteId) => {
+  // Función para relacionar póliza
+  const relacionarPoliza = useCallback((polizaId) => {
     if (clienteSeleccionado) {
-      const expedientesActualizados = [...(clienteSeleccionado.expedientesRelacionados || []), expedienteId];
+      const polizasActualizadas = [...(clienteSeleccionado.polizasRelacionadas || []), polizaId];
       const clienteActualizado = {
         ...clienteSeleccionado,
-        expedientesRelacionados: expedientesActualizados
+        polizasRelacionadas: polizasActualizadas
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -610,13 +610,13 @@ const ModuloClientes = () => {
     setMostrarModalRelacionar(false);
   }, [clienteSeleccionado]);
 
-  // Función para desrelacionar expediente
-  const desrelacionarExpediente = useCallback((expedienteId) => {
+  // Función para desrelacionar póliza
+  const desrelacionarPoliza = useCallback((polizaId) => {
     if (clienteSeleccionado) {
-      const expedientesActualizados = clienteSeleccionado.expedientesRelacionados.filter(id => id !== expedienteId);
+      const polizasActualizadas = clienteSeleccionado.polizasRelacionadas.filter(id => id !== polizaId);
       const clienteActualizado = {
         ...clienteSeleccionado,
-        expedientesRelacionados: expedientesActualizados
+        polizasRelacionadas: polizasActualizadas
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -631,17 +631,17 @@ const ModuloClientes = () => {
   // Hook de paginación para la lista de clientes (debe estar aquí, no dentro de la función)
   const paginacionClientes = usePaginacion(clientes, 10);
 
-  // Memos para los expedientes
-  const expedientesDelCliente = useMemo(() => 
-    expedientes.filter(exp => clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)),
-    [expedientes, clienteSeleccionado]
+  // Memos para las pólizas
+  const polizasDelCliente = useMemo(() => 
+    polizas.filter(exp => clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)),
+    [polizas, clienteSeleccionado]
   );
 
-  const expedientesNoRelacionados = useMemo(() => 
-    expedientes.filter(exp => 
-      !exp.clienteId && !clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)
+  const polizasNoRelacionadas = useMemo(() => 
+    polizas.filter(exp => 
+      !exp.clienteId && !clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)
     ),
-    [expedientes, clienteSeleccionado]
+    [polizas, clienteSeleccionado]
   );
 
   // Renderizado de Lista de Clientes
@@ -724,8 +724,8 @@ const ModuloClientes = () => {
                   </thead>
                   <tbody>
                     {paginacionClientes.itemsPaginados.map((cliente) => {
-                      const expedientesCliente = expedientes.filter(exp => 
-                        cliente.expedientesRelacionados?.includes(exp.id)
+                      const polizasCliente = polizas.filter(exp => 
+                        cliente.polizasRelacionadas?.includes(exp.id)
                       );
                       
                       return (
@@ -773,7 +773,7 @@ const ModuloClientes = () => {
                           </td>
                           <td>
                             <span className="badge bg-primary">
-                              {expedientesCliente.length} productos
+                              {polizasCliente.length} productos
                             </span>
                           </td>
                           <td>
@@ -1670,7 +1670,7 @@ const ModuloClientes = () => {
                     <button
                       onClick={() => setMostrarModalRelacionar(true)}
                       className="btn btn-outline-success"
-                      disabled={expedientesNoRelacionados.length === 0}
+                      disabled={polizasNoRelacionadas.length === 0}
                     >
                       <Plus size={16} className="me-2" />
                       Relacionar Expediente
@@ -1919,7 +1919,7 @@ const ModuloClientes = () => {
               </div>
             </div>
 
-            {/* Productos/Expedientes Relacionados */}
+            {/* Productos/Pólizas Relacionadas */}
             <div className="col-12">
               <div className="card">
                 <div className="card-header d-flex justify-content-between align-items-center">
@@ -1930,18 +1930,18 @@ const ModuloClientes = () => {
                   <button
                     onClick={() => setMostrarModalRelacionar(true)}
                     className="btn btn-sm btn-success"
-                    disabled={expedientesNoRelacionados.length === 0}
+                    disabled={polizasNoRelacionadas.length === 0}
                   >
                     <Plus size={14} className="me-1" />
                     Relacionar Producto
                   </button>
                 </div>
                 <div className="card-body">
-                  {expedientesDelCliente.length === 0 ? (
+                  {polizasDelCliente.length === 0 ? (
                     <div className="text-center py-4">
                       <Package size={48} className="text-muted mb-3" />
                       <p className="text-muted">No hay productos relacionados con este cliente</p>
-                      {expedientesNoRelacionados.length > 0 && (
+                      {polizasNoRelacionadas.length > 0 && (
                         <button
                           onClick={() => setMostrarModalRelacionar(true)}
                           className="btn btn-outline-success"
@@ -1965,7 +1965,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {expedientesDelCliente.map(expediente => (
+                          {polizasDelCliente.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.producto}</td>
                               <td>{expediente.compania}</td>
@@ -1993,7 +1993,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => desrelacionarExpediente(expediente.id)}
+                                  onClick={() => desrelacionarPoliza(expediente.id)}
                                   className="btn btn-sm btn-outline-danger"
                                   title="Desrelacionar"
                                 >
@@ -2460,13 +2460,13 @@ const ModuloClientes = () => {
           </div>
         )}
 
-        {/* Modal para relacionar expedientes */}
+        {/* Modal para relacionar pólizas */}
         {mostrarModalRelacionar && (
           <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
             <div className="modal-dialog modal-lg">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title">Relacionar Expediente/Producto</h5>
+                  <h5 className="modal-title">Relacionar Póliza/Producto</h5>
                   <button 
                     type="button" 
                     className="btn-close"
@@ -2474,12 +2474,12 @@ const ModuloClientes = () => {
                   ></button>
                 </div>
                 <div className="modal-body">
-                  <p>Selecciona los expedientes que deseas relacionar con este cliente:</p>
+                  <p>Selecciona las pólizas que deseas relacionar con este cliente:</p>
                   
-                  {expedientesNoRelacionados.length === 0 ? (
+                  {polizasNoRelacionadas.length === 0 ? (
                     <div className="text-center py-4">
                       <CheckCircle2 size={48} className="text-success mb-3" />
-                      <p className="text-muted">No hay expedientes disponibles para relacionar</p>
+                      <p className="text-muted">No hay pólizas disponibles para relacionar</p>
                     </div>
                   ) : (
                     <div className="table-responsive">
@@ -2494,7 +2494,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {expedientesNoRelacionados.map(expediente => (
+                          {polizasNoRelacionadas.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.nombre} {expediente.apellidoPaterno}</td>
                               <td>{expediente.producto}</td>
@@ -2510,7 +2510,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => relacionarExpediente(expediente.id)}
+                                  onClick={() => relacionarPoliza(expediente.id)}
                                   className="btn btn-sm btn-success"
                                 >
                                   <Plus size={14} className="me-1" />
