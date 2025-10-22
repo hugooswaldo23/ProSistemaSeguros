@@ -654,10 +654,13 @@ const ModuloConfiguracionCatalogos = () => {
         ));
       }
     } else {
-      // Crear nuevo
+      // Crear nuevo - Generar código si no existe
+      const codigoGenerado = formulario.codigo || generarCodigo(prefijo, datos);
+      
       if (tipo === 'producto') {
         // Llamar al backend para crear producto
-        crearTipoProducto(formulario)
+        const productoData = { ...formulario, codigo: codigoGenerado };
+        crearTipoProducto(productoData)
           .then(res => {
             if (res.success) cargarTiposProductos();
             else alert(res.error || 'Error al crear producto');
@@ -666,6 +669,7 @@ const ModuloConfiguracionCatalogos = () => {
         // Llamar al backend para crear documento
         const documentoData = {
           ...formulario,
+          codigo: codigoGenerado,
           tipo_persona: tipo === 'docFisica' ? 'Persona Física' : 'Persona Moral'
         };
         crearTipoDocumento(documentoData)
@@ -675,14 +679,16 @@ const ModuloConfiguracionCatalogos = () => {
           });
       } else if (tipo === 'canal') {
         // Llamar al backend para crear canal de venta
-        crearCanalVenta(formulario)
+        const canalData = { ...formulario, codigo: codigoGenerado };
+        crearCanalVenta(canalData)
           .then(res => {
             if (res.success) cargarCanalesVenta();
             else alert(res.error || 'Error al crear canal de venta');
           });
       } else if (tipo === 'categoria') {
         // Llamar al backend para crear categoría de cliente
-        crearCategoriaCliente(formulario)
+        const categoriaData = { ...formulario, codigo: codigoGenerado };
+        crearCategoriaCliente(categoriaData)
           .then(res => {
             if (res.success) cargarCategoriasClientes();
             else alert(res.error || 'Error al crear categoría de cliente');
@@ -691,6 +697,7 @@ const ModuloConfiguracionCatalogos = () => {
         // Llamar al backend para crear tipo de trámite
         const tramiteData = {
           ...formulario,
+          codigo: codigoGenerado,
           documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : []
         };
         crearTipoTramite(tramiteData)
