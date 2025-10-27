@@ -23,6 +23,9 @@ export const obtenerCanalesVenta = async () => {
     } else if (data.success && data.data && Array.isArray(data.data.data)) {
       // Caso de respuesta anidada
       return { success: true, data: data.data.data };
+    } else if (Array.isArray(data)) {
+      // Si viene directamente como array
+      return { success: true, data };
     } else {
       console.error('Estructura de respuesta inesperada:', data);
       return { success: false, error: 'Formato de respuesta inválido' };

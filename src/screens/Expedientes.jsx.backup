@@ -6,7 +6,7 @@ import { obtenerTiposProductosActivos } from '../services/tiposProductosService'
 import BuscadorCliente from '../components/BuscadorCliente';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configurar worker de PDF.js - ruta local copiada por Vite
+// Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
@@ -30,20 +30,12 @@ const CONSTANTS = {
 const utils = {
   formatearFecha: (fecha, formato = 'corta') => {
     if (!fecha) return '-';
-    
-    // Si la fecha tiene formato ISO (con T), solo tomar la parte de la fecha
-    const fechaSinHora = fecha.includes('T') ? fecha.split('T')[0] : fecha;
-    
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
-      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' },
-      simple: null // Para retornar solo YYYY-MM-DD
+      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     };
-    
-    if (formato === 'simple') return fechaSinHora;
-    
-    return new Date(fechaSinHora).toLocaleDateString('es-MX', opciones[formato]);
+    return new Date(fecha).toLocaleDateString('es-MX', opciones[formato]);
   },
 
   formatearMoneda: (monto) => {
@@ -475,18 +467,12 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 ));
 
 // ============= COMPONENTE EXTRACTOR PDF =============
-const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {
-  const [estado, setEstado] = useState('esperando'); // esperando, procesando, validando-cliente, validando-agente, preview-datos, error
+const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
+  const [estado, setEstado] = useState('esperando');
   const [archivo, setArchivo] = useState(null);
   const [datosExtraidos, setDatosExtraidos] = useState(null);
   const [errores, setErrores] = useState([]);
   const [informacionArchivo, setInformacionArchivo] = useState(null);
-  
-  // Estados para el flujo paso a paso
-  const [clienteEncontrado, setClienteEncontrado] = useState(null);
-  const [agenteEncontrado, setAgenteEncontrado] = useState(null);
-  const [decisionCliente, setDecisionCliente] = useState(null); // 'usar-existente', 'crear-nuevo'
-  const [decisionAgente, setDecisionAgente] = useState(null); // 'usar-existente', 'crear-nuevo', 'omitir'
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -497,410 +483,372 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       
-      // Extraer PÁGINAS 1 Y 2 (algunos datos están en página 1)
-      console.log('📄 Total de páginas:', pdf.numPages);
+      let textoCompleto = '';
       
-      if (pdf.numPages < 2) {
-        throw new Error('El PDF debe tener al menos 2 páginas');
+      // Extraer texto de todas las páginas
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        textoCompleto += pageText + '\n';
       }
-      
-      // PÁGINA 1: Póliza, Endoso, Inciso, Agente
-      const page1 = await pdf.getPage(1);
-      const textContent1 = await page1.getTextContent();
-      
-      const lineas1 = {};
-      textContent1.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas1[y]) lineas1[y] = [];
-        lineas1[y].push({
-          text: item.str,
-          x: item.transform[4]
-        });
-      });
-      
-      const textoPagina1 = Object.keys(lineas1)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas1[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
-      
-      // PÁGINA 2: Resto de datos
-      const page2 = await pdf.getPage(2);
-      const textContent = await page2.getTextContent();
-      
-      const lineas = {};
-      textContent.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas[y]) lineas[y] = [];
-        lineas[y].push({
-          text: item.str,
-          x: item.transform[4]
-        });
-      });
-      
-      const textoCompleto = Object.keys(lineas)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
 
-      console.log('📄 Texto página 1 (primeras 20 líneas):\n', textoPagina1.split('\n').slice(0, 20).join('\n'));
-      console.log('📄 Texto página 2 (primeras 20 líneas):\n', textoCompleto.split('\n').slice(0, 20).join('\n'));
+      console.log('========== TEXTO EXTRAÍDO DEL PDF ==========');
+      console.log(textoCompleto);
+      console.log('==========================================');
 
-      // Buscar cliente por RFC, CURP o nombre en la base de datos
-      const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
+      // Buscar cliente por RFC o nombre en la base de datos
+      const buscarClienteExistente = async (rfc, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
-          console.log('🔍 Buscando cliente con:', { rfc, curp, nombre, apellidoPaterno, apellidoMaterno });
-          
           const response = await fetch(`${API_URL}/api/clientes`);
-          if (!response.ok) {
-            console.error('❌ Error al obtener clientes:', response.status);
-            return null;
-          }
+          if (!response.ok) return null;
           
           const clientes = await response.json();
-          console.log(`📊 Total de clientes en BD: ${clientes.length}`);
           
-          // 1. PRIORIDAD 1: Buscar por RFC (más confiable)
-          if (rfc && rfc.trim() !== '') {
-            const rfcBusqueda = rfc.trim().toUpperCase();
-            console.log(`🔍 Buscando por RFC: "${rfcBusqueda}"`);
-            
-            const clientePorRFC = clientes.find(c => {
-              const rfcCliente = (c.rfc || '').trim().toUpperCase();
-              return rfcCliente === rfcBusqueda;
-            });
-            
+          console.log('Buscando cliente:', { rfc, nombre, apellidoPaterno, apellidoMaterno });
+          
+          // Buscar por RFC primero (más confiable)
+          if (rfc) {
+            const clientePorRFC = clientes.find(c => 
+              c.rfc && c.rfc.toUpperCase().trim() === rfc.toUpperCase().trim()
+            );
             if (clientePorRFC) {
-              console.log('✅ Cliente encontrado por RFC:', clientePorRFC.id, clientePorRFC.nombre);
+              console.log('Cliente encontrado por RFC:', clientePorRFC);
               return clientePorRFC;
-            } else {
-              console.log('⚠️ No se encontró cliente con RFC:', rfcBusqueda);
             }
           }
           
-          // 2. PRIORIDAD 2: Buscar por CURP (si no hay RFC)
-          if (curp && curp.trim() !== '') {
-            const curpBusqueda = curp.trim().toUpperCase();
-            console.log(`🔍 Buscando por CURP: "${curpBusqueda}"`);
-            
-            const clientePorCURP = clientes.find(c => {
-              const curpCliente = (c.curp || '').trim().toUpperCase();
-              return curpCliente === curpBusqueda;
-            });
-            
-            if (clientePorCURP) {
-              console.log('✅ Cliente encontrado por CURP:', clientePorCURP.id, clientePorCURP.nombre);
-              return clientePorCURP;
-            } else {
-              console.log('⚠️ No se encontró cliente con CURP:', curpBusqueda);
-            }
-          }
-          
-          // 3. PRIORIDAD 3: Buscar por nombre completo (último recurso)
+          // Si no hay RFC, buscar por nombre completo
           if (nombre && apellidoPaterno) {
-            const nombreBusqueda = nombre.trim().toUpperCase();
-            const apellidoPaternoBusqueda = apellidoPaterno.trim().toUpperCase();
-            const apellidoMaternoBusqueda = apellidoMaterno ? apellidoMaterno.trim().toUpperCase() : '';
-            
-            console.log(`🔍 Buscando por nombre: "${nombreBusqueda} ${apellidoPaternoBusqueda} ${apellidoMaternoBusqueda}"`);
-            
             const clientePorNombre = clientes.find(c => {
-              const nombreCliente = (c.nombre || '').trim().toUpperCase();
-              const apellidoPaternoCliente = (c.apellido_paterno || c.apellidoPaterno || '').trim().toUpperCase();
-              const apellidoMaternoCliente = (c.apellido_materno || c.apellidoMaterno || '').trim().toUpperCase();
+              const nombreMatch = c.nombre && c.nombre.toUpperCase().trim() === nombre.toUpperCase().trim();
+              const paternoMatch = (c.apellido_paterno || c.apellidoPaterno || '').toUpperCase().trim() === apellidoPaterno.toUpperCase().trim();
+              const maternoMatch = !apellidoMaterno || 
+                !(c.apellido_materno || c.apellidoMaterno) || 
+                (c.apellido_materno || c.apellidoMaterno || '').toUpperCase().trim() === apellidoMaterno.toUpperCase().trim();
               
-              const coincideNombre = nombreCliente === nombreBusqueda;
-              const coincidePaterno = apellidoPaternoCliente === apellidoPaternoBusqueda;
-              const coincideMaterno = !apellidoMaternoBusqueda || 
-                                     !apellidoMaternoCliente || 
-                                     apellidoMaternoCliente === apellidoMaternoBusqueda;
-              
-              return coincideNombre && coincidePaterno && coincideMaterno;
+              return nombreMatch && paternoMatch && maternoMatch;
             });
             
             if (clientePorNombre) {
-              console.log('✅ Cliente encontrado por nombre:', clientePorNombre.id, clientePorNombre.nombre);
+              console.log('Cliente encontrado por nombre:', clientePorNombre);
               return clientePorNombre;
-            } else {
-              console.log('⚠️ No se encontró cliente con ese nombre');
             }
           }
           
-          console.log('❌ Cliente NO encontrado con ningún criterio');
+          console.log('Cliente NO encontrado');
           return null;
         } catch (error) {
-          console.error('❌ Error buscando cliente:', error);
+          console.error('Error buscando cliente:', error);
+          return null;
+        }
+      };
+
+      // Función para extraer dato con múltiples patrones
+      const extraerDatoMultiple = (patrones, texto) => {
+        for (const patron of patrones) {
+          const match = texto.match(patron);
+          if (match && match[1]) {
+            return match[1].trim();
+          }
+        }
+        return '';
+      };
+
+      // Detectar aseguradora
+      const detectarAseguradora = (texto) => {
+        const textoUpper = texto.toUpperCase();
+        if (textoUpper.includes('QUALITAS')) return 'QUALITAS';
+        if (textoUpper.includes('AXA')) return 'AXA';
+        if (textoUpper.includes('GNP')) return 'GNP';
+        if (textoUpper.includes('MAPFRE')) return 'MAPFRE';
+        if (textoUpper.includes('HDI')) return 'HDI';
+        if (textoUpper.includes('ZURICH')) return 'ZURICH';
+        if (textoUpper.includes('ANA')) return 'ANA';
+        if (textoUpper.includes('GENERAL DE SEGUROS')) return 'GS';
+        return 'DESCONOCIDA';
+      };
+
+      const aseguradora = detectarAseguradora(textoCompleto);
+      console.log('Aseguradora detectada:', aseguradora);
+
+      // Inicializar datos
+      let datosExtraidos = {
+        nombre: '',
+        apellido_paterno: '',
+        apellido_materno: '',
+        rfc: '',
+        email: '',
+        telefono_fijo: '',
+        telefono_movil: '',
+        compania: aseguradora !== 'DESCONOCIDA' ? aseguradora : '',
+        producto: 'Autos',
+        etapa_activa: 'Emitida',
+        agente: '',
+        sub_agente: '',
+        numero_poliza: '',
+        inicio_vigencia: '',
+        termino_vigencia: '',
+        prima_pagada: '',
+        cargo_pago_fraccionado: '',
+        iva: '',
+        total: '',
+        tipo_pago: 'Anual',
+        periodo_gracia: aseguradora === 'QUALITAS' ? 14 : 30,
+        marca: '',
+        modelo: '',
+        anio: '',
+        numero_serie: '',
+        placas: '',
+        color: '',
+        tipo_vehiculo: '',
+        tipo_cobertura: '',
+        deducible: '',
+        suma_asegurada: '',
+        conductor_habitual: '',
+        edad_conductor: '',
+        licencia_conducir: ''
+      };
+
+      // Extractores genéricos que funcionan para la mayoría
+      // Nombre del asegurado (múltiples patrones)
+      datosExtraidos.nombre = extraerDatoMultiple([
+        /NOMBRE[S]?\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)?)/i,
+        /ASEGURADO[S]?\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)?)/i,
+        /CONTRATANTE[S]?\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)?)/i
+      ], textoCompleto);
+
+      // Apellidos
+      datosExtraidos.apellido_paterno = extraerDatoMultiple([
+        /APELLIDO\s+PATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+        /AP\.?\s*PATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+        /A\.?\s*PATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i
+      ], textoCompleto);
+
+      datosExtraidos.apellido_materno = extraerDatoMultiple([
+        /APELLIDO\s+MATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+        /AP\.?\s*MATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i,
+        /A\.?\s*MATERNO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ]+)/i
+      ], textoCompleto);
+
+      // RFC
+      datosExtraidos.rfc = extraerDatoMultiple([
+        /RFC\s*[:=]?\s*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i,
+        /R\.F\.C\.?\s*[:=]?\s*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i,
+        /R\s*F\s*C\s*[:=]?\s*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i
+      ], textoCompleto);
+
+      console.log('Datos extraídos (nombre, apellidos, RFC):', {
+        nombre: datosExtraidos.nombre,
+        apellido_paterno: datosExtraidos.apellido_paterno,
+        apellido_materno: datosExtraidos.apellido_materno,
+        rfc: datosExtraidos.rfc
+      });
+
+      // Número de póliza
+      datosExtraidos.numero_poliza = extraerDatoMultiple([
+        /P[ÓO]LIZA\s*(?:N[OÚ]M?\.?|NO\.?|#)?\s*[:=]?\s*(\d+[-\d]*)/i,
+        /NO\.?\s*DE\s+P[ÓO]LIZA\s*[:=]?\s*(\d+[-\d]*)/i,
+        /N[UÚ]MERO\s+DE\s+P[ÓO]LIZA\s*[:=]?\s*(\d+[-\d]*)/i
+      ], textoCompleto);
+
+      // Vigencia
+      const vigenciaMatch = textoCompleto.match(/VIGENCIA\s*(?:DEL?)?\s*[:=]?\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s*(?:AL|A|HASTA)\s*(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
+      if (vigenciaMatch) {
+        const [, diaIni, mesIni, anioIni, diaFin, mesFin, anioFin] = vigenciaMatch;
+        datosExtraidos.inicio_vigencia = `${anioIni.length === 2 ? '20' + anioIni : anioIni}-${mesIni.padStart(2, '0')}-${diaIni.padStart(2, '0')}`;
+        datosExtraidos.termino_vigencia = `${anioFin.length === 2 ? '20' + anioFin : anioFin}-${mesFin.padStart(2, '0')}-${diaFin.padStart(2, '0')}`;
+      }
+
+      // Datos financieros
+      datosExtraidos.prima_pagada = extraerDatoMultiple([
+        /PRIMA\s+(?:NETA|TOTAL)\s*[:=]?\s*\$?\s*([\d,]+\.?\d*)/i,
+        /PRIMA\s*[:=]?\s*\$?\s*([\d,]+\.?\d*)/i
+      ], textoCompleto);
+
+      datosExtraidos.iva = extraerDatoMultiple([
+        /I\.?V\.?A\.?\s*[:=]?\s*\$?\s*([\d,]+\.?\d*)/i
+      ], textoCompleto);
+
+      datosExtraidos.total = extraerDatoMultiple([
+        /TOTAL\s*[:=]?\s*\$?\s*([\d,]+\.?\d*)/i,
+        /PRIMA\s+TOTAL\s*[:=]?\s*\$?\s*([\d,]+\.?\d*)/i
+      ], textoCompleto);
+
+      // Datos del vehículo
+      datosExtraidos.marca = extraerDatoMultiple([
+        /MARCA\s*[:=]?\s*([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|MODELO|TIPO|$)/i
+      ], textoCompleto);
+
+      datosExtraidos.modelo = extraerDatoMultiple([
+        /MODELO\s*[:=]?\s*([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|MOTOR|SERIE|$)/i,
+        /DESCRIPCI[ÓO]N\s*[:=]?\s*([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|$)/i
+      ], textoCompleto);
+
+      datosExtraidos.anio = extraerDatoMultiple([
+        /A[ÑN]O\s*(?:MODELO)?\s*[:=]?\s*(\d{4})/i,
+        /MODELO\s+(\d{4})/i
+      ], textoCompleto);
+
+      datosExtraidos.numero_serie = extraerDatoMultiple([
+        /(?:N[UÚ]MERO\s+DE\s+)?SERIE\s*[:=]?\s*([A-Z0-9]{17})/i,
+        /VIN\s*[:=]?\s*([A-Z0-9]{17})/i,
+        /NIV\s*[:=]?\s*([A-Z0-9]{17})/i
+      ], textoCompleto);
+
+      datosExtraidos.placas = extraerDatoMultiple([
+        /PLACAS?\s*[:=]?\s*([A-Z0-9\-]+)/i,
+        /MATR[ÍI]CULA\s*[:=]?\s*([A-Z0-9\-]+)/i
+      ], textoCompleto);
+
+      // Limpiar montos (quitar comas y espacios)
+      ['prima_pagada', 'cargo_pago_fraccionado', 'iva', 'total', 'suma_asegurada'].forEach(campo => {
+        if (datosExtraidos[campo]) {
+          datosExtraidos[campo] = datosExtraidos[campo].replace(/[,\s]/g, '');
+        }
+      });
+
+      console.log('Datos extraídos completos:', datosExtraidos);
+
+      // Buscar cliente existente
+      const clienteExistente = await buscarClienteExistente(
+        datosExtraidos.rfc,
+        datosExtraidos.nombre,
+        datosExtraidos.apellido_paterno,
+        datosExtraidos.apellido_materno
+      );
+
+      // Agregar información del cliente al resultado
+      const resultado = {
+        ...datosExtraidos,
+        cliente_existente: clienteExistente,
+        cliente_id: clienteExistente?.id || null
+      };
+
+      setDatosExtraidos(resultado);
+      setEstado('completado');
+      
+      // Mensajes informativos
+      const mensajes = [];
+      if (clienteExistente) {
+        const apellidoP = clienteExistente.apellido_paterno || clienteExistente.apellidoPaterno || '';
+        mensajes.push(`✅ Cliente encontrado: ${clienteExistente.nombre} ${apellidoP} (RFC: ${clienteExistente.rfc || 'N/A'})`);
+        mensajes.push(`ℹ️ Los datos del cliente se cargarán automáticamente`);
+      } else {
+        mensajes.push(`⚠️ Cliente NO encontrado en la base de datos`);
+        if (datosExtraidos.nombre) {
+          mensajes.push(`📝 Datos extraídos: ${datosExtraidos.nombre} ${datosExtraidos.apellido_paterno} ${datosExtraidos.apellido_materno}`.trim());
+        }
+        mensajes.push(`ℹ️ Deberá buscar o crear el cliente manualmente`);
+      }
+      
+      // Mostrar qué datos se extrajeron
+      const datosExtraidosCount = Object.values(datosExtraidos).filter(v => v && v !== '').length;
+      mensajes.push(`📊 Se extrajeron ${datosExtraidosCount} campos del PDF`);
+      
+      setErrores(mensajes);
+
+    } catch (error) {
+      console.error('Error al procesar PDF:', error);
+      setEstado('error');
+      setErrores(['❌ Error al procesar el archivo PDF: ' + error.message]);
+    }
+  }, []);
+
+      // Buscar cliente por RFC o nombre en la base de datos
+      const buscarClienteExistente = async (rfc, nombre, apellidoPaterno, apellidoMaterno) => {
+        try {
+          const response = await fetch(`${API_URL}/api/clientes`);
+          if (!response.ok) return null;
+          
+          const clientes = await response.json();
+          
+          // Buscar por RFC primero (más confiable)
+          if (rfc) {
+            const clientePorRFC = clientes.find(c => 
+              c.rfc && c.rfc.toUpperCase() === rfc.toUpperCase()
+            );
+            if (clientePorRFC) return clientePorRFC;
+          }
+          
+          // Si no hay RFC, buscar por nombre completo
+          if (nombre && apellidoPaterno) {
+            const clientePorNombre = clientes.find(c => 
+              c.nombre && c.apellido_paterno &&
+              c.nombre.toUpperCase() === nombre.toUpperCase() &&
+              c.apellido_paterno.toUpperCase() === apellidoPaterno.toUpperCase() &&
+              (!apellidoMaterno || !c.apellido_materno || 
+               c.apellido_materno.toUpperCase() === apellidoMaterno.toUpperCase())
+            );
+            if (clientePorNombre) return clientePorNombre;
+          }
+          
+          return null;
+        } catch (error) {
+          console.error('Error buscando cliente:', error);
           return null;
         }
       };
 
       // Función para extraer datos usando expresiones regulares
       const extraerDato = (patron, texto, grupo = 1) => {
-        try {
-          const match = texto.match(patron);
-          return match && match[grupo] ? match[grupo].trim() : '';
-        } catch (error) {
-          console.warn('Error en extraerDato:', error, 'Patrón:', patron);
-          return '';
-        }
+        const match = texto.match(patron);
+        return match ? match[grupo].trim() : '';
       };
 
-      // Detectar el tipo de aseguradora
-      const esQualitas = /qu[aá]litas/i.test(textoCompleto);
-      const compania = esQualitas ? 'Qualitas' : 
-                       /gnp/i.test(textoCompleto) ? 'GNP' :
-                       /mapfre/i.test(textoCompleto) ? 'MAPFRE' :
-                       /axa/i.test(textoCompleto) ? 'AXA' :
-                       /hdi/i.test(textoCompleto) ? 'HDI' : 'Otra';
-
-      console.log('🏢 Aseguradora detectada:', compania);
-
-      // Extraer datos específicos para Qualitas
-      let datosExtraidos = {};
-      
-      if (esQualitas) {
-        console.log('🎯 Aplicando extractor especializado para Qualitas (página 2)');
+      // Extraer datos del texto (patrones para pólizas de Qualitas y otras aseguradoras)
+      const datosExtraidos = {
+        // INFORMACIÓN DEL ASEGURADO
+        nombre: extraerDato(/(?:NOMBRE|ASEGURADO)[:\s]+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)?)/i, textoCompleto) || '',
+        apellido_paterno: extraerDato(/(?:APELLIDO\s+PATERNO|AP\.\s*PATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
+        apellido_materno: extraerDato(/(?:APELLIDO\s+MATERNO|AP\.\s*MATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
+        rfc: extraerDato(/RFC[:\s]+([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i, textoCompleto) || '',
+        email: extraerDato(/(?:E-?MAIL|CORREO)[:\s]+([\w\.-]+@[\w\.-]+\.\w+)/i, textoCompleto) || '',
+        telefono_fijo: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:FIJO|CASA))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
+        telefono_movil: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:M[OÓ]VIL|CELULAR))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
         
-        // ==================== MESES (definir primero) ====================
-        const meses = {
-          'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
-        };
+        // DATOS DE LA PÓLIZA
+        compania: extraerDato(/(?:ASEGURADORA|COMPA[ÑN][IÍ]A)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|PÓLIZA|SEGURO)/i, textoCompleto) || '',
+        producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos' : 
+                  textoCompleto.match(/VIDA/i) ? 'Vida' :
+                  textoCompleto.match(/DAÑOS?/i) ? 'Daños' :
+                  textoCompleto.match(/GMM|GASTOS\s+M[EÉ]DICOS/i) ? 'GMM' : 'Autos',
+        etapa_activa: 'Emitida',
+        agente: extraerDato(/(?:AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s,\.]+?)(?:\n|PÓLIZA)/i, textoCompleto) || '',
+        sub_agente: '',
+        numero_poliza: extraerDato(/(?:P[ÓO]LIZA|NO\.\s+DE\s+P[ÓO]LIZA)[:\s#]+(\d+[-\d]*)/i, textoCompleto) || '',
         
-        // ==================== INFORMACIÓN DEL ASEGURADO ====================
-        let nombre = '';
-        let apellido_paterno = '';
-        let apellido_materno = '';
+        // VIGENCIA
+        inicio_vigencia: '',
+        termino_vigencia: '',
         
-        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,3})/i);
-        if (nombreMatch) {
-          const palabras = nombreMatch[1].trim().split(/\s+/);
-          console.log('📝 Palabras del nombre:', palabras);
-          
-          if (palabras.length === 4) {
-            nombre = `${palabras[0]} ${palabras[1]}`;
-            apellido_paterno = palabras[2];
-            apellido_materno = palabras[3];
-          } else if (palabras.length === 3) {
-            nombre = palabras[0];
-            apellido_paterno = palabras[1];
-            apellido_materno = palabras[2];
-          } else if (palabras.length === 2) {
-            nombre = palabras[0];
-            apellido_paterno = palabras[1];
-          }
-          console.log('✅ Nombre:', { nombre, apellido_paterno, apellido_materno });
-        }
+        // INFORMACIÓN FINANCIERA
+        prima_pagada: extraerDato(/(?:PRIMA\s+(?:NETA|TOTAL))[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
+        cargo_pago_fraccionado: extraerDato(/(?:CARGO\s+(?:POR\s+)?FRACCIONAMIENTO)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
+        iva: extraerDato(/I\.?V\.?A\.?[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
+        total: extraerDato(/(?:TOTAL|PRIMA\s+TOTAL)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
+        tipo_pago: textoCompleto.match(/CONTADO/i) ? 'Anual' : textoCompleto.match(/FRACCIONADO/i) ? 'Fraccionado' : 'Anual',
+        periodo_gracia: textoCompleto.match(/qualitas/i) ? 14 : 30,
         
-        // ==================== AGENTE (buscar en ambas páginas) ====================
-        let agente = '';
-        const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-        const agenteMatch2 = textoCompleto.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
+        // DESCRIPCIÓN DEL VEHÍCULO (si es seguro de autos)
+        marca: extraerDato(/(?:MARCA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|MODELO|TIPO)/i, textoCompleto) || '',
+        modelo: extraerDato(/(?:MODELO|DESCRIPCI[ÓO]N)[:\s]+([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|MOTOR)/i, textoCompleto) || '',
+        anio: extraerDato(/(?:AÑO|A[ÑN]O\s+MODELO)[:\s]+(\d{4})/i, textoCompleto) || '',
+        numero_serie: extraerDato(/(?:SERIE|VIN|N[UÚ]MERO\s+DE\s+SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto) || '',
+        placas: extraerDato(/(?:PLACAS?|MATRÍCULA)[:\s]+([A-Z0-9\-]+)/i, textoCompleto) || '',
+        color: extraerDato(/(?:COLOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|TIPO)/i, textoCompleto) || '',
+        tipo_vehiculo: extraerDato(/(?:TIPO\s+DE\s+VEH[IÍ]CULO|USO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|COBERTURA)/i, textoCompleto) || '',
         
-        if (agenteMatch1) {
-          agente = `${agenteMatch1[1]} - ${agenteMatch1[2].trim()}`;
-          console.log('✅ Agente (pág 1):', agente);
-        } else if (agenteMatch2) {
-          agente = `${agenteMatch2[1]} - ${agenteMatch2[2].trim()}`;
-          console.log('✅ Agente (pág 2):', agente);
-        }
+        // COBERTURAS
+        tipo_cobertura: extraerDato(/(?:COBERTURA|PLAN)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|DEDUCIBLE)/i, textoCompleto) || '',
+        deducible: extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+)%?/i, textoCompleto) || '',
+        suma_asegurada: extraerDato(/(?:SUMA\s+ASEGURADA|VALOR)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
         
-        // ==================== PÓLIZA (buscar en ambas páginas) ====================
-        // Formato: POLIZA    ENDOSO    INCISO
-        //          POLIZA DE SEGURO DE AUTOMOVILES  
-        //          0971413763  000000    0001
-        let polizaNum = '', endosoNum = '', incisoNum = '';
-        
-        // Buscar patrón simple: 10 dígitos + 6 dígitos + 4 dígitos en una línea
-        const lineaNumeros2 = textoCompleto.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        const lineaNumeros1 = textoPagina1.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        
-        if (lineaNumeros2) {
-          polizaNum = lineaNumeros2[1];
-          endosoNum = lineaNumeros2[2];
-          incisoNum = lineaNumeros2[3];
-          console.log('✅ Póliza extraída (pág 2):', { polizaNum, endosoNum, incisoNum });
-        } else if (lineaNumeros1) {
-          polizaNum = lineaNumeros1[1];
-          endosoNum = lineaNumeros1[2];
-          incisoNum = lineaNumeros1[3];
-          console.log('✅ Póliza extraída (pág 1):', { polizaNum, endosoNum, incisoNum });
-        } else {
-          console.log('⚠️ No se encontró línea con 10+6+4 dígitos');
-        }
-        
-        const planMatch = textoCompleto.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
-        
-        // ==================== RFC ====================
-        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z]{4}\d{6}[A-Z0-9]{3})/i);
-        
-        // ==================== CURP ====================
-        const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
-        
-        // ==================== VEHÍCULO ====================
-        const descripcionMatch = textoCompleto.match(/(\d{5})\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z\s0-9\.]+?)(?=Tipo:|$)/i);
-        const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i); // Al menos 5 caracteres, no captura "Color"
-        const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
-        const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]+)/i);
-        // Buscar color después de "Color:" pero antes de "Placas" o salto de línea
-        const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
-        
-        // ==================== VIGENCIA ====================
-        const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        const hastaMatch = textoCompleto.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        
-        // Para fecha de pago: extraer la fecha directamente O calcular desde plazo
-        let fechaPagoFinal = '';
-        const fechaPagoDirecta = textoCompleto.match(/Fecha\s+Vencimiento\s+del\s+pago[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        const plazoMatch = textoCompleto.match(/Plazo\s+de\s+pago:\s*(\d+)\s*d[ií]as/i);
-        
-        if (fechaPagoDirecta) {
-          fechaPagoFinal = `${fechaPagoDirecta[3]}-${meses[fechaPagoDirecta[2]]}-${fechaPagoDirecta[1]}`;
-          console.log('✅ Fecha pago extraída directamente:', fechaPagoFinal);
-        } else if (desdeMatch && plazoMatch) {
-          // Calcular fecha de pago: fecha inicio + plazo días
-          const fechaInicio = new Date(`${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}`);
-          fechaInicio.setDate(fechaInicio.getDate() + parseInt(plazoMatch[1]));
-          fechaPagoFinal = fechaInicio.toISOString().split('T')[0];
-          console.log('✅ Fecha pago calculada (inicio + plazo):', fechaPagoFinal);
-        } else {
-          console.log('⚠️ No se pudo extraer ni calcular fecha de pago');
-        }
-        
-        // ==================== MONTOS ====================
-        const sumaMatch = textoCompleto.match(/Daños\s+materiales\s+\$\s*([\d,]+\.?\d*)/i);
-        const primaMatch = textoCompleto.match(/Prima\s+Neta\s+([\d,]+\.?\d*)/i);
-        const tasaFinanciamientoMatch = textoCompleto.match(/Tasa\s+Financiamiento\s+([-]?[\d,]+\.?\d*)/i);
-        const gastosExpedicionMatch = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+([\d,]+\.?\d*)/i);
-        const subtotalMatch = textoCompleto.match(/Subtotal\s+([\d,]+\.?\d*)/i);
-        const ivaMatch = textoCompleto.match(/I\.V\.A[.\s]*16%\s+([\d,]+\.?\d*)/i);
-        const totalMatch = textoCompleto.match(/IMPORTE\s+TOTAL\s+([\d,]+\.?\d*)/i);
-        const pagoUnicoMatch = textoCompleto.match(/Pago\s+[UÚ]nico\s+([\d,]+\.?\d*)/i);
-        const deducibleMatch = textoCompleto.match(/(\d+)%\s+[\d,]+\.?\d*\s+Robo/i);
-        
-        datosExtraidos = {
-          // ASEGURADO
-          nombre: nombre,
-          apellido_paterno: apellido_paterno,
-          apellido_materno: apellido_materno,
-          rfc: rfcMatch ? rfcMatch[1] : '',
-          curp: curpMatch ? curpMatch[1] : '',
-          email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
-          telefono_movil: extraerDato(/(\d{10})/i, textoCompleto),
-          
-          // PÓLIZA
-          compania: compania,
-          producto: 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: agente,
-          sub_agente: '',
-          numero_poliza: polizaNum,
-          endoso: endosoNum,
-          inciso: incisoNum,
-          plan: planMatch ? planMatch[1] : '',
-          
-          // VIGENCIA
-          inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
-          termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
-          fecha_pago: fechaPagoFinal,
-          plazo_pago_dias: plazoMatch ? plazoMatch[1] : '14',
-          
-          // MONTOS
-          prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
-          cargo_pago_fraccionado: tasaFinanciamientoMatch ? tasaFinanciamientoMatch[1].replace(/,/g, '') : '',
-          gastos_expedicion: gastosExpedicionMatch ? gastosExpedicionMatch[1].replace(/,/g, '') : '',
-          subtotal: subtotalMatch ? subtotalMatch[1].replace(/,/g, '') : '',
-          iva: ivaMatch ? ivaMatch[1].replace(/,/g, '') : '',
-          total: totalMatch ? totalMatch[1].replace(/,/g, '') : '',
-          pago_unico: pagoUnicoMatch ? pagoUnicoMatch[1].replace(/,/g, '') : '',
-          tipo_pago: 'Anual',
-          periodo_gracia: plazoMatch ? plazoMatch[1] : '14',
-          suma_asegurada: sumaMatch ? sumaMatch[1].replace(/,/g, '') : '',
-          deducible: deducibleMatch ? deducibleMatch[1] : '5',
-          
-          // VEHÍCULO
-          marca: descripcionMatch ? descripcionMatch[2] : '',
-          modelo: descripcionMatch ? descripcionMatch[3].trim() : '',
-          anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
-          numero_serie: serieMatch ? serieMatch[1] : '',
-          motor: motorMatch ? motorMatch[1] : '',
-          placas: placasMatch ? placasMatch[1] : 'NA',
-          color: colorMatch ? colorMatch[1].trim() : '',
-          codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
-          tipo_vehiculo: 'Automóviles Importados',
-          tipo_cobertura: planMatch ? planMatch[1] : 'AMPLIA',
-          
-          // CONDUCTOR
-          conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
-        };
-        
-        console.log('📊 Datos extraídos:', datosExtraidos);
-        
-      } else {
-        console.log('🔧 Aplicando extractor genérico');
-        // Extractor genérico para otras aseguradoras
-        datosExtraidos = {
-          // INFORMACIÓN DEL ASEGURADO
-          nombre: extraerDato(/(?:NOMBRE|ASEGURADO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_paterno: extraerDato(/(?:APELLIDO\s+PATERNO|AP\.\s*PATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_materno: extraerDato(/(?:APELLIDO\s+MATERNO|AP\.\s*MATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          rfc: extraerDato(/RFC[:\s]+([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i, textoCompleto) || '',
-          email: extraerDato(/(?:E-?MAIL|CORREO)[:\s]+([\w\.-]+@[\w\.-]+\.\w+)/i, textoCompleto) || '',
-          telefono_fijo: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:FIJO|CASA))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          telefono_movil: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:M[OÓ]VIL|CELULAR))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          
-          // DATOS DE LA PÓLIZA
-          compania: compania,
-          producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos Individual' : 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: extraerDato(/(?:AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s,\.]+?)(?:\n|PÓLIZA)/i, textoCompleto) || '',
-          sub_agente: '',
-          numero_poliza: extraerDato(/(?:P[ÓO]LIZA|NO\.\s+DE\s+P[ÓO]LIZA)[:\s#]+(\d+[-\d]*)/i, textoCompleto) || '',
-          
-          // VIGENCIA
-          inicio_vigencia: '',
-          termino_vigencia: '',
-          
-          // INFORMACIÓN FINANCIERA
-          prima_pagada: extraerDato(/(?:PRIMA\s+(?:NETA|TOTAL))[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          cargo_pago_fraccionado: extraerDato(/(?:CARGO\s+(?:POR\s+)?FRACCIONAMIENTO)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          iva: extraerDato(/I\.?V\.?A\.?[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          total: extraerDato(/(?:TOTAL|PRIMA\s+TOTAL)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          tipo_pago: textoCompleto.match(/CONTADO/i) ? 'Anual' : textoCompleto.match(/FRACCIONADO/i) ? 'Fraccionado' : 'Anual',
-          periodo_gracia: 30,
-          
-          // DESCRIPCIÓN DEL VEHÍCULO
-          marca: extraerDato(/(?:MARCA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|MODELO|TIPO)/i, textoCompleto) || '',
-          modelo: extraerDato(/(?:MODELO|DESCRIPCI[ÓO]N)[:\s]+([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|MOTOR)/i, textoCompleto) || '',
-          anio: extraerDato(/(?:AÑO|A[ÑN]O\s+MODELO)[:\s]+(\d{4})/i, textoCompleto) || '',
-          numero_serie: extraerDato(/(?:SERIE|VIN|N[UÚ]MERO\s+DE\s+SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto) || '',
-          placas: extraerDato(/(?:PLACAS?|MATRÍCULA)[:\s]+([A-Z0-9\-]+)/i, textoCompleto) || '',
-          color: extraerDato(/(?:COLOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|TIPO)/i, textoCompleto) || '',
-          tipo_vehiculo: extraerDato(/(?:TIPO\s+DE\s+VEH[IÍ]CULO|USO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|COBERTURA)/i, textoCompleto) || '',
-          
-          // COBERTURAS
-          tipo_cobertura: extraerDato(/(?:COBERTURA|PLAN)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|DEDUCIBLE)/i, textoCompleto) || '',
-          deducible: extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+)%?/i, textoCompleto) || '',
-          suma_asegurada: extraerDato(/(?:SUMA\s+ASEGURADA|VALOR)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          
-          // CONDUCTOR
-          conductor_habitual: extraerDato(/(?:CONDUCTOR\s+HABITUAL)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|EDAD)/i, textoCompleto) || '',
-          edad_conductor: extraerDato(/(?:EDAD)[:\s]+(\d+)/i, textoCompleto) || '',
-          licencia_conducir: extraerDato(/(?:LICENCIA)[:\s]+([A-Z0-9]+)/i, textoCompleto) || ''
-        };
-      }
-
-      console.log('📊 Datos extraídos:', datosExtraidos);
+        // CONDUCTOR
+        conductor_habitual: extraerDato(/(?:CONDUCTOR\s+HABITUAL)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|EDAD)/i, textoCompleto) || '',
+        edad_conductor: extraerDato(/(?:EDAD)[:\s]+(\d+)/i, textoCompleto) || '',
+        licencia_conducir: extraerDato(/(?:LICENCIA)[:\s]+([A-Z0-9]+)/i, textoCompleto) || ''
+      };
 
       // Extraer fechas de vigencia
       const fechasMatch = textoCompleto.match(/(?:VIGENCIA|VIGENTE).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4}).*?(?:AL|A).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
@@ -920,7 +868,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Buscar cliente existente
       const clienteExistente = await buscarClienteExistente(
         datosExtraidos.rfc,
-        datosExtraidos.curp,
         datosExtraidos.nombre,
         datosExtraidos.apellido_paterno,
         datosExtraidos.apellido_materno
@@ -934,31 +881,23 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       };
 
       setDatosExtraidos(resultado);
+      setEstado('completado');
       
-      // Guardar información del cliente encontrado (o null si no existe)
-      setClienteEncontrado(clienteExistente);
-      
-      // Buscar agente en el equipo de trabajo
-      let agenteEncontradoEnBD = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          agenteEncontradoEnBD = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
-        }
+      // Mensajes informativos
+      const mensajes = [];
+      if (clienteExistente) {
+        mensajes.push(`✅ Cliente encontrado: ${clienteExistente.nombre} ${clienteExistente.apellido_paterno || clienteExistente.apellidoPaterno || ''} (RFC: ${clienteExistente.rfc || 'N/A'})`);
+        mensajes.push(`ℹ️ Los datos del cliente se cargarán automáticamente`);
+      } else {
+        mensajes.push(`⚠️ Cliente NO encontrado en la base de datos`);
+        mensajes.push(`ℹ️ Deberá buscar o crear el cliente manualmente antes de guardar la póliza`);
       }
-      setAgenteEncontrado(agenteEncontradoEnBD);
       
-      // Pasar al PASO 1: Validación de Cliente
-      setEstado('validando-cliente');
+      // Mostrar qué datos se extrajeron
+      const datosExtraidosCount = Object.values(datosExtraidos).filter(v => v && v !== '').length;
+      mensajes.push(`📊 Se extrajeron ${datosExtraidosCount} campos del PDF`);
       
-      console.log('✅ Datos extraídos. Pasando a validación de cliente...');
-      console.log('  Cliente:', clienteExistente ? 'Encontrado' : 'Nuevo');
-      console.log('  Agente:', agenteEncontradoEnBD ? 'Encontrado' : 'No encontrado');
+      setErrores(mensajes);
 
     } catch (error) {
       console.error('Error al procesar PDF:', error);
@@ -984,117 +923,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     }
   }, [procesarPDF]);
 
-  // PASO 1: Manejar decisión sobre el cliente
-  const handleDecisionCliente = useCallback(async (decision) => {
-    setDecisionCliente(decision);
-    
-    if (decision === 'crear-nuevo') {
-      // Crear cliente automáticamente
-      console.log('🔄 Creando nuevo cliente...');
-      
-      const nuevoCliente = {
-        nombre: datosExtraidos.nombre || '',
-        apellido_paterno: datosExtraidos.apellido_paterno || '',
-        apellido_materno: datosExtraidos.apellido_materno || '',
-        rfc: datosExtraidos.rfc || '',
-        email: datosExtraidos.email || '',
-        telefono_movil: datosExtraidos.telefono_movil || '',
-        telefono_fijo: datosExtraidos.telefono_fijo || '',
-        tipo_persona: datosExtraidos.rfc?.length === 13 ? 'Física' : 'Moral',
-        categoria: 'Regular',
-        estado: 'Activo'
-      };
-      
-      const { crearCliente } = await import('../services/clientesService');
-      const resultado = await crearCliente(nuevoCliente);
-      
-      if (resultado.success) {
-        setClienteEncontrado(resultado.data);
-        console.log('✅ Cliente creado:', resultado.data.nombre);
-      } else {
-        setErrores(['❌ Error al crear cliente: ' + resultado.error]);
-        setEstado('error');
-        return;
-      }
-    }
-    
-    // Pasar al PASO 2: Validación de Agente
-    setEstado('validando-agente');
-  }, [datosExtraidos]);
-
-  // PASO 2: Manejar decisión sobre el agente
-  const handleDecisionAgente = useCallback(async (decision) => {
-    setDecisionAgente(decision);
-    
-    if (decision === 'crear-nuevo') {
-      console.log('🔄 Creando nuevo agente...');
-      
-      // Extraer código y nombre del agente del string "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      const agenteTexto = datosExtraidos.agente || '';
-      const codigoMatch = agenteTexto.match(/^(\d+)/);
-      const nombreCompletoMatch = agenteTexto.match(/\d+\s*-\s*(.+)$/);
-      
-      if (!codigoMatch || !nombreCompletoMatch) {
-        console.error('❌ No se pudo extraer información del agente');
-        alert('No se pudo extraer la información del agente del PDF. Deberás crear el agente manualmente desde el módulo de Equipo de Trabajo.');
-        // Continuar sin crear el agente
-        setEstado('preview-datos');
-        return;
-      }
-      
-      const codigo = codigoMatch[1];
-      const nombreCompleto = nombreCompletoMatch[1].trim();
-      const palabras = nombreCompleto.split(/\s+/);
-      
-      let nombre = '', apellidoPaterno = '', apellidoMaterno = '';
-      if (palabras.length >= 4) {
-        nombre = palabras.slice(0, -2).join(' ');
-        apellidoPaterno = palabras[palabras.length - 2];
-        apellidoMaterno = palabras[palabras.length - 1];
-      } else if (palabras.length === 3) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-        apellidoMaterno = palabras[2];
-      } else if (palabras.length === 2) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-      }
-      
-      try {
-        const nuevoAgente = {
-          codigo: codigo,
-          nombre: nombre,
-          apellidoPaterno: apellidoPaterno,
-          apellidoMaterno: apellidoMaterno,
-          perfil: 'Agente',
-          activo: true,
-          fechaIngreso: new Date().toISOString().split('T')[0],
-          fechaRegistro: new Date().toISOString().split('T')[0],
-          productosAseguradoras: []
-        };
-        
-        const { crearMiembroEquipo } = await import('../services/equipoDeTrabajoService');
-        const resultado = await crearMiembroEquipo(nuevoAgente);
-        
-        if (resultado.success) {
-          setAgenteEncontrado(resultado.data);
-          console.log('✅ Agente creado:', resultado.data.nombre);
-          alert(`✅ Agente creado exitosamente: ${nombre} ${apellidoPaterno}`);
-        } else {
-          throw new Error(resultado.error);
-        }
-      } catch (error) {
-        console.error('❌ Error al crear agente:', error);
-        alert(`⚠️ No se pudo crear el agente automáticamente.\n\nDeberás agregarlo manualmente desde el módulo "Equipo de Trabajo".\n\nDatos del agente:\n- Código: ${codigo}\n- Nombre: ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
-        // Continuar sin el agente
-      }
-    }
-    
-    // Pasar al PASO 3: Preview de todos los datos
-    setEstado('preview-datos');
-  }, [datosExtraidos, aseguradoras, tiposProductos]);
-
-  // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
       onDataExtracted(datosExtraidos);
@@ -1149,312 +977,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               </div>
             )}
 
-            {/* PASO 1: VALIDACIÓN DE CLIENTE */}
-            {estado === 'validando-cliente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
-                    <strong>1/3</strong>
-                  </div>
-                  <h5 className="mt-3">Validación de Cliente</h5>
-                </div>
-
-                <div className="card mb-4">
-                  <div className="card-header bg-light">
-                    <h6 className="mb-0">👤 Datos del Cliente Extraídos</h6>
-                  </div>
-                  <div className="card-body">
-                    <div className="row g-3">
-                      <div className="col-12">
-                        <strong className="d-block mb-1">Nombre Completo:</strong>
-                        <p className="mb-0">{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</p>
-                      </div>
-                      {datosExtraidos.rfc && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">RFC:</strong>
-                          <p className="mb-0">{datosExtraidos.rfc}</p>
-                        </div>
-                      )}
-                      {datosExtraidos.email && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">Email:</strong>
-                          <p className="mb-0">{datosExtraidos.email}</p>
-                        </div>
-                      )}
-                      {datosExtraidos.telefono_movil && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">Teléfono:</strong>
-                          <p className="mb-0">{datosExtraidos.telefono_movil}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {clienteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Cliente ENCONTRADO en base de datos</strong>
-                    </div>
-                    
-                    <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Base de Datos</h6>
-                        
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">ID Cliente</small>
-                            <strong>{clienteEncontrado.codigo || clienteEncontrado.id}</strong>
-                          </div>
-                          
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Fecha de Registro</small>
-                            <strong>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</strong>
-                          </div>
-
-                          <div className="col-12">
-                            <small className="text-muted d-block">Nombre Completo</small>
-                            <strong>
-                              {clienteEncontrado.nombre} {clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} {clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}
-                            </strong>
-                          </div>
-
-                          {clienteEncontrado.rfc && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">RFC</small>
-                              <strong>{clienteEncontrado.rfc}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.curp && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">CURP</small>
-                              <strong>{clienteEncontrado.curp}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{clienteEncontrado.email}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_movil && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Móvil</small>
-                              <strong>{clienteEncontrado.telefono_movil}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_fijo && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Fijo</small>
-                              <strong>{clienteEncontrado.telefono_fijo}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.direccion && (
-                            <div className="col-12">
-                              <small className="text-muted d-block">Dirección</small>
-                              <strong>{clienteEncontrado.direccion}</strong>
-                            </div>
-                          )}
-
-                          {(clienteEncontrado.ciudad || clienteEncontrado.estado) && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Ubicación</small>
-                              <strong>{clienteEncontrado.ciudad}{clienteEncontrado.ciudad && clienteEncontrado.estado ? ', ' : ''}{clienteEncontrado.estado}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.codigo_postal && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Código Postal</small>
-                              <strong>{clienteEncontrado.codigo_postal}</strong>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionCliente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Cliente Existente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        Crear Cliente Nuevo
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Cliente NO encontrado en base de datos</strong>
-                    </div>
-                    <p className="mb-3">Se creará un nuevo cliente con los datos extraídos del PDF.</p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Crear Cliente y Continuar
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={onClose}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PASO 2: VALIDACIÓN DE AGENTE */}
-            {estado === 'validando-agente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
-                    <strong>2/3</strong>
-                  </div>
-                  <h5 className="mt-3">Validación de Agente</h5>
-                </div>
-
-                {datosExtraidos.agente ? (
-                  <div className="card mb-4">
-                    <div className="card-header bg-light">
-                      <h6 className="mb-0">👔 Agente Extraído del PDF</h6>
-                    </div>
-                    <div className="card-body">
-                      <p className="mb-0"><strong>{datosExtraidos.agente}</strong></p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-info mb-4">
-                    <AlertCircle className="me-2" size={20} />
-                    No se pudo extraer información del agente del PDF
-                  </div>
-                )}
-
-                {agenteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
-                    </div>
-                    
-                    <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Equipo de Trabajo</h6>
-                        
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Código Agente</small>
-                            <strong>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</strong>
-                          </div>
-                          
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Nombre Completo</small>
-                            <strong>{agenteEncontrado.nombre}</strong>
-                          </div>
-
-                          {agenteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{agenteEncontrado.email}</strong>
-                            </div>
-                          )}
-
-                          {agenteEncontrado.telefono && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono</small>
-                              <strong>{agenteEncontrado.telefono}</strong>
-                            </div>
-                          )}
-
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Estado</small>
-                            <span className="badge bg-success">Activo</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionAgente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Este Agente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionAgente('crear-nuevo')}
-                      >
-                        Crear Agente Nuevo
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={() => handleDecisionAgente('omitir')}
-                      >
-                        Seleccionar Después
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
-                    </div>
-                    <p className="mb-3">
-                      El agente con código <strong>{datosExtraidos.agente?.match(/^(\d+)/)?.[1] || 'N/A'}</strong> no está registrado.
-                    </p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-primary flex-fill"
-                        onClick={() => handleDecisionAgente('crear-nuevo')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Crear Agente Nuevo
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary flex-fill"
-                        onClick={() => handleDecisionAgente('omitir')}
-                      >
-                        Continuar sin Agente
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={onClose}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PASO 3: PREVIEW DE TODOS LOS DATOS */}
-            {estado === 'preview-datos' && datosExtraidos && (
+            {estado === 'completado' && datosExtraidos && (
               <div>
                 <div className="alert alert-success mb-3">
                   <CheckCircle className="me-2" size={20} />
@@ -1512,33 +1035,21 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                             </div>
                             <div className="col-md-3">
                               <small className="text-muted">Número de Póliza:</small><br/>
-                              <strong>{datosExtraidos.numero_poliza || '-'}</strong>
+                              <strong>{datosExtraidos.numero_poliza}</strong>
                             </div>
-                            <div className="col-md-2">
-                              <small className="text-muted">Endoso:</small><br/>
-                              <strong>{datosExtraidos.endoso || '-'}</strong>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted">Inciso:</small><br/>
-                              <strong>{datosExtraidos.inciso || '-'}</strong>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted">Plan:</small><br/>
-                              <strong className="text-uppercase">{datosExtraidos.plan || '-'}</strong>
-                            </div>
-                          </div>
-                          <div className="row g-2 mt-2">
-                            <div className="col-md-4">
+                            <div className="col-md-3">
                               <small className="text-muted">Producto:</small><br/>
                               <strong>{datosExtraidos.producto}</strong>
                             </div>
-                            <div className="col-md-4">
+                            <div className="col-md-3">
                               <small className="text-muted">Tipo de Pago:</small><br/>
                               <strong>{datosExtraidos.tipo_pago}</strong>
                             </div>
-                            <div className="col-md-4">
+                          </div>
+                          <div className="row g-2 mt-2">
+                            <div className="col-md-12">
                               <small className="text-muted">Agente:</small><br/>
-                              <strong>{datosExtraidos.agente || '-'}</strong>
+                              <strong>{datosExtraidos.agente}</strong>
                             </div>
                           </div>
                         </div>
@@ -1549,20 +1060,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         <div className="p-3 bg-success bg-opacity-10 rounded">
                           <h6 className="text-success mb-3">📅 VIGENCIA DE LA PÓLIZA</h6>
                           <div className="row g-2">
-                            <div className="col-md-4">
+                            <div className="col-md-6">
                               <small className="text-muted">Desde las 12:00 P.M. del:</small><br/>
                               <strong>{datosExtraidos.inicio_vigencia ? new Date(datosExtraidos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
                             </div>
-                            <div className="col-md-4">
+                            <div className="col-md-6">
                               <small className="text-muted">Hasta las 12:00 P.M. del:</small><br/>
                               <strong>{datosExtraidos.termino_vigencia ? new Date(datosExtraidos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">Fecha Vencimiento del pago:</small><br/>
-                              <strong className="text-warning-emphasis">
-                                {datosExtraidos.fecha_pago ? new Date(datosExtraidos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
-                                {datosExtraidos.plazo_pago_dias && ` (${datosExtraidos.plazo_pago_dias} días)`}
-                              </strong>
                             </div>
                           </div>
                         </div>
@@ -1587,23 +1091,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                             </div>
                           </div>
                           <div className="row g-2 mt-2">
-                            <div className="col-md-4">
+                            <div className="col-md-6">
                               <small className="text-muted">Serie (VIN):</small><br/>
                               <strong className="font-monospace">{datosExtraidos.numero_serie}</strong>
                             </div>
-                            <div className="col-md-2">
-                              <small className="text-muted">Motor:</small><br/>
-                              <strong>{datosExtraidos.motor || '-'}</strong>
-                            </div>
-                            <div className="col-md-2">
+                            <div className="col-md-3">
                               <small className="text-muted">Placas:</small><br/>
                               <strong>{datosExtraidos.placas}</strong>
                             </div>
-                            <div className="col-md-2">
-                              <small className="text-muted">Color:</small><br/>
-                              <strong>{datosExtraidos.color || '-'}</strong>
-                            </div>
-                            <div className="col-md-2">
+                            <div className="col-md-3">
                               <small className="text-muted">Tipo:</small><br/>
                               <strong>{datosExtraidos.tipo_vehiculo}</strong>
                             </div>
@@ -1637,44 +1133,22 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         <div className="p-3 bg-secondary bg-opacity-10 rounded">
                           <h6 className="text-secondary mb-3">💰 INFORMACIÓN FINANCIERA</h6>
                           <div className="row g-2">
-                            <div className="col-md-4">
+                            <div className="col-md-3">
                               <small className="text-muted">Prima Neta:</small><br/>
-                              <strong>{datosExtraidos.prima_pagada ? utils.formatearMoneda(datosExtraidos.prima_pagada) : '-'}</strong>
+                              <strong>{utils.formatearMoneda(datosExtraidos.prima_pagada)}</strong>
                             </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">Tasa Financiamiento:</small><br/>
-                              <strong>{datosExtraidos.cargo_pago_fraccionado ? utils.formatearMoneda(datosExtraidos.cargo_pago_fraccionado) : '-'}</strong>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">Gastos por Expedición:</small><br/>
-                              <strong>{datosExtraidos.gastos_expedicion ? utils.formatearMoneda(datosExtraidos.gastos_expedicion) : '-'}</strong>
-                            </div>
-                          </div>
-                          <div className="row g-2 mt-2">
-                            <div className="col-md-4">
-                              <small className="text-muted">Subtotal:</small><br/>
-                              <strong>{datosExtraidos.subtotal ? utils.formatearMoneda(datosExtraidos.subtotal) : '-'}</strong>
-                            </div>
-                            <div className="col-md-4">
+                            <div className="col-md-3">
                               <small className="text-muted">I.V.A. 16%:</small><br/>
-                              <strong>{datosExtraidos.iva ? utils.formatearMoneda(datosExtraidos.iva) : '-'}</strong>
+                              <strong>{utils.formatearMoneda(datosExtraidos.iva)}</strong>
                             </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">IMPORTE TOTAL:</small><br/>
-                              <strong className="text-success fs-5">{datosExtraidos.total ? utils.formatearMoneda(datosExtraidos.total) : '-'}</strong>
-                            </div>
-                          </div>
-                          <div className="row g-2 mt-2">
-                            <div className="col-md-6">
+                            <div className="col-md-3">
                               <small className="text-muted">Forma de Pago:</small><br/>
-                              <strong className="text-uppercase">{datosExtraidos.tipo_pago || '-'}</strong>
+                              <strong className="text-uppercase">{datosExtraidos.tipo_pago}</strong>
                             </div>
-                            {datosExtraidos.fecha_pago && (
-                              <div className="col-md-6">
-                                <small className="text-muted">Pago Único:</small><br/>
-                                <strong>{datosExtraidos.pago_unico ? utils.formatearMoneda(datosExtraidos.pago_unico) : '-'}</strong>
-                              </div>
-                            )}
+                            <div className="col-md-3">
+                              <small className="text-muted">IMPORTE TOTAL:</small><br/>
+                              <strong className="text-success fs-5">{utils.formatearMoneda(datosExtraidos.total)}</strong>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1714,14 +1188,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             >
               Cancelar
             </button>
-            {estado === 'preview-datos' && datosExtraidos && (
+            {estado === 'completado' && datosExtraidos && (
               <button
                 type="button"
                 className="btn btn-success"
                 onClick={aplicarDatos}
               >
                 <CheckCircle className="me-2" size={16} />
-                Aplicar al Formulario
+                Aplicar Datos Extraídos
               </button>
             )}
           </div>
@@ -1814,21 +1288,6 @@ const ListaExpedientes = React.memo(({
 }) => {
   const paginacion = usePaginacion(expedientes, 10);
 
-  // Detectar pólizas duplicadas
-  const polizasDuplicadas = React.useMemo(() => {
-    const grupos = {};
-    expedientes.forEach(exp => {
-      if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-        const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-        if (!grupos[clave]) {
-          grupos[clave] = [];
-        }
-        grupos[clave].push(exp);
-      }
-    });
-    return Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
-  }, [expedientes]);
-
   return (
     <div className="p-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -1844,26 +1303,6 @@ const ListaExpedientes = React.memo(({
           Nueva Póliza
         </button>
       </div>
-
-      {polizasDuplicadas.length > 0 && (
-        <div className="alert alert-warning mb-3" role="alert">
-          <strong>⚠️ Atención:</strong> Se encontraron {polizasDuplicadas.length} póliza(s) duplicada(s).
-          Las filas están marcadas en amarillo.
-          <details className="mt-2">
-            <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
-              Ver detalles de duplicados
-            </summary>
-            <ul className="mt-2 mb-0">
-              {polizasDuplicadas.map(([clave, exps]) => (
-                <li key={clave}>
-                  <strong>{exps[0].numero_poliza}</strong> - {exps[0].compania} - Vigencia: {exps[0].inicio_vigencia}
-                  <span className="text-muted"> ({exps.length} registros)</span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        </div>
-      )}
 
       {expedientes.length > 0 && (
         <div className="row mb-3">
@@ -1901,49 +1340,21 @@ const ListaExpedientes = React.memo(({
               <table className="table table-hover mb-0">
                 <thead className="table-light">
                   <tr>
-                    <th>Póliza</th>
                     <th>Cliente</th>
                     <th>Compañía</th>
                     <th>Producto</th>
                     <th>Etapa Activa</th>
                     <th>Agente</th>
                     <th>Tipo/Estatus Pago</th>
-                    <th>Vigencia</th>
+                    <th>Fecha</th>
                     <th width="200">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
                     const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
-                    
-                    // Detectar si esta póliza está duplicada
-                    const esDuplicada = expedientes.filter(exp => 
-                      exp.numero_poliza === expediente.numero_poliza &&
-                      exp.compania === expediente.compania &&
-                      exp.inicio_vigencia === expediente.inicio_vigencia &&
-                      expediente.numero_poliza // Solo si tiene número de póliza
-                    ).length > 1;
-                    
                     return (
-                      <tr key={expediente.id} className={esDuplicada ? 'table-warning' : ''}>
-                        <td>
-                          <div>
-                            <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
-                            {esDuplicada && (
-                              <div>
-                                <span className="badge bg-warning text-dark" title="Póliza duplicada">
-                                  ⚠️ Duplicada
-                                </span>
-                              </div>
-                            )}
-                            {expediente.endoso && (
-                              <div><small className="text-muted">End: {expediente.endoso}</small></div>
-                            )}
-                            {expediente.inciso && (
-                              <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
-                            )}
-                          </div>
-                        </td>
+                      <tr key={expediente.id}>
                         <td><InfoCliente expediente={expediente} /></td>
                         <td>{expediente.compania}</td>
                         <td>
@@ -1972,8 +1383,7 @@ const ListaExpedientes = React.memo(({
                           />
                         </td>
                         <td>
-                          <small>{utils.formatearFecha(expediente.inicio_vigencia, 'simple')}</small>
-                          <div><small className="text-muted">hasta {utils.formatearFecha(expediente.termino_vigencia, 'simple')}</small></div>
+                          <small>{expediente.fecha_creacion}</small>
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
@@ -2079,180 +1489,32 @@ const Formulario = React.memo(({
 }) => {
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
-  const [infoImportacion, setInfoImportacion] = useState(null);
 
-  const handleDataExtracted = useCallback(async (datosExtraidos) => {
-    try {
-      // 1. BUSCAR O CREAR CLIENTE AUTOMÁTICAMENTE
-      let clienteSeleccionadoFinal = null;
-      
-      if (datosExtraidos.cliente_existente) {
-        // Cliente ya existe en la base de datos
-        clienteSeleccionadoFinal = datosExtraidos.cliente_existente;
-        handleClienteSeleccionado(clienteSeleccionadoFinal);
-        console.log('✅ Cliente encontrado:', clienteSeleccionadoFinal.nombre);
-      } else if (datosExtraidos.nombre || datosExtraidos.rfc) {
-        // Cliente NO existe - Crear automáticamente
-        console.log('🔄 Cliente no encontrado. Creando automáticamente...');
-        
-        const nuevoCliente = {
-          nombre: datosExtraidos.nombre || '',
-          apellido_paterno: datosExtraidos.apellido_paterno || '',
-          apellido_materno: datosExtraidos.apellido_materno || '',
-          rfc: datosExtraidos.rfc || '',
-          email: datosExtraidos.email || '',
-          telefono_movil: datosExtraidos.telefono_movil || '',
-          telefono_fijo: datosExtraidos.telefono_fijo || '',
-          // Campos adicionales con valores por defecto
-          tipo_persona: datosExtraidos.rfc?.length === 13 ? 'Física' : 'Moral',
-          categoria: 'Regular',
-          estado: 'Activo'
-        };
-        
-        // Importar el servicio de clientes
-        const { crearCliente } = await import('../services/clientesService');
-        const resultado = await crearCliente(nuevoCliente);
-        
-        if (resultado.success) {
-          clienteSeleccionadoFinal = resultado.data;
-          handleClienteSeleccionado(clienteSeleccionadoFinal);
-          console.log('✅ Cliente creado exitosamente:', clienteSeleccionadoFinal.nombre, 'ID:', clienteSeleccionadoFinal.id);
-        } else {
-          console.error('❌ Error al crear cliente:', resultado.error);
-          console.log('⚠️ Deberás crear el cliente manualmente');
-        }
-      }
-      
-      // 2. BUSCAR AGENTE POR CÓDIGO Y COMPAÑÍA
-      // El agente extraído viene en formato: "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      let agenteCodigo = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        // Extraer código del agente del formato "25576 - NOMBRE"
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          
-          // Buscar agente en el equipo de trabajo que tenga ese código
-          // Nota: Un agente puede tener diferentes códigos según la compañía
-          const agenteEncontrado = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
-          
-          if (agenteEncontrado) {
-            agenteCodigo = agenteEncontrado.codigo || agenteEncontrado.codigoAgente;
-            console.log('✅ Agente encontrado en equipo:', agenteEncontrado.nombre, 'Código:', agenteCodigo);
-          } else {
-            console.warn('⚠️ Agente no encontrado en equipo. Código:', codigoAgente, 'Compañía:', datosExtraidos.compania);
-            console.log('💡 El agente debe ser agregado al Equipo de Trabajo antes de asignar pólizas');
-          }
-        }
-      }
-      
-      // 3. BUSCAR VENDEDOR/SUB-AGENTE (si aplica)
-      // Los vendedores usan la misma clave que el agente al que están ligados
-      // Por ahora lo dejamos vacío, se puede seleccionar manualmente
-      let subAgenteId = null;
-      
-      // 4. POPULAR FORMULARIO CON TODOS LOS DATOS
-      console.log('📋 Datos a aplicar:', {
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto,
-        companias: companias.slice(0, 10), // Primeras 10 compañías
-        productos: productos.slice(0, 10).map(p => p.nombre || p) // Primeros 10 productos
-      });
-      
-      const nuevoFormulario = {
-        ...formulario,
-        ...datosExtraidos,
-        // Preservar campos del formulario original
-        fecha_creacion: formulario.fecha_creacion,
-        id: formulario.id,
-        // FORZAR valores directamente
-        agente: agenteCodigo || '',
-        sub_agente: '',
-        etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto
-      };
-      
-      console.log('🔍 DEBUG - Valores antes de setFormulario:', {
-        'compania original': datosExtraidos.compania,
-        'compania en nuevo': nuevoFormulario.compania,
-        'agente codigo': agenteCodigo,
-        'agente en nuevo': nuevoFormulario.agente,
-        'producto': nuevoFormulario.producto
-      });
-      
-      setFormulario(nuevoFormulario);
-      
-      // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
-      if (datosExtraidos.inicio_vigencia || datosExtraidos.fecha_pago) {
-        setTimeout(() => {
-          const formularioConCalculos = actualizarCalculosAutomaticos(nuevoFormulario);
-          setFormulario(prev => ({
-            ...prev,
-            ...formularioConCalculos,
-            compania: datosExtraidos.compania,
-            producto: datosExtraidos.producto,
-            agente: agenteCodigo || ''
-          }));
-          console.log('✅ Cálculos automáticos aplicados, estatusPago:', formularioConCalculos.estatusPago);
-        }, 150);
-      } else {
-        // FORZAR la actualización después de un pequeño delay
-        setTimeout(() => {
-          setFormulario(prev => ({
-            ...prev,
-            compania: datosExtraidos.compania,
-            producto: datosExtraidos.producto,
-            agente: agenteCodigo || ''
-          }));
-          console.log('✅ Valores forzados después del render');
-        }, 100);
-      }
-      
-      // 6. MOSTRAR MENSAJE DE CONFIRMACIÓN
-      setDatosImportadosDesdePDF(true);
-      setMostrarExtractorPDF(false);
-      
-      // Guardar información de la importación para mostrar en UI
-      setInfoImportacion({
-        clienteCreado: clienteSeleccionadoFinal && !datosExtraidos.cliente_existente,
-        clienteEncontrado: !!datosExtraidos.cliente_existente,
-        nombreCliente: clienteSeleccionadoFinal?.nombre || 'N/A',
-        agenteAsignado: !!agenteCodigo,
-        poliza: datosExtraidos.numero_poliza || 'N/A',
-        compania: datosExtraidos.compania || 'N/A'
-      });
-      
-      // Mostrar resumen de lo que se importó
-      console.log('📊 Resumen de importación:');
-      if (clienteSeleccionadoFinal) {
-        const esNuevo = !datosExtraidos.cliente_existente;
-        console.log('  Cliente:', esNuevo ? '🆕 Creado automáticamente' : '✅ Encontrado', '-', clienteSeleccionadoFinal.nombre);
-        console.log('  ID Cliente:', clienteSeleccionadoFinal.id);
-      } else {
-        console.log('  Cliente: ⚠️ No pudo crearse - revisar datos');
-      }
-      console.log('  Agente:', agenteCodigo ? '✅ Asignado' : '⚠️ No encontrado (revisar código)');
-      console.log('  Póliza:', datosExtraidos.numero_poliza || 'N/A');
-      console.log('  Compañía:', datosExtraidos.compania || 'N/A');
-      
-    } catch (error) {
-      console.error('Error al procesar datos extraídos:', error);
-      // Aún así intentar popular el formulario con lo que se pueda
-      setFormulario(prev => ({
-        ...prev,
-        ...datosExtraidos,
-        fecha_creacion: prev.fecha_creacion,
-        id: prev.id
-      }));
-      setDatosImportadosDesdePDF(true);
-      setMostrarExtractorPDF(false);
+  const handleDataExtracted = useCallback((datosExtraidos) => {
+    // Si se encontró un cliente existente, seleccionarlo automáticamente
+    if (datosExtraidos.cliente_existente) {
+      handleClienteSeleccionado(datosExtraidos.cliente_existente);
     }
-  }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado, agentes]);
+    
+    setFormulario(prev => ({
+      ...prev,
+      ...datosExtraidos,
+      fecha_creacion: prev.fecha_creacion,
+      id: prev.id,
+      etapa_activa: datosExtraidos.etapa_activa || prev.etapa_activa
+    }));
+    
+    if (datosExtraidos.inicio_vigencia) {
+      const formularioActualizado = actualizarCalculosAutomaticos({
+        ...formulario,
+        ...datosExtraidos
+      });
+      setFormulario(formularioActualizado);
+    }
+    
+    setDatosImportadosDesdePDF(true);
+    setMostrarExtractorPDF(false);
+  }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado]);
 
   return (
     <div className="p-4">
@@ -2263,10 +1525,7 @@ const Formulario = React.memo(({
         <div className="d-flex gap-2">
           {!modoEdicion && (
             <button
-              onClick={() => {
-                console.log('🔵 Abriendo extractor PDF...');
-                setMostrarExtractorPDF(true);
-              }}
+              onClick={() => setMostrarExtractorPDF(true)}
               className="btn btn-outline-primary"
               title="Extraer datos automáticamente desde una póliza PDF"
             >
@@ -2285,40 +1544,14 @@ const Formulario = React.memo(({
 
       <div className="card">
         <div className="card-body">
-          {datosImportadosDesdePDF && !modoEdicion && infoImportacion && (
-            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
+          {datosImportadosDesdePDF && !modoEdicion && (
+            <div className="alert alert-info alert-dismissible fade show mb-4" role="alert">
               <CheckCircle className="me-2" size={20} />
-              <div>
-                <strong>✅ Datos importados desde PDF exitosamente</strong>
-                <ul className="mb-0 mt-2" style={{ fontSize: '0.9rem' }}>
-                  {infoImportacion.clienteCreado && (
-                    <li>🆕 <strong>Cliente creado automáticamente:</strong> {infoImportacion.nombreCliente}</li>
-                  )}
-                  {infoImportacion.clienteEncontrado && (
-                    <li>✅ <strong>Cliente encontrado:</strong> {infoImportacion.nombreCliente}</li>
-                  )}
-                  {!infoImportacion.clienteCreado && !infoImportacion.clienteEncontrado && (
-                    <li>⚠️ <strong>Cliente no pudo crearse</strong> - Verifica los datos extraídos</li>
-                  )}
-                  <li>📄 <strong>Póliza:</strong> {infoImportacion.poliza}</li>
-                  <li>🏢 <strong>Compañía:</strong> {infoImportacion.compania}</li>
-                  {infoImportacion.agenteAsignado ? (
-                    <li>✅ <strong>Agente asignado automáticamente</strong></li>
-                  ) : (
-                    <li>⚠️ <strong>Agente no encontrado</strong> - Selecciónalo manualmente</li>
-                  )}
-                </ul>
-                <small className="text-muted mt-2 d-block">
-                  💡 Revisa la información y completa los campos faltantes antes de guardar
-                </small>
-              </div>
+              <strong>Datos extraídos desde PDF</strong> - Revise la información y complete los campos faltantes
               <button 
                 type="button" 
                 className="btn-close" 
-                onClick={() => {
-                  setDatosImportadosDesdePDF(false);
-                  setInfoImportacion(null);
-                }}
+                onClick={() => setDatosImportadosDesdePDF(false)}
               ></button>
             </div>
           )}
@@ -2929,16 +2162,10 @@ const Formulario = React.memo(({
       </div>
 
       {mostrarExtractorPDF && (
-        <>
-          {console.log('🟢 Renderizando ExtractorPolizasPDF...')}
-          <ExtractorPolizasPDF 
-            onDataExtracted={handleDataExtracted}
-            onClose={() => setMostrarExtractorPDF(false)}
-            agentes={agentes}
-            aseguradoras={companias}
-            tiposProductos={productos}
-          />
-        </>
+        <ExtractorPolizasPDF 
+          onDataExtracted={handleDataExtracted}
+          onClose={() => setMostrarExtractorPDF(false)}
+        />
       )}
     </div>
   );
@@ -3101,15 +2328,15 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Vigencia</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Inicio de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.inicio_vigencia, 'simple')}
+                {expedienteSeleccionado.inicio_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Término de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.termino_vigencia, 'simple')}
+                {expedienteSeleccionado.termino_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Fecha de creación:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.fecha_creacion, 'simple')}
+                {expedienteSeleccionado.fecha_creacion}
               </div>
             </div>
 
@@ -3191,36 +2418,7 @@ const ModuloExpedientes = () => {
   useEffect(() => {
   fetch(`${API_URL}/api/expedientes`)
       .then(res => res.json())
-      .then(data => {
-        setExpedientes(data);
-        
-        // Detectar pólizas duplicadas (mismo número, compañía y vigencia)
-        if (data.length > 0) {
-          const grupos = {};
-          data.forEach(exp => {
-            if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-              const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-              if (!grupos[clave]) {
-                grupos[clave] = [];
-              }
-              grupos[clave].push(exp);
-            }
-          });
-          
-          const duplicados = Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
-          
-          if (duplicados.length > 0) {
-            console.warn('⚠️ Se encontraron pólizas duplicadas:');
-            duplicados.forEach(([clave, exps]) => {
-              console.warn(`  📋 ${clave}:`, exps.map(e => ({
-                id: e.id,
-                cliente: `${e.nombre} ${e.apellido_paterno}`,
-                etapa: e.etapa_activa
-              })));
-            });
-          }
-        }
-      })
+      .then(data => setExpedientes(data))
       .catch(err => console.error('Error al cargar expedientes:', err));
   }, []);
   const [vistaActual, setVistaActual] = useState('lista');
@@ -3425,25 +2623,13 @@ const estadoInicialFormulario = {
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
     const termino_vigencia = formularioActual.termino_vigencia || calculartermino_vigencia(formularioActual.inicio_vigencia);
-    
-    // Calcular proximoPago según el tipo de pago
-    let proximoPago = '';
-    
-    if (formularioActual.tipo_pago === 'Fraccionado') {
-      // Para fraccionado: calcular el próximo pago basado en frecuencia
-      proximoPago = calcularProximoPago(
-        formularioActual.inicio_vigencia,
-        formularioActual.tipo_pago,
-        formularioActual.frecuenciaPago,
-        formularioActual.compania,
-        1
-      );
-    } else if (formularioActual.tipo_pago === 'Anual') {
-      // Para anual: usar fecha_pago si existe, sino usar inicio_vigencia
-      proximoPago = formularioActual.fecha_pago || formularioActual.inicio_vigencia;
-    }
-    
-    // Calcular estatusPago basado en proximoPago
+    const proximoPago = calcularProximoPago(
+      formularioActual.inicio_vigencia,
+      formularioActual.tipo_pago,
+      formularioActual.frecuenciaPago,
+      formularioActual.compania,
+      1
+    );
     const estatusPago = calcularEstatusPago(proximoPago, formularioActual.estatusPago);
     
     // Calcular periodo de gracia automáticamente
@@ -3609,63 +2795,6 @@ const estadoInicialFormulario = {
       return false;
     }
 
-    // Validar póliza duplicada (solo si NO estamos editando)
-    if (!modoEdicion && formulario.numero_poliza) {
-      console.log('🔍 Validando duplicados:', {
-        numero_poliza: formulario.numero_poliza,
-        compania: formulario.compania,
-        inicio_vigencia: formulario.inicio_vigencia,
-        total_expedientes: expedientes.length
-      });
-      
-      const polizaDuplicada = expedientes.find(exp => {
-        // Normalizar fechas para comparación (solo YYYY-MM-DD)
-        const fechaFormulario = formulario.inicio_vigencia ? formulario.inicio_vigencia.split('T')[0] : '';
-        const fechaExpediente = exp.inicio_vigencia ? exp.inicio_vigencia.split('T')[0] : '';
-        
-        const coincide = exp.numero_poliza === formulario.numero_poliza &&
-                        exp.compania === formulario.compania &&
-                        fechaExpediente === fechaFormulario;
-        
-        if (coincide) {
-          console.log('✅ Duplicado encontrado:', {
-            id: exp.id,
-            numero_poliza: exp.numero_poliza,
-            compania: exp.compania,
-            inicio_vigencia: exp.inicio_vigencia,
-            cliente: `${exp.nombre} ${exp.apellido_paterno}`
-          });
-        }
-        return coincide;
-      });
-      
-      if (polizaDuplicada) {
-        const mensaje = 
-          '⚠️ ATENCIÓN: PÓLIZA DUPLICADA DETECTADA\n\n' +
-          'Ya existe un registro en el sistema con estos datos:\n\n' +
-          '📋 Póliza: ' + polizaDuplicada.numero_poliza + '\n' +
-          '🏢 Compañía: ' + polizaDuplicada.compania + '\n' +
-          '📅 Inicio Vigencia: ' + polizaDuplicada.inicio_vigencia.split('T')[0] + '\n' +
-          '👤 Cliente: ' + polizaDuplicada.nombre + ' ' + polizaDuplicada.apellido_paterno + '\n' +
-          '📊 Etapa: ' + polizaDuplicada.etapa_activa + '\n\n' +
-          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-          'Presione ACEPTAR para continuar con el guardado\n' +
-          '(Podrá ver las pólizas duplicadas marcadas en el listado)\n\n' +
-          'Presione CANCELAR para regresar al formulario';
-        
-        const confirmar = window.confirm(mensaje);
-        
-        if (!confirmar) {
-          alert('❌ Operación cancelada.\n\nLa póliza NO fue guardada.\nPuede revisar los datos y volver a intentar.');
-          return false;
-        } else {
-          console.log('✅ Usuario confirmó guardar póliza duplicada');
-        }
-      } else {
-        console.log('✅ No se encontraron duplicados');
-      }
-    }
-
     if (formulario.producto === 'Autos') {
       if (!formulario.marca || !formulario.modelo || !formulario.anio) {
         alert('Para seguros de Autos, complete: Marca, Modelo y Año');
@@ -3685,7 +2814,7 @@ const estadoInicialFormulario = {
     }
 
     return true;
-  }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
+  }, [formulario]);
 
   const guardarExpediente = useCallback(() => {
     if (!validarFormulario()) return;

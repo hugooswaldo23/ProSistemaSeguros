@@ -15,7 +15,15 @@ export const obtenerCategoriasClientes = async () => {
     }
     
     const data = await response.json();
-    return { success: true, data };
+    
+    // Manejar diferentes formatos de respuesta
+    if (data.success && Array.isArray(data.data)) {
+      return { success: true, data: data.data };
+    } else if (Array.isArray(data)) {
+      return { success: true, data };
+    } else {
+      return { success: true, data: [] };
+    }
   } catch (error) {
     console.error('Error en obtenerCategoriasClientes:', error);
     return { success: false, error: error.message };

@@ -361,7 +361,12 @@ const ModuloConfiguracionCatalogos = () => {
     { valor: 'activity', icono: <Activity size={16} />, nombre: 'Actividad' },
     { valor: 'target', icono: <Target size={16} />, nombre: 'Objetivo' },
     { valor: 'layers', icono: <Layers size={16} />, nombre: 'Capas' },
-    { valor: 'zap', icono: <Zap size={16} />, nombre: 'Energía' }
+    { valor: 'zap', icono: <Zap size={16} />, nombre: 'Energía' },
+    { valor: 'plane', icono: '✈️', nombre: 'Avión' },
+    { valor: 'anchor', icono: '⛵', nombre: 'Barco' },
+    { valor: 'factory', icono: '🏭', nombre: 'Fábrica' },
+    { valor: 'house', icono: '🏠', nombre: 'Casa Emoji' },
+    { valor: 'truck', icono: '🚚', nombre: 'Camión' }
   ];
 
   // Colores disponibles
