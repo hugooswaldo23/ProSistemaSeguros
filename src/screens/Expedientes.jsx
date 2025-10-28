@@ -133,21 +133,23 @@ const CampoFechaCalculada = React.memo(({
   </div>
 ));
 
-const InfoCliente = React.memo(({ expediente }) => (
-  <div>
-    <div className="fw-semibold">
-      {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
-    </div>
-    <small className="text-muted">{expediente.email}</small>
-    {expediente.producto === 'Autos' && expediente.marca && (
-      <div>
-        <small className="text-primary">
-          🚗 {expediente.marca} {expediente.modelo} {expediente.año}
-        </small>
+const InfoCliente = React.memo(({ expediente }) => {
+  return (
+    <div>
+      <div className="fw-semibold">
+        {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
       </div>
-    )}
-  </div>
-));
+      <small className="text-muted">{expediente.email}</small>
+      {expediente.producto === 'Autos' && expediente.marca && (
+        <div>
+          <small className="text-primary">
+            🚗 {expediente.marca} {expediente.modelo} {expediente.año}
+          </small>
+        </div>
+      )}
+    </div>
+  );
+});
 
 const EstadoPago = React.memo(({ expediente }) => {
   // Determinar si el pago está vencido
@@ -1306,10 +1308,17 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-      onDataExtracted(datosExtraidos);
+      // Asegurarse de que el cliente_id esté incluido en los datos
+      const datosConCliente = {
+        ...datosExtraidos,
+        cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
+      };
+      
+      console.log('📤 Aplicando datos al formulario con cliente_id:', datosConCliente.cliente_id);
+      onDataExtracted(datosConCliente);
       onClose();
     }
-  }, [datosExtraidos, onDataExtracted, onClose]);
+  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose]);
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -2339,74 +2348,30 @@ const Formulario = React.memo(({
 
   const handleDataExtracted = useCallback(async (datosExtraidos) => {
     try {
-      // 1. BUSCAR O CREAR CLIENTE AUTOMÁTICAMENTE
+      // 1. USAR EL CLIENTE QUE YA FUE CREADO EN EL EXTRACTOR PDF
       let clienteSeleccionadoFinal = null;
       
-      if (datosExtraidos.cliente_existente) {
-        // Cliente ya existe en la base de datos
-        clienteSeleccionadoFinal = datosExtraidos.cliente_existente;
-        handleClienteSeleccionado(clienteSeleccionadoFinal);
-        console.log('✅ Cliente encontrado:', clienteSeleccionadoFinal.nombre);
-      } else if (datosExtraidos.nombre || datosExtraidos.rfc) {
-        // Cliente NO existe - Crear automáticamente
-        console.log('🔄 Cliente no encontrado. Creando automáticamente...');
+      if (datosExtraidos.cliente_id) {
+        // El cliente ya fue creado o encontrado en el extractor PDF
+        // Buscar el cliente en la base de datos usando el cliente_id
+        console.log('� Buscando cliente con ID:', datosExtraidos.cliente_id);
         
-        // Detectar tipo de persona de manera robusta
-        let tipoPersonaDetectado = 'Persona Física'; // Por defecto
-        if (datosExtraidos.rfc && datosExtraidos.rfc.trim().length > 0) {
-          const rfcLimpio = datosExtraidos.rfc.trim();
-          if (rfcLimpio.length === 13) {
-            tipoPersonaDetectado = 'Persona Física';
-          } else if (rfcLimpio.length === 12) {
-            tipoPersonaDetectado = 'Persona Moral';
+        try {
+          const response = await fetch(`${API_URL}/api/clientes`);
+          const clientes = await response.json();
+          clienteSeleccionadoFinal = clientes.find(c => c.id === datosExtraidos.cliente_id);
+          
+          if (clienteSeleccionadoFinal) {
+            handleClienteSeleccionado(clienteSeleccionadoFinal);
+            console.log('✅ Cliente vinculado:', clienteSeleccionadoFinal.nombre || clienteSeleccionadoFinal.razonSocial, 'ID:', clienteSeleccionadoFinal.id);
+          } else {
+            console.error('❌ No se encontró el cliente con ID:', datosExtraidos.cliente_id);
           }
+        } catch (error) {
+          console.error('❌ Error al buscar cliente:', error);
         }
-        
-        // Preparar datos según tipo de persona
-        let nuevoCliente = {};
-        
-        if (tipoPersonaDetectado === 'Persona Moral') {
-          // Para empresas: usar razón social (nombre completo concatenado)
-          const razonSocial = `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim() || 'Empresa';
-          nuevoCliente = {
-            tipoPersona: tipoPersonaDetectado,
-            razonSocial: razonSocial,
-            rfc: datosExtraidos.rfc || '',
-            direccion: datosExtraidos.domicilio || '',
-            email: datosExtraidos.email || '',
-            activo: true
-          };
-        } else {
-          // Para personas físicas: usar nombre y apellidos
-          nuevoCliente = {
-            tipoPersona: tipoPersonaDetectado,
-            nombre: datosExtraidos.nombre || '',
-            apellidoPaterno: datosExtraidos.apellido_paterno || '',
-            apellidoMaterno: datosExtraidos.apellido_materno || '',
-            rfc: datosExtraidos.rfc || '',
-            direccion: datosExtraidos.domicilio || '',
-            email: datosExtraidos.email || '',
-            activo: true
-          };
-        }
-        
-        console.log('📋 Datos del cliente a crear:', nuevoCliente);
-        console.log('🔍 RFC extraído:', datosExtraidos.rfc, '- Longitud:', datosExtraidos.rfc?.length);
-        console.log('✅ Tipo de persona detectado:', tipoPersonaDetectado);
-        console.log('🚀 Enviando al backend:', JSON.stringify(nuevoCliente, null, 2));
-        
-        // Importar el servicio de clientes
-        const { crearCliente } = await import('../services/clientesService');
-        const resultado = await crearCliente(nuevoCliente);
-        
-        if (resultado.success) {
-          clienteSeleccionadoFinal = resultado.data;
-          handleClienteSeleccionado(clienteSeleccionadoFinal);
-          console.log('✅ Cliente creado exitosamente:', clienteSeleccionadoFinal.nombre, 'ID:', clienteSeleccionadoFinal.id);
-        } else {
-          console.error('❌ Error al crear cliente:', resultado.error);
-          console.log('⚠️ Deberás crear el cliente manualmente');
-        }
+      } else {
+        console.warn('⚠️ No se proporcionó cliente_id. El cliente debe ser seleccionado manualmente.');
       }
       
       // 2. BUSCAR AGENTE POR CÓDIGO Y COMPAÑÍA
@@ -3477,7 +3442,30 @@ const DetallesExpediente = React.memo(({
   calcularSiguientePago,
   calculartermino_vigencia,
   calcularProximoPago
-}) => (
+}) => {
+  const [clienteInfo, setClienteInfo] = useState(null);
+  
+  // Cargar información del cliente cuando se selecciona un expediente
+  useEffect(() => {
+    const cargarCliente = async () => {
+      if (expedienteSeleccionado?.cliente_id) {
+        try {
+          const response = await fetch(`${API_URL}/api/clientes`);
+          const clientes = await response.json();
+          const cliente = clientes.find(c => c.id === expedienteSeleccionado.cliente_id);
+          setClienteInfo(cliente);
+        } catch (error) {
+          console.error('Error al cargar cliente:', error);
+        }
+      } else {
+        setClienteInfo(null);
+      }
+    };
+    
+    cargarCliente();
+  }, [expedienteSeleccionado?.cliente_id]);
+  
+  return (
   <div className="p-4">
     <div className="d-flex justify-content-between align-items-center mb-4">
       <h3 className="mb-0">Detalles del Expediente</h3>
@@ -3557,19 +3545,26 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Información del Cliente</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Nombre completo:</strong>
-                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellido_paterno} {expedienteSeleccionado.apellido_materno}
+                {clienteInfo ? (
+                  clienteInfo.tipoPersona === 'Persona Moral' ? 
+                    clienteInfo.razonSocial :
+                    `${clienteInfo.nombre || ''} ${clienteInfo.apellidoPaterno || clienteInfo.apellido_paterno || ''} ${clienteInfo.apellidoMaterno || clienteInfo.apellido_materno || ''}`
+                ) : (expedienteSeleccionado.nombre || expedienteSeleccionado.apellido_paterno ? 
+                  `${expedienteSeleccionado.nombre || ''} ${expedienteSeleccionado.apellido_paterno || ''} ${expedienteSeleccionado.apellido_materno || ''}` : 
+                  '-'
+                )}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Email:</strong>
-                {expedienteSeleccionado.email || '-'}
+                {clienteInfo?.email || expedienteSeleccionado.email || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono fijo:</strong>
-                {expedienteSeleccionado.telefono_fijo || '-'}
+                {clienteInfo?.telefonoFijo || clienteInfo?.telefono_fijo || expedienteSeleccionado.telefono_fijo || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono móvil:</strong>
-                {expedienteSeleccionado.telefono_movil || '-'}
+                {clienteInfo?.telefonoMovil || clienteInfo?.telefono_movil || expedienteSeleccionado.telefono_movil || '-'}
               </div>
             </div>
 
@@ -3684,7 +3679,8 @@ const DetallesExpediente = React.memo(({
       </div>
     )}
   </div>
-));
+  );
+});
 
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
@@ -3708,15 +3704,62 @@ const ModuloExpedientes = () => {
   }, []);
   // Cargar expedientes desde el backend al montar
   useEffect(() => {
-  fetch(`${API_URL}/api/expedientes`)
-      .then(res => res.json())
-      .then(data => {
-        setExpedientes(data);
+    const cargarExpedientesConClientes = async () => {
+      try {
+        // 1. Obtener expedientes
+        const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
+        const expedientes = await resExpedientes.json();
+        
+        // 2. Obtener todos los clientes
+        const resClientes = await fetch(`${API_URL}/api/clientes`);
+        const clientes = await resClientes.json();
+        
+        // 3. Crear un mapa de clientes por ID para búsqueda rápida
+        const clientesMap = {};
+        clientes.forEach(cliente => {
+          clientesMap[cliente.id] = cliente;
+        });
+        
+        // 4. Enriquecer cada expediente con los datos del cliente
+        const expedientesEnriquecidos = expedientes.map(exp => {
+          const cliente = clientesMap[exp.cliente_id];
+          
+          if (cliente) {
+            // Si es Persona Moral, usar razón social como nombre completo
+            if (cliente.tipoPersona === 'Persona Moral') {
+              return {
+                ...exp,
+                nombre: cliente.razonSocial || '',
+                apellido_paterno: '',
+                apellido_materno: '',
+                email: cliente.email || '',
+                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
+                rfc: cliente.rfc || ''
+              };
+            } else {
+              // Persona Física: usar nombre y apellidos
+              return {
+                ...exp,
+                nombre: cliente.nombre || '',
+                apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
+                apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
+                email: cliente.email || '',
+                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
+                rfc: cliente.rfc || ''
+              };
+            }
+          }
+          
+          // Si no se encuentra el cliente, mantener el expediente sin cambios
+          return exp;
+        });
+        
+        setExpedientes(expedientesEnriquecidos);
         
         // Detectar pólizas duplicadas (mismo número, compañía y vigencia)
-        if (data.length > 0) {
+        if (expedientesEnriquecidos.length > 0) {
           const grupos = {};
-          data.forEach(exp => {
+          expedientesEnriquecidos.forEach(exp => {
             if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
               const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
               if (!grupos[clave]) {
@@ -3739,8 +3782,12 @@ const ModuloExpedientes = () => {
             });
           }
         }
-      })
-      .catch(err => console.error('Error al cargar expedientes:', err));
+      } catch (err) {
+        console.error('Error al cargar expedientes:', err);
+      }
+    };
+    
+    cargarExpedientesConClientes();
   }, []);
   const [vistaActual, setVistaActual] = useState('lista');
   const [expedienteSeleccionado, setExpedienteSeleccionado] = useState(null);
@@ -4225,13 +4272,20 @@ const estadoInicialFormulario = {
       estatusPago: formularioConCalculos.estatusPago,
       proximoPago: formularioConCalculos.proximoPago,
       tipo_pago: formularioConCalculos.tipo_pago,
-      fecha_pago: formularioConCalculos.fecha_pago
+      fecha_pago: formularioConCalculos.fecha_pago,
+      cliente_id: formularioConCalculos.cliente_id
     });
     
     // Normalizar apellidos para backend
     const expedientePayload = {
       ...formularioConCalculos
     };
+    
+    console.log('📦 Payload completo a guardar:', {
+      numero_poliza: expedientePayload.numero_poliza,
+      cliente_id: expedientePayload.cliente_id,
+      compania: expedientePayload.compania
+    });
 
     if (modoEdicion) {
   fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
@@ -4262,11 +4316,88 @@ const estadoInicialFormulario = {
         .catch(err => alert('Error al crear expediente'));
     }
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario]);
-  const recargarExpedientes = useCallback(() => {
-  fetch(`${API_URL}/api/expedientes`)
-      .then(res => res.json())
-      .then(data => setExpedientes(data))
-      .catch(err => console.error('Error al recargar expedientes:', err));
+  const recargarExpedientes = useCallback(async () => {
+    try {
+      console.log('🔄 Recargando expedientes...');
+      
+      // 1. Obtener expedientes
+      const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
+      const expedientes = await resExpedientes.json();
+      console.log('📊 Expedientes obtenidos:', expedientes.length);
+      
+      // 2. Obtener todos los clientes
+      const resClientes = await fetch(`${API_URL}/api/clientes`);
+      const clientes = await resClientes.json();
+      console.log('👥 Clientes obtenidos:', clientes.length);
+      
+      // 3. Crear un mapa de clientes por ID para búsqueda rápida
+      const clientesMap = {};
+      clientes.forEach(cliente => {
+        clientesMap[cliente.id] = cliente;
+      });
+      console.log('🗺️ Mapa de clientes creado con', Object.keys(clientesMap).length, 'entradas');
+      
+      // 4. Enriquecer cada expediente con los datos del cliente
+      const expedientesEnriquecidos = expedientes.map(exp => {
+        // Debug: mostrar TODOS los campos del expediente
+        console.log('🔍 Expediente:', exp.numero_poliza, 'Campos relacionados con cliente:', {
+          cliente_id: exp.cliente_id,
+          clienteId: exp.clienteId,
+          nombre: exp.nombre,
+          apellido_paterno: exp.apellido_paterno,
+          razonSocial: exp.razonSocial
+        });
+        
+        const cliente = clientesMap[exp.cliente_id];
+        
+        // Debug para póliza específica
+        if (exp.numero_poliza === '1970064839') {
+          console.log('🔍 DEBUG Póliza 1970064839:', {
+            expediente_id: exp.id,
+            cliente_id: exp.cliente_id,
+            cliente_encontrado: !!cliente,
+            cliente_tipo: cliente?.tipoPersona,
+            cliente_razonSocial: cliente?.razonSocial,
+            cliente_nombre: cliente?.nombre
+          });
+        }
+        
+        if (cliente) {
+          // Si es Persona Moral, usar razón social como nombre completo
+          if (cliente.tipoPersona === 'Persona Moral') {
+            return {
+              ...exp,
+              nombre: cliente.razonSocial || '',
+              apellido_paterno: '',
+              apellido_materno: '',
+              email: cliente.email || '',
+              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
+              rfc: cliente.rfc || ''
+            };
+          } else {
+            // Persona Física: usar nombre y apellidos
+            return {
+              ...exp,
+              nombre: cliente.nombre || '',
+              apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
+              apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
+              email: cliente.email || '',
+              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
+              rfc: cliente.rfc || ''
+            };
+          }
+        }
+        
+        // Si no se encuentra el cliente, mantener el expediente sin cambios
+        console.warn('⚠️ Cliente no encontrado para expediente:', exp.numero_poliza, 'cliente_id:', exp.cliente_id);
+        return exp;
+      });
+      
+      console.log('✅ Expedientes enriquecidos:', expedientesEnriquecidos.length);
+      setExpedientes(expedientesEnriquecidos);
+    } catch (err) {
+      console.error('Error al recargar expedientes:', err);
+    }
   }, []);
   const editarExpediente = useCallback((expediente) => {
     setFormulario({
