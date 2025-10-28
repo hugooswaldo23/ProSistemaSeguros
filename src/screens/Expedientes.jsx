@@ -149,26 +149,52 @@ const InfoCliente = React.memo(({ expediente }) => (
   </div>
 ));
 
-const EstadoPago = React.memo(({ expediente }) => (
-  <div>
-    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
-    {expediente.frecuenciaPago && (
-      <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
-    )}
-    <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
-    {expediente.proximoPago && expediente.estatusPago !== 'Pagado' && (
-      <div>
-        <small className={`${
-          expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
-          expediente.estatusPago === 'Pago por vencer' ? 'text-warning' :
-          'text-muted'
-        }`}>
-          Pago: {utils.formatearFecha(expediente.proximoPago)}
-        </small>
+const EstadoPago = React.memo(({ expediente }) => {
+  // Determinar si el pago está vencido
+  const fechaPago = expediente.proximoPago || expediente.fecha_pago;
+  const hoy = new Date();
+  const fechaPagoDate = fechaPago ? new Date(fechaPago) : null;
+  const estaVencido = fechaPagoDate && fechaPagoDate < hoy && expediente.estatusPago !== 'Pagado';
+  
+  return (
+    <div>
+      {/* Tipo de Pago */}
+      <div className="mb-1">
+        <small className="text-muted">Tipo:</small>
+        <br />
+        <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+        {expediente.frecuenciaPago && (
+          <span className="ms-1">
+            <small className="text-muted">({expediente.frecuenciaPago})</small>
+          </span>
+        )}
       </div>
-    )}
-  </div>
-));
+
+      {/* Estatus de Pago */}
+      <div className="mb-1">
+        <small className="text-muted">Estatus:</small>
+        <br />
+        <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+      </div>
+
+      {/* Fecha de Pago (solo si está pendiente) */}
+      {fechaPago && expediente.estatusPago !== 'Pagado' && (
+        <div>
+          <small className="text-muted">Fecha pago:</small>
+          <br />
+          <small className={`${
+            estaVencido ? 'text-danger fw-bold' :
+            expediente.estatusPago === 'Pago por vencer' ? 'text-warning fw-semibold' :
+            'text-secondary'
+          }`}>
+            {estaVencido && '⚠️ '}
+            {utils.formatearFecha(fechaPago)}
+          </small>
+        </div>
+      )}
+    </div>
+  );
+});
 
 const CalendarioPagos = React.memo(({ 
   expediente, 
@@ -676,30 +702,58 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
         };
         
-        // ==================== INFORMACIÓN DEL ASEGURADO ====================
+        // ==================== RFC (PRIMERO - para determinar tipo de persona) ====================
+        // RFC puede ser:
+        // - Persona Física: 4 letras + 6 dígitos + 3 caracteres (AAAA######XXX) - 13 caracteres
+        // - Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
+        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
+        const rfcExtraido = rfcMatch ? rfcMatch[1] : '';
+        const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
+        
+        console.log('🔍 RFC extraído:', rfcExtraido, '- Longitud:', rfcExtraido.length, '- Tipo:', tipoPersona);
+        
+        // ==================== INFORMACIÓN DEL ASEGURADO (según tipo de persona) ====================
         let nombre = '';
         let apellido_paterno = '';
         let apellido_materno = '';
+        let razonSocial = '';
         
-        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,3})/i);
+        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
         if (nombreMatch) {
-          const palabras = nombreMatch[1].trim().split(/\s+/);
-          console.log('📝 Palabras del nombre:', palabras);
+          const nombreCompleto = nombreMatch[1].trim();
           
-          if (palabras.length === 4) {
-            nombre = `${palabras[0]} ${palabras[1]}`;
-            apellido_paterno = palabras[2];
-            apellido_materno = palabras[3];
-          } else if (palabras.length === 3) {
-            nombre = palabras[0];
-            apellido_paterno = palabras[1];
-            apellido_materno = palabras[2];
-          } else if (palabras.length === 2) {
-            nombre = palabras[0];
-            apellido_paterno = palabras[1];
+          if (tipoPersona === 'Moral') {
+            // Persona Moral: TODO es razón social
+            razonSocial = nombreCompleto;
+            console.log('🏢 Razón Social (Persona Moral):', razonSocial);
+          } else {
+            // Persona Física: Separar en nombre y apellidos
+            const palabras = nombreCompleto.split(/\s+/);
+            console.log('📝 Palabras del nombre (Persona Física):', palabras);
+            
+            if (palabras.length === 4) {
+              nombre = `${palabras[0]} ${palabras[1]}`;
+              apellido_paterno = palabras[2];
+              apellido_materno = palabras[3];
+            } else if (palabras.length === 3) {
+              nombre = palabras[0];
+              apellido_paterno = palabras[1];
+              apellido_materno = palabras[2];
+            } else if (palabras.length === 2) {
+              nombre = palabras[0];
+              apellido_paterno = palabras[1];
+            } else {
+              nombre = palabras[0] || nombreCompleto;
+            }
+            console.log('👤 Nombre (Persona Física):', { nombre, apellido_paterno, apellido_materno });
           }
-          console.log('✅ Nombre:', { nombre, apellido_paterno, apellido_materno });
         }
+        
+        // ==================== DOMICILIO ====================
+        // Capturar solo hasta antes de "R.F.C:" para evitar incluir el RFC
+        const domicilioMatch = textoCompleto.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
+        const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
+        console.log('🏠 Domicilio extraído:', domicilio);
         
         // ==================== AGENTE (buscar en ambas páginas) ====================
         let agente = '';
@@ -741,19 +795,36 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const planMatch = textoCompleto.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
         
         // ==================== RFC ====================
-        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z]{4}\d{6}[A-Z0-9]{3})/i);
         
-        // ==================== CURP ====================
+        // ==================== CURP (solo para Persona Física) ====================
         const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
         
         // ==================== VEHÍCULO ====================
         const descripcionMatch = textoCompleto.match(/(\d{5})\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z\s0-9\.]+?)(?=Tipo:|$)/i);
         const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i); // Al menos 5 caracteres, no captura "Color"
+        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i);
         const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
         const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]+)/i);
-        // Buscar color después de "Color:" pero antes de "Placas" o salto de línea
         const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
+        
+        // Extracción alternativa más específica para marca y modelo
+        let marca = '';
+        let modeloCompleto = '';
+        
+        if (descripcionMatch) {
+          marca = descripcionMatch[2];
+          modeloCompleto = descripcionMatch[3].trim();
+        } else {
+          // Buscar patrón alternativo: después del código y (I) viene MARCA MODELO
+          const altMatch = textoCompleto.match(/\d{4,5}\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z0-9\s\.]+?)(?=\s*Tipo:|\s*Serie:|\n)/i);
+          if (altMatch) {
+            marca = altMatch[1];
+            modeloCompleto = altMatch[2].trim();
+          }
+        }
+        
+        console.log('🚗 Marca extraída:', marca);
+        console.log('🚗 Modelo extraído:', modeloCompleto);
         
         // ==================== VIGENCIA ====================
         const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
@@ -777,6 +848,95 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('⚠️ No se pudo extraer ni calcular fecha de pago');
         }
         
+        // ==================== COBERTURAS ====================
+        console.log('🛡️ Extrayendo coberturas...');
+        
+        // Buscar la sección de coberturas contratadas
+        const coberturasSeccion = textoCompleto.match(/COBERTURAS\s+CONTRATADAS\s+SUMA\s+ASEGURADA\s+DEDUCIBLE\s+\$\s+PRIMAS([\s\S]*?)(?=Para\s+RC\s+en\s+el\s+extranjero|Quedan\s+excluidos|Textos:|Forma\s+de|$)/i);
+        
+        let coberturasExtraidas = [];
+        
+        if (coberturasSeccion) {
+          const textoCobertura = coberturasSeccion[1];
+          console.log('📋 Texto de coberturas encontrado:', textoCobertura.substring(0, 500));
+          
+          // Extraer cada línea de cobertura
+          // Formato 1: Nombre $monto deducible% prima
+          // Formato 2: Nombre $monto POR EVENTO deducible prima
+          // Formato 3: Nombre AMPARADA prima
+          
+          const lineas = textoCobertura.split('\n').filter(l => l.trim().length > 0);
+          
+          for (const linea of lineas) {
+            const lineaLimpia = linea.trim();
+            if (!lineaLimpia) continue;
+            
+            // Patrón 1: Cobertura con monto y deducible porcentual
+            // Ej: "Daños materiales $ 631,350.00 5% 12,972.86"
+            let match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+(\d+)%\s+([\d,]+\.?\d*)/i);
+            if (match) {
+              coberturasExtraidas.push({
+                nombre: match[1].trim(),
+                suma_asegurada: match[2].replace(/,/g, ''),
+                deducible: match[3] + '%',
+                prima: match[4].replace(/,/g, ''),
+                tipo: 'monto'
+              });
+              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} - ${match[3]}%`);
+              continue;
+            }
+            
+            // Patrón 2: Cobertura POR EVENTO con deducible
+            // Ej: "Responsabilidad Civil por Daños a Terceros $ 3,000,000.00 POR EVENTO 0 uma 1,983.96"
+            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+POR\s+EVENTO\s+(.+?)\s+([\d,]+\.?\d*)/i);
+            if (match) {
+              coberturasExtraidas.push({
+                nombre: match[1].trim(),
+                suma_asegurada: match[2].replace(/,/g, ''),
+                deducible: match[3].trim(),
+                prima: match[4].replace(/,/g, ''),
+                tipo: 'por_evento'
+              });
+              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} POR EVENTO`);
+              continue;
+            }
+            
+            // Patrón 3: Cobertura AMPARADA
+            // Ej: "Asistencia Vial Qualitas AMPARADA 565.00"
+            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s.]+?)\s+AMPARADA\s+([\d,]+\.?\d*)/i);
+            if (match) {
+              coberturasExtraidas.push({
+                nombre: match[1].trim(),
+                suma_asegurada: 'AMPARADA',
+                deducible: 'N/A',
+                prima: match[2].replace(/,/g, ''),
+                tipo: 'amparada'
+              });
+              console.log(`✅ Cobertura extraída: ${match[1].trim()} - AMPARADA`);
+              continue;
+            }
+            
+            // Patrón 4: Cobertura con monto específico sin deducible porcentual
+            // Ej: "Muerte del Conductor por Accidente Automovilístico $ 100,000.00 122.40"
+            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$/i);
+            if (match) {
+              coberturasExtraidas.push({
+                nombre: match[1].trim(),
+                suma_asegurada: match[2].replace(/,/g, ''),
+                deducible: 'N/A',
+                prima: match[3].replace(/,/g, ''),
+                tipo: 'monto'
+              });
+              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]}`);
+              continue;
+            }
+          }
+          
+          console.log(`📊 Total de coberturas extraídas: ${coberturasExtraidas.length}`);
+        } else {
+          console.log('⚠️ No se encontró la sección de coberturas');
+        }
+        
         // ==================== MONTOS ====================
         const sumaMatch = textoCompleto.match(/Daños\s+materiales\s+\$\s*([\d,]+\.?\d*)/i);
         const primaMatch = textoCompleto.match(/Prima\s+Neta\s+([\d,]+\.?\d*)/i);
@@ -790,13 +950,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         
         datosExtraidos = {
           // ASEGURADO
+          tipo_persona: tipoPersona,
           nombre: nombre,
           apellido_paterno: apellido_paterno,
           apellido_materno: apellido_materno,
-          rfc: rfcMatch ? rfcMatch[1] : '',
+          razonSocial: razonSocial,
+          rfc: rfcExtraido,
           curp: curpMatch ? curpMatch[1] : '',
+          domicilio: domicilio,
           email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
-          telefono_movil: extraerDato(/(\d{10})/i, textoCompleto),
           
           // PÓLIZA
           compania: compania,
@@ -829,8 +991,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           deducible: deducibleMatch ? deducibleMatch[1] : '5',
           
           // VEHÍCULO
-          marca: descripcionMatch ? descripcionMatch[2] : '',
-          modelo: descripcionMatch ? descripcionMatch[3].trim() : '',
+          marca: marca,
+          modelo: modeloCompleto,
           anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
           numero_serie: serieMatch ? serieMatch[1] : '',
           motor: motorMatch ? motorMatch[1] : '',
@@ -839,6 +1001,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
           tipo_vehiculo: 'Automóviles Importados',
           tipo_cobertura: planMatch ? planMatch[1] : 'AMPLIA',
+          
+          // COBERTURAS DETALLADAS
+          coberturas: coberturasExtraidas,
           
           // CONDUCTOR
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
@@ -938,6 +1103,22 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Guardar información del cliente encontrado (o null si no existe)
       setClienteEncontrado(clienteExistente);
       
+      if (clienteExistente) {
+        console.log('🔍 Cliente encontrado en BD:', {
+          id: clienteExistente.id,
+          codigo: clienteExistente.codigo,
+          tipoPersona: clienteExistente.tipoPersona,
+          razonSocial: clienteExistente.razonSocial,
+          nombre: clienteExistente.nombre,
+          apellidoPaterno: clienteExistente.apellidoPaterno,
+          rfc: clienteExistente.rfc,
+          direccion: clienteExistente.direccion,
+          email: clienteExistente.email,
+          telefonoMovil: clienteExistente.telefonoMovil,
+          created_at: clienteExistente.created_at
+        });
+      }
+      
       // Buscar agente en el equipo de trabajo
       let agenteEncontradoEnBD = null;
       if (datosExtraidos.agente && agentes.length > 0) {
@@ -992,18 +1173,46 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Crear cliente automáticamente
       console.log('🔄 Creando nuevo cliente...');
       
-      const nuevoCliente = {
-        nombre: datosExtraidos.nombre || '',
-        apellido_paterno: datosExtraidos.apellido_paterno || '',
-        apellido_materno: datosExtraidos.apellido_materno || '',
-        rfc: datosExtraidos.rfc || '',
-        email: datosExtraidos.email || '',
-        telefono_movil: datosExtraidos.telefono_movil || '',
-        telefono_fijo: datosExtraidos.telefono_fijo || '',
-        tipo_persona: datosExtraidos.rfc?.length === 13 ? 'Física' : 'Moral',
-        categoria: 'Regular',
-        estado: 'Activo'
-      };
+      // Usar tipo de persona ya detectado en la extracción
+      const tipoPersonaDetectado = datosExtraidos.tipo_persona === 'Moral' ? 'Persona Moral' : 'Persona Física';
+      
+      // Preparar datos según tipo de persona
+      let nuevoCliente = {};
+      
+      if (tipoPersonaDetectado === 'Persona Moral') {
+        // Para empresas: usar razón social directamente extraída
+        nuevoCliente = {
+          tipoPersona: tipoPersonaDetectado,
+          razonSocial: datosExtraidos.razonSocial || 'Empresa',
+          rfc: datosExtraidos.rfc || '',
+          direccion: datosExtraidos.domicilio || '',
+          email: datosExtraidos.email || '',
+          activo: true
+        };
+      } else {
+        // Para personas físicas: usar nombre y apellidos
+        nuevoCliente = {
+          tipoPersona: tipoPersonaDetectado,
+          nombre: datosExtraidos.nombre || '',
+          apellidoPaterno: datosExtraidos.apellido_paterno || '',
+          apellidoMaterno: datosExtraidos.apellido_materno || '',
+          rfc: datosExtraidos.rfc || '',
+          direccion: datosExtraidos.domicilio || '',
+          email: datosExtraidos.email || '',
+          activo: true
+        };
+      }
+      
+      console.log('📋 Datos del cliente a crear:');
+      console.log('   - Tipo persona:', tipoPersonaDetectado);
+      console.log('   - RFC:', datosExtraidos.rfc, '(longitud:', datosExtraidos.rfc?.length, ')');
+      if (tipoPersonaDetectado === 'Persona Moral') {
+        console.log('   - Razón Social:', nuevoCliente.razonSocial);
+      } else {
+        console.log('   - Nombre:', nuevoCliente.nombre);
+        console.log('   - Apellidos:', nuevoCliente.apellidoPaterno, nuevoCliente.apellidoMaterno);
+      }
+      console.log('   - JSON completo:', JSON.stringify(nuevoCliente, null, 2));
       
       const { crearCliente } = await import('../services/clientesService');
       const resultado = await crearCliente(nuevoCliente);
@@ -1166,8 +1375,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                   <div className="card-body">
                     <div className="row g-3">
                       <div className="col-12">
-                        <strong className="d-block mb-1">Nombre Completo:</strong>
-                        <p className="mb-0">{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</p>
+                        <strong className="d-block mb-1">
+                          {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social:' : 'Nombre Completo:'}
+                        </strong>
+                        <p className="mb-0">
+                          {datosExtraidos.tipo_persona === 'Moral' 
+                            ? datosExtraidos.razonSocial 
+                            : `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim()
+                          }
+                        </p>
                       </div>
                       {datosExtraidos.rfc && (
                         <div className="col-md-6">
@@ -1175,16 +1391,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                           <p className="mb-0">{datosExtraidos.rfc}</p>
                         </div>
                       )}
+                      {datosExtraidos.domicilio && (
+                        <div className="col-12">
+                          <strong className="d-block mb-1">Dirección:</strong>
+                          <p className="mb-0">{datosExtraidos.domicilio}</p>
+                        </div>
+                      )}
                       {datosExtraidos.email && (
                         <div className="col-md-6">
                           <strong className="d-block mb-1">Email:</strong>
                           <p className="mb-0">{datosExtraidos.email}</p>
-                        </div>
-                      )}
-                      {datosExtraidos.telefono_movil && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">Teléfono:</strong>
-                          <p className="mb-0">{datosExtraidos.telefono_movil}</p>
                         </div>
                       )}
                     </div>
@@ -1214,9 +1430,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                           </div>
 
                           <div className="col-12">
-                            <small className="text-muted d-block">Nombre Completo</small>
+                            <small className="text-muted d-block">
+                              {clienteEncontrado.tipoPersona === 'Persona Moral' ? 'Razón Social' : 'Nombre Completo'}
+                            </small>
                             <strong>
-                              {clienteEncontrado.nombre} {clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} {clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}
+                              {clienteEncontrado.tipoPersona === 'Persona Moral' 
+                                ? (clienteEncontrado.razonSocial || clienteEncontrado.nombre || 'N/A')
+                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} ${clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}`.trim()
+                              }
                             </strong>
                           </div>
 
@@ -1615,24 +1836,59 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                       <div className="col-12">
                         <div className="p-3 bg-warning bg-opacity-10 rounded">
                           <h6 className="text-warning-emphasis mb-3">🛡️ COBERTURAS CONTRATADAS</h6>
-                          <div className="row g-2">
-                            <div className="col-md-4">
-                              <small className="text-muted">Tipo de Cobertura:</small><br/>
-                              <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
+                          
+                          {datosExtraidos.coberturas && datosExtraidos.coberturas.length > 0 ? (
+                            <div className="table-responsive">
+                              <table className="table table-sm table-hover mb-0">
+                                <thead className="table-light">
+                                  <tr>
+                                    <th>Cobertura</th>
+                                    <th className="text-end">Suma Asegurada</th>
+                                    <th className="text-center">Deducible</th>
+                                    <th className="text-end">Prima</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {datosExtraidos.coberturas.map((cob, idx) => (
+                                    <tr key={idx}>
+                                      <td className="fw-medium">{cob.nombre}</td>
+                                      <td className="text-end">
+                                        {cob.suma_asegurada === 'AMPARADA' ? (
+                                          <span className="badge bg-success">AMPARADA</span>
+                                        ) : (
+                                          `$${parseFloat(cob.suma_asegurada).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                        )}
+                                        {cob.tipo === 'por_evento' && <small className="d-block text-muted">POR EVENTO</small>}
+                                      </td>
+                                      <td className="text-center">
+                                        <span className="badge bg-secondary">{cob.deducible}</span>
+                                      </td>
+                                      <td className="text-end">
+                                        ${parseFloat(cob.prima).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
                             </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">Suma Asegurada:</small><br/>
-                              <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
+                          ) : (
+                            <div className="row g-2">
+                              <div className="col-md-4">
+                                <small className="text-muted">Tipo de Cobertura:</small><br/>
+                                <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
+                              </div>
+                              <div className="col-md-4">
+                                <small className="text-muted">Suma Asegurada:</small><br/>
+                                <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
+                              </div>
+                              <div className="col-md-4">
+                                <small className="text-muted">Deducible:</small><br/>
+                                <strong>{datosExtraidos.deducible}%</strong>
+                              </div>
                             </div>
-                            <div className="col-md-4">
-                              <small className="text-muted">Deducible:</small><br/>
-                              <strong>{datosExtraidos.deducible}%</strong>
-                            </div>
-                          </div>
+                          )}
                         </div>
-                      </div>
-
-                      {/* INFORMACIÓN FINANCIERA */}
+                      </div>                      {/* INFORMACIÓN FINANCIERA */}
                       <div className="col-12">
                         <div className="p-3 bg-secondary bg-opacity-10 rounded">
                           <h6 className="text-secondary mb-3">💰 INFORMACIÓN FINANCIERA</h6>
@@ -2095,19 +2351,49 @@ const Formulario = React.memo(({
         // Cliente NO existe - Crear automáticamente
         console.log('🔄 Cliente no encontrado. Creando automáticamente...');
         
-        const nuevoCliente = {
-          nombre: datosExtraidos.nombre || '',
-          apellido_paterno: datosExtraidos.apellido_paterno || '',
-          apellido_materno: datosExtraidos.apellido_materno || '',
-          rfc: datosExtraidos.rfc || '',
-          email: datosExtraidos.email || '',
-          telefono_movil: datosExtraidos.telefono_movil || '',
-          telefono_fijo: datosExtraidos.telefono_fijo || '',
-          // Campos adicionales con valores por defecto
-          tipo_persona: datosExtraidos.rfc?.length === 13 ? 'Física' : 'Moral',
-          categoria: 'Regular',
-          estado: 'Activo'
-        };
+        // Detectar tipo de persona de manera robusta
+        let tipoPersonaDetectado = 'Persona Física'; // Por defecto
+        if (datosExtraidos.rfc && datosExtraidos.rfc.trim().length > 0) {
+          const rfcLimpio = datosExtraidos.rfc.trim();
+          if (rfcLimpio.length === 13) {
+            tipoPersonaDetectado = 'Persona Física';
+          } else if (rfcLimpio.length === 12) {
+            tipoPersonaDetectado = 'Persona Moral';
+          }
+        }
+        
+        // Preparar datos según tipo de persona
+        let nuevoCliente = {};
+        
+        if (tipoPersonaDetectado === 'Persona Moral') {
+          // Para empresas: usar razón social (nombre completo concatenado)
+          const razonSocial = `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim() || 'Empresa';
+          nuevoCliente = {
+            tipoPersona: tipoPersonaDetectado,
+            razonSocial: razonSocial,
+            rfc: datosExtraidos.rfc || '',
+            direccion: datosExtraidos.domicilio || '',
+            email: datosExtraidos.email || '',
+            activo: true
+          };
+        } else {
+          // Para personas físicas: usar nombre y apellidos
+          nuevoCliente = {
+            tipoPersona: tipoPersonaDetectado,
+            nombre: datosExtraidos.nombre || '',
+            apellidoPaterno: datosExtraidos.apellido_paterno || '',
+            apellidoMaterno: datosExtraidos.apellido_materno || '',
+            rfc: datosExtraidos.rfc || '',
+            direccion: datosExtraidos.domicilio || '',
+            email: datosExtraidos.email || '',
+            activo: true
+          };
+        }
+        
+        console.log('📋 Datos del cliente a crear:', nuevoCliente);
+        console.log('🔍 RFC extraído:', datosExtraidos.rfc, '- Longitud:', datosExtraidos.rfc?.length);
+        console.log('✅ Tipo de persona detectado:', tipoPersonaDetectado);
+        console.log('🚀 Enviando al backend:', JSON.stringify(nuevoCliente, null, 2));
         
         // Importar el servicio de clientes
         const { crearCliente } = await import('../services/clientesService');
@@ -2185,6 +2471,27 @@ const Formulario = React.memo(({
         'producto': nuevoFormulario.producto
       });
       
+      console.log('🚗 DEBUG - Datos del vehículo extraídos:', {
+        'marca': datosExtraidos.marca,
+        'modelo': datosExtraidos.modelo,
+        'anio': datosExtraidos.anio,
+        'numero_serie': datosExtraidos.numero_serie,
+        'motor': datosExtraidos.motor,
+        'placas': datosExtraidos.placas,
+        'color': datosExtraidos.color,
+        'tipo_vehiculo': datosExtraidos.tipo_vehiculo,
+        'tipo_cobertura': datosExtraidos.tipo_cobertura
+      });
+      
+      console.log('🔍 DEBUG - Producto extraído:', datosExtraidos.producto);
+      console.log('🔍 DEBUG - nuevoFormulario.producto:', nuevoFormulario.producto);
+      console.log('🔍 DEBUG - nuevoFormulario completo:', {
+        marca: nuevoFormulario.marca,
+        modelo: nuevoFormulario.modelo,
+        anio: nuevoFormulario.anio,
+        numero_serie: nuevoFormulario.numero_serie
+      });
+      
       setFormulario(nuevoFormulario);
       
       // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
@@ -2194,9 +2501,21 @@ const Formulario = React.memo(({
           setFormulario(prev => ({
             ...prev,
             ...formularioConCalculos,
+            // Preservar datos importantes que no deben cambiar
             compania: datosExtraidos.compania,
             producto: datosExtraidos.producto,
-            agente: agenteCodigo || ''
+            agente: agenteCodigo || '',
+            // Preservar datos del vehículo
+            marca: datosExtraidos.marca,
+            modelo: datosExtraidos.modelo,
+            anio: datosExtraidos.anio,
+            numero_serie: datosExtraidos.numero_serie,
+            motor: datosExtraidos.motor,
+            placas: datosExtraidos.placas,
+            color: datosExtraidos.color,
+            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
+            tipo_cobertura: datosExtraidos.tipo_cobertura,
+            codigo_vehiculo: datosExtraidos.codigo_vehiculo
           }));
           console.log('✅ Cálculos automáticos aplicados, estatusPago:', formularioConCalculos.estatusPago);
         }, 150);
@@ -2207,9 +2526,20 @@ const Formulario = React.memo(({
             ...prev,
             compania: datosExtraidos.compania,
             producto: datosExtraidos.producto,
-            agente: agenteCodigo || ''
+            agente: agenteCodigo || '',
+            // Preservar datos del vehículo también en este caso
+            marca: datosExtraidos.marca,
+            modelo: datosExtraidos.modelo,
+            anio: datosExtraidos.anio,
+            numero_serie: datosExtraidos.numero_serie,
+            motor: datosExtraidos.motor,
+            placas: datosExtraidos.placas,
+            color: datosExtraidos.color,
+            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
+            tipo_cobertura: datosExtraidos.tipo_cobertura,
+            codigo_vehiculo: datosExtraidos.codigo_vehiculo
           }));
-          console.log('✅ Valores forzados después del render');
+          console.log('✅ Valores forzados después del render (incluyendo vehículo)');
         }, 100);
       }
       
@@ -2432,7 +2762,7 @@ const Formulario = React.memo(({
                   value={formulario.producto}
                   onChange={(e) => {
                     const nuevoProducto = e.target.value;
-                    if (formulario.producto === 'Autos' && nuevoProducto !== 'Autos') {
+                    if (formulario.producto === 'Autos Individual' && nuevoProducto !== 'Autos') {
                       setFormulario(prev => ({
                         ...prev, 
                         producto: nuevoProducto,
@@ -2478,7 +2808,7 @@ const Formulario = React.memo(({
             </div>
           </div>
 
-          {formulario.producto === 'Autos' && (
+          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
             <div className="alert alert-info mb-4">
               <h6 className="alert-heading">
                 <AlertCircle className="me-2" size={20} />
@@ -2487,6 +2817,195 @@ const Formulario = React.memo(({
               <p className="mb-0">
                 Se han habilitado campos adicionales específicos para el seguro de automóviles.
               </p>
+            </div>
+          )}
+
+          {/* Datos del Vehículo - Solo si es Autos */}
+          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
+            <div className="mb-4">
+              <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
+              <div className="row g-3">
+                <div className="col-md-4">
+                  <label className="form-label">Marca</label>
+                  <select
+                    className="form-select"
+                    value={formulario.marca}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, marca: e.target.value }))}
+                  >
+                    <option value="">Seleccionar marca</option>
+                    {marcasVehiculo.map(marca => (
+                      <option key={marca} value={marca}>{marca}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Modelo</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.modelo}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, modelo: e.target.value }))}
+                    placeholder="Ej: Civic, Jetta, etc."
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Año</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={formulario.anio}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, anio: e.target.value }))}
+                    min={CONSTANTS.MIN_YEAR}
+                    max={CONSTANTS.MAX_YEAR}
+                    placeholder="Ej: 2023"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Número de Serie (VIN)</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.numero_serie}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_serie: e.target.value.toUpperCase() }))}
+                    placeholder={`${CONSTANTS.VIN_LENGTH} caracteres`}
+                    maxLength={CONSTANTS.VIN_LENGTH}
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Placas</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.placas}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, placas: e.target.value.toUpperCase() }))}
+                    placeholder="Ej: ABC-123"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Color</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.color}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, color: e.target.value }))}
+                    placeholder="Ej: Rojo, Azul, etc."
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Tipo de Vehículo</label>
+                  <select
+                    className="form-select"
+                    value={formulario.tipo_vehiculo}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_vehiculo: e.target.value }))}
+                  >
+                    <option value="">Seleccionar tipo</option>
+                    {tiposVehiculo.map(tipo => (
+                      <option key={tipo} value={tipo}>{tipo}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Datos de la Póliza - Solo si es Autos */}
+          {formulario.producto === 'Autos Individual' && (
+            <div className="mb-4">
+              <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
+              <div className="row g-3">
+                <div className="col-md-6">
+                  <label className="form-label">Número de Póliza</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.numero_poliza}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_poliza: e.target.value }))}
+                    placeholder="Número asignado por la aseguradora"
+                  />
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Tipo de Cobertura</label>
+                  <select
+                    className="form-select"
+                    value={formulario.tipo_cobertura}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_cobertura: e.target.value }))}
+                  >
+                    <option value="">Seleccionar cobertura</option>
+                    {tiposCobertura.map(tipo => (
+                      <option key={tipo} value={tipo}>{tipo}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Deducible</label>
+                  <div className="input-group">
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={formulario.deducible}
+                      onChange={(e) => setFormulario(prev => ({ ...prev, deducible: e.target.value }))}
+                      placeholder="Porcentaje o monto"
+                      step="0.01"
+                    />
+                    <span className="input-group-text">%</span>
+                  </div>
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Suma Asegurada</label>
+                  <div className="input-group">
+                    <span className="input-group-text">$</span>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={formulario.suma_asegurada}
+                      onChange={(e) => setFormulario(prev => ({ ...prev, suma_asegurada: e.target.value }))}
+                      placeholder="Valor del vehículo"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Datos del Conductor - Solo si es Autos */}
+          {formulario.producto === 'Autos Individual' && (
+            <div className="mb-4">
+              <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
+              <div className="row g-3">
+                <div className="col-md-4">
+                  <label className="form-label">Conductor Habitual</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.conductor_habitual}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, conductor_habitual: e.target.value }))}
+                    placeholder="Nombre completo"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Edad del Conductor</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={formulario.edad_conductor}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, edad_conductor: e.target.value }))}
+                    placeholder="Años"
+                    min="18"
+                    max="99"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Licencia de Conducir</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.licencia_conducir}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, licencia_conducir: e.target.value.toUpperCase() }))}
+                    placeholder="Número de licencia"
+                  />
+                </div>
+              </div>
             </div>
           )}
 
@@ -2605,7 +3124,7 @@ const Formulario = React.memo(({
           </div>
 
           {/* Datos del Vehículo - Solo si es Autos */}
-          {formulario.producto === 'Autos' && (
+          {formulario.producto === 'Autos Individual' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
               <div className="row g-3">
@@ -2693,7 +3212,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos de la Póliza - Solo si es Autos */}
-          {formulario.producto === 'Autos' && (
+          {formulario.producto === 'Autos Individual' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
               <div className="row g-3">
@@ -2753,7 +3272,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Conductor - Solo si es Autos */}
-          {formulario.producto === 'Autos' && (
+          {formulario.producto === 'Autos Individual' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
               <div className="row g-3">
@@ -3400,13 +3919,15 @@ const estadoInicialFormulario = {
     if (tipo_pago === 'Anual') return '';
     
     if (tipo_pago === 'Fraccionado' && frecuenciaPago) {
-      const fechaPrimerPago = new Date(fechaInicio);
-      fechaPrimerPago.setDate(fechaPrimerPago.getDate() + periodoGracia);
-      
+      // CORRECCIÓN: Los pagos subsecuentes se calculan desde la fecha de inicio SIN período de gracia
+      // Pago 2: inicio + 1 mes
+      // Pago 3: inicio + 2 meses
+      // etc.
+      const fechaPagoSubsecuente = new Date(fechaInicio);
       const mesesAAgregar = (numeroPago - 1) * CONSTANTS.MESES_POR_FRECUENCIA[frecuenciaPago];
-      fechaPrimerPago.setMonth(fechaPrimerPago.getMonth() + mesesAAgregar);
+      fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
       
-      return fechaPrimerPago.toISOString().split('T')[0];
+      return fechaPagoSubsecuente.toISOString().split('T')[0];
     }
     
     return '';
@@ -3449,7 +3970,15 @@ const estadoInicialFormulario = {
     // Calcular periodo de gracia automáticamente
     const periodoGracia = formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30;
     
-    return { ...formularioActual, termino_vigencia, proximoPago, estatusPago, periodo_gracia: periodoGracia };
+    // Incluir fecha_pago con el mismo valor que proximoPago para mantener consistencia
+    return { 
+      ...formularioActual, 
+      termino_vigencia, 
+      proximoPago, 
+      fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
+      estatusPago, 
+      periodo_gracia: periodoGracia 
+    };
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
 
   const obtenerSiguienteEstado = useCallback((estadoActual) => {
@@ -3666,7 +4195,7 @@ const estadoInicialFormulario = {
       }
     }
 
-    if (formulario.producto === 'Autos') {
+    if (formulario.producto === 'Autos Individual') {
       if (!formulario.marca || !formulario.modelo || !formulario.anio) {
         alert('Para seguros de Autos, complete: Marca, Modelo y Año');
         return false;
@@ -3691,6 +4220,14 @@ const estadoInicialFormulario = {
     if (!validarFormulario()) return;
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
+    
+    console.log('💾 Guardando expediente con cálculos:', {
+      estatusPago: formularioConCalculos.estatusPago,
+      proximoPago: formularioConCalculos.proximoPago,
+      tipo_pago: formularioConCalculos.tipo_pago,
+      fecha_pago: formularioConCalculos.fecha_pago
+    });
+    
     // Normalizar apellidos para backend
     const expedientePayload = {
       ...formularioConCalculos
