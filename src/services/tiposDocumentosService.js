@@ -3,8 +3,6 @@
 // Descripción: Manejo de tipos de documentos para personas físicas y morales
 // ============================================================================
 
-// src/services/tiposDocumentosService.js
-
 import API_URL from '../constants/apiUrl.js';
 
 // Obtener todos los tipos de documentos
@@ -17,7 +15,7 @@ export const obtenerTiposDocumentos = async () => {
     }
     
     const data = await response.json();
-    console.log('Respuesta completa del backend:', data);
+    console.log('Respuesta completa del backend (tipos documentos):', data);
     
     // Verificar si la respuesta tiene la estructura esperada
     if (data.success && Array.isArray(data.data)) {
@@ -25,6 +23,9 @@ export const obtenerTiposDocumentos = async () => {
     } else if (data.success && data.data && Array.isArray(data.data.data)) {
       // Caso de respuesta anidada
       return { success: true, data: data.data.data };
+    } else if (Array.isArray(data)) {
+      // Si viene directamente como array
+      return { success: true, data };
     } else {
       console.error('Estructura de respuesta inesperada:', data);
       return { success: false, error: 'Formato de respuesta inválido' };
@@ -52,10 +53,10 @@ export const obtenerTiposDocumentosPorTipo = async (tipoPersona) => {
   }
 };
 
-// Obtener tipos de documentos ordenados (para formularios)
-export const obtenerTiposDocumentosOrdenados = async () => {
+// Obtener tipos de documentos activos
+export const obtenerTiposDocumentosActivos = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposDocumentos`);
+    const response = await fetch(`${API_URL}/api/tiposDocumentos/activos`);
     
     if (!response.ok) {
       throw new Error('Error al obtener tipos de documentos activos');

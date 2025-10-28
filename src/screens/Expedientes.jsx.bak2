@@ -30,20 +30,12 @@ const CONSTANTS = {
 const utils = {
   formatearFecha: (fecha, formato = 'corta') => {
     if (!fecha) return '-';
-    
-    // Si la fecha tiene formato ISO (con T), solo tomar la parte de la fecha
-    const fechaSinHora = fecha.includes('T') ? fecha.split('T')[0] : fecha;
-    
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
-      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' },
-      simple: null // Para retornar solo YYYY-MM-DD
+      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     };
-    
-    if (formato === 'simple') return fechaSinHora;
-    
-    return new Date(fechaSinHora).toLocaleDateString('es-MX', opciones[formato]);
+    return new Date(fecha).toLocaleDateString('es-MX', opciones[formato]);
   },
 
   formatearMoneda: (monto) => {
@@ -133,70 +125,42 @@ const CampoFechaCalculada = React.memo(({
   </div>
 ));
 
-const InfoCliente = React.memo(({ expediente }) => {
-  return (
-    <div>
-      <div className="fw-semibold">
-        {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
-      </div>
-      <small className="text-muted">{expediente.email}</small>
-      {expediente.producto === 'Autos' && expediente.marca && (
-        <div>
-          <small className="text-primary">
-            🚗 {expediente.marca} {expediente.modelo} {expediente.año}
-          </small>
-        </div>
-      )}
+const InfoCliente = React.memo(({ expediente }) => (
+  <div>
+    <div className="fw-semibold">
+      {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
     </div>
-  );
-});
-
-const EstadoPago = React.memo(({ expediente }) => {
-  // Determinar si el pago está vencido
-  const fechaPago = expediente.proximoPago || expediente.fecha_pago;
-  const hoy = new Date();
-  const fechaPagoDate = fechaPago ? new Date(fechaPago) : null;
-  const estaVencido = fechaPagoDate && fechaPagoDate < hoy && expediente.estatusPago !== 'Pagado';
-  
-  return (
-    <div>
-      {/* Tipo de Pago */}
-      <div className="mb-1">
-        <small className="text-muted">Tipo:</small>
-        <br />
-        <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
-        {expediente.frecuenciaPago && (
-          <span className="ms-1">
-            <small className="text-muted">({expediente.frecuenciaPago})</small>
-          </span>
-        )}
+    <small className="text-muted">{expediente.email}</small>
+    {expediente.producto === 'Autos' && expediente.marca && (
+      <div>
+        <small className="text-primary">
+          🚗 {expediente.marca} {expediente.modelo} {expediente.año}
+        </small>
       </div>
+    )}
+  </div>
+));
 
-      {/* Estatus de Pago */}
-      <div className="mb-1">
-        <small className="text-muted">Estatus:</small>
-        <br />
-        <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+const EstadoPago = React.memo(({ expediente }) => (
+  <div>
+    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+    {expediente.frecuenciaPago && (
+      <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
+    )}
+    <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+    {expediente.proximoPago && expediente.estatusPago !== 'Pagado' && (
+      <div>
+        <small className={`${
+          expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
+          expediente.estatusPago === 'Pago por vencer' ? 'text-warning' :
+          'text-muted'
+        }`}>
+          Pago: {utils.formatearFecha(expediente.proximoPago)}
+        </small>
       </div>
-
-      {/* Fecha de Pago (solo si está pendiente) */}
-      {fechaPago && expediente.estatusPago !== 'Pagado' && (
-        <div>
-          <small className="text-muted">Fecha pago:</small>
-          <br />
-          <small className={`${
-            estaVencido ? 'text-danger fw-bold' :
-            expediente.estatusPago === 'Pago por vencer' ? 'text-warning fw-semibold' :
-            'text-secondary'
-          }`}>
-            {estaVencido && '⚠️ '}
-            {utils.formatearFecha(fechaPago)}
-          </small>
-        </div>
-      )}
-    </div>
-  );
-});
+    )}
+  </div>
+));
 
 const CalendarioPagos = React.memo(({ 
   expediente, 
@@ -503,18 +467,12 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 ));
 
 // ============= COMPONENTE EXTRACTOR PDF =============
-const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {
-  const [estado, setEstado] = useState('esperando'); // esperando, procesando, validando-cliente, validando-agente, preview-datos, error
+const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose }) => {
+  const [estado, setEstado] = useState('esperando');
   const [archivo, setArchivo] = useState(null);
   const [datosExtraidos, setDatosExtraidos] = useState(null);
   const [errores, setErrores] = useState([]);
   const [informacionArchivo, setInformacionArchivo] = useState(null);
-  
-  // Estados para el flujo paso a paso
-  const [clienteEncontrado, setClienteEncontrado] = useState(null);
-  const [agenteEncontrado, setAgenteEncontrado] = useState(null);
-  const [decisionCliente, setDecisionCliente] = useState(null); // 'usar-existente', 'crear-nuevo'
-  const [decisionAgente, setDecisionAgente] = useState(null); // 'usar-existente', 'crear-nuevo', 'omitir'
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -583,90 +541,37 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       console.log('📄 Texto página 1 (primeras 20 líneas):\n', textoPagina1.split('\n').slice(0, 20).join('\n'));
       console.log('📄 Texto página 2 (primeras 20 líneas):\n', textoCompleto.split('\n').slice(0, 20).join('\n'));
 
-      // Buscar cliente por RFC, CURP o nombre en la base de datos
-      const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
+      // Buscar cliente por RFC o nombre en la base de datos
+      const buscarClienteExistente = async (rfc, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
-          console.log('🔍 Buscando cliente con:', { rfc, curp, nombre, apellidoPaterno, apellidoMaterno });
-          
           const response = await fetch(`${API_URL}/api/clientes`);
-          if (!response.ok) {
-            console.error('❌ Error al obtener clientes:', response.status);
-            return null;
-          }
+          if (!response.ok) return null;
           
           const clientes = await response.json();
-          console.log(`📊 Total de clientes en BD: ${clientes.length}`);
           
-          // 1. PRIORIDAD 1: Buscar por RFC (más confiable)
-          if (rfc && rfc.trim() !== '') {
-            const rfcBusqueda = rfc.trim().toUpperCase();
-            console.log(`🔍 Buscando por RFC: "${rfcBusqueda}"`);
-            
-            const clientePorRFC = clientes.find(c => {
-              const rfcCliente = (c.rfc || '').trim().toUpperCase();
-              return rfcCliente === rfcBusqueda;
-            });
-            
-            if (clientePorRFC) {
-              console.log('✅ Cliente encontrado por RFC:', clientePorRFC.id, clientePorRFC.nombre);
-              return clientePorRFC;
-            } else {
-              console.log('⚠️ No se encontró cliente con RFC:', rfcBusqueda);
-            }
+          // Buscar por RFC primero (más confiable)
+          if (rfc) {
+            const clientePorRFC = clientes.find(c => 
+              c.rfc && c.rfc.toUpperCase() === rfc.toUpperCase()
+            );
+            if (clientePorRFC) return clientePorRFC;
           }
           
-          // 2. PRIORIDAD 2: Buscar por CURP (si no hay RFC)
-          if (curp && curp.trim() !== '') {
-            const curpBusqueda = curp.trim().toUpperCase();
-            console.log(`🔍 Buscando por CURP: "${curpBusqueda}"`);
-            
-            const clientePorCURP = clientes.find(c => {
-              const curpCliente = (c.curp || '').trim().toUpperCase();
-              return curpCliente === curpBusqueda;
-            });
-            
-            if (clientePorCURP) {
-              console.log('✅ Cliente encontrado por CURP:', clientePorCURP.id, clientePorCURP.nombre);
-              return clientePorCURP;
-            } else {
-              console.log('⚠️ No se encontró cliente con CURP:', curpBusqueda);
-            }
-          }
-          
-          // 3. PRIORIDAD 3: Buscar por nombre completo (último recurso)
+          // Si no hay RFC, buscar por nombre completo
           if (nombre && apellidoPaterno) {
-            const nombreBusqueda = nombre.trim().toUpperCase();
-            const apellidoPaternoBusqueda = apellidoPaterno.trim().toUpperCase();
-            const apellidoMaternoBusqueda = apellidoMaterno ? apellidoMaterno.trim().toUpperCase() : '';
-            
-            console.log(`🔍 Buscando por nombre: "${nombreBusqueda} ${apellidoPaternoBusqueda} ${apellidoMaternoBusqueda}"`);
-            
-            const clientePorNombre = clientes.find(c => {
-              const nombreCliente = (c.nombre || '').trim().toUpperCase();
-              const apellidoPaternoCliente = (c.apellido_paterno || c.apellidoPaterno || '').trim().toUpperCase();
-              const apellidoMaternoCliente = (c.apellido_materno || c.apellidoMaterno || '').trim().toUpperCase();
-              
-              const coincideNombre = nombreCliente === nombreBusqueda;
-              const coincidePaterno = apellidoPaternoCliente === apellidoPaternoBusqueda;
-              const coincideMaterno = !apellidoMaternoBusqueda || 
-                                     !apellidoMaternoCliente || 
-                                     apellidoMaternoCliente === apellidoMaternoBusqueda;
-              
-              return coincideNombre && coincidePaterno && coincideMaterno;
-            });
-            
-            if (clientePorNombre) {
-              console.log('✅ Cliente encontrado por nombre:', clientePorNombre.id, clientePorNombre.nombre);
-              return clientePorNombre;
-            } else {
-              console.log('⚠️ No se encontró cliente con ese nombre');
-            }
+            const clientePorNombre = clientes.find(c => 
+              c.nombre && c.apellido_paterno &&
+              c.nombre.toUpperCase() === nombre.toUpperCase() &&
+              c.apellido_paterno.toUpperCase() === apellidoPaterno.toUpperCase() &&
+              (!apellidoMaterno || !c.apellido_materno || 
+               c.apellido_materno.toUpperCase() === apellidoMaterno.toUpperCase())
+            );
+            if (clientePorNombre) return clientePorNombre;
           }
           
-          console.log('❌ Cliente NO encontrado con ningún criterio');
           return null;
         } catch (error) {
-          console.error('❌ Error buscando cliente:', error);
+          console.error('Error buscando cliente:', error);
           return null;
         }
       };
@@ -704,58 +609,30 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
         };
         
-        // ==================== RFC (PRIMERO - para determinar tipo de persona) ====================
-        // RFC puede ser:
-        // - Persona Física: 4 letras + 6 dígitos + 3 caracteres (AAAA######XXX) - 13 caracteres
-        // - Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
-        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
-        const rfcExtraido = rfcMatch ? rfcMatch[1] : '';
-        const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
-        
-        console.log('🔍 RFC extraído:', rfcExtraido, '- Longitud:', rfcExtraido.length, '- Tipo:', tipoPersona);
-        
-        // ==================== INFORMACIÓN DEL ASEGURADO (según tipo de persona) ====================
+        // ==================== INFORMACIÓN DEL ASEGURADO ====================
         let nombre = '';
         let apellido_paterno = '';
         let apellido_materno = '';
-        let razonSocial = '';
         
-        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
+        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,3})/i);
         if (nombreMatch) {
-          const nombreCompleto = nombreMatch[1].trim();
+          const palabras = nombreMatch[1].trim().split(/\s+/);
+          console.log('📝 Palabras del nombre:', palabras);
           
-          if (tipoPersona === 'Moral') {
-            // Persona Moral: TODO es razón social
-            razonSocial = nombreCompleto;
-            console.log('🏢 Razón Social (Persona Moral):', razonSocial);
-          } else {
-            // Persona Física: Separar en nombre y apellidos
-            const palabras = nombreCompleto.split(/\s+/);
-            console.log('📝 Palabras del nombre (Persona Física):', palabras);
-            
-            if (palabras.length === 4) {
-              nombre = `${palabras[0]} ${palabras[1]}`;
-              apellido_paterno = palabras[2];
-              apellido_materno = palabras[3];
-            } else if (palabras.length === 3) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-              apellido_materno = palabras[2];
-            } else if (palabras.length === 2) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-            } else {
-              nombre = palabras[0] || nombreCompleto;
-            }
-            console.log('👤 Nombre (Persona Física):', { nombre, apellido_paterno, apellido_materno });
+          if (palabras.length === 4) {
+            nombre = `${palabras[0]} ${palabras[1]}`;
+            apellido_paterno = palabras[2];
+            apellido_materno = palabras[3];
+          } else if (palabras.length === 3) {
+            nombre = palabras[0];
+            apellido_paterno = palabras[1];
+            apellido_materno = palabras[2];
+          } else if (palabras.length === 2) {
+            nombre = palabras[0];
+            apellido_paterno = palabras[1];
           }
+          console.log('✅ Nombre:', { nombre, apellido_paterno, apellido_materno });
         }
-        
-        // ==================== DOMICILIO ====================
-        // Capturar solo hasta antes de "R.F.C:" para evitar incluir el RFC
-        const domicilioMatch = textoCompleto.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
-        const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
-        console.log('🏠 Domicilio extraído:', domicilio);
         
         // ==================== AGENTE (buscar en ambas páginas) ====================
         let agente = '';
@@ -793,40 +670,27 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         } else {
           console.log('⚠️ No se encontró línea con 10+6+4 dígitos');
         }
+          
+          if (!polizaNum) {
+            console.log('� Buscando póliza en todo el texto...');
+            console.log('�📄 Texto pág 1 (primeros 500):', textoPagina1.substring(0, 500));
+            console.log('📄 Texto pág 2 (primeros 500):', textoCompleto.substring(0, 500));
+          }
+        }
         
         const planMatch = textoCompleto.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
         
         // ==================== RFC ====================
-        
-        // ==================== CURP (solo para Persona Física) ====================
-        const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
+        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z]{4}\d{6}[A-Z0-9]{3})/i);
         
         // ==================== VEHÍCULO ====================
         const descripcionMatch = textoCompleto.match(/(\d{5})\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z\s0-9\.]+?)(?=Tipo:|$)/i);
         const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i);
+        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i); // Al menos 5 caracteres, no captura "Color"
         const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
         const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]+)/i);
+        // Buscar color después de "Color:" pero antes de "Placas" o salto de línea
         const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
-        
-        // Extracción alternativa más específica para marca y modelo
-        let marca = '';
-        let modeloCompleto = '';
-        
-        if (descripcionMatch) {
-          marca = descripcionMatch[2];
-          modeloCompleto = descripcionMatch[3].trim();
-        } else {
-          // Buscar patrón alternativo: después del código y (I) viene MARCA MODELO
-          const altMatch = textoCompleto.match(/\d{4,5}\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z0-9\s\.]+?)(?=\s*Tipo:|\s*Serie:|\n)/i);
-          if (altMatch) {
-            marca = altMatch[1];
-            modeloCompleto = altMatch[2].trim();
-          }
-        }
-        
-        console.log('🚗 Marca extraída:', marca);
-        console.log('🚗 Modelo extraído:', modeloCompleto);
         
         // ==================== VIGENCIA ====================
         const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
@@ -850,95 +714,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('⚠️ No se pudo extraer ni calcular fecha de pago');
         }
         
-        // ==================== COBERTURAS ====================
-        console.log('🛡️ Extrayendo coberturas...');
-        
-        // Buscar la sección de coberturas contratadas
-        const coberturasSeccion = textoCompleto.match(/COBERTURAS\s+CONTRATADAS\s+SUMA\s+ASEGURADA\s+DEDUCIBLE\s+\$\s+PRIMAS([\s\S]*?)(?=Para\s+RC\s+en\s+el\s+extranjero|Quedan\s+excluidos|Textos:|Forma\s+de|$)/i);
-        
-        let coberturasExtraidas = [];
-        
-        if (coberturasSeccion) {
-          const textoCobertura = coberturasSeccion[1];
-          console.log('📋 Texto de coberturas encontrado:', textoCobertura.substring(0, 500));
-          
-          // Extraer cada línea de cobertura
-          // Formato 1: Nombre $monto deducible% prima
-          // Formato 2: Nombre $monto POR EVENTO deducible prima
-          // Formato 3: Nombre AMPARADA prima
-          
-          const lineas = textoCobertura.split('\n').filter(l => l.trim().length > 0);
-          
-          for (const linea of lineas) {
-            const lineaLimpia = linea.trim();
-            if (!lineaLimpia) continue;
-            
-            // Patrón 1: Cobertura con monto y deducible porcentual
-            // Ej: "Daños materiales $ 631,350.00 5% 12,972.86"
-            let match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+(\d+)%\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3] + '%',
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} - ${match[3]}%`);
-              continue;
-            }
-            
-            // Patrón 2: Cobertura POR EVENTO con deducible
-            // Ej: "Responsabilidad Civil por Daños a Terceros $ 3,000,000.00 POR EVENTO 0 uma 1,983.96"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+POR\s+EVENTO\s+(.+?)\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3].trim(),
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'por_evento'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} POR EVENTO`);
-              continue;
-            }
-            
-            // Patrón 3: Cobertura AMPARADA
-            // Ej: "Asistencia Vial Qualitas AMPARADA 565.00"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s.]+?)\s+AMPARADA\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: 'AMPARADA',
-                deducible: 'N/A',
-                prima: match[2].replace(/,/g, ''),
-                tipo: 'amparada'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - AMPARADA`);
-              continue;
-            }
-            
-            // Patrón 4: Cobertura con monto específico sin deducible porcentual
-            // Ej: "Muerte del Conductor por Accidente Automovilístico $ 100,000.00 122.40"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: 'N/A',
-                prima: match[3].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]}`);
-              continue;
-            }
-          }
-          
-          console.log(`📊 Total de coberturas extraídas: ${coberturasExtraidas.length}`);
-        } else {
-          console.log('⚠️ No se encontró la sección de coberturas');
-        }
-        
         // ==================== MONTOS ====================
         const sumaMatch = textoCompleto.match(/Daños\s+materiales\s+\$\s*([\d,]+\.?\d*)/i);
         const primaMatch = textoCompleto.match(/Prima\s+Neta\s+([\d,]+\.?\d*)/i);
@@ -952,19 +727,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         
         datosExtraidos = {
           // ASEGURADO
-          tipo_persona: tipoPersona,
           nombre: nombre,
           apellido_paterno: apellido_paterno,
           apellido_materno: apellido_materno,
-          razonSocial: razonSocial,
-          rfc: rfcExtraido,
-          curp: curpMatch ? curpMatch[1] : '',
-          domicilio: domicilio,
+          rfc: rfcMatch ? rfcMatch[1] : '',
           email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
+          telefono_movil: extraerDato(/(\d{10})/i, textoCompleto),
           
           // PÓLIZA
-          compania: compania,
-          producto: 'Autos Individual',
+          compania: 'Qualitas',
+          producto: 'Autos',
           etapa_activa: 'Emitida',
           agente: agente,
           sub_agente: '',
@@ -993,8 +765,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           deducible: deducibleMatch ? deducibleMatch[1] : '5',
           
           // VEHÍCULO
-          marca: marca,
-          modelo: modeloCompleto,
+          marca: descripcionMatch ? descripcionMatch[2] : '',
+          modelo: descripcionMatch ? descripcionMatch[3].trim() : '',
           anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
           numero_serie: serieMatch ? serieMatch[1] : '',
           motor: motorMatch ? motorMatch[1] : '',
@@ -1003,9 +775,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
           tipo_vehiculo: 'Automóviles Importados',
           tipo_cobertura: planMatch ? planMatch[1] : 'AMPLIA',
-          
-          // COBERTURAS DETALLADAS
-          coberturas: coberturasExtraidas,
           
           // CONDUCTOR
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
@@ -1028,7 +797,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           
           // DATOS DE LA PÓLIZA
           compania: compania,
-          producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos Individual' : 'Autos Individual',
+          producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos' : 'Autos',
           etapa_activa: 'Emitida',
           agente: extraerDato(/(?:AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s,\.]+?)(?:\n|PÓLIZA)/i, textoCompleto) || '',
           sub_agente: '',
@@ -1087,7 +856,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Buscar cliente existente
       const clienteExistente = await buscarClienteExistente(
         datosExtraidos.rfc,
-        datosExtraidos.curp,
         datosExtraidos.nombre,
         datosExtraidos.apellido_paterno,
         datosExtraidos.apellido_materno
@@ -1101,47 +869,23 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       };
 
       setDatosExtraidos(resultado);
+      setEstado('completado');
       
-      // Guardar información del cliente encontrado (o null si no existe)
-      setClienteEncontrado(clienteExistente);
-      
+      // Mensajes informativos
+      const mensajes = [];
       if (clienteExistente) {
-        console.log('🔍 Cliente encontrado en BD:', {
-          id: clienteExistente.id,
-          codigo: clienteExistente.codigo,
-          tipoPersona: clienteExistente.tipoPersona,
-          razonSocial: clienteExistente.razonSocial,
-          nombre: clienteExistente.nombre,
-          apellidoPaterno: clienteExistente.apellidoPaterno,
-          rfc: clienteExistente.rfc,
-          direccion: clienteExistente.direccion,
-          email: clienteExistente.email,
-          telefonoMovil: clienteExistente.telefonoMovil,
-          created_at: clienteExistente.created_at
-        });
+        mensajes.push(`✅ Cliente encontrado: ${clienteExistente.nombre} ${clienteExistente.apellido_paterno || clienteExistente.apellidoPaterno || ''} (RFC: ${clienteExistente.rfc || 'N/A'})`);
+        mensajes.push(`ℹ️ Los datos del cliente se cargarán automáticamente`);
+      } else {
+        mensajes.push(`⚠️ Cliente NO encontrado en la base de datos`);
+        mensajes.push(`ℹ️ Deberá buscar o crear el cliente manualmente antes de guardar la póliza`);
       }
       
-      // Buscar agente en el equipo de trabajo
-      let agenteEncontradoEnBD = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          agenteEncontradoEnBD = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
-        }
-      }
-      setAgenteEncontrado(agenteEncontradoEnBD);
+      // Mostrar qué datos se extrajeron
+      const datosExtraidosCount = Object.values(datosExtraidos).filter(v => v && v !== '').length;
+      mensajes.push(`📊 Se extrajeron ${datosExtraidosCount} campos del PDF`);
       
-      // Pasar al PASO 1: Validación de Cliente
-      setEstado('validando-cliente');
-      
-      console.log('✅ Datos extraídos. Pasando a validación de cliente...');
-      console.log('  Cliente:', clienteExistente ? 'Encontrado' : 'Nuevo');
-      console.log('  Agente:', agenteEncontradoEnBD ? 'Encontrado' : 'No encontrado');
+      setErrores(mensajes);
 
     } catch (error) {
       console.error('Error al procesar PDF:', error);
@@ -1167,158 +911,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     }
   }, [procesarPDF]);
 
-  // PASO 1: Manejar decisión sobre el cliente
-  const handleDecisionCliente = useCallback(async (decision) => {
-    setDecisionCliente(decision);
-    
-    if (decision === 'crear-nuevo') {
-      // Crear cliente automáticamente
-      console.log('🔄 Creando nuevo cliente...');
-      
-      // Usar tipo de persona ya detectado en la extracción
-      const tipoPersonaDetectado = datosExtraidos.tipo_persona === 'Moral' ? 'Persona Moral' : 'Persona Física';
-      
-      // Preparar datos según tipo de persona
-      let nuevoCliente = {};
-      
-      if (tipoPersonaDetectado === 'Persona Moral') {
-        // Para empresas: usar razón social directamente extraída
-        nuevoCliente = {
-          tipoPersona: tipoPersonaDetectado,
-          razonSocial: datosExtraidos.razonSocial || 'Empresa',
-          rfc: datosExtraidos.rfc || '',
-          direccion: datosExtraidos.domicilio || '',
-          email: datosExtraidos.email || '',
-          activo: true
-        };
-      } else {
-        // Para personas físicas: usar nombre y apellidos
-        nuevoCliente = {
-          tipoPersona: tipoPersonaDetectado,
-          nombre: datosExtraidos.nombre || '',
-          apellidoPaterno: datosExtraidos.apellido_paterno || '',
-          apellidoMaterno: datosExtraidos.apellido_materno || '',
-          rfc: datosExtraidos.rfc || '',
-          direccion: datosExtraidos.domicilio || '',
-          email: datosExtraidos.email || '',
-          activo: true
-        };
-      }
-      
-      console.log('📋 Datos del cliente a crear:');
-      console.log('   - Tipo persona:', tipoPersonaDetectado);
-      console.log('   - RFC:', datosExtraidos.rfc, '(longitud:', datosExtraidos.rfc?.length, ')');
-      if (tipoPersonaDetectado === 'Persona Moral') {
-        console.log('   - Razón Social:', nuevoCliente.razonSocial);
-      } else {
-        console.log('   - Nombre:', nuevoCliente.nombre);
-        console.log('   - Apellidos:', nuevoCliente.apellidoPaterno, nuevoCliente.apellidoMaterno);
-      }
-      console.log('   - JSON completo:', JSON.stringify(nuevoCliente, null, 2));
-      
-      const { crearCliente } = await import('../services/clientesService');
-      const resultado = await crearCliente(nuevoCliente);
-      
-      if (resultado.success) {
-        setClienteEncontrado(resultado.data);
-        console.log('✅ Cliente creado:', resultado.data.nombre);
-      } else {
-        setErrores(['❌ Error al crear cliente: ' + resultado.error]);
-        setEstado('error');
-        return;
-      }
-    }
-    
-    // Pasar al PASO 2: Validación de Agente
-    setEstado('validando-agente');
-  }, [datosExtraidos]);
-
-  // PASO 2: Manejar decisión sobre el agente
-  const handleDecisionAgente = useCallback(async (decision) => {
-    setDecisionAgente(decision);
-    
-    if (decision === 'crear-nuevo') {
-      console.log('🔄 Creando nuevo agente...');
-      
-      // Extraer código y nombre del agente del string "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      const agenteTexto = datosExtraidos.agente || '';
-      const codigoMatch = agenteTexto.match(/^(\d+)/);
-      const nombreCompletoMatch = agenteTexto.match(/\d+\s*-\s*(.+)$/);
-      
-      if (!codigoMatch || !nombreCompletoMatch) {
-        console.error('❌ No se pudo extraer información del agente');
-        alert('No se pudo extraer la información del agente del PDF. Deberás crear el agente manualmente desde el módulo de Equipo de Trabajo.');
-        // Continuar sin crear el agente
-        setEstado('preview-datos');
-        return;
-      }
-      
-      const codigo = codigoMatch[1];
-      const nombreCompleto = nombreCompletoMatch[1].trim();
-      const palabras = nombreCompleto.split(/\s+/);
-      
-      let nombre = '', apellidoPaterno = '', apellidoMaterno = '';
-      if (palabras.length >= 4) {
-        nombre = palabras.slice(0, -2).join(' ');
-        apellidoPaterno = palabras[palabras.length - 2];
-        apellidoMaterno = palabras[palabras.length - 1];
-      } else if (palabras.length === 3) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-        apellidoMaterno = palabras[2];
-      } else if (palabras.length === 2) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-      }
-      
-      try {
-        const nuevoAgente = {
-          codigo: codigo,
-          nombre: nombre,
-          apellidoPaterno: apellidoPaterno,
-          apellidoMaterno: apellidoMaterno,
-          perfil: 'Agente',
-          activo: true,
-          fechaIngreso: new Date().toISOString().split('T')[0],
-          fechaRegistro: new Date().toISOString().split('T')[0],
-          productosAseguradoras: []
-        };
-        
-        const { crearMiembroEquipo } = await import('../services/equipoDeTrabajoService');
-        const resultado = await crearMiembroEquipo(nuevoAgente);
-        
-        if (resultado.success) {
-          setAgenteEncontrado(resultado.data);
-          console.log('✅ Agente creado:', resultado.data.nombre);
-          alert(`✅ Agente creado exitosamente: ${nombre} ${apellidoPaterno}`);
-        } else {
-          throw new Error(resultado.error);
-        }
-      } catch (error) {
-        console.error('❌ Error al crear agente:', error);
-        alert(`⚠️ No se pudo crear el agente automáticamente.\n\nDeberás agregarlo manualmente desde el módulo "Equipo de Trabajo".\n\nDatos del agente:\n- Código: ${codigo}\n- Nombre: ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
-        // Continuar sin el agente
-      }
-    }
-    
-    // Pasar al PASO 3: Preview de todos los datos
-    setEstado('preview-datos');
-  }, [datosExtraidos, aseguradoras, tiposProductos]);
-
-  // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-      // Asegurarse de que el cliente_id esté incluido en los datos
-      const datosConCliente = {
-        ...datosExtraidos,
-        cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
-      };
-      
-      console.log('📤 Aplicando datos al formulario con cliente_id:', datosConCliente.cliente_id);
-      onDataExtracted(datosConCliente);
+      onDataExtracted(datosExtraidos);
       onClose();
     }
-  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose]);
+  }, [datosExtraidos, onDataExtracted, onClose]);
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -1367,324 +965,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               </div>
             )}
 
-            {/* PASO 1: VALIDACIÓN DE CLIENTE */}
-            {estado === 'validando-cliente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
-                    <strong>1/3</strong>
-                  </div>
-                  <h5 className="mt-3">Validación de Cliente</h5>
-                </div>
-
-                <div className="card mb-4">
-                  <div className="card-header bg-light">
-                    <h6 className="mb-0">👤 Datos del Cliente Extraídos</h6>
-                  </div>
-                  <div className="card-body">
-                    <div className="row g-3">
-                      <div className="col-12">
-                        <strong className="d-block mb-1">
-                          {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social:' : 'Nombre Completo:'}
-                        </strong>
-                        <p className="mb-0">
-                          {datosExtraidos.tipo_persona === 'Moral' 
-                            ? datosExtraidos.razonSocial 
-                            : `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim()
-                          }
-                        </p>
-                      </div>
-                      {datosExtraidos.rfc && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">RFC:</strong>
-                          <p className="mb-0">{datosExtraidos.rfc}</p>
-                        </div>
-                      )}
-                      {datosExtraidos.domicilio && (
-                        <div className="col-12">
-                          <strong className="d-block mb-1">Dirección:</strong>
-                          <p className="mb-0">{datosExtraidos.domicilio}</p>
-                        </div>
-                      )}
-                      {datosExtraidos.email && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">Email:</strong>
-                          <p className="mb-0">{datosExtraidos.email}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {clienteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Cliente ENCONTRADO en base de datos</strong>
-                    </div>
-                    
-                    <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Base de Datos</h6>
-                        
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">ID Cliente</small>
-                            <strong>{clienteEncontrado.codigo || clienteEncontrado.id}</strong>
-                          </div>
-                          
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Fecha de Registro</small>
-                            <strong>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</strong>
-                          </div>
-
-                          <div className="col-12">
-                            <small className="text-muted d-block">
-                              {clienteEncontrado.tipoPersona === 'Persona Moral' ? 'Razón Social' : 'Nombre Completo'}
-                            </small>
-                            <strong>
-                              {clienteEncontrado.tipoPersona === 'Persona Moral' 
-                                ? (clienteEncontrado.razonSocial || clienteEncontrado.nombre || 'N/A')
-                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} ${clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}`.trim()
-                              }
-                            </strong>
-                          </div>
-
-                          {clienteEncontrado.rfc && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">RFC</small>
-                              <strong>{clienteEncontrado.rfc}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.curp && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">CURP</small>
-                              <strong>{clienteEncontrado.curp}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{clienteEncontrado.email}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_movil && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Móvil</small>
-                              <strong>{clienteEncontrado.telefono_movil}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_fijo && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Fijo</small>
-                              <strong>{clienteEncontrado.telefono_fijo}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.direccion && (
-                            <div className="col-12">
-                              <small className="text-muted d-block">Dirección</small>
-                              <strong>{clienteEncontrado.direccion}</strong>
-                            </div>
-                          )}
-
-                          {(clienteEncontrado.ciudad || clienteEncontrado.estado) && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Ubicación</small>
-                              <strong>{clienteEncontrado.ciudad}{clienteEncontrado.ciudad && clienteEncontrado.estado ? ', ' : ''}{clienteEncontrado.estado}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.codigo_postal && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Código Postal</small>
-                              <strong>{clienteEncontrado.codigo_postal}</strong>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionCliente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Cliente Existente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        Crear Cliente Nuevo
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Cliente NO encontrado en base de datos</strong>
-                    </div>
-                    <p className="mb-3">Se creará un nuevo cliente con los datos extraídos del PDF.</p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Crear Cliente y Continuar
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={onClose}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PASO 2: VALIDACIÓN DE AGENTE */}
-            {estado === 'validando-agente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
-                    <strong>2/3</strong>
-                  </div>
-                  <h5 className="mt-3">Validación de Agente</h5>
-                </div>
-
-                {datosExtraidos.agente ? (
-                  <div className="card mb-4">
-                    <div className="card-header bg-light">
-                      <h6 className="mb-0">👔 Agente Extraído del PDF</h6>
-                    </div>
-                    <div className="card-body">
-                      <p className="mb-0"><strong>{datosExtraidos.agente}</strong></p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-info mb-4">
-                    <AlertCircle className="me-2" size={20} />
-                    No se pudo extraer información del agente del PDF
-                  </div>
-                )}
-
-                {agenteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
-                    </div>
-                    
-                    <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Equipo de Trabajo</h6>
-                        
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Código Agente</small>
-                            <strong>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</strong>
-                          </div>
-                          
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Nombre Completo</small>
-                            <strong>{agenteEncontrado.nombre}</strong>
-                          </div>
-
-                          {agenteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{agenteEncontrado.email}</strong>
-                            </div>
-                          )}
-
-                          {agenteEncontrado.telefono && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono</small>
-                              <strong>{agenteEncontrado.telefono}</strong>
-                            </div>
-                          )}
-
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Estado</small>
-                            <span className="badge bg-success">Activo</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionAgente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Este Agente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionAgente('crear-nuevo')}
-                      >
-                        Crear Agente Nuevo
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={() => handleDecisionAgente('omitir')}
-                      >
-                        Seleccionar Después
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
-                    </div>
-                    <p className="mb-3">
-                      El agente con código <strong>{datosExtraidos.agente?.match(/^(\d+)/)?.[1] || 'N/A'}</strong> no está registrado.
-                    </p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-primary flex-fill"
-                        onClick={() => handleDecisionAgente('crear-nuevo')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Crear Agente Nuevo
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary flex-fill"
-                        onClick={() => handleDecisionAgente('omitir')}
-                      >
-                        Continuar sin Agente
-                      </button>
-                      <button 
-                        className="btn btn-outline-secondary"
-                        onClick={onClose}
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* PASO 3: PREVIEW DE TODOS LOS DATOS */}
-            {estado === 'preview-datos' && datosExtraidos && (
+            {estado === 'completado' && datosExtraidos && (
               <div>
                 <div className="alert alert-success mb-3">
                   <CheckCircle className="me-2" size={20} />
@@ -1845,59 +1126,24 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                       <div className="col-12">
                         <div className="p-3 bg-warning bg-opacity-10 rounded">
                           <h6 className="text-warning-emphasis mb-3">🛡️ COBERTURAS CONTRATADAS</h6>
-                          
-                          {datosExtraidos.coberturas && datosExtraidos.coberturas.length > 0 ? (
-                            <div className="table-responsive">
-                              <table className="table table-sm table-hover mb-0">
-                                <thead className="table-light">
-                                  <tr>
-                                    <th>Cobertura</th>
-                                    <th className="text-end">Suma Asegurada</th>
-                                    <th className="text-center">Deducible</th>
-                                    <th className="text-end">Prima</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {datosExtraidos.coberturas.map((cob, idx) => (
-                                    <tr key={idx}>
-                                      <td className="fw-medium">{cob.nombre}</td>
-                                      <td className="text-end">
-                                        {cob.suma_asegurada === 'AMPARADA' ? (
-                                          <span className="badge bg-success">AMPARADA</span>
-                                        ) : (
-                                          `$${parseFloat(cob.suma_asegurada).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                        )}
-                                        {cob.tipo === 'por_evento' && <small className="d-block text-muted">POR EVENTO</small>}
-                                      </td>
-                                      <td className="text-center">
-                                        <span className="badge bg-secondary">{cob.deducible}</span>
-                                      </td>
-                                      <td className="text-end">
-                                        ${parseFloat(cob.prima).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                          <div className="row g-2">
+                            <div className="col-md-4">
+                              <small className="text-muted">Tipo de Cobertura:</small><br/>
+                              <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
                             </div>
-                          ) : (
-                            <div className="row g-2">
-                              <div className="col-md-4">
-                                <small className="text-muted">Tipo de Cobertura:</small><br/>
-                                <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
-                              </div>
-                              <div className="col-md-4">
-                                <small className="text-muted">Suma Asegurada:</small><br/>
-                                <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
-                              </div>
-                              <div className="col-md-4">
-                                <small className="text-muted">Deducible:</small><br/>
-                                <strong>{datosExtraidos.deducible}%</strong>
-                              </div>
+                            <div className="col-md-4">
+                              <small className="text-muted">Suma Asegurada:</small><br/>
+                              <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
                             </div>
-                          )}
+                            <div className="col-md-4">
+                              <small className="text-muted">Deducible:</small><br/>
+                              <strong>{datosExtraidos.deducible}%</strong>
+                            </div>
+                          </div>
                         </div>
-                      </div>                      {/* INFORMACIÓN FINANCIERA */}
+                      </div>
+
+                      {/* INFORMACIÓN FINANCIERA */}
                       <div className="col-12">
                         <div className="p-3 bg-secondary bg-opacity-10 rounded">
                           <h6 className="text-secondary mb-3">💰 INFORMACIÓN FINANCIERA</h6>
@@ -1979,14 +1225,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             >
               Cancelar
             </button>
-            {estado === 'preview-datos' && datosExtraidos && (
+            {estado === 'completado' && datosExtraidos && (
               <button
                 type="button"
                 className="btn btn-success"
                 onClick={aplicarDatos}
               >
                 <CheckCircle className="me-2" size={16} />
-                Aplicar al Formulario
+                Aplicar Datos Extraídos
               </button>
             )}
           </div>
@@ -2079,21 +1325,6 @@ const ListaExpedientes = React.memo(({
 }) => {
   const paginacion = usePaginacion(expedientes, 10);
 
-  // Detectar pólizas duplicadas
-  const polizasDuplicadas = React.useMemo(() => {
-    const grupos = {};
-    expedientes.forEach(exp => {
-      if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-        const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-        if (!grupos[clave]) {
-          grupos[clave] = [];
-        }
-        grupos[clave].push(exp);
-      }
-    });
-    return Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
-  }, [expedientes]);
-
   return (
     <div className="p-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -2109,26 +1340,6 @@ const ListaExpedientes = React.memo(({
           Nueva Póliza
         </button>
       </div>
-
-      {polizasDuplicadas.length > 0 && (
-        <div className="alert alert-warning mb-3" role="alert">
-          <strong>⚠️ Atención:</strong> Se encontraron {polizasDuplicadas.length} póliza(s) duplicada(s).
-          Las filas están marcadas en amarillo.
-          <details className="mt-2">
-            <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
-              Ver detalles de duplicados
-            </summary>
-            <ul className="mt-2 mb-0">
-              {polizasDuplicadas.map(([clave, exps]) => (
-                <li key={clave}>
-                  <strong>{exps[0].numero_poliza}</strong> - {exps[0].compania} - Vigencia: {exps[0].inicio_vigencia}
-                  <span className="text-muted"> ({exps.length} registros)</span>
-                </li>
-              ))}
-            </ul>
-          </details>
-        </div>
-      )}
 
       {expedientes.length > 0 && (
         <div className="row mb-3">
@@ -2166,49 +1377,21 @@ const ListaExpedientes = React.memo(({
               <table className="table table-hover mb-0">
                 <thead className="table-light">
                   <tr>
-                    <th>Póliza</th>
                     <th>Cliente</th>
                     <th>Compañía</th>
                     <th>Producto</th>
                     <th>Etapa Activa</th>
                     <th>Agente</th>
                     <th>Tipo/Estatus Pago</th>
-                    <th>Vigencia</th>
+                    <th>Fecha</th>
                     <th width="200">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
                     const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
-                    
-                    // Detectar si esta póliza está duplicada
-                    const esDuplicada = expedientes.filter(exp => 
-                      exp.numero_poliza === expediente.numero_poliza &&
-                      exp.compania === expediente.compania &&
-                      exp.inicio_vigencia === expediente.inicio_vigencia &&
-                      expediente.numero_poliza // Solo si tiene número de póliza
-                    ).length > 1;
-                    
                     return (
-                      <tr key={expediente.id} className={esDuplicada ? 'table-warning' : ''}>
-                        <td>
-                          <div>
-                            <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
-                            {esDuplicada && (
-                              <div>
-                                <span className="badge bg-warning text-dark" title="Póliza duplicada">
-                                  ⚠️ Duplicada
-                                </span>
-                              </div>
-                            )}
-                            {expediente.endoso && (
-                              <div><small className="text-muted">End: {expediente.endoso}</small></div>
-                            )}
-                            {expediente.inciso && (
-                              <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
-                            )}
-                          </div>
-                        </td>
+                      <tr key={expediente.id}>
                         <td><InfoCliente expediente={expediente} /></td>
                         <td>{expediente.compania}</td>
                         <td>
@@ -2237,8 +1420,7 @@ const ListaExpedientes = React.memo(({
                           />
                         </td>
                         <td>
-                          <small>{utils.formatearFecha(expediente.inicio_vigencia, 'simple')}</small>
-                          <div><small className="text-muted">hasta {utils.formatearFecha(expediente.termino_vigencia, 'simple')}</small></div>
+                          <small>{expediente.fecha_creacion}</small>
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
@@ -2344,210 +1526,32 @@ const Formulario = React.memo(({
 }) => {
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
-  const [infoImportacion, setInfoImportacion] = useState(null);
 
-  const handleDataExtracted = useCallback(async (datosExtraidos) => {
-    try {
-      // 1. USAR EL CLIENTE QUE YA FUE CREADO EN EL EXTRACTOR PDF
-      let clienteSeleccionadoFinal = null;
-      
-      if (datosExtraidos.cliente_id) {
-        // El cliente ya fue creado o encontrado en el extractor PDF
-        // Buscar el cliente en la base de datos usando el cliente_id
-        console.log('� Buscando cliente con ID:', datosExtraidos.cliente_id);
-        
-        try {
-          const response = await fetch(`${API_URL}/api/clientes`);
-          const clientes = await response.json();
-          clienteSeleccionadoFinal = clientes.find(c => c.id === datosExtraidos.cliente_id);
-          
-          if (clienteSeleccionadoFinal) {
-            handleClienteSeleccionado(clienteSeleccionadoFinal);
-            console.log('✅ Cliente vinculado:', clienteSeleccionadoFinal.nombre || clienteSeleccionadoFinal.razonSocial, 'ID:', clienteSeleccionadoFinal.id);
-          } else {
-            console.error('❌ No se encontró el cliente con ID:', datosExtraidos.cliente_id);
-          }
-        } catch (error) {
-          console.error('❌ Error al buscar cliente:', error);
-        }
-      } else {
-        console.warn('⚠️ No se proporcionó cliente_id. El cliente debe ser seleccionado manualmente.');
-      }
-      
-      // 2. BUSCAR AGENTE POR CÓDIGO Y COMPAÑÍA
-      // El agente extraído viene en formato: "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      let agenteCodigo = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        // Extraer código del agente del formato "25576 - NOMBRE"
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          
-          // Buscar agente en el equipo de trabajo que tenga ese código
-          // Nota: Un agente puede tener diferentes códigos según la compañía
-          const agenteEncontrado = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
-          
-          if (agenteEncontrado) {
-            agenteCodigo = agenteEncontrado.codigo || agenteEncontrado.codigoAgente;
-            console.log('✅ Agente encontrado en equipo:', agenteEncontrado.nombre, 'Código:', agenteCodigo);
-          } else {
-            console.warn('⚠️ Agente no encontrado en equipo. Código:', codigoAgente, 'Compañía:', datosExtraidos.compania);
-            console.log('💡 El agente debe ser agregado al Equipo de Trabajo antes de asignar pólizas');
-          }
-        }
-      }
-      
-      // 3. BUSCAR VENDEDOR/SUB-AGENTE (si aplica)
-      // Los vendedores usan la misma clave que el agente al que están ligados
-      // Por ahora lo dejamos vacío, se puede seleccionar manualmente
-      let subAgenteId = null;
-      
-      // 4. POPULAR FORMULARIO CON TODOS LOS DATOS
-      console.log('📋 Datos a aplicar:', {
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto,
-        companias: companias.slice(0, 10), // Primeras 10 compañías
-        productos: productos.slice(0, 10).map(p => p.nombre || p) // Primeros 10 productos
-      });
-      
-      const nuevoFormulario = {
-        ...formulario,
-        ...datosExtraidos,
-        // Preservar campos del formulario original
-        fecha_creacion: formulario.fecha_creacion,
-        id: formulario.id,
-        // FORZAR valores directamente
-        agente: agenteCodigo || '',
-        sub_agente: '',
-        etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto
-      };
-      
-      console.log('🔍 DEBUG - Valores antes de setFormulario:', {
-        'compania original': datosExtraidos.compania,
-        'compania en nuevo': nuevoFormulario.compania,
-        'agente codigo': agenteCodigo,
-        'agente en nuevo': nuevoFormulario.agente,
-        'producto': nuevoFormulario.producto
-      });
-      
-      console.log('🚗 DEBUG - Datos del vehículo extraídos:', {
-        'marca': datosExtraidos.marca,
-        'modelo': datosExtraidos.modelo,
-        'anio': datosExtraidos.anio,
-        'numero_serie': datosExtraidos.numero_serie,
-        'motor': datosExtraidos.motor,
-        'placas': datosExtraidos.placas,
-        'color': datosExtraidos.color,
-        'tipo_vehiculo': datosExtraidos.tipo_vehiculo,
-        'tipo_cobertura': datosExtraidos.tipo_cobertura
-      });
-      
-      console.log('🔍 DEBUG - Producto extraído:', datosExtraidos.producto);
-      console.log('🔍 DEBUG - nuevoFormulario.producto:', nuevoFormulario.producto);
-      console.log('🔍 DEBUG - nuevoFormulario completo:', {
-        marca: nuevoFormulario.marca,
-        modelo: nuevoFormulario.modelo,
-        anio: nuevoFormulario.anio,
-        numero_serie: nuevoFormulario.numero_serie
-      });
-      
-      setFormulario(nuevoFormulario);
-      
-      // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
-      if (datosExtraidos.inicio_vigencia || datosExtraidos.fecha_pago) {
-        setTimeout(() => {
-          const formularioConCalculos = actualizarCalculosAutomaticos(nuevoFormulario);
-          setFormulario(prev => ({
-            ...prev,
-            ...formularioConCalculos,
-            // Preservar datos importantes que no deben cambiar
-            compania: datosExtraidos.compania,
-            producto: datosExtraidos.producto,
-            agente: agenteCodigo || '',
-            // Preservar datos del vehículo
-            marca: datosExtraidos.marca,
-            modelo: datosExtraidos.modelo,
-            anio: datosExtraidos.anio,
-            numero_serie: datosExtraidos.numero_serie,
-            motor: datosExtraidos.motor,
-            placas: datosExtraidos.placas,
-            color: datosExtraidos.color,
-            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-            tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo
-          }));
-          console.log('✅ Cálculos automáticos aplicados, estatusPago:', formularioConCalculos.estatusPago);
-        }, 150);
-      } else {
-        // FORZAR la actualización después de un pequeño delay
-        setTimeout(() => {
-          setFormulario(prev => ({
-            ...prev,
-            compania: datosExtraidos.compania,
-            producto: datosExtraidos.producto,
-            agente: agenteCodigo || '',
-            // Preservar datos del vehículo también en este caso
-            marca: datosExtraidos.marca,
-            modelo: datosExtraidos.modelo,
-            anio: datosExtraidos.anio,
-            numero_serie: datosExtraidos.numero_serie,
-            motor: datosExtraidos.motor,
-            placas: datosExtraidos.placas,
-            color: datosExtraidos.color,
-            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-            tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo
-          }));
-          console.log('✅ Valores forzados después del render (incluyendo vehículo)');
-        }, 100);
-      }
-      
-      // 6. MOSTRAR MENSAJE DE CONFIRMACIÓN
-      setDatosImportadosDesdePDF(true);
-      setMostrarExtractorPDF(false);
-      
-      // Guardar información de la importación para mostrar en UI
-      setInfoImportacion({
-        clienteCreado: clienteSeleccionadoFinal && !datosExtraidos.cliente_existente,
-        clienteEncontrado: !!datosExtraidos.cliente_existente,
-        nombreCliente: clienteSeleccionadoFinal?.nombre || 'N/A',
-        agenteAsignado: !!agenteCodigo,
-        poliza: datosExtraidos.numero_poliza || 'N/A',
-        compania: datosExtraidos.compania || 'N/A'
-      });
-      
-      // Mostrar resumen de lo que se importó
-      console.log('📊 Resumen de importación:');
-      if (clienteSeleccionadoFinal) {
-        const esNuevo = !datosExtraidos.cliente_existente;
-        console.log('  Cliente:', esNuevo ? '🆕 Creado automáticamente' : '✅ Encontrado', '-', clienteSeleccionadoFinal.nombre);
-        console.log('  ID Cliente:', clienteSeleccionadoFinal.id);
-      } else {
-        console.log('  Cliente: ⚠️ No pudo crearse - revisar datos');
-      }
-      console.log('  Agente:', agenteCodigo ? '✅ Asignado' : '⚠️ No encontrado (revisar código)');
-      console.log('  Póliza:', datosExtraidos.numero_poliza || 'N/A');
-      console.log('  Compañía:', datosExtraidos.compania || 'N/A');
-      
-    } catch (error) {
-      console.error('Error al procesar datos extraídos:', error);
-      // Aún así intentar popular el formulario con lo que se pueda
-      setFormulario(prev => ({
-        ...prev,
-        ...datosExtraidos,
-        fecha_creacion: prev.fecha_creacion,
-        id: prev.id
-      }));
-      setDatosImportadosDesdePDF(true);
-      setMostrarExtractorPDF(false);
+  const handleDataExtracted = useCallback((datosExtraidos) => {
+    // Si se encontró un cliente existente, seleccionarlo automáticamente
+    if (datosExtraidos.cliente_existente) {
+      handleClienteSeleccionado(datosExtraidos.cliente_existente);
     }
-  }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado, agentes]);
+    
+    setFormulario(prev => ({
+      ...prev,
+      ...datosExtraidos,
+      fecha_creacion: prev.fecha_creacion,
+      id: prev.id,
+      etapa_activa: datosExtraidos.etapa_activa || prev.etapa_activa
+    }));
+    
+    if (datosExtraidos.inicio_vigencia) {
+      const formularioActualizado = actualizarCalculosAutomaticos({
+        ...formulario,
+        ...datosExtraidos
+      });
+      setFormulario(formularioActualizado);
+    }
+    
+    setDatosImportadosDesdePDF(true);
+    setMostrarExtractorPDF(false);
+  }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado]);
 
   return (
     <div className="p-4">
@@ -2558,10 +1562,7 @@ const Formulario = React.memo(({
         <div className="d-flex gap-2">
           {!modoEdicion && (
             <button
-              onClick={() => {
-                console.log('🔵 Abriendo extractor PDF...');
-                setMostrarExtractorPDF(true);
-              }}
+              onClick={() => setMostrarExtractorPDF(true)}
               className="btn btn-outline-primary"
               title="Extraer datos automáticamente desde una póliza PDF"
             >
@@ -2580,40 +1581,14 @@ const Formulario = React.memo(({
 
       <div className="card">
         <div className="card-body">
-          {datosImportadosDesdePDF && !modoEdicion && infoImportacion && (
-            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
+          {datosImportadosDesdePDF && !modoEdicion && (
+            <div className="alert alert-info alert-dismissible fade show mb-4" role="alert">
               <CheckCircle className="me-2" size={20} />
-              <div>
-                <strong>✅ Datos importados desde PDF exitosamente</strong>
-                <ul className="mb-0 mt-2" style={{ fontSize: '0.9rem' }}>
-                  {infoImportacion.clienteCreado && (
-                    <li>🆕 <strong>Cliente creado automáticamente:</strong> {infoImportacion.nombreCliente}</li>
-                  )}
-                  {infoImportacion.clienteEncontrado && (
-                    <li>✅ <strong>Cliente encontrado:</strong> {infoImportacion.nombreCliente}</li>
-                  )}
-                  {!infoImportacion.clienteCreado && !infoImportacion.clienteEncontrado && (
-                    <li>⚠️ <strong>Cliente no pudo crearse</strong> - Verifica los datos extraídos</li>
-                  )}
-                  <li>📄 <strong>Póliza:</strong> {infoImportacion.poliza}</li>
-                  <li>🏢 <strong>Compañía:</strong> {infoImportacion.compania}</li>
-                  {infoImportacion.agenteAsignado ? (
-                    <li>✅ <strong>Agente asignado automáticamente</strong></li>
-                  ) : (
-                    <li>⚠️ <strong>Agente no encontrado</strong> - Selecciónalo manualmente</li>
-                  )}
-                </ul>
-                <small className="text-muted mt-2 d-block">
-                  💡 Revisa la información y completa los campos faltantes antes de guardar
-                </small>
-              </div>
+              <strong>Datos extraídos desde PDF</strong> - Revise la información y complete los campos faltantes
               <button 
                 type="button" 
                 className="btn-close" 
-                onClick={() => {
-                  setDatosImportadosDesdePDF(false);
-                  setInfoImportacion(null);
-                }}
+                onClick={() => setDatosImportadosDesdePDF(false)}
               ></button>
             </div>
           )}
@@ -2727,7 +1702,7 @@ const Formulario = React.memo(({
                   value={formulario.producto}
                   onChange={(e) => {
                     const nuevoProducto = e.target.value;
-                    if (formulario.producto === 'Autos Individual' && nuevoProducto !== 'Autos') {
+                    if (formulario.producto === 'Autos' && nuevoProducto !== 'Autos') {
                       setFormulario(prev => ({
                         ...prev, 
                         producto: nuevoProducto,
@@ -2773,7 +1748,7 @@ const Formulario = React.memo(({
             </div>
           </div>
 
-          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
+          {formulario.producto === 'Autos' && (
             <div className="alert alert-info mb-4">
               <h6 className="alert-heading">
                 <AlertCircle className="me-2" size={20} />
@@ -2782,195 +1757,6 @@ const Formulario = React.memo(({
               <p className="mb-0">
                 Se han habilitado campos adicionales específicos para el seguro de automóviles.
               </p>
-            </div>
-          )}
-
-          {/* Datos del Vehículo - Solo si es Autos */}
-          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
-              <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label">Marca</label>
-                  <select
-                    className="form-select"
-                    value={formulario.marca}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, marca: e.target.value }))}
-                  >
-                    <option value="">Seleccionar marca</option>
-                    {marcasVehiculo.map(marca => (
-                      <option key={marca} value={marca}>{marca}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Modelo</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.modelo}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, modelo: e.target.value }))}
-                    placeholder="Ej: Civic, Jetta, etc."
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Año</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={formulario.anio}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, anio: e.target.value }))}
-                    min={CONSTANTS.MIN_YEAR}
-                    max={CONSTANTS.MAX_YEAR}
-                    placeholder="Ej: 2023"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Número de Serie (VIN)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.numero_serie}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_serie: e.target.value.toUpperCase() }))}
-                    placeholder={`${CONSTANTS.VIN_LENGTH} caracteres`}
-                    maxLength={CONSTANTS.VIN_LENGTH}
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Placas</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.placas}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, placas: e.target.value.toUpperCase() }))}
-                    placeholder="Ej: ABC-123"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Color</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.color}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, color: e.target.value }))}
-                    placeholder="Ej: Rojo, Azul, etc."
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Tipo de Vehículo</label>
-                  <select
-                    className="form-select"
-                    value={formulario.tipo_vehiculo}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_vehiculo: e.target.value }))}
-                  >
-                    <option value="">Seleccionar tipo</option>
-                    {tiposVehiculo.map(tipo => (
-                      <option key={tipo} value={tipo}>{tipo}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Datos de la Póliza - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
-              <div className="row g-3">
-                <div className="col-md-6">
-                  <label className="form-label">Número de Póliza</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.numero_poliza}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_poliza: e.target.value }))}
-                    placeholder="Número asignado por la aseguradora"
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Tipo de Cobertura</label>
-                  <select
-                    className="form-select"
-                    value={formulario.tipo_cobertura}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_cobertura: e.target.value }))}
-                  >
-                    <option value="">Seleccionar cobertura</option>
-                    {tiposCobertura.map(tipo => (
-                      <option key={tipo} value={tipo}>{tipo}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Deducible</label>
-                  <div className="input-group">
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formulario.deducible}
-                      onChange={(e) => setFormulario(prev => ({ ...prev, deducible: e.target.value }))}
-                      placeholder="Porcentaje o monto"
-                      step="0.01"
-                    />
-                    <span className="input-group-text">%</span>
-                  </div>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Suma Asegurada</label>
-                  <div className="input-group">
-                    <span className="input-group-text">$</span>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formulario.suma_asegurada}
-                      onChange={(e) => setFormulario(prev => ({ ...prev, suma_asegurada: e.target.value }))}
-                      placeholder="Valor del vehículo"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Datos del Conductor - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
-              <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label">Conductor Habitual</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.conductor_habitual}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, conductor_habitual: e.target.value }))}
-                    placeholder="Nombre completo"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Edad del Conductor</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={formulario.edad_conductor}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, edad_conductor: e.target.value }))}
-                    placeholder="Años"
-                    min="18"
-                    max="99"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Licencia de Conducir</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.licencia_conducir}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, licencia_conducir: e.target.value.toUpperCase() }))}
-                    placeholder="Número de licencia"
-                  />
-                </div>
-              </div>
             </div>
           )}
 
@@ -3089,7 +1875,7 @@ const Formulario = React.memo(({
           </div>
 
           {/* Datos del Vehículo - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
+          {formulario.producto === 'Autos' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
               <div className="row g-3">
@@ -3177,7 +1963,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos de la Póliza - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
+          {formulario.producto === 'Autos' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
               <div className="row g-3">
@@ -3237,7 +2023,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Conductor - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
+          {formulario.producto === 'Autos' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
               <div className="row g-3">
@@ -3413,16 +2199,10 @@ const Formulario = React.memo(({
       </div>
 
       {mostrarExtractorPDF && (
-        <>
-          {console.log('🟢 Renderizando ExtractorPolizasPDF...')}
-          <ExtractorPolizasPDF 
-            onDataExtracted={handleDataExtracted}
-            onClose={() => setMostrarExtractorPDF(false)}
-            agentes={agentes}
-            aseguradoras={companias}
-            tiposProductos={productos}
-          />
-        </>
+        <ExtractorPolizasPDF 
+          onDataExtracted={handleDataExtracted}
+          onClose={() => setMostrarExtractorPDF(false)}
+        />
       )}
     </div>
   );
@@ -3442,30 +2222,7 @@ const DetallesExpediente = React.memo(({
   calcularSiguientePago,
   calculartermino_vigencia,
   calcularProximoPago
-}) => {
-  const [clienteInfo, setClienteInfo] = useState(null);
-  
-  // Cargar información del cliente cuando se selecciona un expediente
-  useEffect(() => {
-    const cargarCliente = async () => {
-      if (expedienteSeleccionado?.cliente_id) {
-        try {
-          const response = await fetch(`${API_URL}/api/clientes`);
-          const clientes = await response.json();
-          const cliente = clientes.find(c => c.id === expedienteSeleccionado.cliente_id);
-          setClienteInfo(cliente);
-        } catch (error) {
-          console.error('Error al cargar cliente:', error);
-        }
-      } else {
-        setClienteInfo(null);
-      }
-    };
-    
-    cargarCliente();
-  }, [expedienteSeleccionado?.cliente_id]);
-  
-  return (
+}) => (
   <div className="p-4">
     <div className="d-flex justify-content-between align-items-center mb-4">
       <h3 className="mb-0">Detalles del Expediente</h3>
@@ -3545,26 +2302,19 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Información del Cliente</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Nombre completo:</strong>
-                {clienteInfo ? (
-                  clienteInfo.tipoPersona === 'Persona Moral' ? 
-                    clienteInfo.razonSocial :
-                    `${clienteInfo.nombre || ''} ${clienteInfo.apellidoPaterno || clienteInfo.apellido_paterno || ''} ${clienteInfo.apellidoMaterno || clienteInfo.apellido_materno || ''}`
-                ) : (expedienteSeleccionado.nombre || expedienteSeleccionado.apellido_paterno ? 
-                  `${expedienteSeleccionado.nombre || ''} ${expedienteSeleccionado.apellido_paterno || ''} ${expedienteSeleccionado.apellido_materno || ''}` : 
-                  '-'
-                )}
+                {expedienteSeleccionado.nombre} {expedienteSeleccionado.apellido_paterno} {expedienteSeleccionado.apellido_materno}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Email:</strong>
-                {clienteInfo?.email || expedienteSeleccionado.email || '-'}
+                {expedienteSeleccionado.email || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono fijo:</strong>
-                {clienteInfo?.telefonoFijo || clienteInfo?.telefono_fijo || expedienteSeleccionado.telefono_fijo || '-'}
+                {expedienteSeleccionado.telefono_fijo || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Teléfono móvil:</strong>
-                {clienteInfo?.telefonoMovil || clienteInfo?.telefono_movil || expedienteSeleccionado.telefono_movil || '-'}
+                {expedienteSeleccionado.telefono_movil || '-'}
               </div>
             </div>
 
@@ -3615,15 +2365,15 @@ const DetallesExpediente = React.memo(({
               <h5 className="card-title border-bottom pb-2">Vigencia</h5>
               <div className="mb-3">
                 <strong className="d-block text-muted">Inicio de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.inicio_vigencia, 'simple')}
+                {expedienteSeleccionado.inicio_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Término de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.termino_vigencia, 'simple')}
+                {expedienteSeleccionado.termino_vigencia || '-'}
               </div>
               <div className="mb-3">
                 <strong className="d-block text-muted">Fecha de creación:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.fecha_creacion, 'simple')}
+                {expedienteSeleccionado.fecha_creacion}
               </div>
             </div>
 
@@ -3679,8 +2429,7 @@ const DetallesExpediente = React.memo(({
       </div>
     )}
   </div>
-  );
-});
+));
 
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
@@ -3704,90 +2453,10 @@ const ModuloExpedientes = () => {
   }, []);
   // Cargar expedientes desde el backend al montar
   useEffect(() => {
-    const cargarExpedientesConClientes = async () => {
-      try {
-        // 1. Obtener expedientes
-        const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
-        const expedientes = await resExpedientes.json();
-        
-        // 2. Obtener todos los clientes
-        const resClientes = await fetch(`${API_URL}/api/clientes`);
-        const clientes = await resClientes.json();
-        
-        // 3. Crear un mapa de clientes por ID para búsqueda rápida
-        const clientesMap = {};
-        clientes.forEach(cliente => {
-          clientesMap[cliente.id] = cliente;
-        });
-        
-        // 4. Enriquecer cada expediente con los datos del cliente
-        const expedientesEnriquecidos = expedientes.map(exp => {
-          const cliente = clientesMap[exp.cliente_id];
-          
-          if (cliente) {
-            // Si es Persona Moral, usar razón social como nombre completo
-            if (cliente.tipoPersona === 'Persona Moral') {
-              return {
-                ...exp,
-                nombre: cliente.razonSocial || '',
-                apellido_paterno: '',
-                apellido_materno: '',
-                email: cliente.email || '',
-                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || ''
-              };
-            } else {
-              // Persona Física: usar nombre y apellidos
-              return {
-                ...exp,
-                nombre: cliente.nombre || '',
-                apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
-                apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
-                email: cliente.email || '',
-                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || ''
-              };
-            }
-          }
-          
-          // Si no se encuentra el cliente, mantener el expediente sin cambios
-          return exp;
-        });
-        
-        setExpedientes(expedientesEnriquecidos);
-        
-        // Detectar pólizas duplicadas (mismo número, compañía y vigencia)
-        if (expedientesEnriquecidos.length > 0) {
-          const grupos = {};
-          expedientesEnriquecidos.forEach(exp => {
-            if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-              const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-              if (!grupos[clave]) {
-                grupos[clave] = [];
-              }
-              grupos[clave].push(exp);
-            }
-          });
-          
-          const duplicados = Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
-          
-          if (duplicados.length > 0) {
-            console.warn('⚠️ Se encontraron pólizas duplicadas:');
-            duplicados.forEach(([clave, exps]) => {
-              console.warn(`  📋 ${clave}:`, exps.map(e => ({
-                id: e.id,
-                cliente: `${e.nombre} ${e.apellido_paterno}`,
-                etapa: e.etapa_activa
-              })));
-            });
-          }
-        }
-      } catch (err) {
-        console.error('Error al cargar expedientes:', err);
-      }
-    };
-    
-    cargarExpedientesConClientes();
+  fetch(`${API_URL}/api/expedientes`)
+      .then(res => res.json())
+      .then(data => setExpedientes(data))
+      .catch(err => console.error('Error al cargar expedientes:', err));
   }, []);
   const [vistaActual, setVistaActual] = useState('lista');
   const [expedienteSeleccionado, setExpedienteSeleccionado] = useState(null);
@@ -3966,15 +2635,13 @@ const estadoInicialFormulario = {
     if (tipo_pago === 'Anual') return '';
     
     if (tipo_pago === 'Fraccionado' && frecuenciaPago) {
-      // CORRECCIÓN: Los pagos subsecuentes se calculan desde la fecha de inicio SIN período de gracia
-      // Pago 2: inicio + 1 mes
-      // Pago 3: inicio + 2 meses
-      // etc.
-      const fechaPagoSubsecuente = new Date(fechaInicio);
-      const mesesAAgregar = (numeroPago - 1) * CONSTANTS.MESES_POR_FRECUENCIA[frecuenciaPago];
-      fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
+      const fechaPrimerPago = new Date(fechaInicio);
+      fechaPrimerPago.setDate(fechaPrimerPago.getDate() + periodoGracia);
       
-      return fechaPagoSubsecuente.toISOString().split('T')[0];
+      const mesesAAgregar = (numeroPago - 1) * CONSTANTS.MESES_POR_FRECUENCIA[frecuenciaPago];
+      fechaPrimerPago.setMonth(fechaPrimerPago.getMonth() + mesesAAgregar);
+      
+      return fechaPrimerPago.toISOString().split('T')[0];
     }
     
     return '';
@@ -3993,39 +2660,19 @@ const estadoInicialFormulario = {
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
     const termino_vigencia = formularioActual.termino_vigencia || calculartermino_vigencia(formularioActual.inicio_vigencia);
-    
-    // Calcular proximoPago según el tipo de pago
-    let proximoPago = '';
-    
-    if (formularioActual.tipo_pago === 'Fraccionado') {
-      // Para fraccionado: calcular el próximo pago basado en frecuencia
-      proximoPago = calcularProximoPago(
-        formularioActual.inicio_vigencia,
-        formularioActual.tipo_pago,
-        formularioActual.frecuenciaPago,
-        formularioActual.compania,
-        1
-      );
-    } else if (formularioActual.tipo_pago === 'Anual') {
-      // Para anual: usar fecha_pago si existe, sino usar inicio_vigencia
-      proximoPago = formularioActual.fecha_pago || formularioActual.inicio_vigencia;
-    }
-    
-    // Calcular estatusPago basado en proximoPago
+    const proximoPago = calcularProximoPago(
+      formularioActual.inicio_vigencia,
+      formularioActual.tipo_pago,
+      formularioActual.frecuenciaPago,
+      formularioActual.compania,
+      1
+    );
     const estatusPago = calcularEstatusPago(proximoPago, formularioActual.estatusPago);
     
     // Calcular periodo de gracia automáticamente
     const periodoGracia = formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30;
     
-    // Incluir fecha_pago con el mismo valor que proximoPago para mantener consistencia
-    return { 
-      ...formularioActual, 
-      termino_vigencia, 
-      proximoPago, 
-      fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
-      estatusPago, 
-      periodo_gracia: periodoGracia 
-    };
+    return { ...formularioActual, termino_vigencia, proximoPago, estatusPago, periodo_gracia: periodoGracia };
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
 
   const obtenerSiguienteEstado = useCallback((estadoActual) => {
@@ -4185,64 +2832,7 @@ const estadoInicialFormulario = {
       return false;
     }
 
-    // Validar póliza duplicada (solo si NO estamos editando)
-    if (!modoEdicion && formulario.numero_poliza) {
-      console.log('🔍 Validando duplicados:', {
-        numero_poliza: formulario.numero_poliza,
-        compania: formulario.compania,
-        inicio_vigencia: formulario.inicio_vigencia,
-        total_expedientes: expedientes.length
-      });
-      
-      const polizaDuplicada = expedientes.find(exp => {
-        // Normalizar fechas para comparación (solo YYYY-MM-DD)
-        const fechaFormulario = formulario.inicio_vigencia ? formulario.inicio_vigencia.split('T')[0] : '';
-        const fechaExpediente = exp.inicio_vigencia ? exp.inicio_vigencia.split('T')[0] : '';
-        
-        const coincide = exp.numero_poliza === formulario.numero_poliza &&
-                        exp.compania === formulario.compania &&
-                        fechaExpediente === fechaFormulario;
-        
-        if (coincide) {
-          console.log('✅ Duplicado encontrado:', {
-            id: exp.id,
-            numero_poliza: exp.numero_poliza,
-            compania: exp.compania,
-            inicio_vigencia: exp.inicio_vigencia,
-            cliente: `${exp.nombre} ${exp.apellido_paterno}`
-          });
-        }
-        return coincide;
-      });
-      
-      if (polizaDuplicada) {
-        const mensaje = 
-          '⚠️ ATENCIÓN: PÓLIZA DUPLICADA DETECTADA\n\n' +
-          'Ya existe un registro en el sistema con estos datos:\n\n' +
-          '📋 Póliza: ' + polizaDuplicada.numero_poliza + '\n' +
-          '🏢 Compañía: ' + polizaDuplicada.compania + '\n' +
-          '📅 Inicio Vigencia: ' + polizaDuplicada.inicio_vigencia.split('T')[0] + '\n' +
-          '👤 Cliente: ' + polizaDuplicada.nombre + ' ' + polizaDuplicada.apellido_paterno + '\n' +
-          '📊 Etapa: ' + polizaDuplicada.etapa_activa + '\n\n' +
-          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-          'Presione ACEPTAR para continuar con el guardado\n' +
-          '(Podrá ver las pólizas duplicadas marcadas en el listado)\n\n' +
-          'Presione CANCELAR para regresar al formulario';
-        
-        const confirmar = window.confirm(mensaje);
-        
-        if (!confirmar) {
-          alert('❌ Operación cancelada.\n\nLa póliza NO fue guardada.\nPuede revisar los datos y volver a intentar.');
-          return false;
-        } else {
-          console.log('✅ Usuario confirmó guardar póliza duplicada');
-        }
-      } else {
-        console.log('✅ No se encontraron duplicados');
-      }
-    }
-
-    if (formulario.producto === 'Autos Individual') {
+    if (formulario.producto === 'Autos') {
       if (!formulario.marca || !formulario.modelo || !formulario.anio) {
         alert('Para seguros de Autos, complete: Marca, Modelo y Año');
         return false;
@@ -4261,31 +2851,16 @@ const estadoInicialFormulario = {
     }
 
     return true;
-  }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
+  }, [formulario]);
 
   const guardarExpediente = useCallback(() => {
     if (!validarFormulario()) return;
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
-    
-    console.log('💾 Guardando expediente con cálculos:', {
-      estatusPago: formularioConCalculos.estatusPago,
-      proximoPago: formularioConCalculos.proximoPago,
-      tipo_pago: formularioConCalculos.tipo_pago,
-      fecha_pago: formularioConCalculos.fecha_pago,
-      cliente_id: formularioConCalculos.cliente_id
-    });
-    
     // Normalizar apellidos para backend
     const expedientePayload = {
       ...formularioConCalculos
     };
-    
-    console.log('📦 Payload completo a guardar:', {
-      numero_poliza: expedientePayload.numero_poliza,
-      cliente_id: expedientePayload.cliente_id,
-      compania: expedientePayload.compania
-    });
 
     if (modoEdicion) {
   fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
@@ -4316,88 +2891,11 @@ const estadoInicialFormulario = {
         .catch(err => alert('Error al crear expediente'));
     }
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario]);
-  const recargarExpedientes = useCallback(async () => {
-    try {
-      console.log('🔄 Recargando expedientes...');
-      
-      // 1. Obtener expedientes
-      const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
-      const expedientes = await resExpedientes.json();
-      console.log('📊 Expedientes obtenidos:', expedientes.length);
-      
-      // 2. Obtener todos los clientes
-      const resClientes = await fetch(`${API_URL}/api/clientes`);
-      const clientes = await resClientes.json();
-      console.log('👥 Clientes obtenidos:', clientes.length);
-      
-      // 3. Crear un mapa de clientes por ID para búsqueda rápida
-      const clientesMap = {};
-      clientes.forEach(cliente => {
-        clientesMap[cliente.id] = cliente;
-      });
-      console.log('🗺️ Mapa de clientes creado con', Object.keys(clientesMap).length, 'entradas');
-      
-      // 4. Enriquecer cada expediente con los datos del cliente
-      const expedientesEnriquecidos = expedientes.map(exp => {
-        // Debug: mostrar TODOS los campos del expediente
-        console.log('🔍 Expediente:', exp.numero_poliza, 'Campos relacionados con cliente:', {
-          cliente_id: exp.cliente_id,
-          clienteId: exp.clienteId,
-          nombre: exp.nombre,
-          apellido_paterno: exp.apellido_paterno,
-          razonSocial: exp.razonSocial
-        });
-        
-        const cliente = clientesMap[exp.cliente_id];
-        
-        // Debug para póliza específica
-        if (exp.numero_poliza === '1970064839') {
-          console.log('🔍 DEBUG Póliza 1970064839:', {
-            expediente_id: exp.id,
-            cliente_id: exp.cliente_id,
-            cliente_encontrado: !!cliente,
-            cliente_tipo: cliente?.tipoPersona,
-            cliente_razonSocial: cliente?.razonSocial,
-            cliente_nombre: cliente?.nombre
-          });
-        }
-        
-        if (cliente) {
-          // Si es Persona Moral, usar razón social como nombre completo
-          if (cliente.tipoPersona === 'Persona Moral') {
-            return {
-              ...exp,
-              nombre: cliente.razonSocial || '',
-              apellido_paterno: '',
-              apellido_materno: '',
-              email: cliente.email || '',
-              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-              rfc: cliente.rfc || ''
-            };
-          } else {
-            // Persona Física: usar nombre y apellidos
-            return {
-              ...exp,
-              nombre: cliente.nombre || '',
-              apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
-              apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
-              email: cliente.email || '',
-              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-              rfc: cliente.rfc || ''
-            };
-          }
-        }
-        
-        // Si no se encuentra el cliente, mantener el expediente sin cambios
-        console.warn('⚠️ Cliente no encontrado para expediente:', exp.numero_poliza, 'cliente_id:', exp.cliente_id);
-        return exp;
-      });
-      
-      console.log('✅ Expedientes enriquecidos:', expedientesEnriquecidos.length);
-      setExpedientes(expedientesEnriquecidos);
-    } catch (err) {
-      console.error('Error al recargar expedientes:', err);
-    }
+  const recargarExpedientes = useCallback(() => {
+  fetch(`${API_URL}/api/expedientes`)
+      .then(res => res.json())
+      .then(data => setExpedientes(data))
+      .catch(err => console.error('Error al recargar expedientes:', err));
   }, []);
   const editarExpediente = useCallback((expediente) => {
     setFormulario({

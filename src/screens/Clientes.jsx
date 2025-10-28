@@ -341,18 +341,40 @@ const ModuloClientes = () => {
     }
 
     try {
-      // Preparar datos para enviar - removiendo solo campos de UI
-      const { documentos, polizasRelacionadas, contactos, ...datosBase } = formularioCliente;
-      
-      const datosCliente = {
-        ...datosBase,
-        // Generar código si no existe (para creación) - usa la función generarCodigoCliente
-        codigo: formularioCliente.codigo || generarCodigoCliente(),
-        // Enviar categoria_id
-        categoria_id: formularioCliente.categoria_id
-      };
+      // Lista de campos válidos que acepta el backend
+      const camposPermitidos = [
+        'id', 'codigo', 'tipoPersona', 'categoria_id',
+        'nombre', 'apellidoPaterno', 'apellidoMaterno',
+        'razonSocial', 'nombreComercial', 'rfc', 'curp',
+        'email', 'telefonoFijo', 'telefonoMovil',
+        'calle', 'numeroExterior', 'numeroInterior', 'colonia',
+        'ciudad', 'estado', 'codigoPostal', 'pais',
+        'referencias', 'notas', 'estadoCliente',
+        'fechaRegistro', 'fechaNacimiento', 'sexo', 'estadoCivil',
+        'ocupacion', 'profesion', 'lugarNacimiento',
+        'nacionalidad', 'giroEmpresarial', 'representanteLegal',
+        'registroPatronal', 'numeroEmpleados', 'ingresosMensuales',
+        'origenRecursos', 'beneficiarioFinal', 'personaPoliticamenteExpuesta',
+        'relacionPersonaPolitica', 'actividadEconomica'
+      ];
 
-      console.log('Datos a enviar:', datosCliente);
+      // Filtrar solo los campos permitidos
+      const datosCliente = {};
+      camposPermitidos.forEach(campo => {
+        if (formularioCliente.hasOwnProperty(campo)) {
+          datosCliente[campo] = formularioCliente[campo];
+        }
+      });
+
+      // Asegurar categoria_id
+      datosCliente.categoria_id = formularioCliente.categoria_id || formularioCliente.categoria?.id || 1;
+      
+      // Generar código si no existe
+      if (!datosCliente.codigo) {
+        datosCliente.codigo = generarCodigoCliente();
+      }
+
+      console.log('Datos a enviar (filtrados):', datosCliente);
 
       if (modoEdicion) {
         // Actualizar cliente
@@ -399,7 +421,12 @@ const ModuloClientes = () => {
 
   // Función para editar cliente
   const editarCliente = useCallback((cliente) => {
-    setFormularioCliente(cliente);
+    // Normalizar categoria_id si viene como objeto anidado
+    const clienteNormalizado = {
+      ...cliente,
+      categoria_id: cliente.categoria_id || cliente.categoria?.id || 1
+    };
+    setFormularioCliente(clienteNormalizado);
     setModoEdicion(true);
     setVistaActual('formulario-cliente');
   }, []);
