@@ -1219,10 +1219,41 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       const { crearCliente } = await import('../services/clientesService');
       const resultado = await crearCliente(nuevoCliente);
       
-      if (resultado.success) {
+      console.log('📡 Respuesta de crearCliente:', resultado);
+      
+      if (resultado.success && resultado.data) {
         setClienteEncontrado(resultado.data);
-        console.log('✅ Cliente creado:', resultado.data.nombre);
+        const nombreCliente = resultado.data.razonSocial || `${resultado.data.nombre} ${resultado.data.apellidoPaterno || ''}`.trim();
+        console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', resultado.data.id);
+      } else if (resultado.success && !resultado.data) {
+        console.warn('⚠️ El servidor devolvió success pero sin datos. Intentando recargar clientes...');
+        
+        // Recargar todos los clientes para obtener el recién creado
+        const { obtenerClientes } = await import('../services/clientesService');
+        const clientesResult = await obtenerClientes();
+        
+        if (clientesResult.success && clientesResult.data.length > 0) {
+          // Buscar el cliente por RFC
+          const clienteCreado = clientesResult.data.find(c => c.rfc === nuevoCliente.rfc);
+          
+          if (clienteCreado) {
+            setClienteEncontrado(clienteCreado);
+            const nombreCliente = clienteCreado.razonSocial || `${clienteCreado.nombre} ${clienteCreado.apellidoPaterno || ''}`.trim();
+            console.log('✅ Cliente recuperado después de creación:', nombreCliente, 'ID:', clienteCreado.id);
+          } else {
+            console.error('❌ No se pudo encontrar el cliente recién creado');
+            setErrores(['El cliente se creó pero no se pudo recuperar. Por favor, reintenta.']);
+            setEstado('error');
+            return;
+          }
+        } else {
+          console.error('❌ No se pudieron recargar los clientes');
+          setErrores(['Error al recargar clientes después de la creación.']);
+          setEstado('error');
+          return;
+        }
       } else {
+        console.error('❌ Error al crear cliente:', resultado.error);
         setErrores(['❌ Error al crear cliente: ' + resultado.error]);
         setEstado('error');
         return;
@@ -3444,6 +3475,22 @@ const DetallesExpediente = React.memo(({
   calcularProximoPago
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
+  const [mostrarCoberturas, setMostrarCoberturas] = useState(true); // Abierto por defecto
+  
+  // Debug: ver qué coberturas tiene el expediente
+  useEffect(() => {
+    if (expedienteSeleccionado) {
+      console.log('🔍 Expediente seleccionado para detalles:', {
+        numero_poliza: expedienteSeleccionado.numero_poliza,
+        tiene_coberturas: !!expedienteSeleccionado.coberturas,
+        cantidad_coberturas: expedienteSeleccionado.coberturas?.length || 0,
+        coberturas: expedienteSeleccionado.coberturas,
+        tipo_cobertura: expedienteSeleccionado.tipo_cobertura,
+        suma_asegurada: expedienteSeleccionado.suma_asegurada,
+        deducible: expedienteSeleccionado.deducible
+      });
+    }
+  }, [expedienteSeleccionado]);
   
   // Cargar información del cliente cuando se selecciona un expediente
   useEffect(() => {
@@ -3539,94 +3586,295 @@ const DetallesExpediente = React.memo(({
 
     {expedienteSeleccionado && (
       <div className="card">
-        <div className="card-body">
-          <div className="row g-4">
-            <div className="col-md-6">
-              <h5 className="card-title border-bottom pb-2">Información del Cliente</h5>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Nombre completo:</strong>
-                {clienteInfo ? (
-                  clienteInfo.tipoPersona === 'Persona Moral' ? 
-                    clienteInfo.razonSocial :
-                    `${clienteInfo.nombre || ''} ${clienteInfo.apellidoPaterno || clienteInfo.apellido_paterno || ''} ${clienteInfo.apellidoMaterno || clienteInfo.apellido_materno || ''}`
-                ) : (expedienteSeleccionado.nombre || expedienteSeleccionado.apellido_paterno ? 
-                  `${expedienteSeleccionado.nombre || ''} ${expedienteSeleccionado.apellido_paterno || ''} ${expedienteSeleccionado.apellido_materno || ''}` : 
-                  '-'
-                )}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Email:</strong>
-                {clienteInfo?.email || expedienteSeleccionado.email || '-'}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Teléfono fijo:</strong>
-                {clienteInfo?.telefonoFijo || clienteInfo?.telefono_fijo || expedienteSeleccionado.telefono_fijo || '-'}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Teléfono móvil:</strong>
-                {clienteInfo?.telefonoMovil || clienteInfo?.telefono_movil || expedienteSeleccionado.telefono_movil || '-'}
+        <div className="card-body p-3">
+          <div className="row g-3">
+            
+            {/* INFORMACIÓN DEL ASEGURADO */}
+            <div className="col-12">
+              <div className="p-3 bg-light rounded">
+                <h6 className="text-primary mb-2 d-flex align-items-center">
+                  <span className="me-2">👤</span> INFORMACIÓN DEL ASEGURADO
+                </h6>
+                <div className="row g-2">
+                  <div className="col-md-12">
+                    <small className="text-muted">Nombre Completo:</small><br/>
+                    <strong>
+                      {clienteInfo ? (
+                        clienteInfo.tipoPersona === 'Persona Moral' ? 
+                          clienteInfo.razonSocial :
+                          `${clienteInfo.nombre || ''} ${clienteInfo.apellidoPaterno || clienteInfo.apellido_paterno || ''} ${clienteInfo.apellidoMaterno || clienteInfo.apellido_materno || ''}`
+                      ) : (expedienteSeleccionado.nombre || expedienteSeleccionado.apellido_paterno ? 
+                        `${expedienteSeleccionado.nombre || ''} ${expedienteSeleccionado.apellido_paterno || ''} ${expedienteSeleccionado.apellido_materno || ''}` : 
+                        '-'
+                      )}
+                    </strong>
+                  </div>
+                  {expedienteSeleccionado.conductor_habitual && (
+                    <div className="col-md-12">
+                      <small className="text-muted">Conductor Habitual:</small><br/>
+                      <strong>{expedienteSeleccionado.conductor_habitual}</strong>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="col-md-6">
-              <h5 className="card-title border-bottom pb-2">Información del Seguro</h5>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Compañía:</strong>
-                {expedienteSeleccionado.compania}
+            {/* DATOS DE LA PÓLIZA */}
+            <div className="col-12">
+              <div className="p-3 bg-primary bg-opacity-10 rounded">
+                <h6 className="text-primary mb-2 d-flex align-items-center">
+                  <span className="me-2">📋</span> DATOS DE LA PÓLIZA
+                </h6>
+                <div className="row g-2">
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Compañía:</small><br/>
+                    <strong className="text-primary">{expedienteSeleccionado.compania}</strong>
+                  </div>
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Número de Póliza:</small><br/>
+                    <strong>{expedienteSeleccionado.numero_poliza || '-'}</strong>
+                  </div>
+                  <div className="col-md-2 col-4">
+                    <small className="text-muted">Endoso:</small><br/>
+                    <strong>{expedienteSeleccionado.endoso || '000000'}</strong>
+                  </div>
+                  <div className="col-md-2 col-4">
+                    <small className="text-muted">Inciso:</small><br/>
+                    <strong>{expedienteSeleccionado.inciso || '0001'}</strong>
+                  </div>
+                  <div className="col-md-2 col-4">
+                    <small className="text-muted">Plan:</small><br/>
+                    <strong className="text-uppercase">{expedienteSeleccionado.plan || 'AMPLIA'}</strong>
+                  </div>
+                </div>
+                <div className="row g-2 mt-1">
+                  <div className="col-md-4 col-6">
+                    <small className="text-muted">Producto:</small><br/>
+                    <strong>{expedienteSeleccionado.producto}</strong>
+                  </div>
+                  <div className="col-md-4 col-6">
+                    <small className="text-muted">Tipo de Pago:</small><br/>
+                    <strong>{expedienteSeleccionado.tipo_pago || 'Anual'}</strong>
+                  </div>
+                  <div className="col-md-4">
+                    <small className="text-muted">Agente:</small><br/>
+                    <strong>{expedienteSeleccionado.agente || '-'}</strong>
+                  </div>
+                </div>
               </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Producto:</strong>
-                {expedienteSeleccionado.producto}
+            </div>
+
+            {/* VIGENCIA DE LA PÓLIZA */}
+            <div className="col-12">
+              <div className="p-3 bg-success bg-opacity-10 rounded">
+                <h6 className="text-success mb-2 d-flex align-items-center">
+                  <span className="me-2">📅</span> VIGENCIA DE LA PÓLIZA
+                </h6>
+                <div className="row g-2">
+                  <div className="col-md-4">
+                    <small className="text-muted">Desde las 12:00 P.M. del:</small><br/>
+                    <strong>{expedienteSeleccionado.inicio_vigencia ? new Date(expedienteSeleccionado.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
+                  </div>
+                  <div className="col-md-4">
+                    <small className="text-muted">Hasta las 12:00 P.M. del:</small><br/>
+                    <strong>{expedienteSeleccionado.termino_vigencia ? new Date(expedienteSeleccionado.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong>
+                  </div>
+                  <div className="col-md-4">
+                    <small className="text-muted">Fecha Vencimiento del pago:</small><br/>
+                    <strong className="text-warning-emphasis">
+                      {expedienteSeleccionado.fecha_pago ? new Date(expedienteSeleccionado.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
+                      {expedienteSeleccionado.periodo_gracia && ` (${expedienteSeleccionado.periodo_gracia} días)`}
+                    </strong>
+                  </div>
+                </div>
               </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Etapa Activa:</strong>
-                <Badge tipo="etapa" valor={expedienteSeleccionado.etapa_activa} />
-                {expedienteSeleccionado.motivoCancelacion && (
-                  <div className="mt-1">
-                    <small className="text-danger">Motivo: {expedienteSeleccionado.motivoCancelacion}</small>
+            </div>
+
+            {/* DESCRIPCIÓN DEL VEHÍCULO - Solo si es Autos */}
+            {expedienteSeleccionado.producto && expedienteSeleccionado.producto.toLowerCase().includes('auto') && (
+              <div className="col-12">
+                <div className="p-3 bg-info bg-opacity-10 rounded">
+                  <h6 className="text-info mb-2 d-flex align-items-center">
+                    <span className="me-2">🚗</span> DESCRIPCIÓN DEL VEHÍCULO ASEGURADO
+                  </h6>
+                  <div className="row g-2">
+                    <div className="col-md-2 col-4">
+                      <small className="text-muted">Marca:</small><br/>
+                      <strong>{expedienteSeleccionado.marca || '-'}</strong>
+                    </div>
+                    <div className="col-md-6 col-8">
+                      <small className="text-muted">Modelo:</small><br/>
+                      <strong>{expedienteSeleccionado.modelo || '-'}</strong>
+                    </div>
+                    <div className="col-md-2 col-6">
+                      <small className="text-muted">Año:</small><br/>
+                      <strong>{expedienteSeleccionado.anio || '-'}</strong>
+                    </div>
+                    <div className="col-md-2 col-6">
+                      <small className="text-muted">Color:</small><br/>
+                      <strong>{expedienteSeleccionado.color || '-'}</strong>
+                    </div>
+                  </div>
+                  <div className="row g-2 mt-1">
+                    <div className="col-md-4">
+                      <small className="text-muted">Serie (VIN):</small><br/>
+                      <strong className="font-monospace small">{expedienteSeleccionado.numero_serie || '-'}</strong>
+                    </div>
+                    <div className="col-md-2 col-4">
+                      <small className="text-muted">Motor:</small><br/>
+                      <strong className="small">{expedienteSeleccionado.motor || '-'}</strong>
+                    </div>
+                    <div className="col-md-2 col-4">
+                      <small className="text-muted">Placas:</small><br/>
+                      <strong>{expedienteSeleccionado.placas || '-'}</strong>
+                    </div>
+                    <div className="col-md-4 col-4">
+                      <small className="text-muted">Tipo:</small><br/>
+                      <strong className="small">{expedienteSeleccionado.tipo_vehiculo || '-'}</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* INFORMACIÓN FINANCIERA */}
+            <div className="col-12">
+              <div className="p-3 bg-secondary bg-opacity-10 rounded">
+                <h6 className="text-secondary mb-2 d-flex align-items-center">
+                  <span className="me-2">💰</span> INFORMACIÓN FINANCIERA
+                </h6>
+                <div className="row g-2">
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Prima Neta:</small><br/>
+                    <strong>{utils.formatearMoneda(expedienteSeleccionado.prima_pagada)}</strong>
+                  </div>
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Tasa Financiamiento:</small><br/>
+                    <strong>{utils.formatearMoneda(expedienteSeleccionado.cargoPagoFraccionado || expedienteSeleccionado.cargo_pago_fraccionado)}</strong>
+                  </div>
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Gastos por Expedición:</small><br/>
+                    <strong>{utils.formatearMoneda(expedienteSeleccionado.gastosExpedicion || expedienteSeleccionado.gastos_expedicion)}</strong>
+                  </div>
+                  <div className="col-md-3 col-6">
+                    <small className="text-muted">Subtotal:</small><br/>
+                    <strong>{utils.formatearMoneda(expedienteSeleccionado.subtotal)}</strong>
+                  </div>
+                </div>
+                <div className="row g-2 mt-1">
+                  <div className="col-md-4 col-6">
+                    <small className="text-muted">I.V.A. 16%:</small><br/>
+                    <strong>{utils.formatearMoneda(expedienteSeleccionado.iva)}</strong>
+                  </div>
+                  <div className="col-md-4 col-6">
+                    <small className="text-muted">IMPORTE TOTAL:</small><br/>
+                    <strong className="text-success fs-5">{utils.formatearMoneda(expedienteSeleccionado.total)}</strong>
+                  </div>
+                  <div className="col-md-4">
+                    <small className="text-muted">Forma de Pago:</small><br/>
+                    <strong className="text-uppercase">{expedienteSeleccionado.tipo_pago || 'ANUAL'}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* COBERTURAS CONTRATADAS - Siempre desplegable */}
+            <div className="col-12">
+              <div className="p-3 bg-warning bg-opacity-10 rounded">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-2"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setMostrarCoberturas(!mostrarCoberturas)}
+                >
+                  <h6 className="text-warning-emphasis mb-0 d-flex align-items-center">
+                    <span className="me-2">🛡️</span> COBERTURAS CONTRATADAS
+                    {expedienteSeleccionado.coberturas && expedienteSeleccionado.coberturas.length > 0 && (
+                      <span className="badge bg-warning text-dark ms-2">{expedienteSeleccionado.coberturas.length}</span>
+                    )}
+                  </h6>
+                  <button 
+                    className="btn btn-sm btn-outline-warning"
+                    type="button"
+                  >
+                    {mostrarCoberturas ? '▲ Ocultar' : '▼ Ver detalles'}
+                  </button>
+                </div>
+                
+                {mostrarCoberturas && (
+                  <div>
+                    {expedienteSeleccionado.coberturas && expedienteSeleccionado.coberturas.length > 0 ? (
+                      <div className="table-responsive">
+                        <table className="table table-sm table-hover mb-0 bg-white">
+                          <thead className="table-light">
+                            <tr>
+                              <th>Cobertura</th>
+                              <th className="text-end">Suma Asegurada</th>
+                              <th className="text-center">Deducible</th>
+                              <th className="text-end">Prima</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {expedienteSeleccionado.coberturas.map((cob, idx) => (
+                              <tr key={idx}>
+                                <td className="fw-medium">{cob.nombre}</td>
+                                <td className="text-end">
+                                  {cob.suma_asegurada === 'AMPARADA' ? (
+                                    <span className="badge bg-success">AMPARADA</span>
+                                  ) : (
+                                    `$${parseFloat(cob.suma_asegurada || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                  )}
+                                  {cob.tipo === 'por_evento' && <small className="d-block text-muted">POR EVENTO</small>}
+                                </td>
+                                <td className="text-center">
+                                  <span className="badge bg-secondary">{cob.deducible}</span>
+                                </td>
+                                <td className="text-end">
+                                  ${parseFloat(cob.prima || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      // Si no hay coberturas detalladas, mostrar datos básicos o mensaje
+                      (expedienteSeleccionado.tipo_cobertura || expedienteSeleccionado.suma_asegurada || expedienteSeleccionado.deducible) ? (
+                        <div className="row g-2">
+                          {expedienteSeleccionado.tipo_cobertura && (
+                            <div className="col-md-4">
+                              <small className="text-muted">Tipo de Cobertura:</small><br/>
+                              <strong className="text-uppercase">{expedienteSeleccionado.tipo_cobertura}</strong>
+                            </div>
+                          )}
+                          {expedienteSeleccionado.suma_asegurada && (
+                            <div className="col-md-4">
+                              <small className="text-muted">Suma Asegurada:</small><br/>
+                              <strong>{utils.formatearMoneda(expedienteSeleccionado.suma_asegurada)}</strong>
+                            </div>
+                          )}
+                          {expedienteSeleccionado.deducible && (
+                            <div className="col-md-4">
+                              <small className="text-muted">Deducible:</small><br/>
+                              <strong>{expedienteSeleccionado.deducible}{typeof expedienteSeleccionado.deducible === 'number' ? '%' : ''}</strong>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="alert alert-info mb-0">
+                          <small>
+                            ℹ️ No hay información detallada de coberturas disponible para esta póliza.
+                            <br/>
+                            <em className="text-muted">Las coberturas detalladas se extraen automáticamente al importar pólizas desde PDF.</em>
+                          </small>
+                        </div>
+                      )
+                    )}
                   </div>
                 )}
               </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Agente:</strong>
-                {expedienteSeleccionado.agente || '-'}
-              </div>
             </div>
 
-            <div className="col-md-6">
-              <h5 className="card-title border-bottom pb-2">Información Financiera</h5>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Prima pagada:</strong>
-                {utils.formatearMoneda(expedienteSeleccionado.prima_pagada)}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">IVA:</strong>
-                {utils.formatearMoneda(expedienteSeleccionado.iva)}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Total:</strong>
-                <span className="fs-5 fw-bold text-primary">
-                  {utils.formatearMoneda(expedienteSeleccionado.total)}
-                </span>
-              </div>
-            </div>
-
-            <div className="col-md-6">
-              <h5 className="card-title border-bottom pb-2">Vigencia</h5>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Inicio de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.inicio_vigencia, 'simple')}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Término de vigencia:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.termino_vigencia, 'simple')}
-              </div>
-              <div className="mb-3">
-                <strong className="d-block text-muted">Fecha de creación:</strong>
-                {utils.formatearFecha(expedienteSeleccionado.fecha_creacion, 'simple')}
-              </div>
-            </div>
-
+            {/* CALENDARIO DE PAGOS - Si es Fraccionado */}
             {expedienteSeleccionado.tipo_pago === 'Fraccionado' && 
              expedienteSeleccionado.frecuenciaPago && 
              expedienteSeleccionado.inicio_vigencia && (
@@ -3639,41 +3887,6 @@ const DetallesExpediente = React.memo(({
               </div>
             )}
 
-            {expedienteSeleccionado.producto === 'Autos' && (
-              <>
-                <div className="col-md-6">
-                  <h5 className="card-title border-bottom pb-2">Información del Vehículo</h5>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Marca:</strong>
-                    {expedienteSeleccionado.marca || '-'}
-                  </div>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Modelo:</strong>
-                    {expedienteSeleccionado.modelo || '-'}
-                  </div>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Año:</strong>
-                    {expedienteSeleccionado.anio || '-'}
-                  </div>
-                </div>
-
-                <div className="col-md-6">
-                  <h5 className="card-title border-bottom pb-2">Identificación del Vehículo</h5>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Número de Serie (VIN):</strong>
-                    {expedienteSeleccionado.numero_serie || '-'}
-                  </div>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Placas:</strong>
-                    {expedienteSeleccionado.placas || '-'}
-                  </div>
-                  <div className="mb-3">
-                    <strong className="d-block text-muted">Color:</strong>
-                    {expedienteSeleccionado.color || '-'}
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>
@@ -3908,29 +4121,50 @@ const estadoInicialFormulario = {
   termino_vigencia: '',
   prima_pagada: '',
   cargo_pago_fraccionado: '',
+  cargoPagoFraccionado: '',
   iva: '',
   total: '',
   motivo_cancelacion: '',
+  motivoCancelacion: '',
   tipo_pago: 'Anual',
   frecuencia_pago: '',
+  frecuenciaPago: '',
   periodo_gracia: 14,
   proximo_pago: '',
+  proximoPago: '',
   estatus_pago: 'Sin definir',
+  estatusPago: 'Sin definir',
   fecha_ultimo_pago: '',
+  fecha_pago: '',
+  plazo_pago_dias: '',
+  gastos_expedicion: '',
+  gastosExpedicion: '',
+  subtotal: '',
+  pago_unico: '',
   marca: '',
   modelo: '',
   anio: '',
   numero_serie: '',
+  motor: '',
   placas: '',
   color: '',
   tipo_vehiculo: '',
+  codigo_vehiculo: '',
   numero_poliza: '',
+  endoso: '000000',
+  inciso: '0001',
+  plan: '',
   tipo_cobertura: '',
   deducible: '',
   suma_asegurada: '',
   conductor_habitual: '',
   edad_conductor: '',
   licencia_conducir: '',
+  coberturas: null,
+  tipo_persona: '',
+  razonSocial: '',
+  curp: '',
+  domicilio: '',
   fecha_creacion: new Date().toISOString().split('T')[0],
   id: null
 };
@@ -4268,38 +4502,120 @@ const estadoInicialFormulario = {
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
     
-    console.log('💾 Guardando expediente con cálculos:', {
-      estatusPago: formularioConCalculos.estatusPago,
-      proximoPago: formularioConCalculos.proximoPago,
-      tipo_pago: formularioConCalculos.tipo_pago,
-      fecha_pago: formularioConCalculos.fecha_pago,
-      cliente_id: formularioConCalculos.cliente_id
-    });
-    
     // Normalizar apellidos para backend
     const expedientePayload = {
       ...formularioConCalculos
     };
     
-    console.log('📦 Payload completo a guardar:', {
+    // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
+    if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
+      expedientePayload.coberturas = JSON.stringify(expedientePayload.coberturas);
+      console.log('🔄 Coberturas convertidas a JSON string para el backend');
+    }
+    
+    // LOG COMPLETO DE TODOS LOS CAMPOS
+    console.log('💾 ============ GUARDANDO EXPEDIENTE ============');
+    console.log('📋 TODOS LOS CAMPOS DEL PAYLOAD:', {
+      // Identificación
+      id: expedientePayload.id,
       numero_poliza: expedientePayload.numero_poliza,
+      endoso: expedientePayload.endoso,
+      inciso: expedientePayload.inciso,
+      
+      // Cliente
       cliente_id: expedientePayload.cliente_id,
-      compania: expedientePayload.compania
+      nombre: expedientePayload.nombre,
+      apellido_paterno: expedientePayload.apellido_paterno,
+      apellido_materno: expedientePayload.apellido_materno,
+      
+      // Producto y Compañía
+      compania: expedientePayload.compania,
+      producto: expedientePayload.producto,
+      plan: expedientePayload.plan,
+      tipo_cobertura: expedientePayload.tipo_cobertura,
+      
+      // Agente y Equipo
+      agente: expedientePayload.agente,
+      sub_agente: expedientePayload.sub_agente,
+      
+      // Vigencia
+      inicio_vigencia: expedientePayload.inicio_vigencia,
+      termino_vigencia: expedientePayload.termino_vigencia,
+      fecha_pago: expedientePayload.fecha_pago,
+      periodo_gracia: expedientePayload.periodo_gracia,
+      
+      // Pagos
+      tipo_pago: expedientePayload.tipo_pago,
+      frecuenciaPago: expedientePayload.frecuenciaPago,
+      estatusPago: expedientePayload.estatusPago,
+      proximoPago: expedientePayload.proximoPago,
+      
+      // Financiero
+      prima_pagada: expedientePayload.prima_pagada,
+      cargoPagoFraccionado: expedientePayload.cargoPagoFraccionado,
+      cargo_pago_fraccionado: expedientePayload.cargo_pago_fraccionado,
+      gastosExpedicion: expedientePayload.gastosExpedicion,
+      gastos_expedicion: expedientePayload.gastos_expedicion,
+      subtotal: expedientePayload.subtotal,
+      iva: expedientePayload.iva,
+      total: expedientePayload.total,
+      
+      // Coberturas
+      coberturas: expedientePayload.coberturas,
+      coberturas_tipo: typeof expedientePayload.coberturas,
+      coberturas_es_string: typeof expedientePayload.coberturas === 'string',
+      suma_asegurada: expedientePayload.suma_asegurada,
+      deducible: expedientePayload.deducible,
+      
+      // Vehículo (si aplica)
+      marca: expedientePayload.marca,
+      modelo: expedientePayload.modelo,
+      anio: expedientePayload.anio,
+      numero_serie: expedientePayload.numero_serie,
+      motor: expedientePayload.motor,
+      placas: expedientePayload.placas,
+      color: expedientePayload.color,
+      tipo_vehiculo: expedientePayload.tipo_vehiculo,
+      conductor_habitual: expedientePayload.conductor_habitual,
+      
+      // Estado
+      etapa_activa: expedientePayload.etapa_activa,
+      motivoCancelacion: expedientePayload.motivoCancelacion,
+      fecha_creacion: expedientePayload.fecha_creacion,
+      
+      // Otros
+      notas: expedientePayload.notas
     });
+    
+    console.log('📦 PAYLOAD COMPLETO (JSON):', JSON.stringify(expedientePayload, null, 2));
 
     if (modoEdicion) {
+      console.log(`🔄 ACTUALIZANDO expediente ID: ${formularioConCalculos.id}`);
   fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(expedientePayload)
       })
-        .then(() => {
+        .then(response => {
+          console.log('📡 Respuesta servidor (UPDATE):', {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok
+          });
+          return response.json();
+        })
+        .then(data => {
+          console.log('✅ Expediente actualizado, respuesta del servidor:', data);
           limpiarFormulario();
           recargarExpedientes();
           setVistaActual('lista');
         })
-        .catch(err => alert('Error al actualizar expediente'));
+        .catch(err => {
+          console.error('❌ Error al actualizar expediente:', err);
+          alert('Error al actualizar expediente: ' + err.message);
+        });
     } else {
+      console.log('🆕 CREANDO nuevo expediente');
   fetch(`${API_URL}/api/expedientes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -4308,22 +4624,61 @@ const estadoInicialFormulario = {
           fecha_creacion: new Date().toISOString().split('T')[0]
         })
       })
-        .then(() => {
+        .then(response => {
+          console.log('📡 Respuesta servidor (CREATE):', {
+            status: response.status,
+            statusText: response.statusText,
+            ok: response.ok
+          });
+          return response.json();
+        })
+        .then(data => {
+          console.log('✅ Expediente creado, respuesta del servidor:', data);
           limpiarFormulario();
           recargarExpedientes();
           setVistaActual('lista');
         })
-        .catch(err => alert('Error al crear expediente'));
+        .catch(err => {
+          console.error('❌ Error al crear expediente:', err);
+          alert('Error al crear expediente: ' + err.message);
+        });
     }
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario]);
   const recargarExpedientes = useCallback(async () => {
     try {
-      console.log('🔄 Recargando expedientes...');
+      console.log('🔄 ============ RECARGANDO EXPEDIENTES ============');
       
       // 1. Obtener expedientes
       const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
       const expedientes = await resExpedientes.json();
-      console.log('📊 Expedientes obtenidos:', expedientes.length);
+      console.log(`📊 ${expedientes.length} expedientes obtenidos del backend`);
+      
+      // Log del PRIMER expediente completo para ver estructura
+      if (expedientes.length > 0) {
+        console.log('🔍 EJEMPLO - Primer expediente recibido:', {
+          ...expedientes[0],
+          _todos_los_campos: Object.keys(expedientes[0])
+        });
+      }
+      
+      // Debug: verificar coberturas en expedientes
+      let expedientesConCoberturas = 0;
+      expedientes.forEach((exp, index) => {
+        if (exp.coberturas) {
+          expedientesConCoberturas++;
+          if (index < 3) { // Solo los primeros 3 para no saturar
+            console.log(`🛡️ Expediente ${exp.numero_poliza} tiene coberturas:`, {
+              tipo: typeof exp.coberturas,
+              es_array: Array.isArray(exp.coberturas),
+              es_string: typeof exp.coberturas === 'string',
+              cantidad: Array.isArray(exp.coberturas) ? exp.coberturas.length : 'N/A',
+              longitud_string: typeof exp.coberturas === 'string' ? exp.coberturas.length : 'N/A',
+              preview: typeof exp.coberturas === 'string' ? exp.coberturas.substring(0, 100) + '...' : exp.coberturas
+            });
+          }
+        }
+      });
+      console.log(`📈 Total de expedientes con coberturas: ${expedientesConCoberturas} de ${expedientes.length}`);
       
       // 2. Obtener todos los clientes
       const resClientes = await fetch(`${API_URL}/api/clientes`);
@@ -4339,6 +4694,17 @@ const estadoInicialFormulario = {
       
       // 4. Enriquecer cada expediente con los datos del cliente
       const expedientesEnriquecidos = expedientes.map(exp => {
+        // Parsear coberturas si vienen como string JSON
+        if (exp.coberturas && typeof exp.coberturas === 'string') {
+          try {
+            exp.coberturas = JSON.parse(exp.coberturas);
+            console.log(`✅ Coberturas parseadas para ${exp.numero_poliza}:`, exp.coberturas.length);
+          } catch (error) {
+            console.error(`❌ Error parseando coberturas para ${exp.numero_poliza}:`, error);
+            exp.coberturas = null;
+          }
+        }
+        
         // Debug: mostrar TODOS los campos del expediente
         console.log('🔍 Expediente:', exp.numero_poliza, 'Campos relacionados con cliente:', {
           cliente_id: exp.cliente_id,

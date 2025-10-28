@@ -1,6 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
+import { obtenerClientes, crearCliente, actualizarCliente, eliminarCliente } from '../services/clientesService';
 
 // Hook personalizado para paginación (reutilizado del código original)
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -144,50 +145,76 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 const ModuloClientes = () => {
   // Estados principales del módulo de clientes
   const [clientes, setClientes] = useState([]);
-  const [categorias, setCategorias] = useState([]);
+  const [cargando, setCargando] = useState(false);
   
-  // Cargar clientes y categorías desde el backend al montar el componente
+  // Cargar clientes desde el backend al montar el componente
   useEffect(() => {
-    // Cargar clientes
-    fetch(`${API_URL}/api/clientes`)
-      .then(res => res.json())
-      .then(data => setClientes(data))
-      .catch(err => {
-        console.error('Error al cargar clientes:', err);
+    const cargarClientes = async () => {
+      console.log('🔄 Cargando clientes desde el backend...');
+      setCargando(true);
+      
+      try {
+        const resultado = await obtenerClientes();
+        
+        if (resultado.success) {
+          console.log(`✅ ${resultado.data.length} clientes cargados desde el backend`);
+          
+          // Log de TODOS los campos del primer cliente (si existe)
+          if (resultado.data.length > 0) {
+            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', {
+              ...resultado.data[0],
+              _todos_los_campos: Object.keys(resultado.data[0])
+            });
+          }
+          
+          // Log de campos específicos para todos los clientes
+          resultado.data.forEach((cliente, index) => {
+            if (index < 3) { // Solo los primeros 3 para no saturar
+              console.log(`📋 Cliente ${index + 1} (${cliente.codigo || cliente.id}):`, {
+                tipoPersona: cliente.tipoPersona,
+                nombre: cliente.nombre,
+                apellidoPaterno: cliente.apellidoPaterno,
+                apellidoMaterno: cliente.apellidoMaterno,
+                razonSocial: cliente.razonSocial,
+                email: cliente.email,
+                telefonoFijo: cliente.telefonoFijo,
+                telefonoMovil: cliente.telefonoMovil,
+                contactos: cliente.contactos,
+                contactos_tipo: typeof cliente.contactos,
+                contactos_cantidad: Array.isArray(cliente.contactos) ? cliente.contactos.length : 'No es array',
+                documentos_cantidad: cliente.documentos?.length || 0
+              });
+            }
+          });
+          
+          setClientes(resultado.data);
+        } else {
+          console.error('❌ Error al cargar clientes:', resultado.error);
+          setClientes([]);
+        }
+      } catch (err) {
+        console.error('❌ Excepción al cargar clientes:', err);
         setClientes([]);
-      });
-
-    // Cargar categorías de clientes
-    fetch(`${API_URL}/api/categorias-clientes`)
-      .then(res => res.json())
-      .then(data => setCategorias(data))
-      .catch(err => {
-        console.error('Error al cargar categorías:', err);
-        // Valores por defecto si falla la carga
-        setCategorias([
-          { id: 1, nombre: 'Normal' },
-          { id: 2, nombre: 'VIP' },
-          { id: 3, nombre: 'Premium' },
-          { id: 4, nombre: 'Digital' },
-          { id: 5, nombre: 'Empresarial' },
-          { id: 6, nombre: 'Gobierno' }
-        ]);
-      });
+      } finally {
+        setCargando(false);
+      }
+    };
+    
+    cargarClientes();
   }, []);
   const [vistaActual, setVistaActual] = useState('clientes');
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
   const [mostrarModalDocumento, setMostrarModalDocumento] = useState(false);
   const [tipoDocumentoASubir, setTipoDocumentoASubir] = useState('');
-  const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
   const [mostrarModalRelacionar, setMostrarModalRelacionar] = useState(false);
   const [mostrarModalVerDocumento, setMostrarModalVerDocumento] = useState(false);
   const [documentoAVer, setDocumentoAVer] = useState(null);
   const [mostrarModalConfirmarEliminar, setMostrarModalConfirmarEliminar] = useState(false);
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
   
-  // Simulación de pólizas existentes (en tu sistema real vendrían del estado principal)
-  const [polizas] = useState([
+  // Simulación de expedientes existentes (en tu sistema real vendrían del estado principal)
+  const [expedientes] = useState([
     { id: 1, nombre: 'Juan', apellidoPaterno: 'Pérez', producto: 'Autos', compania: 'Qualitas', etapaActiva: 'Pagado', clienteId: null },
     { id: 2, nombre: 'María', apellidoPaterno: 'González', producto: 'Vida', compania: 'Banorte', etapaActiva: 'Pagado', clienteId: null },
     { id: 3, nombre: 'Carlos', apellidoPaterno: 'López', producto: 'Daños', compania: 'HDI', etapaActiva: 'En cotización', clienteId: null },
@@ -197,6 +224,7 @@ const ModuloClientes = () => {
 
   // Tipos de cliente
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
+  const segmentosCliente = useMemo(() => ['Premium', 'Estándar', 'Básico', 'VIP'], []);
   
   // Tipos de documentos
   const tiposDocumentosPersonaFisica = useMemo(() => [
@@ -254,18 +282,17 @@ const ModuloClientes = () => {
     estado: '',
     codigoPostal: '',
     pais: 'México',
-    categoria_id: categorias.length > 0 ? categorias[0].id : 1, // Solo para UI
-    codigo: '', // Solo para UI
+    segmento: 'Estándar',
     fechaAlta: new Date().toISOString().split('T')[0],
     activo: true,
     notas: '',
-    documentos: [], // Solo para UI
-    polizasRelacionadas: [], // Solo para UI
+    documentos: [],
+    expedientesRelacionados: [],
     representanteLegal: '',
     puestoRepresentante: '',
     telefonoRepresentante: '',
     emailRepresentante: '',
-    contactos: [], // Solo para UI - Array para múltiples contactos
+    contactos: [], // Array para múltiples contactos
     id: null
   });
 
@@ -308,26 +335,26 @@ const ModuloClientes = () => {
       estado: '',
       codigoPostal: '',
       pais: 'México',
-      categoria_id: categorias.length > 0 ? categorias[0].id : 1, // Solo para UI
-      codigo: '', // Solo para UI
+      segmento: 'Estándar',
       fechaAlta: new Date().toISOString().split('T')[0],
       activo: true,
       notas: '',
-      documentos: [], // Solo para UI
-      polizasRelacionadas: [], // Solo para UI
+      documentos: [],
+      expedientesRelacionados: [],
       representanteLegal: '',
       puestoRepresentante: '',
       telefonoRepresentante: '',
       emailRepresentante: '',
-      contactos: [], // Solo para UI
+      contactos: [],
       id: null
     });
     setModoEdicion(false);
     setClienteSeleccionado(null);
-  }, [categorias]);
+  }, []);
 
   // Función para guardar cliente
   const guardarCliente = useCallback(async () => {
+    // Validaciones
     if (formularioCliente.tipoPersona === 'Persona Física') {
       if (!formularioCliente.nombre || !formularioCliente.apellidoPaterno) {
         alert('Por favor complete los campos obligatorios: Nombre y Apellido Paterno');
@@ -340,207 +367,234 @@ const ModuloClientes = () => {
       }
     }
 
+    // Preparar datos del cliente
+    const datosCliente = {
+      ...formularioCliente,
+      // Asegurar que el código esté presente
+      codigo: formularioCliente.codigo || generarCodigoCliente(),
+      // Convertir arrays a JSON string si es necesario
+      contactos: formularioCliente.contactos && Array.isArray(formularioCliente.contactos) 
+        ? JSON.stringify(formularioCliente.contactos) 
+        : formularioCliente.contactos,
+      documentos: formularioCliente.documentos && Array.isArray(formularioCliente.documentos)
+        ? JSON.stringify(formularioCliente.documentos)
+        : formularioCliente.documentos,
+      expedientesRelacionados: formularioCliente.expedientesRelacionados && Array.isArray(formularioCliente.expedientesRelacionados)
+        ? JSON.stringify(formularioCliente.expedientesRelacionados)
+        : formularioCliente.expedientesRelacionados
+    };
+
+    // Log detallado ANTES de enviar
+    console.log('💾 GUARDANDO CLIENTE - Datos del formulario:', {
+      tipoPersona: datosCliente.tipoPersona,
+      nombre: datosCliente.nombre,
+      apellidoPaterno: datosCliente.apellidoPaterno,
+      apellidoMaterno: datosCliente.apellidoMaterno,
+      razonSocial: datosCliente.razonSocial,
+      nombreComercial: datosCliente.nombreComercial,
+      rfc: datosCliente.rfc,
+      curp: datosCliente.curp,
+      fechaNacimiento: datosCliente.fechaNacimiento,
+      email: datosCliente.email,
+      telefonoFijo: datosCliente.telefonoFijo,
+      telefonoMovil: datosCliente.telefonoMovil,
+      direccion: datosCliente.direccion,
+      ciudad: datosCliente.ciudad,
+      estado: datosCliente.estado,
+      codigoPostal: datosCliente.codigoPostal,
+      pais: datosCliente.pais,
+      segmento: datosCliente.segmento,
+      representanteLegal: datosCliente.representanteLegal,
+      puestoRepresentante: datosCliente.puestoRepresentante,
+      telefonoRepresentante: datosCliente.telefonoRepresentante,
+      emailRepresentante: datosCliente.emailRepresentante,
+      contactos_tipo: typeof datosCliente.contactos,
+      contactos_es_string: typeof datosCliente.contactos === 'string',
+      documentos_cantidad: formularioCliente.documentos?.length || 0,
+      activo: datosCliente.activo,
+      notas: datosCliente.notas
+    });
+
+    setCargando(true);
+
     try {
-      // Lista de campos válidos que acepta el backend
-      const camposPermitidos = [
-        'id', 'codigo', 'tipoPersona', 'categoria_id',
-        'nombre', 'apellidoPaterno', 'apellidoMaterno',
-        'razonSocial', 'nombreComercial', 'rfc', 'curp',
-        'email', 'telefonoFijo', 'telefonoMovil',
-        'calle', 'numeroExterior', 'numeroInterior', 'colonia',
-        'ciudad', 'estado', 'codigoPostal', 'pais',
-        'referencias', 'notas', 'estadoCliente',
-        'fechaRegistro', 'fechaNacimiento', 'sexo', 'estadoCivil',
-        'ocupacion', 'profesion', 'lugarNacimiento',
-        'nacionalidad', 'giroEmpresarial', 'representanteLegal',
-        'registroPatronal', 'numeroEmpleados', 'ingresosMensuales',
-        'origenRecursos', 'beneficiarioFinal', 'personaPoliticamenteExpuesta',
-        'relacionPersonaPolitica', 'actividadEconomica'
-      ];
-
-      // Filtrar solo los campos permitidos
-      const datosCliente = {};
-      camposPermitidos.forEach(campo => {
-        if (formularioCliente.hasOwnProperty(campo)) {
-          datosCliente[campo] = formularioCliente[campo];
-        }
-      });
-
-      // Asegurar categoria_id
-      datosCliente.categoria_id = formularioCliente.categoria_id || formularioCliente.categoria?.id || 1;
+      let resultado;
       
-      // Generar código si no existe
-      if (!datosCliente.codigo) {
-        datosCliente.codigo = generarCodigoCliente();
-      }
-
-      console.log('Datos a enviar (filtrados):', datosCliente);
-
       if (modoEdicion) {
         // Actualizar cliente
-        const res = await fetch(`${API_URL}/api/clientes/${formularioCliente.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(datosCliente)
-        });
-        
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
-          console.error('Error del servidor:', errorData);
-          throw new Error(errorData.message || errorData.error || 'Error al actualizar cliente');
-        }
-        
-        const actualizado = await res.json();
-        setClientes(prev => prev.map(c => c.id === actualizado.id ? actualizado : c));
-        alert('✅ Cliente actualizado correctamente');
+        console.log(`🔄 Actualizando cliente ID: ${datosCliente.id}`);
+        resultado = await actualizarCliente(datosCliente.id, datosCliente);
       } else {
         // Crear cliente
-        const res = await fetch(`${API_URL}/api/clientes`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(datosCliente)
-        });
-        
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({}));
-          console.error('Error del servidor:', errorData);
-          throw new Error(errorData.message || errorData.error || 'Error al crear cliente');
+        console.log('🆕 Creando nuevo cliente');
+        resultado = await crearCliente(datosCliente);
+      }
+      
+      console.log('📡 Resultado del servidor:', resultado);
+      
+      if (resultado.success) {
+        // Verificar que la respuesta tenga datos
+        if (!resultado.data) {
+          console.error('⚠️ El servidor devolvió success pero sin datos');
+          alert('El cliente fue guardado pero no se recibió confirmación completa. Recargando lista...');
+          
+          // Recargar toda la lista de clientes
+          const clientesActualizados = await obtenerClientes();
+          if (clientesActualizados.success) {
+            setClientes(clientesActualizados.data);
+          }
+        } else {
+          console.log('✅ Cliente guardado correctamente:', resultado.data);
+          
+          // Parsear arrays si vienen como strings
+          const clienteGuardado = {
+            ...resultado.data,
+            contactos: typeof resultado.data.contactos === 'string' 
+              ? JSON.parse(resultado.data.contactos) 
+              : resultado.data.contactos,
+            documentos: typeof resultado.data.documentos === 'string'
+              ? JSON.parse(resultado.data.documentos)
+              : resultado.data.documentos,
+            expedientesRelacionados: typeof resultado.data.expedientesRelacionados === 'string'
+              ? JSON.parse(resultado.data.expedientesRelacionados)
+              : resultado.data.expedientesRelacionados
+          };
+          
+          if (modoEdicion) {
+            setClientes(prev => prev.map(c => c.id === clienteGuardado.id ? clienteGuardado : c));
+          } else {
+            setClientes(prev => [...prev, clienteGuardado]);
+          }
         }
         
-        const nuevo = await res.json();
-        setClientes(prev => [...prev, nuevo]);
-        alert('✅ Cliente creado correctamente');
+        limpiarFormularioCliente();
+        setVistaActual('clientes');
+      } else {
+        console.error('❌ Error del servidor:', resultado.error);
+        alert('Error al guardar cliente: ' + resultado.error);
       }
-      limpiarFormularioCliente();
-      setVistaActual('clientes');
     } catch (err) {
-      console.error('Error completo:', err);
-      alert('❌ Error al guardar cliente: ' + err.message);
+      console.error('💥 Excepción al guardar cliente:', err);
+      alert('Error inesperado al guardar cliente: ' + err.message);
+    } finally {
+      setCargando(false);
     }
   }, [formularioCliente, modoEdicion, limpiarFormularioCliente, generarCodigoCliente]);
 
   // Función para editar cliente
   const editarCliente = useCallback((cliente) => {
-    // Normalizar categoria_id si viene como objeto anidado
-    const clienteNormalizado = {
-      ...cliente,
-      categoria_id: cliente.categoria_id || cliente.categoria?.id || 1
-    };
-    setFormularioCliente(clienteNormalizado);
+    setFormularioCliente(cliente);
     setModoEdicion(true);
     setVistaActual('formulario-cliente');
   }, []);
 
   // Función para eliminar cliente
-  const eliminarCliente = useCallback(async (id) => {
+  const eliminarClienteLocal = useCallback(async (id) => {
     const cliente = clientes.find(c => c.id === id);
-    if (cliente?.polizasRelacionadas?.length > 0) {
-      alert('No se puede eliminar el cliente porque tiene pólizas relacionadas.');
+    if (cliente?.expedientesRelacionados?.length > 0) {
+      alert('No se puede eliminar el cliente porque tiene expedientes relacionados.');
       return;
     }
+    
     const nombreCliente = cliente.tipoPersona === 'Persona Física' ? 
       `${cliente.nombre} ${cliente.apellidoPaterno}` : 
       cliente.razonSocial;
+    
+    if (!confirm(`¿Está seguro de eliminar el cliente "${nombreCliente}"?`)) {
+      return;
+    }
+    
+    setCargando(true);
+    
     try {
-  const res = await fetch(`${API_URL}/api/clientes/${id}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) throw new Error('Error al eliminar cliente');
-      setClientes(prev => prev.filter(c => c.id !== id));
-      alert(`✅ Cliente "${nombreCliente}" eliminado correctamente`);
+      const resultado = await eliminarCliente(id);
+      
+      if (resultado.success) {
+        setClientes(prev => prev.filter(c => c.id !== id));
+        alert(`✅ Cliente "${nombreCliente}" eliminado correctamente`);
+      } else {
+        alert('Error al eliminar cliente: ' + resultado.error);
+      }
     } catch (err) {
-      alert('Error al eliminar cliente: ' + err.message);
+      alert('Error inesperado al eliminar cliente: ' + err.message);
+    } finally {
+      setCargando(false);
     }
   }, [clientes]);
 
   // Función para ver detalles
-  const verDetallesCliente = useCallback(async (cliente) => {
+  const verDetallesCliente = useCallback((cliente) => {
     setClienteSeleccionado(cliente);
     setVistaActual('detalles-cliente');
-    
-    // Cargar documentos del cliente desde el backend
-    try {
-      const response = await fetch(`${API_URL}/api/clientes/${cliente.id}/documentos`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Actualizar el cliente con sus documentos
-        const clienteConDocumentos = {
-          ...cliente,
-          documentos: data.data || []
-        };
-        setClienteSeleccionado(clienteConDocumentos);
-      }
-    } catch (error) {
-      console.error('Error al cargar documentos:', error);
-      // No mostramos error al usuario, solo no se cargan los documentos
-    }
   }, []);
 
   // Función para agregar documento
-  const agregarDocumento = useCallback(async (tipoDocumento, archivo = null) => {
-    if (!clienteSeleccionado) {
-      alert('❌ Error: No hay cliente seleccionado');
-      return;
-    }
+  const agregarDocumento = useCallback((tipoDocumento, nombreArchivo = null) => {
+    // Simular que siempre son PDFs para este ejemplo
+    // En un sistema real, esto vendría del input file
+    const extension = '.pdf';
+    const nombreBase = tipoDocumento.replace(/[^a-zA-Z0-9]/g, '_');
+    
+    const nuevoDocumento = {
+      id: Date.now() + Math.random(), // ID único más robusto
+      tipo: tipoDocumento,
+      nombre: nombreArchivo || `${nombreBase}_${new Date().toISOString().split('T')[0]}${extension}`,
+      fechaSubida: new Date().toISOString().split('T')[0],
+      estado: 'Vigente',
+      tipoArchivo: 'application/pdf', // En un sistema real vendría del file.type
+      tamaño: '2.5 MB' // Simulado
+    };
 
-    if (!archivo) {
-      alert('❌ Error: Debe seleccionar un archivo');
-      return;
-    }
-
-    try {
-      // Crear FormData para enviar el archivo
-      const formData = new FormData();
-      formData.append('archivo', archivo);
-      formData.append('tipo', tipoDocumento);
-      formData.append('estado', 'Vigente');
-
-      // Subir documento al backend
-      const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}/documentos`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-        },
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Error al subir el documento');
+    if (modoEdicion || clienteSeleccionado) {
+      const clienteActual = modoEdicion ? formularioCliente : clienteSeleccionado;
+      
+      // Verificar si ya existe un documento del mismo tipo
+      const documentosExistentes = clienteActual.documentos || [];
+      const indiceExistente = documentosExistentes.findIndex(doc => doc.tipo === tipoDocumento);
+      
+      let documentosActualizados;
+      let esActualizacion = false;
+      
+      if (indiceExistente !== -1) {
+        // Reemplazar el documento existente
+        documentosActualizados = [...documentosExistentes];
+        documentosActualizados[indiceExistente] = nuevoDocumento;
+        esActualizacion = true;
+      } else {
+        // Agregar nuevo documento
+        documentosActualizados = [...documentosExistentes, nuevoDocumento];
       }
-
-      const resultado = await response.json();
       
-      // Actualizar la lista de documentos del cliente
-      const documentosActualizados = [...(clienteSeleccionado.documentos || []), resultado.data];
+      if (modoEdicion) {
+        setFormularioCliente(prev => ({
+          ...prev,
+          documentos: documentosActualizados
+        }));
+      } else {
+        const clienteActualizado = {
+          ...clienteSeleccionado,
+          documentos: documentosActualizados
+        };
+        setClienteSeleccionado(clienteActualizado);
+        setClientes(prev => prev.map(c => 
+          c.id === clienteActualizado.id ? clienteActualizado : c
+        ));
+      }
       
-      const clienteActualizado = {
-        ...clienteSeleccionado,
-        documentos: documentosActualizados
-      };
-      
-      setClienteSeleccionado(clienteActualizado);
-      setClientes(prev => prev.map(c => 
-        c.id === clienteActualizado.id ? clienteActualizado : c
-      ));
-
-      alert(`✅ Documento "${tipoDocumento}" subido correctamente`);
-      setMostrarModalDocumento(false);
-      setTipoDocumentoASubir('');
-      
-    } catch (error) {
-      console.error('Error al subir documento:', error);
-      alert(`❌ Error al subir documento: ${error.message}`);
+      // Mensaje de confirmación
+      if (esActualizacion) {
+        alert(`✅ Documento "${tipoDocumento}" actualizado correctamente`);
+      } else {
+        alert(`✅ Documento "${tipoDocumento}" agregado correctamente`);
+      }
     }
-  }, [clienteSeleccionado]);
+    
+    setMostrarModalDocumento(false);
+    setTipoDocumentoASubir('');
+  }, [modoEdicion, clienteSeleccionado, formularioCliente]);
 
   // Función para eliminar documento
-  const eliminarDocumento = useCallback(async (documentoId) => {
+  const eliminarDocumento = useCallback((documentoId) => {
     if (!clienteSeleccionado) {
       alert('❌ Error: No hay cliente seleccionado');
       return;
@@ -557,60 +611,37 @@ const ModuloClientes = () => {
       return;
     }
     
-    try {
-      // Eliminar documento del backend
-      const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}/documentos/${documentoId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-        }
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Error al eliminar el documento');
-      }
-
-      // Filtrar los documentos para eliminar el seleccionado
-      const documentosActualizados = clienteSeleccionado.documentos.filter(doc => doc.id !== documentoId);
-      
-      // Crear el cliente actualizado con los nuevos documentos
-      const clienteActualizado = {
-        ...clienteSeleccionado,
-        documentos: documentosActualizados
-      };
-      
-      // Actualizar el estado del cliente seleccionado
-      setClienteSeleccionado(clienteActualizado);
-      
-      // Actualizar la lista de clientes
-      setClientes(prevClientes => 
-        prevClientes.map(cliente => 
-          cliente.id === clienteActualizado.id ? clienteActualizado : cliente
-        )
-      );
-      
-      // Cerrar el modal si estaba abierto
-      if (mostrarModalVerDocumento && documentoAVer?.id === documentoId) {
-        setMostrarModalVerDocumento(false);
-        setDocumentoAVer(null);
-      }
-      
-      // Cerrar modal de confirmación
-      setMostrarModalConfirmarEliminar(false);
-      setDocumentoAEliminar(null);
-      
-      // Mensaje de confirmación
-      alert(`✅ Documento "${documentoAEliminar.tipo}" eliminado correctamente`);
-      
-    } catch (error) {
-      console.error('Error al eliminar documento:', error);
-      alert(`❌ Error al eliminar documento: ${error.message}`);
-      
-      // Cerrar modal de confirmación incluso si hay error
-      setMostrarModalConfirmarEliminar(false);
-      setDocumentoAEliminar(null);
+    // Filtrar los documentos para eliminar el seleccionado
+    const documentosActualizados = clienteSeleccionado.documentos.filter(doc => doc.id !== documentoId);
+    
+    // Crear el cliente actualizado con los nuevos documentos
+    const clienteActualizado = {
+      ...clienteSeleccionado,
+      documentos: documentosActualizados
+    };
+    
+    // Actualizar el estado del cliente seleccionado
+    setClienteSeleccionado(clienteActualizado);
+    
+    // Actualizar la lista de clientes
+    setClientes(prevClientes => 
+      prevClientes.map(cliente => 
+        cliente.id === clienteActualizado.id ? clienteActualizado : cliente
+      )
+    );
+    
+    // Cerrar el modal si estaba abierto
+    if (mostrarModalVerDocumento && documentoAVer?.id === documentoId) {
+      setMostrarModalVerDocumento(false);
+      setDocumentoAVer(null);
     }
+    
+    // Cerrar modal de confirmación
+    setMostrarModalConfirmarEliminar(false);
+    setDocumentoAEliminar(null);
+    
+    // Mensaje de confirmación
+    alert(`✅ Documento "${documentoAEliminar.tipo}" eliminado correctamente`);
   }, [clienteSeleccionado, mostrarModalVerDocumento, documentoAVer]);
 
   // Función para mostrar modal de confirmación de eliminación
@@ -619,13 +650,13 @@ const ModuloClientes = () => {
     setMostrarModalConfirmarEliminar(true);
   }, []);
 
-  // Función para relacionar póliza
-  const relacionarPoliza = useCallback((polizaId) => {
+  // Función para relacionar expediente
+  const relacionarExpediente = useCallback((expedienteId) => {
     if (clienteSeleccionado) {
-      const polizasActualizadas = [...(clienteSeleccionado.polizasRelacionadas || []), polizaId];
+      const expedientesActualizados = [...(clienteSeleccionado.expedientesRelacionados || []), expedienteId];
       const clienteActualizado = {
         ...clienteSeleccionado,
-        polizasRelacionadas: polizasActualizadas
+        expedientesRelacionados: expedientesActualizados
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -637,13 +668,13 @@ const ModuloClientes = () => {
     setMostrarModalRelacionar(false);
   }, [clienteSeleccionado]);
 
-  // Función para desrelacionar póliza
-  const desrelacionarPoliza = useCallback((polizaId) => {
+  // Función para desrelacionar expediente
+  const desrelacionarExpediente = useCallback((expedienteId) => {
     if (clienteSeleccionado) {
-      const polizasActualizadas = clienteSeleccionado.polizasRelacionadas.filter(id => id !== polizaId);
+      const expedientesActualizados = clienteSeleccionado.expedientesRelacionados.filter(id => id !== expedienteId);
       const clienteActualizado = {
         ...clienteSeleccionado,
-        polizasRelacionadas: polizasActualizadas
+        expedientesRelacionados: expedientesActualizados
       };
       
       setClienteSeleccionado(clienteActualizado);
@@ -658,17 +689,17 @@ const ModuloClientes = () => {
   // Hook de paginación para la lista de clientes (debe estar aquí, no dentro de la función)
   const paginacionClientes = usePaginacion(clientes, 10);
 
-  // Memos para las pólizas
-  const polizasDelCliente = useMemo(() => 
-    polizas.filter(exp => clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)),
-    [polizas, clienteSeleccionado]
+  // Memos para los expedientes
+  const expedientesDelCliente = useMemo(() => 
+    expedientes.filter(exp => clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)),
+    [expedientes, clienteSeleccionado]
   );
 
-  const polizasNoRelacionadas = useMemo(() => 
-    polizas.filter(exp => 
-      !exp.clienteId && !clienteSeleccionado?.polizasRelacionadas?.includes(exp.id)
+  const expedientesNoRelacionados = useMemo(() => 
+    expedientes.filter(exp => 
+      !exp.clienteId && !clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)
     ),
-    [polizas, clienteSeleccionado]
+    [expedientes, clienteSeleccionado]
   );
 
   // Renderizado de Lista de Clientes
@@ -742,7 +773,7 @@ const ModuloClientes = () => {
                       <th>Cliente</th>
                       <th>RFC</th>
                       <th>Contacto</th>
-                      <th>Categoría</th>
+                      <th>Segmento</th>
                       <th>Productos</th>
                       <th>Documentos</th>
                       <th>Estado</th>
@@ -751,14 +782,14 @@ const ModuloClientes = () => {
                   </thead>
                   <tbody>
                     {paginacionClientes.itemsPaginados.map((cliente) => {
-                      const polizasCliente = polizas.filter(exp => 
-                        cliente.polizasRelacionadas?.includes(exp.id)
+                      const expedientesCliente = expedientes.filter(exp => 
+                        cliente.expedientesRelacionados?.includes(exp.id)
                       );
                       
                       return (
                         <tr key={cliente.id}>
                           <td>
-                            <strong className="text-primary">{cliente.codigo || `CL${String(cliente.id).padStart(3, '0')}`}</strong>
+                            <strong className="text-primary">{cliente.codigo}</strong>
                           </td>
                           <td>
                             <div>
@@ -788,19 +819,17 @@ const ModuloClientes = () => {
                           </td>
                           <td>
                             <span className={`badge ${
-                              cliente.categoria?.nombre === 'VIP' ? 'bg-purple' :
-                              cliente.categoria?.nombre === 'Premium' ? 'bg-warning' :
-                              cliente.categoria?.nombre === 'Digital' ? 'bg-info' :
-                              cliente.categoria?.nombre === 'Empresarial' ? 'bg-success' :
-                              cliente.categoria?.nombre === 'Gobierno' ? 'bg-primary' :
+                              cliente.segmento === 'VIP' ? 'bg-purple' :
+                              cliente.segmento === 'Premium' ? 'bg-warning' :
+                              cliente.segmento === 'Estándar' ? 'bg-info' :
                               'bg-secondary'
                             }`}>
-                              {cliente.categoria?.nombre || 'Normal'}
+                              {cliente.segmento}
                             </span>
                           </td>
                           <td>
                             <span className="badge bg-primary">
-                              {polizasCliente.length} productos
+                              {expedientesCliente.length} productos
                             </span>
                           </td>
                           <td>
@@ -832,9 +861,10 @@ const ModuloClientes = () => {
                                 <Edit size={14} />
                               </button>
                               <button
-                                onClick={() => eliminarCliente(cliente.id)}
+                                onClick={() => eliminarClienteLocal(cliente.id)}
                                 className="btn btn-outline-danger"
                                 title="Eliminar"
+                                disabled={cargando}
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -864,7 +894,7 @@ const ModuloClientes = () => {
 
   // Renderizado de Formulario de Cliente
   const renderFormularioCliente = () => {
-    const siguienteCodigo = !modoEdicion ? generarCodigoCliente() : (formularioCliente.codigo || 'CL-Auto');
+    const siguienteCodigo = !modoEdicion ? generarCodigoCliente() : formularioCliente.codigo;
     const estadosMexico = [
       'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 
       'Chihuahua', 'Ciudad de México', 'Coahuila', 'Colima', 'Durango', 'Guanajuato', 
@@ -975,14 +1005,14 @@ const ModuloClientes = () => {
                 </div>
                 
                 <div className="col-md-4">
-                  <label className="form-label">Categoría</label>
+                  <label className="form-label">Segmento</label>
                   <select
                     className="form-select"
-                    value={formularioCliente.categoria_id}
-                    onChange={(e) => setFormularioCliente({...formularioCliente, categoria_id: parseInt(e.target.value)})}
+                    value={formularioCliente.segmento}
+                    onChange={(e) => setFormularioCliente({...formularioCliente, segmento: e.target.value})}
                   >
-                    {categorias.map(categoria => (
-                      <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+                    {segmentosCliente.map(segmento => (
+                      <option key={segmento} value={segmento}>{segmento}</option>
                     ))}
                   </select>
                 </div>
@@ -1507,16 +1537,14 @@ const ModuloClientes = () => {
                       </div>
                     )}
                     <div className="col-md-6">
-                      <strong className="d-block text-muted">Categoría:</strong>
+                      <strong className="d-block text-muted">Segmento:</strong>
                       <span className={`badge ${
-                        clienteSeleccionado.categoria?.nombre === 'VIP' ? 'bg-purple' :
-                        clienteSeleccionado.categoria?.nombre === 'Premium' ? 'bg-warning' :
-                        clienteSeleccionado.categoria?.nombre === 'Digital' ? 'bg-info' :
-                        clienteSeleccionado.categoria?.nombre === 'Empresarial' ? 'bg-success' :
-                        clienteSeleccionado.categoria?.nombre === 'Gobierno' ? 'bg-primary' :
+                        clienteSeleccionado.segmento === 'VIP' ? 'bg-purple' :
+                        clienteSeleccionado.segmento === 'Premium' ? 'bg-warning' :
+                        clienteSeleccionado.segmento === 'Estándar' ? 'bg-info' :
                         'bg-secondary'
                       }`}>
-                        {clienteSeleccionado.categoria?.nombre || 'Normal'}
+                        {clienteSeleccionado.segmento}
                       </span>
                     </div>
                     <div className="col-md-6">
@@ -1697,7 +1725,7 @@ const ModuloClientes = () => {
                     <button
                       onClick={() => setMostrarModalRelacionar(true)}
                       className="btn btn-outline-success"
-                      disabled={polizasNoRelacionadas.length === 0}
+                      disabled={expedientesNoRelacionados.length === 0}
                     >
                       <Plus size={16} className="me-2" />
                       Relacionar Expediente
@@ -1946,7 +1974,7 @@ const ModuloClientes = () => {
               </div>
             </div>
 
-            {/* Productos/Pólizas Relacionadas */}
+            {/* Productos/Expedientes Relacionados */}
             <div className="col-12">
               <div className="card">
                 <div className="card-header d-flex justify-content-between align-items-center">
@@ -1957,18 +1985,18 @@ const ModuloClientes = () => {
                   <button
                     onClick={() => setMostrarModalRelacionar(true)}
                     className="btn btn-sm btn-success"
-                    disabled={polizasNoRelacionadas.length === 0}
+                    disabled={expedientesNoRelacionados.length === 0}
                   >
                     <Plus size={14} className="me-1" />
                     Relacionar Producto
                   </button>
                 </div>
                 <div className="card-body">
-                  {polizasDelCliente.length === 0 ? (
+                  {expedientesDelCliente.length === 0 ? (
                     <div className="text-center py-4">
                       <Package size={48} className="text-muted mb-3" />
                       <p className="text-muted">No hay productos relacionados con este cliente</p>
-                      {polizasNoRelacionadas.length > 0 && (
+                      {expedientesNoRelacionados.length > 0 && (
                         <button
                           onClick={() => setMostrarModalRelacionar(true)}
                           className="btn btn-outline-success"
@@ -1992,7 +2020,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {polizasDelCliente.map(expediente => (
+                          {expedientesDelCliente.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.producto}</td>
                               <td>{expediente.compania}</td>
@@ -2020,7 +2048,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => desrelacionarPoliza(expediente.id)}
+                                  onClick={() => desrelacionarExpediente(expediente.id)}
                                   className="btn btn-sm btn-outline-danger"
                                   title="Desrelacionar"
                                 >
@@ -2442,20 +2470,14 @@ const ModuloClientes = () => {
                   </div>
                   
                   <div className="mb-3">
-                    <label className="form-label">Archivo *</label>
+                    <label className="form-label">Archivo</label>
                     <input 
                       type="file" 
                       className="form-control"
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={(e) => setArchivoSeleccionado(e.target.files[0])}
                     />
-                    {archivoSeleccionado && (
-                      <small className="text-success d-block mt-2">
-                        ✅ {archivoSeleccionado.name} ({(archivoSeleccionado.size / 1024 / 1024).toFixed(2)} MB)
-                      </small>
-                    )}
-                    <small className="text-muted d-block mt-1">
-                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX (Máx. 10MB)
+                    <small className="text-muted">
+                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX
                     </small>
                   </div>
                 </div>
@@ -2466,7 +2488,6 @@ const ModuloClientes = () => {
                     onClick={() => {
                       setMostrarModalDocumento(false);
                       setTipoDocumentoASubir('');
-                      setArchivoSeleccionado(null);
                     }}
                   >
                     Cancelar
@@ -2474,8 +2495,8 @@ const ModuloClientes = () => {
                   <button 
                     type="button" 
                     className="btn btn-primary"
-                    onClick={() => agregarDocumento(tipoDocumentoASubir, archivoSeleccionado)}
-                    disabled={!tipoDocumentoASubir || !archivoSeleccionado}
+                    onClick={() => agregarDocumento(tipoDocumentoASubir)}
+                    disabled={!tipoDocumentoASubir}
                   >
                     <FileUp size={16} className="me-2" />
                     {clienteSeleccionado?.documentos?.find(doc => doc.tipo === tipoDocumentoASubir) ? 
@@ -2487,13 +2508,13 @@ const ModuloClientes = () => {
           </div>
         )}
 
-        {/* Modal para relacionar pólizas */}
+        {/* Modal para relacionar expedientes */}
         {mostrarModalRelacionar && (
           <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
             <div className="modal-dialog modal-lg">
               <div className="modal-content">
                 <div className="modal-header">
-                  <h5 className="modal-title">Relacionar Póliza/Producto</h5>
+                  <h5 className="modal-title">Relacionar Expediente/Producto</h5>
                   <button 
                     type="button" 
                     className="btn-close"
@@ -2501,12 +2522,12 @@ const ModuloClientes = () => {
                   ></button>
                 </div>
                 <div className="modal-body">
-                  <p>Selecciona las pólizas que deseas relacionar con este cliente:</p>
+                  <p>Selecciona los expedientes que deseas relacionar con este cliente:</p>
                   
-                  {polizasNoRelacionadas.length === 0 ? (
+                  {expedientesNoRelacionados.length === 0 ? (
                     <div className="text-center py-4">
                       <CheckCircle2 size={48} className="text-success mb-3" />
-                      <p className="text-muted">No hay pólizas disponibles para relacionar</p>
+                      <p className="text-muted">No hay expedientes disponibles para relacionar</p>
                     </div>
                   ) : (
                     <div className="table-responsive">
@@ -2521,7 +2542,7 @@ const ModuloClientes = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {polizasNoRelacionadas.map(expediente => (
+                          {expedientesNoRelacionados.map(expediente => (
                             <tr key={expediente.id}>
                               <td>{expediente.nombre} {expediente.apellidoPaterno}</td>
                               <td>{expediente.producto}</td>
@@ -2537,7 +2558,7 @@ const ModuloClientes = () => {
                               </td>
                               <td>
                                 <button
-                                  onClick={() => relacionarPoliza(expediente.id)}
+                                  onClick={() => relacionarExpediente(expediente.id)}
                                   className="btn btn-sm btn-success"
                                 >
                                   <Plus size={14} className="me-1" />
