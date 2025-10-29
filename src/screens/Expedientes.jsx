@@ -4361,12 +4361,35 @@ const estadoInicialFormulario = {
     return ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión', 'Pendiente de pago'].includes(estado);
   }, []);
 
-  const cambiarEstadoExpediente = useCallback((expedienteId, nuevoEstado, motivo = '') => {
-    setExpedientes(prev => prev.map(exp => 
-      exp.id === expedienteId 
-        ? { ...exp, etapa_activa: nuevoEstado, motivoCancelacion: motivo, fechaActualizacion: new Date().toISOString().split('T')[0] }
-        : exp
-    ));
+  const cambiarEstadoExpediente = useCallback(async (expedienteId, nuevoEstado, motivo = '') => {
+    try {
+      // 1. Actualizar en la base de datos
+      const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          etapa_activa: nuevoEstado,
+          motivoCancelacion: motivo,
+          fecha_actualizacion: new Date().toISOString().split('T')[0]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al actualizar el estado en la base de datos');
+      }
+
+      console.log('✅ Estado actualizado en BD:', { expedienteId, nuevoEstado, motivo });
+
+      // 2. Actualizar el estado local
+      setExpedientes(prev => prev.map(exp => 
+        exp.id === expedienteId 
+          ? { ...exp, etapa_activa: nuevoEstado, motivoCancelacion: motivo, fecha_actualizacion: new Date().toISOString().split('T')[0] }
+          : exp
+      ));
+    } catch (error) {
+      console.error('❌ Error al cambiar estado del expediente:', error);
+      alert('Error al actualizar el estado: ' + error.message);
+    }
   }, []);
 
   const avanzarEstado = useCallback((expediente) => {
@@ -4422,22 +4445,49 @@ const estadoInicialFormulario = {
     return '';
   }, [calcularProximoPago]);
 
-  const aplicarPago = useCallback((expedienteId) => {
-    setExpedientes(prev => prev.map(exp => {
-      if (exp.id === expedienteId) {
-        const fechaActual = new Date().toISOString().split('T')[0];
-        const proximoPago = calcularSiguientePago(exp);
-        
-        return { 
-          ...exp, 
+  const aplicarPago = useCallback(async (expedienteId) => {
+    try {
+      // Buscar el expediente actual para calcular el siguiente pago
+      const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
+      if (!expedienteActual) return;
+
+      const fechaActual = new Date().toISOString().split('T')[0];
+      const proximoPago = calcularSiguientePago(expedienteActual);
+
+      // 1. Actualizar en la base de datos
+      const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           estatusPago: 'Pagado',
           fechaUltimoPago: fechaActual,
           proximoPago: proximoPago
-        };
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al aplicar el pago en la base de datos');
       }
-      return exp;
-    }));
-  }, [calcularSiguientePago]);
+
+      console.log('✅ Pago aplicado en BD:', { expedienteId, fechaActual, proximoPago });
+
+      // 2. Actualizar el estado local
+      setExpedientes(prev => prev.map(exp => {
+        if (exp.id === expedienteId) {
+          return { 
+            ...exp, 
+            estatusPago: 'Pagado',
+            fechaUltimoPago: fechaActual,
+            proximoPago: proximoPago
+          };
+        }
+        return exp;
+      }));
+    } catch (error) {
+      console.error('❌ Error al aplicar pago:', error);
+      alert('Error al aplicar el pago: ' + error.message);
+    }
+  }, [calcularSiguientePago, expedientes]);
 
   // Función para manejar selección de cliente
   const handleClienteSeleccionado = useCallback((cliente) => {
