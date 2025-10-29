@@ -30,7 +30,7 @@ Este documento especifica la lógica completa del equipo de trabajo y el sistema
 - **Permisos**: Ve SOLO sus propias pólizas
 - **Función**: Vende pólizas y administra su cartera
 - **Características CLAVE**:
-  - ✅ **Múltiples claves**: Tiene una clave DIFERENTE por cada aseguradora
+  - ✅ **Múltiples claves**: Tiene una clave por cada **producto de cada aseguradora**
   - ✅ **Productos específicos**: No puede vender TODOS los productos de TODAS las aseguradoras
   - ✅ **Cobra directo**: Las comisiones las cobra directamente con la aseguradora
   - ✅ **Paga a vendedores**: Puede pagar comisión a sus vendedores (opcional)
@@ -39,16 +39,28 @@ Este documento especifica la lógica completa del equipo de trabajo y el sistema
 **Ejemplo Real:**
 ```
 Agente: Juan Pérez
-├─ Qualitas: Clave AG-12345
-│  ├─ Productos permitidos: Auto Tradicional, Auto Premium
-│  └─ Comisión: 15% (configurable por producto)
-├─ ANA Seguros: Clave ANAAG-999
-│  ├─ Productos permitidos: Auto Tradicional, GMM
-│  └─ Comisión: 12% (configurable por producto)
-└─ GNP: Clave GNP-AG-777
-   ├─ Productos permitidos: Vida Individual
-   └─ Comisión: 20%
+
+HDI Seguros
+├─ Autos Individual
+│  ├─ Clave: HDI-AUTO-12345
+│  └─ Comisión: 15%
+├─ Vida Individual
+│  ├─ Clave: HDI-VIDA-12345
+│  └─ Comisión: 20%
+└─ Gastos Médicos Menores
+   ├─ Clave: HDI-GMM-12345
+   └─ Comisión: 18%
+
+ABA Seguros
+├─ Autos Individual
+│  ├─ Clave: ABA-AG-999-AUTO
+│  └─ Comisión: 12%
+└─ Vida Individual
+   ├─ Clave: ABA-AG-999-VIDA
+   └─ Comisión: 22%
 ```
+
+**Ventaja**: Máxima flexibilidad - cada producto puede tener su propia clave y comisión
 
 ### 4️⃣ **Vendedor**
 - **Permisos**: Ve SOLO sus propias ventas
@@ -100,52 +112,26 @@ CREATE TABLE equipo_trabajo (
 );
 ```
 
-### **Tabla: `claves_agente_aseguradora`** ⭐ NUEVA
-**Propósito**: Un agente tiene múltiples claves (una por aseguradora)
+### **Tabla: `claves_agente_aseguradora`** ❌ NO NECESARIA
+**Por qué NO**: Ya tienes el campo `clave` en `productos_agente` (antes `ejecutivos_por_producto`)
 
+**Ventaja del diseño actual:**
+- ✅ Clave específica por **producto + aseguradora** (más flexible)
+- ✅ Todo en una sola tabla (más simple)
+- ✅ Ya está implementado en tu UI (ver captura)
+
+### **Tabla: `productos_agente`** ✅ YA EXISTE (como `ejecutivos_por_producto`)
+**Propósito**: Qué productos puede vender cada agente/vendedor + su clave específica
+
+**Estructura ACTUAL (según tu captura de pantalla):**
 ```sql
-CREATE TABLE claves_agente_aseguradora (
-  id INT PRIMARY KEY AUTO_INCREMENT,
-  agente_id INT NOT NULL,                          -- FK a equipo_trabajo
-  aseguradora_id INT NOT NULL,                     -- FK a aseguradoras
-  clave_aseguradora VARCHAR(50) NOT NULL,          -- Ej: "AG-12345", "ANAAG-999"
-  activo BOOLEAN DEFAULT TRUE,
-  fecha_asignacion DATE,
-  
-  FOREIGN KEY (agente_id) REFERENCES equipo_trabajo(id) ON DELETE CASCADE,
-  FOREIGN KEY (aseguradora_id) REFERENCES aseguradoras(id) ON DELETE CASCADE,
-  UNIQUE KEY unique_agente_aseguradora (agente_id, aseguradora_id)
-);
-```
-
-**Ejemplo de datos:**
-```sql
-INSERT INTO claves_agente_aseguradora VALUES
-(1, 5, 1, 'AG-12345', TRUE, '2024-01-15'),    -- Agente Juan → Qualitas
-(2, 5, 2, 'ANAAG-999', TRUE, '2024-01-15'),   -- Agente Juan → ANA Seguros
-(3, 5, 3, 'GNP-AG-777', TRUE, '2024-02-01');  -- Agente Juan → GNP
-```
-
-### **Tabla: `productos_agente`** (ya existe como `ejecutivos_por_producto`)
-**Propósito**: Qué productos puede vender cada agente/vendedor por aseguradora
-
-```sql
--- RENOMBRAR de ejecutivos_por_producto → productos_agente
--- O EXTENDER la tabla actual
-ALTER TABLE ejecutivos_por_producto ADD COLUMN clave_aseguradora VARCHAR(50);
-ALTER TABLE ejecutivos_por_producto ADD COLUMN comision_agente DECIMAL(5,2);
-ALTER TABLE ejecutivos_por_producto ADD COLUMN comision_vendedor_porcentaje DECIMAL(5,2);
-```
-
-**Estructura ideal:**
-```sql
-CREATE TABLE productos_agente (
+-- Tabla existente con los campos necesarios
+CREATE TABLE ejecutivos_por_producto (
   id INT PRIMARY KEY AUTO_INCREMENT,
   usuario_id INT NOT NULL,                         -- FK a equipo_trabajo (Agente o Vendedor)
   aseguradora_id INT NOT NULL,                     -- FK a aseguradoras
   producto_id INT NOT NULL,                        -- FK a tipos_productos
-  clave_aseguradora VARCHAR(50),                   -- Clave que usa para esta aseguradora
-  comision_base DECIMAL(5,2),                      -- Comisión base del producto (ej: 15%)
+  clave VARCHAR(50),                               -- ⭐ CLAVE ESPECÍFICA por producto
   comision_personalizada DECIMAL(5,2),             -- Comisión específica para este agente
   ejecutivo_id INT,                                -- FK a equipo_trabajo (Ejecutivo supervisor)
   activo BOOLEAN DEFAULT TRUE,
@@ -154,8 +140,30 @@ CREATE TABLE productos_agente (
   FOREIGN KEY (aseguradora_id) REFERENCES aseguradoras(id) ON DELETE CASCADE,
   FOREIGN KEY (producto_id) REFERENCES tipos_productos(id) ON DELETE CASCADE,
   FOREIGN KEY (ejecutivo_id) REFERENCES equipo_trabajo(id) ON DELETE SET NULL,
-  UNIQUE KEY unique_usuario_producto (usuario_id, producto_id)
+  UNIQUE KEY unique_usuario_aseguradora_producto (usuario_id, aseguradora_id, producto_id)
 );
+```
+
+**✅ Campos que YA tienes:**
+- `clave` - Para guardar la clave del agente en esa aseguradora/producto
+- `comision_personalizada` - Para % de comisión específico
+
+**❌ Campo que FALTA agregar:**
+```sql
+ALTER TABLE ejecutivos_por_producto 
+ADD COLUMN comision_vendedor_porcentaje DECIMAL(5,2) DEFAULT 50
+COMMENT 'Porcentaje de la comisión que se comparte con el vendedor';
+```
+
+**Ejemplo de datos (según tu UI):**
+```sql
+-- Agente: Juan Pérez (usuario_id = 5)
+INSERT INTO ejecutivos_por_producto VALUES
+(1, 5, 1, 10, 'HDI-AUTO-12345', 15.00, 3, TRUE),    -- HDI / Autos Individual / 15%
+(2, 5, 1, 11, 'HDI-VIDA-12345', 20.00, 3, TRUE),    -- HDI / Vida Individual / 20%
+(3, 5, 1, 12, 'HDI-GMM-12345', 18.00, 3, TRUE),     -- HDI / GMM / 18%
+(4, 5, 2, 10, 'ABA-999-AUTO', 12.00, 3, TRUE),      -- ABA / Autos Individual / 12%
+(5, 5, 2, 11, 'ABA-999-VIDA', 22.00, 3, TRUE);      -- ABA / Vida Individual / 22%
 ```
 
 ### **Tabla: `comisiones`** ⭐ NUEVA - CRÍTICA
@@ -277,20 +285,31 @@ Cuando se crea una póliza en `expedientes`:
   expediente_id: 100,
   numero_poliza: "POL-2024-001",
   cliente_id: "CLI001",
-  aseguradora: "Qualitas",
-  producto: "Auto Tradicional",
+  aseguradora: "HDI Seguros",
+  producto: "Autos Individual",
   importe_total: 15000.00,
   
   // CAMPOS CLAVE PARA COMISIONES
   agente_id: "AG-001",           // ⭐ Quien vendió (o bajo cuya clave)
   vendedor_id: "VEN-001",        // ⭐ Si fue un vendedor (NULL si vendió el agente)
-  clave_aseguradora: "AG-12345", // ⭐ Clave usada en la aseguradora
+  clave: "HDI-AUTO-12345",       // ⭐ Clave específica usada (de ejecutivos_por_producto)
   
   etapa_activa: "Emitida",
   estatus_pago: "Pendiente",
   fecha_emision: "2024-10-15",
   fecha_vencimiento_pago: "2024-11-15"
 }
+```
+
+**Cómo se obtiene la clave:**
+```sql
+-- Al crear el expediente, buscar la clave del agente para ese producto
+SELECT clave 
+FROM ejecutivos_por_producto
+WHERE usuario_id = [agente_id]
+  AND aseguradora_id = [id de aseguradora]
+  AND producto_id = [id de producto]
+LIMIT 1;
 ```
 
 ### **Paso 2: Registro Automático de Comisión**
@@ -456,11 +475,12 @@ ORDER BY comisiones_ganadas DESC;
 ### Backend (Hugo)
 - [ ] Agregar campos a `expedientes`:
   - [ ] `agente_id VARCHAR(20)` ⭐
-  - [ ] `vendedor_id VARCHAR(20)` ⭐
-  - [ ] `clave_aseguradora VARCHAR(50)` ⭐
+  - [ ] `vendedor_id VARCHAR(20)` ⭐  
+  - [ ] `clave VARCHAR(50)` ⭐ (clave específica usada del registro de ejecutivos_por_producto)
 
-- [ ] Crear tabla `claves_agente_aseguradora`
-- [ ] Extender/renombrar tabla `ejecutivos_por_producto` → `productos_agente`
+- [ ] Agregar a `ejecutivos_por_producto`:
+  - [ ] `comision_vendedor_porcentaje DECIMAL(5,2)` - % que se comparte con vendedor
+
 - [ ] Crear tabla `comisiones` ⭐ CRÍTICA
 - [ ] Crear trigger para auto-generar comisiones
 - [ ] Endpoints para:
