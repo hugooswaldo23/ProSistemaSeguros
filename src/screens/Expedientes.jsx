@@ -139,12 +139,39 @@ const CampoFechaCalculada = React.memo(({
 ));
 
 const InfoCliente = React.memo(({ expediente }) => {
+  // Determinar si es Persona Moral por el campo razon_social
+  const esPersonaMoral = expediente.razon_social && expediente.razon_social.trim() !== '';
+  
   return (
     <div>
       <div className="fw-semibold">
-        {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
+        {esPersonaMoral ? (
+          // Persona Moral - Mostrar RAZÓN SOCIAL (empresa), NO nombre del contacto
+          <div>
+            <div>{expediente.razon_social}</div>
+            {expediente.nombre_comercial && (
+              <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                ({expediente.nombre_comercial})
+              </small>
+            )}
+            {(expediente.nombre || expediente.email || expediente.telefono_movil) && (
+              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
+                {expediente.nombre && expediente.apellido_paterno && (
+                  <div>👤 Contacto: {expediente.nombre} {expediente.apellido_paterno}</div>
+                )}
+                {expediente.email && <div>📧 {expediente.email}</div>}
+                {expediente.telefono_movil && <div>📱 {expediente.telefono_movil}</div>}
+              </div>
+            )}
+          </div>
+        ) : (
+          // Persona Física - Mostrar Nombre y Apellidos del cliente
+          <>{expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}</>
+        )}
       </div>
-      <small className="text-muted">{expediente.email}</small>
+      {!esPersonaMoral && expediente.email && (
+        <small className="text-muted">{expediente.email}</small>
+      )}
       {expediente.producto === 'Autos' && expediente.marca && (
         <div>
           <small className="text-primary">
@@ -1342,9 +1369,21 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       console.log('📡 Respuesta de crearCliente:', resultado);
       
       if (resultado.success && resultado.data) {
-        setClienteEncontrado(resultado.data);
-        const nombreCliente = resultado.data.razonSocial || `${resultado.data.nombre} ${resultado.data.apellidoPaterno || ''}`.trim();
-        console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', resultado.data.id);
+        // ⚠️ IMPORTANTE: Normalizar campos del backend (snake_case → camelCase)
+        const clienteNormalizado = {
+          ...resultado.data,
+          razonSocial: resultado.data.razonSocial || resultado.data.razon_social || '',
+          nombreComercial: resultado.data.nombreComercial || resultado.data.nombre_comercial || '',
+          apellidoPaterno: resultado.data.apellidoPaterno || resultado.data.apellido_paterno || '',
+          apellidoMaterno: resultado.data.apellidoMaterno || resultado.data.apellido_materno || '',
+          telefonoFijo: resultado.data.telefonoFijo || resultado.data.telefono_fijo || '',
+          telefonoMovil: resultado.data.telefonoMovil || resultado.data.telefono_movil || ''
+        };
+        
+        setClienteEncontrado(clienteNormalizado);
+        const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
+        console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', clienteNormalizado.id);
+        console.log('✅ Cliente normalizado:', clienteNormalizado);
       } else if (resultado.success && !resultado.data) {
         console.warn('⚠️ El servidor devolvió success pero sin datos. Intentando recargar clientes...');
         
@@ -1357,9 +1396,21 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           const clienteCreado = clientesResult.data.find(c => c.rfc === nuevoCliente.rfc);
           
           if (clienteCreado) {
-            setClienteEncontrado(clienteCreado);
-            const nombreCliente = clienteCreado.razonSocial || `${clienteCreado.nombre} ${clienteCreado.apellidoPaterno || ''}`.trim();
-            console.log('✅ Cliente recuperado después de creación:', nombreCliente, 'ID:', clienteCreado.id);
+            // ⚠️ IMPORTANTE: Normalizar campos del backend
+            const clienteNormalizado = {
+              ...clienteCreado,
+              razonSocial: clienteCreado.razonSocial || clienteCreado.razon_social || '',
+              nombreComercial: clienteCreado.nombreComercial || clienteCreado.nombre_comercial || '',
+              apellidoPaterno: clienteCreado.apellidoPaterno || clienteCreado.apellido_paterno || '',
+              apellidoMaterno: clienteCreado.apellidoMaterno || clienteCreado.apellido_materno || '',
+              telefonoFijo: clienteCreado.telefonoFijo || clienteCreado.telefono_fijo || '',
+              telefonoMovil: clienteCreado.telefonoMovil || clienteCreado.telefono_movil || ''
+            };
+            
+            setClienteEncontrado(clienteNormalizado);
+            const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
+            console.log('✅ Cliente recuperado después de creación:', nombreCliente, 'ID:', clienteNormalizado.id);
+            console.log('✅ Cliente normalizado:', clienteNormalizado);
           } else {
             console.error('❌ No se pudo encontrar el cliente recién creado');
             setErrores(['El cliente se creó pero no se pudo recuperar. Por favor, reintenta.']);
@@ -1459,13 +1510,33 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-      // Asegurarse de que el cliente_id esté incluido en los datos
+      // Combinar los datos extraídos del PDF con los datos normalizados del cliente
       const datosConCliente = {
         ...datosExtraidos,
         cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
       };
+
+      // Si tenemos clienteEncontrado, usar sus datos normalizados (ya en camelCase)
+      if (clienteEncontrado) {
+        console.log('✅ Aplicando datos del cliente normalizado:', {
+          razonSocial: clienteEncontrado.razonSocial,
+          nombreComercial: clienteEncontrado.nombreComercial,
+          rfc: clienteEncontrado.rfc
+        });
+        
+        // Sobrescribir los datos del cliente del PDF con los datos normalizados de BD
+        datosConCliente.razonSocial = clienteEncontrado.razonSocial || clienteEncontrado.razon_social || datosConCliente.razonSocial;
+        datosConCliente.nombreComercial = clienteEncontrado.nombreComercial || clienteEncontrado.nombre_comercial || datosConCliente.nombreComercial;
+        datosConCliente.nombre = clienteEncontrado.nombre || datosConCliente.nombre;
+        datosConCliente.apellido_paterno = clienteEncontrado.apellidoPaterno || clienteEncontrado.apellido_paterno || datosConCliente.apellido_paterno;
+        datosConCliente.apellido_materno = clienteEncontrado.apellidoMaterno || clienteEncontrado.apellido_materno || datosConCliente.apellido_materno;
+        datosConCliente.rfc = clienteEncontrado.rfc || datosConCliente.rfc;
+        datosConCliente.email = clienteEncontrado.email || datosConCliente.email;
+        datosConCliente.telefono_fijo = clienteEncontrado.telefonoFijo || clienteEncontrado.telefono_fijo || datosConCliente.telefono_fijo;
+        datosConCliente.telefono_movil = clienteEncontrado.telefonoMovil || clienteEncontrado.telefono_movil || datosConCliente.telefono_movil;
+      }
       
-      console.log('📤 Aplicando datos al formulario con cliente_id:', datosConCliente.cliente_id);
+      console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
       onClose();
     }
@@ -2324,7 +2395,7 @@ const ListaExpedientes = React.memo(({
                     <th>Etapa Activa</th>
                     <th>Agente</th>
                     <th>Tipo/Estatus Pago</th>
-                    <th>Vigencia</th>
+                    <th>Vigencia/Pago</th>
                     <th width="180">Acciones</th>
                   </tr>
                 </thead>
@@ -2405,11 +2476,22 @@ const ListaExpedientes = React.memo(({
                         </td>
                         <td>
                           <div style={{ fontSize: '0.75rem' }}>
-                            {utils.formatearFecha(expediente.inicio_vigencia, 'compacto')}
+                            <small className="text-muted">Inicio:</small>{' '}
+                            {expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
                           <div style={{ fontSize: '0.75rem' }}>
-                            {utils.formatearFecha(expediente.termino_vigencia, 'compacto')}
+                            <small className="text-muted">Fin:</small>{' '}
+                            {expediente.termino_vigencia ? new Date(expediente.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
+                          {(expediente.fecha_pago || expediente.proximoPago) && (
+                            <div style={{ fontSize: '0.75rem', marginTop: '2px', paddingTop: '2px', borderTop: '1px solid #e9ecef' }}>
+                              <small className="text-muted">Pago:</small>{' '}
+                              <span className="text-primary">
+                                {expediente.fecha_pago ? new Date(expediente.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : 
+                                 expediente.proximoPago ? new Date(expediente.proximoPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
@@ -2581,58 +2663,58 @@ const Formulario = React.memo(({
       // Por ahora lo dejamos vacío, se puede seleccionar manualmente
       let subAgenteId = null;
       
-      // 4. POPULAR FORMULARIO CON TODOS LOS DATOS
-      console.log('📋 Datos a aplicar:', {
+      // 4. POPULAR FORMULARIO CON DATOS DE LA PÓLIZA (NO sobrescribir datos del cliente)
+      // handleClienteSeleccionado YA aplicó los datos del cliente correctamente
+      console.log('📋 Datos de la póliza a aplicar:', {
         compania: datosExtraidos.compania,
         producto: datosExtraidos.producto,
-        companias: companias.slice(0, 10), // Primeras 10 compañías
-        productos: productos.slice(0, 10).map(p => p.nombre || p) // Primeros 10 productos
+        numero_poliza: datosExtraidos.numero_poliza
       });
       
-      const nuevoFormulario = {
-        ...formulario,
-        ...datosExtraidos,
-        // Preservar campos del formulario original
-        fecha_creacion: formulario.fecha_creacion,
-        id: formulario.id,
-        // FORZAR valores directamente
-        agente: agenteCodigo || '',
-        sub_agente: '',
-        etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto
-      };
+      // EXCLUIR campos del cliente para NO sobrescribirlos con valores undefined del PDF
+      const { 
+        // Campos del cliente que NO deben sobrescribirse
+        nombre, apellido_paterno, apellido_materno, 
+        razonSocial, razon_social, 
+        nombreComercial, nombre_comercial,
+        rfc, tipo_persona,
+        email, telefono_fijo, telefono_movil,
+        // El resto son datos de la póliza
+        ...datosPoliza 
+      } = datosExtraidos;
       
-      console.log('🔍 DEBUG - Valores antes de setFormulario:', {
-        'compania original': datosExtraidos.compania,
-        'compania en nuevo': nuevoFormulario.compania,
-        'agente codigo': agenteCodigo,
-        'agente en nuevo': nuevoFormulario.agente,
-        'producto': nuevoFormulario.producto
+      // Usar setFormulario con callback para hacer UPDATE PARCIAL
+      setFormulario(prev => {
+        const nuevoFormulario = {
+          ...prev, // Mantener TODO (incluye datos del cliente que ya están bien)
+          ...datosPoliza, // Aplicar SOLO datos de la póliza (sin campos del cliente)
+          // Mantener cliente_id
+          cliente_id: datosExtraidos.cliente_id || prev.cliente_id,
+          // Forzar valores de la póliza
+          agente: agenteCodigo || '',
+          sub_agente: '',
+          etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
+          compania: datosExtraidos.compania,
+          producto: datosExtraidos.producto
+        };
+        
+        console.log('✅ Formulario actualizado - Datos del cliente preservados:', {
+          cliente_id: nuevoFormulario.cliente_id,
+          razon_social: nuevoFormulario.razon_social,
+          rfc: nuevoFormulario.rfc,
+          email: nuevoFormulario.email,
+          telefono_movil: nuevoFormulario.telefono_movil
+        });
+        
+        console.log('✅ Formulario actualizado - Datos de la póliza aplicados:', {
+          compania: nuevoFormulario.compania,
+          producto: nuevoFormulario.producto,
+          numero_poliza: nuevoFormulario.numero_poliza,
+          inicio_vigencia: nuevoFormulario.inicio_vigencia
+        });
+        
+        return nuevoFormulario;
       });
-      
-      console.log('🚗 DEBUG - Datos del vehículo extraídos:', {
-        'marca': datosExtraidos.marca,
-        'modelo': datosExtraidos.modelo,
-        'anio': datosExtraidos.anio,
-        'numero_serie': datosExtraidos.numero_serie,
-        'motor': datosExtraidos.motor,
-        'placas': datosExtraidos.placas,
-        'color': datosExtraidos.color,
-        'tipo_vehiculo': datosExtraidos.tipo_vehiculo,
-        'tipo_cobertura': datosExtraidos.tipo_cobertura
-      });
-      
-      console.log('🔍 DEBUG - Producto extraído:', datosExtraidos.producto);
-      console.log('🔍 DEBUG - nuevoFormulario.producto:', nuevoFormulario.producto);
-      console.log('🔍 DEBUG - nuevoFormulario completo:', {
-        marca: nuevoFormulario.marca,
-        modelo: nuevoFormulario.modelo,
-        anio: nuevoFormulario.anio,
-        numero_serie: nuevoFormulario.numero_serie
-      });
-      
-      setFormulario(nuevoFormulario);
       
       // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
       if (datosExtraidos.inicio_vigencia || datosExtraidos.fecha_pago) {
@@ -2795,7 +2877,9 @@ const Formulario = React.memo(({
 
           {/* Datos del Cliente */}
           <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">Datos del Cliente</h5>
+            <h5 className="card-title border-bottom pb-2">
+              {clienteSeleccionado?.tipoPersona === 'Persona Moral' ? 'Datos de la Empresa' : 'Datos del Cliente'}
+            </h5>
             
             {/* Buscador de Cliente */}
             <BuscadorCliente
@@ -2812,61 +2896,159 @@ const Formulario = React.memo(({
 
             {/* Datos del cliente (solo lectura si está seleccionado) */}
             {clienteSeleccionado && (
-              <div className="row g-3 mt-2">
-                <div className="col-md-6">
-                  <label className="form-label">Nombre</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.nombre}
-                    disabled
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Apellido Paterno</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.apellido_paterno}
-                    disabled
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Apellido Materno</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.apellido_materno}
-                    disabled
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">RFC</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.rfc}
-                    disabled
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Email</label>
-                  <input
-                    type="email"
-                    className="form-control"
-                    value={formulario.email}
-                    disabled
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Teléfono Móvil</label>
-                  <input
-                    type="tel"
-                    className="form-control"
-                    value={formulario.telefono_movil}
-                    disabled
-                  />
-                </div>
+              <div className="row g-3 mt-2" key={clienteSeleccionado.id}>
+                {clienteSeleccionado.tipoPersona === 'Persona Moral' ? (
+                  // Campos para Persona Moral (Empresa)
+                  <>
+                    <div className="col-md-12">
+                      <label className="form-label">Razón Social</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.razon_social || ''}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Nombre Comercial</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.nombre_comercial || ''}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">RFC</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.rfc || ''}
+                        readOnly
+                      />
+                    </div>
+                    
+                    {/* Datos de Contacto - Editables */}
+                    <div className="col-12">
+                      <hr className="my-3" />
+                      <h6 className="text-muted mb-3">
+                        💼 Datos del Contacto
+                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                          (Editable - Se actualizará el cliente)
+                        </small>
+                      </h6>
+                    </div>
+                    
+                    <div className="col-md-4">
+                      <label className="form-label">Nombre del Contacto</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.nombre || ''}
+                        onChange={(e) => setFormulario({...formulario, nombre: e.target.value})}
+                        placeholder="Nombre"
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Paterno</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.apellido_paterno || ''}
+                        onChange={(e) => setFormulario({...formulario, apellido_paterno: e.target.value})}
+                        placeholder="Apellido Paterno"
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Materno</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.apellido_materno || ''}
+                        onChange={(e) => setFormulario({...formulario, apellido_materno: e.target.value})}
+                        placeholder="Apellido Materno"
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Email del Contacto</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={formulario.email || ''}
+                        onChange={(e) => setFormulario({...formulario, email: e.target.value})}
+                        placeholder="correo@ejemplo.com"
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Teléfono Móvil</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.telefono_movil || ''}
+                        onChange={(e) => setFormulario({...formulario, telefono_movil: e.target.value})}
+                        placeholder="55 5555 5555"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  // Campos para Persona Física
+                  <>
+                    <div className="col-md-6">
+                      <label className="form-label">Nombre</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.nombre}
+                        disabled
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Apellido Paterno</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.apellido_paterno}
+                        disabled
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Apellido Materno</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.apellido_materno}
+                        disabled
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">RFC</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.rfc}
+                        disabled
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Email</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={formulario.email}
+                        disabled
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Teléfono Móvil</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.telefono_movil}
+                        disabled
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -4113,6 +4295,8 @@ const estadoInicialFormulario = {
   nombre: '',
   apellido_paterno: '',
   apellido_materno: '',
+  razon_social: '',
+  nombre_comercial: '',
   telefono_fijo: '',
   telefono_movil: '',
   email: '',
@@ -4430,20 +4614,40 @@ const estadoInicialFormulario = {
     }
 
     if (cliente) {
+      console.log('🔍 Cliente seleccionado:', {
+        id: cliente.id,
+        tipoPersona: cliente.tipoPersona,
+        razonSocial: cliente.razonSocial,
+        razon_social: cliente.razon_social,
+        nombreComercial: cliente.nombreComercial,
+        nombre_comercial: cliente.nombre_comercial,
+        nombre: cliente.nombre,
+        apellidoPaterno: cliente.apellidoPaterno,
+        apellidoMaterno: cliente.apellidoMaterno
+      });
+
       setClienteSeleccionado(cliente);
       
       // Auto-llenar datos del cliente en el formulario
       // Manejar tanto camelCase como snake_case del backend
-      setFormulario(prev => ({
-        ...prev,
+      const datosFormulario = {
         cliente_id: cliente.id,
         nombre: cliente.nombre || '',
         apellido_paterno: cliente.apellido_paterno || cliente.apellidoPaterno || '',
         apellido_materno: cliente.apellido_materno || cliente.apellidoMaterno || '',
+        razon_social: cliente.razon_social || cliente.razonSocial || '',
+        nombre_comercial: cliente.nombre_comercial || cliente.nombreComercial || '',
         email: cliente.email || '',
         telefono_fijo: cliente.telefono_fijo || cliente.telefonoFijo || '',
         telefono_movil: cliente.telefono_movil || cliente.telefonoMovil || '',
         rfc: cliente.rfc || ''
+      };
+
+      console.log('📝 Datos que se aplicarán al formulario:', datosFormulario);
+
+      setFormulario(prev => ({
+        ...prev,
+        ...datosFormulario
       }));
     } else {
       setClienteSeleccionado(null);
@@ -4453,6 +4657,8 @@ const estadoInicialFormulario = {
         nombre: '',
         apellido_paterno: '',
         apellido_materno: '',
+        razon_social: '',
+        nombre_comercial: '',
         email: '',
         telefono_fijo: '',
         telefono_movil: '',
@@ -4558,8 +4764,61 @@ const estadoInicialFormulario = {
     return true;
   }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
 
-  const guardarExpediente = useCallback(() => {
+  const guardarExpediente = useCallback(async () => {
     if (!validarFormulario()) return;
+
+    // Si hay un cliente seleccionado, actualizar sus datos de contacto según su tipo
+    if (clienteSeleccionado && formulario.cliente_id) {
+      try {
+        console.log('💼 Actualizando datos de contacto del cliente...', {
+          cliente_id: clienteSeleccionado.id,
+          tipoPersona: clienteSeleccionado.tipoPersona
+        });
+        
+        let datosActualizados = {};
+        
+        if (clienteSeleccionado.tipoPersona === 'Persona Moral') {
+          // PERSONA MORAL: nombre/apellidos/email/teléfonos son DEL CONTACTO (persona con quien hablas)
+          datosActualizados = {
+            nombre: formulario.nombre || '',
+            apellido_paterno: formulario.apellido_paterno || '',
+            apellido_materno: formulario.apellido_materno || '',
+            email: formulario.email || '',
+            telefono_fijo: formulario.telefono_fijo || '',
+            telefono_movil: formulario.telefono_movil || ''
+          };
+          console.log('📝 Actualizando CONTACTO de Persona Moral:', datosActualizados);
+        } else {
+          // PERSONA FÍSICA: nombre/apellidos son DEL CLIENTE, contacto_* son del GESTOR
+          datosActualizados = {
+            contacto_nombre: formulario.nombre || '',
+            contacto_apellido_paterno: formulario.apellido_paterno || '',
+            contacto_apellido_materno: formulario.apellido_materno || '',
+            contacto_email: formulario.email || '',
+            contacto_telefono_fijo: formulario.telefono_fijo || '',
+            contacto_telefono_movil: formulario.telefono_movil || ''
+          };
+          console.log('📝 Actualizando GESTOR/CONTACTO de Persona Física:', datosActualizados);
+        }
+        
+        const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(datosActualizados)
+        });
+
+        if (response.ok) {
+          const resultado = await response.json();
+          console.log('✅ Datos de contacto del cliente actualizados correctamente:', resultado);
+        } else {
+          const errorText = await response.text();
+          console.warn('⚠️ No se pudo actualizar el cliente:', errorText);
+        }
+      } catch (error) {
+        console.error('❌ Error al actualizar cliente:', error);
+        // Continuar con el guardado del expediente aunque falle la actualización del cliente
+      }
+    }
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
     
@@ -4704,7 +4963,7 @@ const estadoInicialFormulario = {
           alert('Error al crear expediente: ' + err.message);
         });
     }
-  }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario]);
+  }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario, clienteSeleccionado]);
   const recargarExpedientes = useCallback(async () => {
     try {
       console.log('🔄 ============ RECARGANDO EXPEDIENTES ============');
@@ -4783,41 +5042,25 @@ const estadoInicialFormulario = {
             expediente_id: exp.id,
             cliente_id: exp.cliente_id,
             cliente_encontrado: !!cliente,
-            cliente_tipo: cliente?.tipoPersona,
-            cliente_razonSocial: cliente?.razonSocial,
-            cliente_nombre: cliente?.nombre
+            expediente_nombre: exp.nombre,
+            expediente_razon_social: exp.razon_social,
+            expediente_apellido_paterno: exp.apellido_paterno
           });
         }
         
-        if (cliente) {
-          // Si es Persona Moral, usar razón social como nombre completo
-          if (cliente.tipoPersona === 'Persona Moral') {
-            return {
-              ...exp,
-              nombre: cliente.razonSocial || '',
-              apellido_paterno: '',
-              apellido_materno: '',
-              email: cliente.email || '',
-              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-              rfc: cliente.rfc || ''
-            };
-          } else {
-            // Persona Física: usar nombre y apellidos
-            return {
-              ...exp,
-              nombre: cliente.nombre || '',
-              apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
-              apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
-              email: cliente.email || '',
-              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-              rfc: cliente.rfc || ''
-            };
-          }
-        }
-        
-        // Si no se encuentra el cliente, mantener el expediente sin cambios
-        console.warn('⚠️ Cliente no encontrado para expediente:', exp.numero_poliza, 'cliente_id:', exp.cliente_id);
-        return exp;
+        // IMPORTANTE: NO sobrescribir los datos del expediente con datos actuales del cliente
+        // El expediente debe mantener los datos que tenía cuando se creó la póliza
+        // Solo usar los datos que YA están en el expediente
+        return {
+          ...exp,
+          // Mantener los datos originales del expediente
+          nombre: exp.nombre || '',
+          apellido_paterno: exp.apellido_paterno || '',
+          apellido_materno: exp.apellido_materno || '',
+          razon_social: exp.razon_social || '',
+          nombre_comercial: exp.nombre_comercial || '',
+          rfc: exp.rfc || ''
+        };
       });
       
       console.log('✅ Expedientes enriquecidos:', expedientesEnriquecidos.length);

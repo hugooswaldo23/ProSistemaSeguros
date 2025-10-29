@@ -161,17 +161,35 @@ const ModuloClientes = () => {
         if (resultadoClientes.success) {
           console.log(`✅ ${resultadoClientes.data.length} clientes cargados desde el backend`);
           
+          // Parsear contactos si vienen como string
+          const clientesParseados = resultadoClientes.data.map(cliente => ({
+            ...cliente,
+            contactos: (() => {
+              if (!cliente.contactos) return [];
+              if (Array.isArray(cliente.contactos)) return cliente.contactos;
+              if (typeof cliente.contactos === 'string') {
+                try {
+                  return JSON.parse(cliente.contactos);
+                } catch (error) {
+                  console.error('Error al parsear contactos del cliente:', cliente.id, error);
+                  return [];
+                }
+              }
+              return [];
+            })()
+          }));
+          
           // Log de TODOS los campos del primer cliente (si existe)
-          if (resultadoClientes.data.length > 0) {
-            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', resultadoClientes.data[0]);
+          if (clientesParseados.length > 0) {
+            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', clientesParseados[0]);
             console.log('🔑 ID del cliente:', {
-              id: resultadoClientes.data[0].id,
-              tipo: typeof resultadoClientes.data[0].id
+              id: clientesParseados[0].id,
+              tipo: typeof clientesParseados[0].id
             });
           }
           
           // Log de campos específicos para todos los clientes
-          resultadoClientes.data.forEach((cliente, index) => {
+          clientesParseados.forEach((cliente, index) => {
             if (index < 3) { // Solo los primeros 3 para no saturar
               console.log(`📋 Cliente ${index + 1} (${cliente.codigo || cliente.id}):`, {
                 tipoPersona: cliente.tipoPersona,
@@ -190,7 +208,7 @@ const ModuloClientes = () => {
             }
           });
           
-          setClientes(resultadoClientes.data);
+          setClientes(clientesParseados);
         } else {
           console.error('❌ Error al cargar clientes:', resultadoClientes.error);
           setClientes([]);
@@ -296,7 +314,8 @@ const ModuloClientes = () => {
     telefonoFijo: '',
     telefonoMovil: '',
     direccion: '',
-    ciudad: '',
+    colonia: '',
+    municipio: '',
     estado: '',
     codigoPostal: '',
     pais: 'México',
@@ -349,7 +368,8 @@ const ModuloClientes = () => {
       telefonoFijo: '',
       telefonoMovil: '',
       direccion: '',
-      ciudad: '',
+      colonia: '',
+      municipio: '',
       estado: '',
       codigoPostal: '',
       pais: 'México',
@@ -418,7 +438,8 @@ const ModuloClientes = () => {
       
       // Dirección
       direccion: formularioCliente.direccion,
-      ciudad: formularioCliente.ciudad,
+      colonia: formularioCliente.colonia,
+      municipio: formularioCliente.municipio,
       estado: formularioCliente.estado,
       codigoPostal: formularioCliente.codigoPostal,
       pais: formularioCliente.pais,
@@ -458,7 +479,8 @@ const ModuloClientes = () => {
       telefonoFijo: datosCliente.telefonoFijo,
       telefonoMovil: datosCliente.telefonoMovil,
       direccion: datosCliente.direccion,
-      ciudad: datosCliente.ciudad,
+      colonia: datosCliente.colonia,
+      municipio: datosCliente.municipio,
       estado: datosCliente.estado,
       codigoPostal: datosCliente.codigoPostal,
       pais: datosCliente.pais,
@@ -540,9 +562,49 @@ const ModuloClientes = () => {
     }
   }, [formularioCliente, modoEdicion, limpiarFormularioCliente, generarCodigoCliente]);
 
+  // Función para normalizar el nombre del estado
+  const normalizarEstado = (estado) => {
+    if (!estado) return '';
+    // Convertir a formato: Primera letra mayúscula, resto minúsculas
+    // Excepto "Ciudad de México" que tiene formato especial
+    const estadoLower = estado.toLowerCase();
+    if (estadoLower === 'ciudad de mexico' || estadoLower === 'ciudad de méxico') {
+      return 'Ciudad de México';
+    }
+    // Para otros estados: Primera letra mayúscula
+    return estado.charAt(0).toUpperCase() + estado.slice(1).toLowerCase();
+  };
+
   // Función para editar cliente
   const editarCliente = useCallback((cliente) => {
-    setFormularioCliente(cliente);
+    // Normalizar el estado antes de setear el formulario
+    const clienteNormalizado = {
+      ...cliente,
+      estado: normalizarEstado(cliente.estado),
+      // Asegurar que contactos sea un array
+      contactos: (() => {
+        if (!cliente.contactos) return [];
+        if (Array.isArray(cliente.contactos)) return cliente.contactos;
+        if (typeof cliente.contactos === 'string') {
+          try {
+            return JSON.parse(cliente.contactos);
+          } catch (error) {
+            console.error('Error al parsear contactos:', error);
+            return [];
+          }
+        }
+        return [];
+      })()
+    };
+    
+    console.log('📝 Cliente a editar - Estado y contactos normalizados:', {
+      estadoOriginal: cliente.estado,
+      estadoNormalizado: clienteNormalizado.estado,
+      contactosOriginal: cliente.contactos,
+      contactosNormalizados: clienteNormalizado.contactos
+    });
+    
+    setFormularioCliente(clienteNormalizado);
     setModoEdicion(true);
     setVistaActual('formulario-cliente');
   }, []);
@@ -583,7 +645,39 @@ const ModuloClientes = () => {
 
   // Función para ver detalles
   const verDetallesCliente = useCallback((cliente) => {
-    setClienteSeleccionado(cliente);
+    // Parsear contactos si vienen como string
+    const clienteConContactos = {
+      ...cliente,
+      contactos: (() => {
+        if (!cliente.contactos) return [];
+        if (Array.isArray(cliente.contactos)) return cliente.contactos;
+        if (typeof cliente.contactos === 'string') {
+          try {
+            return JSON.parse(cliente.contactos);
+          } catch (error) {
+            console.error('Error al parsear contactos en detalles:', error);
+            return [];
+          }
+        }
+        return [];
+      })()
+    };
+    
+    console.log('👁️ ==== VER DETALLES DEL CLIENTE ====');
+    console.log('Cliente completo:', clienteConContactos);
+    console.log('Campos de contacto principal:', {
+      tipoPersona: clienteConContactos.tipoPersona,
+      nombre: clienteConContactos.nombre,
+      apellidoPaterno: clienteConContactos.apellidoPaterno,
+      apellidoMaterno: clienteConContactos.apellidoMaterno,
+      email: clienteConContactos.email,
+      telefonoMovil: clienteConContactos.telefonoMovil,
+      telefonoFijo: clienteConContactos.telefonoFijo
+    });
+    console.log('Array de contactos:', clienteConContactos.contactos);
+    console.log('====================================');
+    
+    setClienteSeleccionado(clienteConContactos);
     setVistaActual('detalles-cliente');
   }, []);
 
@@ -1282,23 +1376,32 @@ const ModuloClientes = () => {
                 {formularioCliente.tipoPersona === 'Persona Física' ? 'Dirección' : 'Dirección Fiscal'}
               </h5>
               <div className="row g-3">
-                <div className="col-md-12">
+                <div className="col-md-8">
                   <label className="form-label">Dirección</label>
                   <input
                     type="text"
                     className="form-control"
                     value={formularioCliente.direccion}
                     onChange={(e) => setFormularioCliente({...formularioCliente, direccion: e.target.value})}
-                    placeholder="Calle, número, colonia"
+                    placeholder="Calle y número"
                   />
                 </div>
-                <div className="col-md-3">
-                  <label className="form-label">Ciudad</label>
+                <div className="col-md-4">
+                  <label className="form-label">Colonia</label>
                   <input
                     type="text"
                     className="form-control"
-                    value={formularioCliente.ciudad}
-                    onChange={(e) => setFormularioCliente({...formularioCliente, ciudad: e.target.value})}
+                    value={formularioCliente.colonia}
+                    onChange={(e) => setFormularioCliente({...formularioCliente, colonia: e.target.value})}
+                  />
+                </div>
+                <div className="col-md-3">
+                  <label className="form-label">Municipio</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formularioCliente.municipio}
+                    onChange={(e) => setFormularioCliente({...formularioCliente, municipio: e.target.value})}
                   />
                 </div>
                 <div className="col-md-3">
@@ -1392,11 +1495,83 @@ const ModuloClientes = () => {
               </div>
             )}
 
+            {/* SECCIÓN 3.5: Contacto Principal (solo para Persona Moral - campos individuales) */}
+            {formularioCliente.tipoPersona === 'Persona Moral' && (
+              <div className="mb-4">
+                <h5 className="card-title border-bottom pb-2">
+                  Contacto Principal
+                  <span className="badge bg-primary ms-2">Principal</span>
+                </h5>
+                <div className="row g-3">
+                  <div className="col-md-4">
+                    <label className="form-label">Nombre(s)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.nombre || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, nombre: e.target.value})}
+                      placeholder="Nombre(s) del contacto"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Paterno</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.apellidoPaterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, apellidoPaterno: e.target.value})}
+                      placeholder="Apellido paterno"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Materno</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.apellidoMaterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, apellidoMaterno: e.target.value})}
+                      placeholder="Apellido materno"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Email</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      value={formularioCliente.email || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, email: e.target.value})}
+                      placeholder="correo@empresa.com"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Teléfono Fijo</label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={formularioCliente.telefonoFijo || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, telefonoFijo: e.target.value})}
+                      placeholder="55 5555 5555"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Teléfono Móvil</label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={formularioCliente.telefonoMovil || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, telefonoMovil: e.target.value})}
+                      placeholder="55 5555 5555"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* SECCIÓN 4: Información de Contacto (Múltiples contactos) */}
             <div className="mb-4">
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h5 className="card-title mb-0">
-                  {formularioCliente.tipoPersona === 'Persona Física' ? 'Información de Contacto' : 'Contactos de la Empresa'}
+                  {formularioCliente.tipoPersona === 'Persona Física' ? 'Información de Contacto' : 'Contactos Adicionales'}
                 </h5>
                 {formularioCliente.tipoPersona === 'Persona Moral' && (
                   <button
@@ -1405,7 +1580,7 @@ const ModuloClientes = () => {
                     className="btn btn-success btn-sm"
                   >
                     <Plus size={16} className="me-2" />
-                    Agregar Contacto
+                    Agregar Contacto Adicional
                   </button>
                 )}
               </div>
@@ -1727,9 +1902,9 @@ const ModuloClientes = () => {
                           <strong className="text-muted">Dirección:</strong>
                         </div>
                         {clienteSeleccionado.direccion || '-'}
-                        {(clienteSeleccionado.ciudad || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
+                        {(clienteSeleccionado.municipio || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
                           <div>
-                            {clienteSeleccionado.ciudad && `${clienteSeleccionado.ciudad}, `}
+                            {clienteSeleccionado.municipio && `${clienteSeleccionado.municipio}, `}
                             {clienteSeleccionado.estado} 
                             {clienteSeleccionado.codigoPostal && ` C.P. ${clienteSeleccionado.codigoPostal}`}
                           </div>
@@ -1737,11 +1912,63 @@ const ModuloClientes = () => {
                       </div>
                     </div>
                   ) : (
-                    // Para Persona Moral - mostrar múltiples contactos
+                    // Para Persona Moral - mostrar contacto principal + múltiples contactos
                     <>
-                      {clienteSeleccionado.contactos && clienteSeleccionado.contactos.length > 0 ? (
-                        <div className="row g-3">
-                          {clienteSeleccionado.contactos.map((contacto, index) => (
+                      {/* Contacto Principal (campos individuales de la empresa) - Siempre mostrar */}
+                      <div className="mb-3">
+                        <div className="card border-primary">
+                          <div className="card-header bg-primary bg-opacity-10 py-2">
+                            <div className="d-flex justify-content-between align-items-center">
+                              <strong className="text-primary">
+                                <User size={16} className="me-2" />
+                                Contacto Principal
+                              </strong>
+                              <span className="badge bg-primary">Principal</span>
+                            </div>
+                          </div>
+                          <div className="card-body">
+                            <div className="row g-3">
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <User size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Nombre:</strong>
+                                </div>
+                                <div>
+                                  {clienteSeleccionado.nombre || '-'} {clienteSeleccionado.apellidoPaterno || ''} {clienteSeleccionado.apellidoMaterno || ''}
+                                </div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Mail size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Email:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.email || '-'}</div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Phone size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Teléfono Móvil:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.telefonoMovil || '-'}</div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Phone size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Teléfono Fijo:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.telefonoFijo || '-'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Contactos Adicionales (array de contactos) */}
+                      {clienteSeleccionado.contactos && clienteSeleccionado.contactos.length > 0 && (
+                        <>
+                          <h6 className="text-muted mb-2">Contactos Adicionales</h6>
+                          <div className="row g-3 mb-3">
+                            {clienteSeleccionado.contactos.map((contacto, index) => (
                             <div key={contacto.id || index} className="col-md-6">
                               <div className={`card ${contacto.esContactoPrincipal ? 'border-primary' : 'border-light'}`}>
                                 <div className="card-header py-2">
@@ -1779,11 +2006,7 @@ const ModuloClientes = () => {
                             </div>
                           ))}
                         </div>
-                      ) : (
-                        <div className="alert alert-info">
-                          <AlertCircle size={20} className="me-2" />
-                          No hay contactos registrados para esta empresa.
-                        </div>
+                        </>
                       )}
                       
                       {/* Dirección de la empresa */}
@@ -1793,9 +2016,9 @@ const ModuloClientes = () => {
                           <strong className="text-muted">Dirección Fiscal:</strong>
                         </div>
                         {clienteSeleccionado.direccion || '-'}
-                        {(clienteSeleccionado.ciudad || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
+                        {(clienteSeleccionado.municipio || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
                           <div>
-                            {clienteSeleccionado.ciudad && `${clienteSeleccionado.ciudad}, `}
+                            {clienteSeleccionado.municipio && `${clienteSeleccionado.municipio}, `}
                             {clienteSeleccionado.estado} 
                             {clienteSeleccionado.codigoPostal && ` C.P. ${clienteSeleccionado.codigoPostal}`}
                           </div>
@@ -2367,8 +2590,8 @@ const ModuloClientes = () => {
                                       <div className="col-8">{clienteSeleccionado?.direccion || 'Calle Ejemplo #123'}</div>
                                     </div>
                                     <div className="row mb-2">
-                                      <div className="col-4 text-muted">Ciudad:</div>
-                                      <div className="col-8">{clienteSeleccionado?.ciudad || 'Ciudad'}, {clienteSeleccionado?.estado || 'Estado'}</div>
+                                      <div className="col-4 text-muted">Municipio:</div>
+                                      <div className="col-8">{clienteSeleccionado?.municipio || 'Municipio'}, {clienteSeleccionado?.estado || 'Estado'}</div>
                                     </div>
                                   </div>
                                 )}
