@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, FileText, DollarSign, AlertCircle, 
   RefreshCw, Send, CheckCircle, Clock, Edit,
@@ -6,152 +6,323 @@ import {
   ArrowRight, Activity, Award, X, User, Shield, 
   Package, Paperclip, MessageSquare, CheckCircle2, 
   XCircle, Eye, UserCheck, Users, BarChart2, 
-  Building2, Briefcase, FileCheck
+  Building2, Briefcase, FileCheck, Filter, Download
 } from 'lucide-react';
+import { API_URL } from '../constants/apiUrl';
 
 const DashboardComponent = () => {
   // Estados
   const [modalDetalle, setModalDetalle] = useState(null);
+  const [filtroTramites, setFiltroTramites] = useState('todos');
+  const [cargando, setCargando] = useState(true);
+  const [modalDesglose, setModalDesglose] = useState(null); // { tipo: 'emitidas|porVencer|vencidas|canceladas', datos: [] }
   
-  // Tipos de trámite - diseño profesional sin emojis
+  // Tipos de trámite - diseño ejecutivo
   const tiposTramite = [
-    { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#1e40af' },
-    { nombre: 'Actualización de datos', codigo: 'AD', color: '#0f766e' },
-    { nombre: 'Cambio de forma de pago', codigo: 'FP', color: '#7c2d12' },
-    { nombre: 'Solicitud de cancelación', codigo: 'SC', color: '#991b1b' },
-    { nombre: 'Reexpedición de póliza', codigo: 'RP', color: '#6b21a8' },
-    { nombre: 'Cambio de cobertura', codigo: 'CC', color: '#0e7490' },
-    { nombre: 'Inclusión/Exclusión', codigo: 'IE', color: '#166534' },
-    { nombre: 'Cambio suma asegurada', codigo: 'SA', color: '#92400e' },
-    { nombre: 'Rehabilitación', codigo: 'RH', color: '#1e3a8a' },
-    { nombre: 'Endoso', codigo: 'EN', color: '#4c1d95' }
+    { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#3B82F6' },
+    { nombre: 'Actualización de datos', codigo: 'AD', color: '#06B6D4' },
+    { nombre: 'Cambio de forma de pago', codigo: 'FP', color: '#8B5CF6' },
+    { nombre: 'Solicitud de cancelación', codigo: 'SC', color: '#EF4444' },
+    { nombre: 'Reexpedición de póliza', codigo: 'RP', color: '#EC4899' },
+    { nombre: 'Cambio de cobertura', codigo: 'CC', color: '#10B981' },
+    { nombre: 'Inclusión/Exclusión', codigo: 'IE', color: '#F59E0B' },
+    { nombre: 'Cambio suma asegurada', codigo: 'SA', color: '#F97316' },
+    { nombre: 'Rehabilitación', codigo: 'RH', color: '#6366F1' },
+    { nombre: 'Endoso', codigo: 'EN', color: '#14B8A6' }
   ];
 
-  // Estados para demostración con más detalles
-  const [expedientes] = useState([
-    // Nuevas pólizas
-    { id: 1, tipo: 'nueva', etapa: 'Solicitud de cotización', producto: 'Autos', cliente: 'Juan Pérez García', empresa: 'Grupo Industrial Norte SA' },
-    { id: 2, tipo: 'nueva', etapa: 'Cotización enviada', producto: 'Vida', cliente: 'María García López', empresa: 'Consultores Asociados' },
-    { id: 3, tipo: 'nueva', etapa: 'Solicitar emisión', producto: 'Daños', cliente: 'Carlos López Martín', empresa: 'Logística Internacional' },
-    { id: 4, tipo: 'nueva', etapa: 'Emitida pendiente de pago', producto: 'Autos', cliente: 'Ana Martínez Ruiz', empresa: 'Servicios Corporativos' },
-    { id: 5, tipo: 'nueva', etapa: 'Pagada', producto: 'Vida', cliente: 'Roberto Silva Torres', empresa: 'Manufactura Global' },
-    // Trámites con información completa incluyendo roles
-    { 
-      id: 6, 
-      tipo: 'tramite', 
-      tramite: 'Cambio de beneficiario',
-      poliza: 'POL-2024-001',
-      // Roles en el trámite
-      cliente: 'Luis Rodríguez',
-      telefono: '33-1234-5678',
-      email: 'luis.rodriguez@email.com',
-      agente: 'Patricia Mendoza',
-      agenteEmail: 'patricia.mendoza@seguros.com',
-      agenteTelefono: '33-1111-2222',
-      vendedor: 'Roberto Sánchez',
-      vendedorEmail: 'roberto.sanchez@seguros.com',
-      vendedorTelefono: '33-3333-4444',
-      ejecutivo: 'María Elena Torres',
-      ejecutivoEmail: 'elena.torres@seguros.com',
-      ejecutivoTelefono: '33-5555-6666',
-      // Información de la póliza
-      aseguradora: 'Qualitas',
-      producto: 'Vida',
-      sumaAsegurada: 500000,
-      fechaSolicitud: '2024-01-15',
-      estado: 'En proceso',
-      descripcion: 'El cliente solicita cambiar el beneficiario de su póliza de vida debido a cambio en su estado civil',
-      beneficiarioActual: 'María López Hernández',
-      beneficiarioNuevo: 'Carmen Rodríguez Martín',
-      archivos: ['INE_nuevo_beneficiario.pdf', 'Acta_matrimonio.pdf'],
-      observaciones: 'Documentación completa, pendiente validación',
-      solicitadoPor: 'Cliente'
-    },
-    { 
-      id: 7, 
-      tipo: 'tramite', 
-      tramite: 'Actualización de datos',
-      poliza: 'POL-2024-002',
-      cliente: 'Patricia Gómez',
-      telefono: '33-9876-5432',
-      email: 'patricia.gomez@email.com',
-      agente: 'Carlos Ramírez',
-      agenteEmail: 'carlos.ramirez@seguros.com',
-      agenteTelefono: '33-7777-8888',
-      vendedor: null,
-      ejecutivo: 'Fernando López',
-      ejecutivoEmail: 'fernando.lopez@seguros.com',
-      ejecutivoTelefono: '33-9999-0000',
-      aseguradora: 'Banorte',
-      producto: 'Autos',
-      vehiculo: 'Honda CRV 2023',
-      placas: 'JKL-123-A',
-      fechaSolicitud: '2024-01-16',
-      estado: 'Pendiente',
-      descripcion: 'Cambio de domicilio y actualización de teléfono de contacto',
-      domicilioAnterior: 'Av. Patria 1234, Zapopan',
-      domicilioNuevo: 'Av. López Mateos 5678, Guadalajara',
-      archivos: ['Comprobante_domicilio.pdf'],
-      observaciones: 'Falta comprobante de domicilio actualizado',
-      solicitadoPor: 'Agente'
-    },
-    { 
-      id: 8, 
-      tipo: 'tramite', 
-      tramite: 'Cambio de cobertura',
-      poliza: 'POL-2024-003',
-      cliente: 'Miguel Herrera',
-      telefono: '33-5555-1234',
-      email: 'miguel.herrera@email.com',
-      agente: 'Ana Flores',
-      agenteEmail: 'ana.flores@seguros.com',
-      agenteTelefono: '33-2222-3333',
-      vendedor: 'José Luis Martínez',
-      vendedorEmail: 'jose.martinez@seguros.com',
-      vendedorTelefono: '33-4444-5555',
-      ejecutivo: 'María Elena Torres',
-      ejecutivoEmail: 'elena.torres@seguros.com',
-      ejecutivoTelefono: '33-5555-6666',
-      aseguradora: 'HDI',
-      producto: 'Autos',
-      vehiculo: 'Toyota Corolla 2022',
-      placas: 'ABC-789-B',
-      fechaSolicitud: '2024-01-17',
-      estado: 'Autorizado',
-      descripcion: 'Cambio de cobertura de Limitada a Amplia',
-      coberturaActual: 'Limitada',
-      coberturaNueva: 'Amplia',
-      primaMensualActual: 1200,
-      primaMensualNueva: 1800,
-      archivos: ['Cotizacion_nueva.pdf', 'Autorizacion_cliente.pdf'],
-      observaciones: 'Cliente autorizó el incremento en prima',
-      solicitadoPor: 'Vendedor'
-    },
-    // Pagos
-    { id: 9, tipo: 'pago', estatusPago: 'Vencido', poliza: 'POL-2024-003', monto: 5000, cliente: 'José Hernández', diasVencido: 5 },
-    { id: 10, tipo: 'pago', estatusPago: 'Por vencer', poliza: 'POL-2024-004', monto: 3500, cliente: 'Laura Díaz', diasParaVencer: 3 },
-    { id: 11, tipo: 'pago', estatusPago: 'En período de gracia', poliza: 'POL-2024-005', monto: 7800, cliente: 'Miguel Torres', diasGracia: 7 }
-  ]);
+  // Estados - Listos para conectar con la base de datos
+  const [expedientes, setExpedientes] = useState([]);
+  const [tramites, setTramites] = useState([]);
+  const [pagos, setPagos] = useState([]);
+  const [nuevasPolizas, setNuevasPolizas] = useState([]);
+
+  // Cargar expedientes desde el backend
+  useEffect(() => {
+    const cargarExpedientes = async () => {
+      try {
+        setCargando(true);
+        console.log('🔄 Cargando expedientes desde:', `${API_URL}/api/expedientes`);
+        const response = await fetch(`${API_URL}/api/expedientes`);
+        console.log('📡 Response status:', response.status, response.statusText);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Expedientes cargados:', data.length, 'registros');
+          console.log('📊 Datos:', data);
+          setExpedientes(data);
+        } else {
+          console.error('❌ Error al cargar expedientes:', response.statusText);
+        }
+      } catch (error) {
+        console.error('❌ Error en la petición:', error);
+      } finally {
+        setCargando(false);
+      }
+    };
+
+    cargarExpedientes();
+  }, []);
+
+  // Función para recargar datos
+  const recargarDatos = () => {
+    window.location.reload();
+  };
 
   // Función para abrir modal con detalles
   const abrirDetalleTramite = (tramite) => {
     setModalDetalle(tramite);
   };
 
-  // Estadísticas calculadas
-  const estadisticasTramites = useMemo(() => {
-    const tramites = expedientes.filter(exp => exp.tipo === 'tramite');
-    const agrupados = {};
+  // Función para abrir modal de desglose
+  const abrirDesglose = (tipo) => {
+    let polizasFiltradas = [];
+    let titulo = '';
+    let color = '';
+
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const añoActual = hoy.getFullYear();
+
+    const esMesActual = (fecha) => {
+      if (!fecha) return false;
+      const fechaObj = new Date(fecha);
+      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
+    };
+
+    switch(tipo) {
+      case 'emitidas':
+        polizasFiltradas = expedientes.filter(exp => 
+          esMesActual(exp.fecha_emision) && 
+          exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas
+        );
+        titulo = 'Primas Emitidas - Mes Actual';
+        color = '#3B82F6';
+        break;
+
+      case 'porVencer':
+        polizasFiltradas = expedientes.filter(p => 
+          p.fecha_vencimiento_pago && 
+          p.estatus_pago === 'Por Vencer' &&
+          p.etapa_activa !== 'Cancelada'
+        );
+        titulo = 'Primas Por Vencer - Acumulado';
+        color = '#F59E0B';
+        break;
+
+      case 'vencidas':
+        polizasFiltradas = expedientes.filter(p => 
+          p.fecha_vencimiento_pago && 
+          p.estatus_pago === 'Vencido' &&
+          p.etapa_activa !== 'Cancelada'
+        );
+        titulo = 'Primas Vencidas - Acumulado';
+        color = '#EF4444';
+        break;
+
+      case 'canceladas':
+        polizasFiltradas = expedientes.filter(exp => 
+          exp.etapa_activa === 'Cancelada' && esMesActual(exp.fecha_cancelacion)
+        );
+        titulo = 'Primas Canceladas - Mes Actual';
+        color = '#6B7280';
+        break;
+    }
+
+    // Agrupar por producto
+    const porProducto = polizasFiltradas.reduce((acc, poliza) => {
+      const producto = poliza.producto || 'Sin producto';
+      if (!acc[producto]) {
+        acc[producto] = {
+          polizas: [],
+          total: 0,
+          cantidad: 0
+        };
+      }
+      acc[producto].polizas.push(poliza);
+      acc[producto].total += parseFloat(poliza.importe_total) || 0;
+      acc[producto].cantidad += 1;
+      return acc;
+    }, {});
+
+    setModalDesglose({
+      tipo,
+      titulo,
+      color,
+      porProducto,
+      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + (parseFloat(p.importe_total) || 0), 0),
+      cantidadTotal: polizasFiltradas.length
+    });
+  };
+
+  // Estadísticas Financieras - Calculadas desde expedientes (MES EN CURSO)
+  // ⚠️ IMPORTANTE: Cada póliza tiene DOS estados independientes:
+  //    - etapa_activa: Estado operativo ("Cotizada", "Emitida", "Cancelada", "Renovada")
+  //    - estatus_pago: Estado financiero ("Pendiente", "Pagado", "Por Vencer", "Vencido")
+  const estadisticasFinancieras = useMemo(() => {
+    console.log('📈 Calculando estadísticas con', expedientes.length, 'expedientes');
     
-    tiposTramite.forEach(tipo => {
-      agrupados[tipo.nombre] = tramites.filter(t => t.tramite === tipo.nombre).length;
+    // Obtener mes y año actual
+    const hoy = new Date();
+    const mesActual = hoy.getMonth(); // 0-11
+    const añoActual = hoy.getFullYear();
+    
+    console.log(`📅 Filtrando datos del mes: ${mesActual + 1}/${añoActual}`);
+    
+    // Función helper para verificar si una fecha está en el mes actual
+    const esMesActual = (fecha) => {
+      if (!fecha) return false;
+      const fechaObj = new Date(fecha);
+      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
+    };
+    
+    // Filtrar solo pólizas del mes actual
+    const expedientesMesActual = expedientes.filter(exp => {
+      // Verificar si fue emitida en el mes actual
+      const emitidaMesActual = esMesActual(exp.fecha_emision);
+      // O si tiene movimiento de pago en el mes actual
+      const pagoMesActual = esMesActual(exp.fecha_vencimiento_pago);
+      
+      return emitidaMesActual || pagoMesActual;
     });
     
-    return {
-      total: tramites.length,
-      porTipo: agrupados,
-      tramites: tramites
+    console.log('✅ Expedientes del mes actual:', expedientesMesActual.length);
+    
+    // PRIMAS EMITIDAS - Todas las pólizas EMITIDAS en el mes (sin importar estado de pago)
+    // Nota: etapa_activa describe el workflow operativo, no el estado de pago
+    const polizasEmitidas = expedientesMesActual.filter(exp => 
+      esMesActual(exp.fecha_emision) && 
+      exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas (no canceladas ni cotizadas)
+    );
+    
+    const ventasNuevas = polizasEmitidas.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
+    const renovaciones = polizasEmitidas.filter(p => p.tipo_movimiento === 'renovacion' || p.tipo_movimiento === 'Renovación');
+    
+    const primasVentasNuevas = ventasNuevas.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasRenovaciones = renovaciones.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasEmitidas = primasVentasNuevas + primasRenovaciones;
+    
+    console.log('💰 Ventas Nuevas:', ventasNuevas.length, '- $', primasVentasNuevas);
+    console.log('🔄 Renovaciones:', renovaciones.length, '- $', primasRenovaciones);
+
+    // PRIMAS POR VENCER - Pólizas con pago pendiente que aún no vencen
+    // Nota: estatus_pago describe la situación financiera
+    const polizasPorVencerTodas = expedientes.filter(p => 
+      p.fecha_vencimiento_pago && 
+      p.estatus_pago === 'Por Vencer' &&
+      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
+    );
+    
+    const porVencerMesActual = polizasPorVencerTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
+    const porVencerAnteriores = polizasPorVencerTodas.filter(p => {
+      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
+      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
+      return fechaVencimiento <= ultimoDiaMesAnterior;
+    });
+    
+    const primasPorVencerMesActual = porVencerMesActual.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasPorVencerAnteriores = porVencerAnteriores.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasPorVencerTotal = primasPorVencerMesActual + primasPorVencerAnteriores;
+    
+    console.log('⏰ Por Vencer Mes Actual:', porVencerMesActual.length, '- $', primasPorVencerMesActual);
+    console.log('⏰ Por Vencer Anteriores:', porVencerAnteriores.length, '- $', primasPorVencerAnteriores);
+
+    // PRIMAS VENCIDAS - Pólizas con pago vencido que no han pagado
+    // Nota: estatus_pago = 'Vencido' significa que ya pasó fecha_vencimiento_pago y no pagó
+    const polizasVencidasTodas = expedientes.filter(p => 
+      p.fecha_vencimiento_pago && 
+      p.estatus_pago === 'Vencido' &&
+      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
+    );
+    
+    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
+    const vencidasAnteriores = polizasVencidasTodas.filter(p => {
+      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
+      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
+      return fechaVencimiento <= ultimoDiaMesAnterior;
+    });
+    
+    const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
+    
+    console.log('🚨 Vencidas Mes Actual:', vencidasMesActual.length, '- $', primasVencidasMesActual);
+    console.log('🚨 Vencidas Anteriores:', vencidasAnteriores.length, '- $', primasVencidasAnteriores);
+
+    // PRIMAS CANCELADAS - Pólizas canceladas en el mes actual
+    // Nota: etapa_activa = 'Cancelada' describe el estado operativo
+    const polizasCanceladas = expedientesMesActual.filter(exp => {
+      const canceladaMesActual = esMesActual(exp.fecha_cancelacion);
+      return exp.etapa_activa === 'Cancelada' && canceladaMesActual;
+    });
+    
+    const primasCanceladas = polizasCanceladas.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+
+    const stats = {
+      primasEmitidas: {
+        monto: primasEmitidas,
+        cantidad: polizasEmitidas.length,
+        ventasNuevas: {
+          monto: primasVentasNuevas,
+          cantidad: ventasNuevas.length
+        },
+        renovaciones: {
+          monto: primasRenovaciones,
+          cantidad: renovaciones.length
+        }
+      },
+      primasPorVencer: {
+        monto: primasPorVencerTotal,
+        cantidad: porVencerMesActual.length + porVencerAnteriores.length,
+        mesActual: {
+          monto: primasPorVencerMesActual,
+          cantidad: porVencerMesActual.length
+        },
+        anteriores: {
+          monto: primasPorVencerAnteriores,
+          cantidad: porVencerAnteriores.length
+        }
+      },
+      primasVencidas: {
+        monto: primasVencidasTotal,
+        cantidad: vencidasMesActual.length + vencidasAnteriores.length,
+        mesActual: {
+          monto: primasVencidasMesActual,
+          cantidad: vencidasMesActual.length
+        },
+        anteriores: {
+          monto: primasVencidasAnteriores,
+          cantidad: vencidasAnteriores.length
+        }
+      },
+      primasCanceladas: {
+        monto: primasCanceladas,
+        cantidad: polizasCanceladas.length
+      }
     };
+    
+    console.log('💰 Estadísticas calculadas (MES ACTUAL):', stats);
+    return stats;
   }, [expedientes]);
 
   // Etapas de nuevas pólizas - diseño ejecutivo
@@ -216,484 +387,549 @@ const DashboardComponent = () => {
       
       <style>
         {`
-          .corporate-card {
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
+          .executive-card {
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
             transition: all 0.2s ease;
             background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
           }
-          .corporate-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+          .executive-card:hover {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            border-color: #D1D5DB;
             transform: translateY(-2px);
           }
-          .metric-card {
-            border-left: 4px solid;
+          .kpi-card {
             background: white;
-            border-radius: 4px;
+            border-radius: 6px;
+            border: 1px solid #E5E7EB;
+            position: relative;
+            overflow: hidden;
           }
-          .status-indicator {
-            width: 8px;
-            height: 8px;
+          .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-color);
+          }
+          .metric-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+          }
+          .compact-table {
+            font-size: 13px;
+          }
+          .compact-table th {
+            background: #F9FAFB;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6B7280;
+            padding: 8px 12px;
+            border-bottom: 2px solid #E5E7EB;
+          }
+          .compact-table td {
+            padding: 10px 12px;
+            vertical-align: middle;
+            border-bottom: 1px solid #F3F4F6;
+          }
+          .status-dot {
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
             display: inline-block;
             margin-right: 6px;
           }
-          .professional-header {
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            color: white;
-          }
           .data-row:hover {
-            background-color: #f8f9fa;
+            background-color: #F9FAFB;
+          }
+          .section-header {
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+          }
+          .mini-chart {
+            height: 40px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+          }
+          .mini-chart-bar {
+            flex: 1;
+            background: #E5E7EB;
+            border-radius: 2px 2px 0 0;
+            transition: background 0.2s;
+          }
+          .mini-chart-bar:hover {
+            background: #3B82F6;
+          }
+          .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s ease-in-out infinite;
+            border-radius: 4px;
+          }
+          @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
           }
         `}
       </style>
       
-      <div className="p-0">
-        {/* Header Profesional */}
-        <div className="professional-header p-4">
+      <div className="p-0" style={{ backgroundColor: '#F3F4F6', minHeight: '100vh' }}>
+        {/* Header Ejecutivo Compacto */}
+        <div style={{ background: 'white', borderBottom: '1px solid #E5E7EB' }} className="py-3 px-4">
           <div className="container-fluid">
             <div className="d-flex justify-content-between align-items-center">
               <div>
-                <h3 className="mb-1 fw-normal">Sistema de Gestión de Seguros</h3>
-                <p className="mb-0 opacity-75" style={{ fontSize: '14px' }}>
-                  Panel de Control Ejecutivo - {new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                </p>
+                <h4 className="mb-0 fw-bold" style={{ color: '#111827' }}>Dashboard Ejecutivo</h4>
+                <small className="text-muted" style={{ fontSize: '12px' }}>
+                  {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </small>
               </div>
               <div className="d-flex gap-2">
-                <button className="btn btn-outline-light btn-sm">
-                  <RefreshCw size={14} className="me-1" />
+                <button className="btn btn-sm" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
+                  <Download size={14} className="me-1" />
+                  Exportar
+                </button>
+                <button 
+                  className="btn btn-sm" 
+                  style={{ border: '1px solid #E5E7EB', background: 'white' }}
+                  onClick={recargarDatos}
+                  disabled={cargando}>
+                  <RefreshCw size={14} className={`me-1 ${cargando ? 'spinner-border spinner-border-sm' : ''}`} />
                   Actualizar
                 </button>
-                <button className="btn btn-light btn-sm">
+                <button className="btn btn-primary btn-sm">
                   <Plus size={14} className="me-1" />
-                  Nueva Operación
+                  Nueva Póliza
                 </button>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="container-fluid p-4">
-          {/* Indicadores Clave - KPIs */}
+        <div className="container-fluid px-4 py-3">
+          {/* SECCIÓN ECONÓMICA - Tarjetas Financieras */}
+          <div className="mb-3">
+            <h5 className="fw-bold mb-0" style={{ color: '#111827' }}>Panel Financiero</h5>
+            <p className="text-muted mb-3" style={{ fontSize: '13px' }}>
+              Resumen de primas del mes en curso ({new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })})
+              {cargando && <span className="ms-2"><span className="spinner-border spinner-border-sm me-1" /> Cargando...</span>}
+              {!cargando && expedientes.length > 0 && <span className="ms-2 text-success">• {expedientes.length} pólizas en base de datos</span>}
+            </p>
+          </div>
+
           <div className="row g-3 mb-4">
+            {/* Primas Emitidas */}
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Operaciones Totales
-                    </p>
-                    <h3 className="mb-0 fw-bold">{expedientes.length}</h3>
-                    <small className="text-success">
-                      <TrendingUp size={14} className="me-1" />
-                      +12% vs mes anterior
-                    </small>
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('emitidas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <FileCheck size={24} style={{ color: 'white' }} />
                   </div>
-                  <div className="p-2 bg-primary bg-opacity-10 rounded">
-                    <BarChart2 size={20} className="text-primary" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Trámites Activos
-                    </p>
-                    <h3 className="mb-0 fw-bold">{estadisticasTramites.total}</h3>
-                    <small className="text-warning">
-                      <Activity size={14} className="me-1" />
-                      {estadisticasTramites.tramites.filter(t => t.estado === 'Pendiente').length} pendientes
-                    </small>
-                  </div>
-                  <div className="p-2 bg-warning bg-opacity-10 rounded">
-                    <FileCheck size={20} className="text-warning" />
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Monto Por Cobrar
-                    </p>
-                    <h3 className="mb-0 fw-bold">
-                      ${estadisticasPagos.montoTotal.toLocaleString('es-MX')}
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Primas Emitidas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#3B82F6' }}>
+                      ${estadisticasFinancieras.primasEmitidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
-                    <small className="text-danger">
-                      <AlertTriangle size={14} className="me-1" />
-                      {estadisticasPagos.vencidos.length} vencidos
-                    </small>
                   </div>
-                  <div className="p-2 bg-success bg-opacity-10 rounded">
-                    <DollarSign size={20} className="text-success" />
+                </div>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#10B981' }}></span>
+                      Nuevas: {estadisticasFinancieras.primasEmitidas.ventasNuevas.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#10B981', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.ventasNuevas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#06B6D4' }}></span>
+                      Renovaciones: {estadisticasFinancieras.primasEmitidas.renovaciones.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#06B6D4', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.renovaciones.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
                   </div>
                 </div>
               </div>
             </div>
-            
+
+            {/* Primas Por Vencer */}
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Eficiencia Operativa
-                    </p>
-                    <h3 className="mb-0 fw-bold">87.3%</h3>
-                    <small className="text-success">
-                      <Award size={14} className="me-1" />
-                      Óptimo
-                    </small>
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('porVencer')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Clock size={24} style={{ color: 'white' }} />
                   </div>
-                  <div className="p-2 bg-info bg-opacity-10 rounded">
-                    <Activity size={20} className="text-info" />
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Por Vencer
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#F59E0B' }}>
+                      ${estadisticasFinancieras.primasPorVencer.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
                   </div>
+                </div>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#F59E0B' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasPorVencer.mesActual.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#F59E0B', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPorVencer.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#D97706' }}></span>
+                      Anteriores: {estadisticasFinancieras.primasPorVencer.anteriores.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#D97706', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPorVencer.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Primas Vencidas */}
+            <div className="col-md-3">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('vencidas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <AlertTriangle size={24} style={{ color: 'white' }} />
+                  </div>
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Vencidas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#EF4444' }}>
+                      ${estadisticasFinancieras.primasVencidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
+                  </div>
+                </div>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#EF4444' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasVencidas.mesActual.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#EF4444', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#DC2626' }}></span>
+                      Anteriores: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasVencidas.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Primas Canceladas */}
+            <div className="col-md-3">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('canceladas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #6B7280 0%, #4B5563 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <XCircle size={24} style={{ color: 'white' }} />
+                  </div>
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Canceladas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#6B7280' }}>
+                      ${estadisticasFinancieras.primasCanceladas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
+                  </div>
+                </div>
+                <div className="d-flex align-items-center justify-content-between pt-2 border-top">
+                  <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                    {estadisticasFinancieras.primasCanceladas.cantidad} pólizas
+                  </span>
+                  <span className="metric-badge" style={{ background: '#F3F4F6', color: '#6B7280' }}>
+                    <X size={10} className="me-1" />
+                    Perdidas
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* SECCIÓN 1: Gestión de Trámites */}
-          <div className="row g-4 mb-4">
-            <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <Briefcase size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Gestión de Trámites - Pólizas Vigentes</h5>
-                    </div>
-                    <span className="badge bg-secondary px-3 py-2">
-                      {estadisticasTramites.total} Activos
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {/* Panel de resumen */}
-                    <div className="col-md-4">
-                      <div className="border rounded p-3 bg-light">
-                        <h6 className="text-muted mb-3">Resumen Ejecutivo</h6>
-                        <div className="mb-4">
-                          <div className="d-flex justify-content-between mb-2">
-                            <span className="text-muted">Total procesado:</span>
-                            <strong>{estadisticasTramites.total}</strong>
-                          </div>
-                          <div className="progress" style={{ height: '6px' }}>
-                            <div className="progress-bar bg-primary" style={{ width: '65%' }}></div>
-                          </div>
-                          <small className="text-muted">65% completado este mes</small>
-                        </div>
-                        
-                        {/* Últimos trámites */}
-                        {estadisticasTramites.tramites.length > 0 && (
-                          <div>
-                            <h6 className="text-muted mb-2">Actividad Reciente</h6>
-                            {estadisticasTramites.tramites.slice(0, 3).map(t => (
-                              <div key={t.id} 
-                                   className="d-flex justify-content-between align-items-center py-2 border-bottom data-row"
-                                   style={{ cursor: 'pointer', fontSize: '14px' }}
-                                   onClick={() => abrirDetalleTramite(t)}>
-                                <div>
-                                  <div className="fw-semibold">{t.tramite}</div>
-                                  <small className="text-muted">{t.cliente}</small>
-                                </div>
-                                <Eye size={14} className="text-secondary" />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Grid de tipos de trámite */}
-                    <div className="col-md-8">
-                      <div className="row g-2">
-                        {tiposTramite.map(tipo => {
-                          const cantidad = estadisticasTramites.porTipo[tipo.nombre] || 0;
-                          const tramitesDelTipo = estadisticasTramites.tramites.filter(t => t.tramite === tipo.nombre);
-                          
-                          return (
-                            <div key={tipo.nombre} className="col-md-6">
-                              <div 
-                                className="border rounded p-3 d-flex align-items-center justify-content-between"
-                                style={{ 
-                                  cursor: tramitesDelTipo.length > 0 ? 'pointer' : 'default',
-                                  borderLeft: `3px solid ${tipo.color}`
-                                }}
-                                onClick={() => {
-                                  if (tramitesDelTipo.length > 0) {
-                                    abrirDetalleTramite(tramitesDelTipo[0]);
-                                  }
-                                }}>
-                                <div className="d-flex align-items-center">
-                                  <div className="me-3">
-                                    <div className="fw-bold" style={{ color: tipo.color, fontSize: '18px' }}>
-                                      {tipo.codigo}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="fw-semibold" style={{ fontSize: '14px' }}>
-                                      {tipo.nombre}
-                                    </div>
-                                    {cantidad > 0 && (
-                                      <small className="text-muted">
-                                        {cantidad} {cantidad === 1 ? 'trámite' : 'trámites'}
-                                      </small>
-                                    )}
-                                  </div>
-                                </div>
-                                {cantidad > 0 && (
-                                  <span className="badge rounded-pill" 
-                                        style={{ backgroundColor: tipo.color }}>
-                                    {cantidad}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
+          {/* Mensaje cuando no hay datos */}
+          {!cargando && expedientes.length === 0 && (
+            <div className="row g-3 mb-4">
+              <div className="col-12">
+                <div className="executive-card p-5 text-center">
+                  <FileText size={48} className="text-muted mb-3" />
+                  <h5 className="text-muted mb-2">No hay pólizas registradas</h5>
+                  <p className="text-muted mb-3" style={{ fontSize: '13px' }}>
+                    Comienza creando tu primera póliza para ver las estadísticas financieras
+                  </p>
+                  <button className="btn btn-primary btn-sm">
+                    <Plus size={14} className="me-1" />
+                    Crear Primera Póliza
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* SECCIÓN 2: Nuevas Pólizas */}
-          <div className="row g-4 mb-4">
+          {/* Próximamente: Más secciones del dashboard */}
+          <div className="row g-3">
             <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <FileText size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Pipeline de Nuevas Pólizas</h5>
-                    </div>
-                    <span className="badge bg-primary px-3 py-2">
-                      {expedientes.filter(e => e.tipo === 'nueva').length} En Proceso
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {estadisticasNuevasPolizas.map((etapa, index) => {
-                      const Icono = etapa.icono;
-                      return (
-                        <div key={index} className="col">
-                          <div className="text-center">
-                            <div className="metric-card p-3" style={{ borderLeftColor: etapa.color }}>
-                              <div className="mb-2">
-                                <Icono size={24} style={{ color: etapa.color }} />
-                              </div>
-                              <h2 className="mb-1" style={{ color: etapa.color }}>
-                                {etapa.cantidad}
-                              </h2>
-                              <p className="text-muted mb-1" style={{ fontSize: '13px' }}>
-                                {etapa.nombre}
-                              </p>
-                              <small className="text-muted fw-bold">
-                                {etapa.codigo}
-                              </small>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  
-                  {/* Pipeline visual */}
-                  <div className="mt-4 p-3 bg-light rounded">
-                    <div className="d-flex justify-content-between align-items-center position-relative">
-                      <div className="position-absolute w-100" 
-                           style={{ 
-                             height: '2px',
-                             backgroundColor: '#e0e0e0',
-                             top: '50%',
-                             transform: 'translateY(-50%)',
-                             zIndex: 0
-                           }} />
-                      {estadisticasNuevasPolizas.map((etapa, index) => (
-                        <div key={index} className="text-center position-relative bg-light px-2"
-                             style={{ zIndex: 1 }}>
-                          <div className={`rounded-circle d-inline-flex align-items-center justify-content-center ${etapa.cantidad > 0 ? 'bg-white border' : 'bg-secondary bg-opacity-10'}`}
-                               style={{ 
-                                 width: '36px', 
-                                 height: '36px',
-                                 borderColor: etapa.cantidad > 0 ? etapa.color : 'transparent',
-                                 color: etapa.cantidad > 0 ? etapa.color : '#999',
-                                 fontWeight: '600',
-                                 fontSize: '14px'
-                               }}>
-                            {etapa.cantidad}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* SECCIÓN 3: Control de Pagos */}
-          <div className="row g-4">
-            <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <CreditCard size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Control Financiero de Pagos</h5>
-                    </div>
-                    <span className="badge bg-warning px-3 py-2">
-                      {estadisticasPagos.vencidos.length + estadisticasPagos.porVencer.length + estadisticasPagos.enGracia.length} Requieren Atención
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {/* Pagos vencidos */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#dc2626' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Pagos Vencidos
-                            </p>
-                            <h3 className="mb-0 text-danger">{estadisticasPagos.vencidos.length}</h3>
-                          </div>
-                          <AlertTriangle size={20} className="text-danger" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-danger mb-0">
-                            ${estadisticasPagos.vencidos.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.vencidos.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-danger w-100">
-                              Gestionar Vencidos
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Por vencer */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#f59e0b' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Por Vencer
-                            </p>
-                            <h3 className="mb-0 text-warning">{estadisticasPagos.porVencer.length}</h3>
-                          </div>
-                          <Clock size={20} className="text-warning" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-warning mb-0">
-                            ${estadisticasPagos.porVencer.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.porVencer.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-warning w-100">
-                              Enviar Recordatorios
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* En período de gracia */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#3b82f6' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              En Período de Gracia
-                            </p>
-                            <h3 className="mb-0 text-info">{estadisticasPagos.enGracia.length}</h3>
-                          </div>
-                          <Calendar size={20} className="text-info" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-info mb-0">
-                            ${estadisticasPagos.enGracia.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.enGracia.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-info w-100">
-                              Notificar Clientes
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Resumen financiero */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#10b981' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Total Por Cobrar
-                            </p>
-                            <h3 className="mb-0 text-success">
-                              ${estadisticasPagos.montoTotal.toLocaleString('es-MX')}
-                            </h3>
-                          </div>
-                          <TrendingUp size={20} className="text-success" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <div className="d-flex justify-content-between mb-2">
-                            <small>Eficiencia cobro:</small>
-                            <strong className="text-success">78%</strong>
-                          </div>
-                          <div className="progress" style={{ height: '4px' }}>
-                            <div className="progress-bar bg-success" style={{ width: '78%' }}></div>
-                          </div>
-                        </div>
-                        
-                        <div className="mt-3">
-                          <button className="btn btn-sm btn-success w-100">
-                            Registrar Pago
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="executive-card p-4 text-center">
+                <Activity size={48} className="text-muted mb-3" />
+                <h5 className="text-muted">Secciones adicionales en desarrollo</h5>
+                <p className="text-muted mb-0" style={{ fontSize: '13px' }}>
+                  Próximamente: Trámites, Pipeline de Ventas, y más métricas operativas
+                </p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODAL DE DETALLE DE TRÁMITE - Diseño Corporativo */}
+      {/* MODAL DE DESGLOSE - Por Producto */}
+      {modalDesglose && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setModalDesglose(null)}>
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              {/* Header del modal */}
+              <div className="modal-header" style={{ background: modalDesglose.color, color: 'white' }}>
+                <div>
+                  <h5 className="modal-title fw-bold mb-1">{modalDesglose.titulo}</h5>
+                  <small style={{ opacity: 0.9 }}>
+                    {modalDesglose.cantidadTotal} pólizas • ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                  </small>
+                </div>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white"
+                  onClick={() => setModalDesglose(null)}>
+                </button>
+              </div>
+              
+              {/* Body del modal */}
+              <div className="modal-body p-0">
+                {Object.keys(modalDesglose.porProducto).length === 0 ? (
+                  <div className="text-center py-5">
+                    <FileText size={48} className="text-muted mb-3" />
+                    <h6 className="text-muted">No hay pólizas en esta categoría</h6>
+                  </div>
+                ) : (
+                  Object.entries(modalDesglose.porProducto).map(([producto, data], idx) => (
+                    <div key={idx} className="border-bottom">
+                      {/* Header por producto */}
+                      <div className="p-3" style={{ background: '#F9FAFB' }}>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <div>
+                            <h6 className="mb-1 fw-bold" style={{ color: '#111827' }}>
+                              <Package size={18} className="me-2" style={{ color: modalDesglose.color }} />
+                              {producto}
+                            </h6>
+                            <small className="text-muted">
+                              {data.cantidad} póliza{data.cantidad !== 1 ? 's' : ''}
+                            </small>
+                          </div>
+                          <div className="text-end">
+                            <div className="fw-bold" style={{ color: modalDesglose.color, fontSize: '18px' }}>
+                              ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                            </div>
+                            <small className="text-muted">Total</small>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tabla de pólizas */}
+                      <div className="table-responsive">
+                        <table className="table table-hover mb-0 compact-table">
+                          <thead>
+                            <tr>
+                              <th>Póliza</th>
+                              <th>Cliente</th>
+                              <th>Aseguradora</th>
+                              <th>Fecha Emisión</th>
+                              {modalDesglose.tipo !== 'emitidas' && <th>Fecha Vencimiento</th>}
+                              <th>Estado</th>
+                              <th className="text-end">Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.polizas.map((poliza, pIdx) => (
+                              <tr key={pIdx} className="data-row">
+                                <td>
+                                  <span className="fw-semibold" style={{ color: '#111827' }}>
+                                    {poliza.numero_poliza || 'Sin número'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div>
+                                    <div className="fw-medium" style={{ fontSize: '13px' }}>
+                                      {poliza.cliente_nombre || 'Sin nombre'}
+                                    </div>
+                                    <small className="text-muted">
+                                      {poliza.cliente_id}
+                                    </small>
+                                  </div>
+                                </td>
+                                <td>{poliza.aseguradora || '-'}</td>
+                                <td>
+                                  <small>
+                                    {poliza.fecha_emision 
+                                      ? new Date(poliza.fecha_emision).toLocaleDateString('es-MX')
+                                      : '-'
+                                    }
+                                  </small>
+                                </td>
+                                {modalDesglose.tipo !== 'emitidas' && (
+                                  <td>
+                                    <small>
+                                      {poliza.fecha_vencimiento_pago 
+                                        ? new Date(poliza.fecha_vencimiento_pago).toLocaleDateString('es-MX')
+                                        : '-'
+                                      }
+                                    </small>
+                                  </td>
+                                )}
+                                <td>
+                                  <span className={`badge ${
+                                    poliza.etapa_activa === 'Emitida' ? 'bg-success' :
+                                    poliza.etapa_activa === 'Cancelada' ? 'bg-secondary' :
+                                    poliza.etapa_activa === 'Cotizada' ? 'bg-info' :
+                                    'bg-primary'
+                                  }`} style={{ fontSize: '10px' }}>
+                                    {poliza.etapa_activa || 'Sin etapa'}
+                                  </span>
+                                  {poliza.estatus_pago && (
+                                    <div className="mt-1">
+                                      <span className={`badge ${
+                                        poliza.estatus_pago === 'Pagado' ? 'bg-success' :
+                                        poliza.estatus_pago === 'Por Vencer' ? 'bg-warning' :
+                                        poliza.estatus_pago === 'Vencido' ? 'bg-danger' :
+                                        'bg-secondary'
+                                      }`} style={{ fontSize: '9px' }}>
+                                        💰 {poliza.estatus_pago}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {poliza.tipo_movimiento && (
+                                    <div>
+                                      <small className="text-muted" style={{ fontSize: '10px' }}>
+                                        {poliza.tipo_movimiento}
+                                      </small>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  <span className="fw-bold" style={{ color: modalDesglose.color }}>
+                                    ${parseFloat(poliza.importe_total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot style={{ background: '#F9FAFB' }}>
+                            <tr>
+                              <td colSpan={modalDesglose.tipo !== 'emitidas' ? 6 : 5} className="text-end fw-bold">
+                                Subtotal {producto}:
+                              </td>
+                              <td className="text-end fw-bold" style={{ color: modalDesglose.color }}>
+                                ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              {/* Footer del modal */}
+              <div className="modal-footer" style={{ background: '#F9FAFB' }}>
+                <div className="d-flex justify-content-between w-100 align-items-center">
+                  <div>
+                    <strong style={{ fontSize: '16px', color: '#111827' }}>Total General:</strong>
+                    <span className="ms-2 text-muted">{modalDesglose.cantidadTotal} pólizas</span>
+                  </div>
+                  <h4 className="mb-0 fw-bold" style={{ color: modalDesglose.color }}>
+                    ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                  </h4>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DETALLE - Comentado temporalmente */}
       {modalDetalle && (
         <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg modal-dialog-centered">
