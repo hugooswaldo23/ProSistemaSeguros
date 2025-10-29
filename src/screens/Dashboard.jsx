@@ -6,25 +6,26 @@ import {
   ArrowRight, Activity, Award, X, User, Shield, 
   Package, Paperclip, MessageSquare, CheckCircle2, 
   XCircle, Eye, UserCheck, Users, BarChart2, 
-  Building2, Briefcase, FileCheck
+  Building2, Briefcase, FileCheck, Filter, Download
 } from 'lucide-react';
 
 const DashboardComponent = () => {
   // Estados
   const [modalDetalle, setModalDetalle] = useState(null);
+  const [filtroTramites, setFiltroTramites] = useState('todos');
   
-  // Tipos de trámite - diseño profesional sin emojis
+  // Tipos de trámite - diseño ejecutivo
   const tiposTramite = [
-    { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#1e40af' },
-    { nombre: 'Actualización de datos', codigo: 'AD', color: '#0f766e' },
-    { nombre: 'Cambio de forma de pago', codigo: 'FP', color: '#7c2d12' },
-    { nombre: 'Solicitud de cancelación', codigo: 'SC', color: '#991b1b' },
-    { nombre: 'Reexpedición de póliza', codigo: 'RP', color: '#6b21a8' },
-    { nombre: 'Cambio de cobertura', codigo: 'CC', color: '#0e7490' },
-    { nombre: 'Inclusión/Exclusión', codigo: 'IE', color: '#166534' },
-    { nombre: 'Cambio suma asegurada', codigo: 'SA', color: '#92400e' },
-    { nombre: 'Rehabilitación', codigo: 'RH', color: '#1e3a8a' },
-    { nombre: 'Endoso', codigo: 'EN', color: '#4c1d95' }
+    { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#3B82F6' },
+    { nombre: 'Actualización de datos', codigo: 'AD', color: '#06B6D4' },
+    { nombre: 'Cambio de forma de pago', codigo: 'FP', color: '#8B5CF6' },
+    { nombre: 'Solicitud de cancelación', codigo: 'SC', color: '#EF4444' },
+    { nombre: 'Reexpedición de póliza', codigo: 'RP', color: '#EC4899' },
+    { nombre: 'Cambio de cobertura', codigo: 'CC', color: '#10B981' },
+    { nombre: 'Inclusión/Exclusión', codigo: 'IE', color: '#F59E0B' },
+    { nombre: 'Cambio suma asegurada', codigo: 'SA', color: '#F97316' },
+    { nombre: 'Rehabilitación', codigo: 'RH', color: '#6366F1' },
+    { nombre: 'Endoso', codigo: 'EN', color: '#14B8A6' }
   ];
 
   // Estados - Listos para conectar con la base de datos
@@ -116,144 +117,219 @@ const DashboardComponent = () => {
       
       <style>
         {`
-          .corporate-card {
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
+          .executive-card {
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
             transition: all 0.2s ease;
             background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
           }
-          .corporate-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            transform: translateY(-2px);
+          .executive-card:hover {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            border-color: #D1D5DB;
           }
-          .metric-card {
-            border-left: 4px solid;
+          .kpi-card {
             background: white;
-            border-radius: 4px;
+            border-radius: 6px;
+            border: 1px solid #E5E7EB;
+            position: relative;
+            overflow: hidden;
           }
-          .status-indicator {
-            width: 8px;
-            height: 8px;
+          .kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-color);
+          }
+          .metric-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+          }
+          .compact-table {
+            font-size: 13px;
+          }
+          .compact-table th {
+            background: #F9FAFB;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #6B7280;
+            padding: 8px 12px;
+            border-bottom: 2px solid #E5E7EB;
+          }
+          .compact-table td {
+            padding: 10px 12px;
+            vertical-align: middle;
+            border-bottom: 1px solid #F3F4F6;
+          }
+          .status-dot {
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
             display: inline-block;
             margin-right: 6px;
           }
-          .professional-header {
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
-            color: white;
-          }
           .data-row:hover {
-            background-color: #f8f9fa;
+            background-color: #F9FAFB;
+          }
+          .section-header {
+            border-bottom: 2px solid #E5E7EB;
+            padding-bottom: 12px;
+            margin-bottom: 20px;
+          }
+          .mini-chart {
+            height: 40px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+          }
+          .mini-chart-bar {
+            flex: 1;
+            background: #E5E7EB;
+            border-radius: 2px 2px 0 0;
+            transition: background 0.2s;
+          }
+          .mini-chart-bar:hover {
+            background: #3B82F6;
           }
         `}
       </style>
       
-      <div className="p-0">
-        {/* Header Profesional */}
-        <div className="professional-header p-4">
+      <div className="p-0" style={{ backgroundColor: '#F3F4F6', minHeight: '100vh' }}>
+        {/* Header Ejecutivo Compacto */}
+        <div style={{ background: 'white', borderBottom: '1px solid #E5E7EB' }} className="py-3 px-4">
           <div className="container-fluid">
             <div className="d-flex justify-content-between align-items-center">
               <div>
-                <h3 className="mb-1 fw-normal">Sistema de Gestión de Seguros</h3>
-                <p className="mb-0 opacity-75" style={{ fontSize: '14px' }}>
-                  Panel de Control Ejecutivo - {new Date().toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                </p>
+                <h4 className="mb-0 fw-bold" style={{ color: '#111827' }}>Dashboard Ejecutivo</h4>
+                <small className="text-muted" style={{ fontSize: '12px' }}>
+                  {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                </small>
               </div>
               <div className="d-flex gap-2">
-                <button className="btn btn-outline-light btn-sm">
+                <button className="btn btn-sm" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
+                  <Download size={14} className="me-1" />
+                  Exportar
+                </button>
+                <button className="btn btn-sm" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
                   <RefreshCw size={14} className="me-1" />
                   Actualizar
                 </button>
-                <button className="btn btn-light btn-sm">
+                <button className="btn btn-primary btn-sm">
                   <Plus size={14} className="me-1" />
-                  Nueva Operación
+                  Nueva Póliza
                 </button>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="container-fluid p-4">
-          {/* Indicadores Clave - KPIs */}
-          <div className="row g-3 mb-4">
+        <div className="container-fluid px-4 py-3">
+          {/* KPIs Ejecutivos - Compactos */}
+          <div className="row g-3 mb-3">
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Operaciones Totales
-                    </p>
-                    <h3 className="mb-0 fw-bold">{expedientes.length}</h3>
-                    <small className="text-success">
-                      <TrendingUp size={14} className="me-1" />
-                      +12% vs mes anterior
-                    </small>
+              <div className="kpi-card p-3" style={{ '--accent-color': '#3B82F6' }}>
+                <div className="d-flex justify-content-between align-items-start mb-2">
+                  <div style={{ flex: 1 }}>
+                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Total Operaciones
+                    </div>
+                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
+                      {expedientes.length}
+                    </h2>
                   </div>
-                  <div className="p-2 bg-primary bg-opacity-10 rounded">
-                    <BarChart2 size={20} className="text-primary" />
+                  <div style={{ padding: '8px', background: '#EFF6FF', borderRadius: '6px' }}>
+                    <BarChart2 size={20} style={{ color: '#3B82F6' }} />
                   </div>
+                </div>
+                <div className="d-flex align-items-center justify-content-between">
+                  <span className="metric-badge" style={{ background: '#D1FAE5', color: '#065F46' }}>
+                    <TrendingUp size={10} className="me-1" />
+                    +12%
+                  </span>
+                  <small className="text-muted" style={{ fontSize: '11px' }}>vs mes anterior</small>
                 </div>
               </div>
             </div>
             
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div className="kpi-card p-3" style={{ '--accent-color': '#F59E0B' }}>
+                <div className="d-flex justify-content-between align-items-start mb-2">
+                  <div style={{ flex: 1 }}>
+                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                       Trámites Activos
-                    </p>
-                    <h3 className="mb-0 fw-bold">{estadisticasTramites.total}</h3>
-                    <small className="text-warning">
-                      <Activity size={14} className="me-1" />
-                      {estadisticasTramites.tramites.filter(t => t.estado === 'Pendiente').length} pendientes
-                    </small>
+                    </div>
+                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
+                      {estadisticasTramites.total}
+                    </h2>
                   </div>
-                  <div className="p-2 bg-warning bg-opacity-10 rounded">
-                    <FileCheck size={20} className="text-warning" />
+                  <div style={{ padding: '8px', background: '#FEF3C7', borderRadius: '6px' }}>
+                    <FileCheck size={20} style={{ color: '#F59E0B' }} />
                   </div>
+                </div>
+                <div className="d-flex align-items-center justify-content-between">
+                  <span className="metric-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>
+                    <Activity size={10} className="me-1" />
+                    {estadisticasTramites.tramites.filter(t => t.estado === 'Pendiente').length} pendientes
+                  </span>
+                  <small className="text-muted" style={{ fontSize: '11px' }}>en proceso</small>
                 </div>
               </div>
             </div>
             
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Monto Por Cobrar
-                    </p>
-                    <h3 className="mb-0 fw-bold">
-                      ${estadisticasPagos.montoTotal.toLocaleString('es-MX')}
-                    </h3>
-                    <small className="text-danger">
-                      <AlertTriangle size={14} className="me-1" />
-                      {estadisticasPagos.vencidos.length} vencidos
-                    </small>
+              <div className="kpi-card p-3" style={{ '--accent-color': '#10B981' }}>
+                <div className="d-flex justify-content-between align-items-start mb-2">
+                  <div style={{ flex: 1 }}>
+                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Por Cobrar
+                    </div>
+                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
+                      ${estadisticasPagos.montoTotal.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h2>
                   </div>
-                  <div className="p-2 bg-success bg-opacity-10 rounded">
-                    <DollarSign size={20} className="text-success" />
+                  <div style={{ padding: '8px', background: '#D1FAE5', borderRadius: '6px' }}>
+                    <DollarSign size={20} style={{ color: '#10B981' }} />
                   </div>
+                </div>
+                <div className="d-flex align-items-center justify-content-between">
+                  <span className="metric-badge" style={{ background: '#FEE2E2', color: '#991B1B' }}>
+                    <AlertTriangle size={10} className="me-1" />
+                    {estadisticasPagos.vencidos.length} vencidos
+                  </span>
+                  <small className="text-muted" style={{ fontSize: '11px' }}>urgente</small>
                 </div>
               </div>
             </div>
             
             <div className="col-md-3">
-              <div className="corporate-card p-3">
-                <div className="d-flex justify-content-between align-items-start">
-                  <div>
-                    <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Eficiencia Operativa
-                    </p>
-                    <h3 className="mb-0 fw-bold">87.3%</h3>
-                    <small className="text-success">
-                      <Award size={14} className="me-1" />
-                      Óptimo
-                    </small>
+              <div className="kpi-card p-3" style={{ '--accent-color': '#8B5CF6' }}>
+                <div className="d-flex justify-content-between align-items-start mb-2">
+                  <div style={{ flex: 1 }}>
+                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Tasa Conversión
+                    </div>
+                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
+                      87.3%
+                    </h2>
                   </div>
-                  <div className="p-2 bg-info bg-opacity-10 rounded">
-                    <Activity size={20} className="text-info" />
+                  <div style={{ padding: '8px', background: '#EDE9FE', borderRadius: '6px' }}>
+                    <TrendingUp size={20} style={{ color: '#8B5CF6' }} />
                   </div>
+                </div>
+                <div className="d-flex align-items-center justify-content-between">
+                  <span className="metric-badge" style={{ background: '#D1FAE5', color: '#065F46' }}>
+                    <Award size={10} className="me-1" />
+                    Excelente
+                  </span>
+                  <small className="text-muted" style={{ fontSize: '11px' }}>cotización → póliza</small>
                 </div>
               </div>
             </div>
