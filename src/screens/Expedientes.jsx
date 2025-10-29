@@ -72,9 +72,9 @@ const utils = {
       },
       pago: {
         'Pagado': 'bg-success',
-        'Vencido': 'bg-danger',
-        'Pago por vencer': 'bg-warning',
-        'Sin definir': 'bg-secondary'
+        'Pendiente': 'bg-secondary',
+        'Por Vencer': 'bg-warning',
+        'Vencido': 'bg-danger'
       },
       tipo_pago: {
         'Fraccionado': 'bg-info',
@@ -185,7 +185,7 @@ const InfoCliente = React.memo(({ expediente }) => {
 
 const EstadoPago = React.memo(({ expediente }) => {
   // Determinar si el pago está vencido
-  const fechaPago = expediente.proximoPago || expediente.fecha_pago;
+  const fechaPago = expediente.fecha_vencimiento_pago || expediente.proximoPago || expediente.fecha_pago;
   const hoy = new Date();
   const fechaPagoDate = fechaPago ? new Date(fechaPago) : null;
   const estaVencido = fechaPagoDate && fechaPagoDate < hoy && expediente.estatusPago !== 'Pagado';
@@ -196,7 +196,7 @@ const EstadoPago = React.memo(({ expediente }) => {
       <div className="mb-1">
         <small className="text-muted">Tipo:</small>
         <br />
-        <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+        <small className="fw-semibold text-primary">{expediente.tipo_pago || '-'}</small>
         {expediente.frecuenciaPago && (
           <span className="ms-1">
             <small className="text-muted">({expediente.frecuenciaPago})</small>
@@ -208,7 +208,7 @@ const EstadoPago = React.memo(({ expediente }) => {
       <div className="mb-1">
         <small className="text-muted">Estatus:</small>
         <br />
-        <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+        <Badge tipo="pago" valor={expediente.estatusPago || 'Pendiente'} className="badge-sm" />
       </div>
 
       {/* Fecha de Pago (solo si está pendiente) */}
@@ -218,11 +218,10 @@ const EstadoPago = React.memo(({ expediente }) => {
           <br />
           <small className={`${
             estaVencido ? 'text-danger fw-bold' :
-            expediente.estatusPago === 'Pago por vencer' ? 'text-warning fw-semibold' :
             'text-secondary'
           }`}>
             {estaVencido && '⚠️ '}
-            {utils.formatearFecha(fechaPago)}
+            {new Date(fechaPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '')}
           </small>
         </div>
       )}
@@ -1061,6 +1060,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
           termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
           fecha_pago: fechaPagoFinal,
+          fecha_vencimiento_pago: fechaPagoFinal,
           plazo_pago_dias: plazoMatch ? plazoMatch[1] : '14',
           
           // MONTOS
@@ -1123,6 +1123,28 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             datosExtraidos.tipo_cobertura = 'RC (Responsabilidad Civil)';
           }
           console.log('✅ Tipo de cobertura normalizado:', datosExtraidos.tipo_cobertura);
+        }
+        
+        // Calcular estatusPago basado en fecha_vencimiento_pago
+        if (fechaPagoFinal) {
+          const fechaVencimiento = new Date(fechaPagoFinal);
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
+          fechaVencimiento.setHours(0, 0, 0, 0);
+          
+          const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+          
+          if (diasRestantes < 0) {
+            datosExtraidos.estatusPago = 'Vencido';
+          } else if (diasRestantes <= 15) {
+            datosExtraidos.estatusPago = 'Por Vencer';
+          } else {
+            datosExtraidos.estatusPago = 'Pendiente';
+          }
+          console.log('✅ Estatus de pago calculado:', datosExtraidos.estatusPago, '(Vencimiento:', fechaPagoFinal, 'Días restantes:', diasRestantes, ')');
+        } else {
+          datosExtraidos.estatusPago = 'Pendiente';
+          console.log('⚠️ Sin fecha de vencimiento, estatus por defecto: Pendiente');
         }
         
         console.log('📊 Datos extraídos completos:', datosExtraidos);
@@ -2387,16 +2409,25 @@ const ListaExpedientes = React.memo(({
             <div className="table-responsive">
               <table className="table table-hover table-sm mb-0">
                 <thead className="table-light">
-                  <tr style={{ fontSize: '0.85rem' }}>
-                    <th>Póliza</th>
-                    <th>Cliente</th>
-                    <th>Compañía</th>
-                    <th>Producto</th>
-                    <th>Etapa Activa</th>
-                    <th>Agente</th>
-                    <th>Tipo/Estatus Pago</th>
-                    <th>Vigencia/Pago</th>
-                    <th width="180">Acciones</th>
+                  <tr style={{ fontSize: '0.75rem' }}>
+                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Póliza</th>
+                    <th style={{ width: '180px', verticalAlign: 'middle' }}>Cliente</th>
+                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Compañía</th>
+                    <th style={{ width: '200px', verticalAlign: 'middle' }}>Producto</th>
+                    <th style={{ width: '80px' }}>
+                      <div>Etapa</div>
+                      <div>Activa</div>
+                    </th>
+                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Agente</th>
+                    <th style={{ width: '100px' }}>
+                      <div>Tipo</div>
+                      <div>Estatus Pago</div>
+                    </th>
+                    <th style={{ width: '100px' }}>
+                      <div>Vigencia</div>
+                      <div>Pago</div>
+                    </th>
+                    <th width="180" style={{ verticalAlign: 'middle' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2474,24 +2505,18 @@ const ListaExpedientes = React.memo(({
                             compacto={true}
                           />
                         </td>
-                        <td>
-                          <div style={{ fontSize: '0.75rem' }}>
-                            <small className="text-muted">Inicio:</small>{' '}
+                        <td style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                          <div>
                             {expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
-                          <div style={{ fontSize: '0.75rem' }}>
-                            <small className="text-muted">Fin:</small>{' '}
+                          <div>
                             {expediente.termino_vigencia ? new Date(expediente.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
-                          {(expediente.fecha_pago || expediente.proximoPago) && (
-                            <div style={{ fontSize: '0.75rem', marginTop: '2px', paddingTop: '2px', borderTop: '1px solid #e9ecef' }}>
-                              <small className="text-muted">Pago:</small>{' '}
-                              <span className="text-primary">
-                                {expediente.fecha_pago ? new Date(expediente.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : 
-                                 expediente.proximoPago ? new Date(expediente.proximoPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
-                              </span>
-                            </div>
-                          )}
+                          <div className="fw-semibold" style={{ marginTop: '2px', color: '#f59e0b' }}>
+                            {expediente.fecha_vencimiento_pago ? new Date(expediente.fecha_vencimiento_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : 
+                             expediente.proximoPago ? new Date(expediente.proximoPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') :
+                             expediente.fecha_pago ? new Date(expediente.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                          </div>
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
@@ -2719,15 +2744,16 @@ const Formulario = React.memo(({
       // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
       if (datosExtraidos.inicio_vigencia || datosExtraidos.fecha_pago) {
         setTimeout(() => {
-          const formularioConCalculos = actualizarCalculosAutomaticos(nuevoFormulario);
-          setFormulario(prev => ({
-            ...prev,
-            ...formularioConCalculos,
-            // Preservar datos importantes que no deben cambiar
-            compania: datosExtraidos.compania,
-            producto: datosExtraidos.producto,
-            agente: agenteCodigo || '',
-            // Preservar datos del vehículo
+          setFormulario(prev => {
+            const formularioConCalculos = actualizarCalculosAutomaticos(prev);
+            return {
+              ...prev,
+              ...formularioConCalculos,
+              // Preservar datos importantes que no deben cambiar
+              compania: datosExtraidos.compania,
+              producto: datosExtraidos.producto,
+              agente: agenteCodigo || '',
+              // Preservar datos del vehículo
             marca: datosExtraidos.marca,
             modelo: datosExtraidos.modelo,
             anio: datosExtraidos.anio,
@@ -2738,8 +2764,9 @@ const Formulario = React.memo(({
             tipo_vehiculo: datosExtraidos.tipo_vehiculo,
             tipo_cobertura: datosExtraidos.tipo_cobertura,
             codigo_vehiculo: datosExtraidos.codigo_vehiculo
-          }));
-          console.log('✅ Cálculos automáticos aplicados, estatusPago:', formularioConCalculos.estatusPago);
+            };
+          });
+          console.log('✅ Cálculos automáticos aplicados');
         }, 150);
       } else {
         // FORZAR la actualización después de un pequeño delay
@@ -3514,39 +3541,38 @@ const Formulario = React.memo(({
               
               <div className="col-md-3">
                 <label className="form-label">Fecha de Pago</label>
-                <div className="input-group">
-                  <input
-                    type="date"
-                    className="form-control bg-light"
-                    value={formulario.proximoPago}
-                    readOnly
-                  />
-                  <span className="input-group-text">
-                    <span className="text-info" title="Calculado automáticamente">🤖</span>
-                  </span>
-                </div>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={formulario.fecha_vencimiento_pago || ''}
+                  onChange={(e) => {
+                    const nuevaFecha = e.target.value;
+                    setFormulario(prev => {
+                      const nuevoEstatus = calcularEstatusPago(nuevaFecha, prev.estatusPago);
+                      return {
+                        ...prev,
+                        fecha_vencimiento_pago: nuevaFecha,
+                        fecha_pago: nuevaFecha,
+                        estatusPago: nuevoEstatus
+                      };
+                    });
+                  }}
+                />
               </div>
               
               <div className="col-md-6">
                 <label className="form-label">Estatus del Pago</label>
-                <div className="input-group">
-                  <select
-                    className="form-select bg-light"
-                    value={formulario.estatusPago}
-                    onChange={(e) => {
-                      if (e.target.value === 'Pagado') {
-                        setFormulario(prev => ({ ...prev, estatusPago: 'Pagado' }));
-                      }
-                    }}
-                  >
-                    {estatusPago.map(estatus => (
-                      <option key={estatus} value={estatus}>{estatus}</option>
-                    ))}
-                  </select>
-                  <span className="input-group-text">
-                    <span className="text-info" title="Se actualiza automáticamente">🤖</span>
-                  </span>
-                </div>
+                <select
+                  className="form-select"
+                  value={formulario.estatusPago}
+                  onChange={(e) => {
+                    setFormulario(prev => ({ ...prev, estatusPago: e.target.value }));
+                  }}
+                >
+                  {estatusPago.map(estatus => (
+                    <option key={estatus} value={estatus}>{estatus}</option>
+                  ))}
+                </select>
               </div>
 
               {formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicio_vigencia && (
@@ -4124,6 +4150,29 @@ const ModuloExpedientes = () => {
         const expedientesEnriquecidos = expedientes.map(exp => {
           const cliente = clientesMap[exp.cliente_id];
           
+          // Calcular estatusPago automáticamente si es necesario
+          let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
+          
+          // Si el estatus es inválido o no existe, calcularlo desde la fecha
+          const estatusInvalidos = ['Sin definir', 'Pago por vencer', null, undefined, ''];
+          if (estatusInvalidos.includes(estatusPagoCalculado)) {
+            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+            if (fechaVencimiento) {
+              const fechaVenc = new Date(fechaVencimiento);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              if (fechaVenc < hoy) {
+                estatusPagoCalculado = 'Vencido';
+              } else {
+                estatusPagoCalculado = 'Pendiente';
+              }
+            } else {
+              estatusPagoCalculado = 'Pendiente';
+            }
+          }
+          
           if (cliente) {
             // Si es Persona Moral, usar razón social como nombre completo
             if (cliente.tipoPersona === 'Persona Moral') {
@@ -4134,7 +4183,8 @@ const ModuloExpedientes = () => {
                 apellido_materno: '',
                 email: cliente.email || '',
                 telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || ''
+                rfc: cliente.rfc || '',
+                estatusPago: estatusPagoCalculado
               };
             } else {
               // Persona Física: usar nombre y apellidos
@@ -4145,13 +4195,17 @@ const ModuloExpedientes = () => {
                 apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
                 email: cliente.email || '',
                 telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || ''
+                rfc: cliente.rfc || '',
+                estatusPago: estatusPagoCalculado
               };
             }
           }
           
-          // Si no se encuentra el cliente, mantener el expediente sin cambios
-          return exp;
+          // Si no se encuentra el cliente, mantener el expediente con estatus calculado
+          return {
+            ...exp,
+            estatusPago: estatusPagoCalculado
+          };
         });
         
         setExpedientes(expedientesEnriquecidos);
@@ -4272,7 +4326,7 @@ const ModuloExpedientes = () => {
   const tiposPago = useMemo(() => ['Anual', 'Fraccionado'], []);
   const frecuenciasPago = useMemo(() => Object.keys(CONSTANTS.PAGOS_POR_FRECUENCIA).sort(), []);
   const periodosGracia = useMemo(() => [14, 30], []);
-  const estatusPago = useMemo(() => ['Sin definir', 'Pagado', 'Vencido', 'Pago por vencer'], []);
+  const estatusPago = useMemo(() => ['Pendiente', 'Pagado', 'Vencido'], []);
   const motivosCancelacion = useMemo(() => [
     'Cliente desistió',
     'Documentación incompleta',
@@ -4321,8 +4375,8 @@ const estadoInicialFormulario = {
   periodo_gracia: 14,
   proximo_pago: '',
   proximoPago: '',
-  estatus_pago: 'Sin definir',
-  estatusPago: 'Sin definir',
+  estatus_pago: 'Pendiente',
+  estatusPago: 'Pendiente',
   fecha_ultimo_pago: '',
   fecha_pago: '',
   plazo_pago_dias: '',
@@ -4404,14 +4458,28 @@ const estadoInicialFormulario = {
   }, []);
 
   const calcularEstatusPago = useCallback((proximoPago, estatusActual) => {
-    if (!proximoPago) return 'Sin definir';
+    // Si ya está marcado como pagado completamente, mantener ese estado
     if (estatusActual === 'Pagado') return 'Pagado';
     
-    const diasRestantes = utils.calcularDiasRestantes(proximoPago);
+    // Si no hay fecha de pago, el estado es Pendiente
+    if (!proximoPago) return 'Pendiente';
     
-    if (diasRestantes > 30) return 'Sin definir';
-    if (diasRestantes > 0) return 'Pago por vencer';
-    return 'Vencido';
+    // Calcular días restantes
+    const fechaPago = new Date(proximoPago);
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    fechaPago.setHours(0, 0, 0, 0);
+    
+    const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
+    
+    // Si la fecha ya pasó, está vencido
+    if (diasRestantes < 0) return 'Vencido';
+    
+    // Si faltan 15 días o menos, está por vencer (para alertar)
+    if (diasRestantes <= 15) return 'Por Vencer';
+    
+    // Si aún faltan más de 15 días, está pendiente
+    return 'Pendiente';
   }, []);
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
@@ -4430,22 +4498,24 @@ const estadoInicialFormulario = {
         1
       );
     } else if (formularioActual.tipo_pago === 'Anual') {
-      // Para anual: usar fecha_pago si existe, sino usar inicio_vigencia
-      proximoPago = formularioActual.fecha_pago || formularioActual.inicio_vigencia;
+      // Para anual: usar fecha_vencimiento_pago si existe, sino usar inicio_vigencia
+      proximoPago = formularioActual.fecha_vencimiento_pago || formularioActual.fecha_pago || formularioActual.inicio_vigencia;
     }
     
-    // Calcular estatusPago basado en proximoPago
-    const estatusPago = calcularEstatusPago(proximoPago, formularioActual.estatusPago);
+    // Calcular estatusPago basado en la fecha de vencimiento
+    const fechaParaCalculo = formularioActual.fecha_vencimiento_pago || proximoPago;
+    const estatusPago = calcularEstatusPago(fechaParaCalculo, formularioActual.estatusPago);
     
     // Calcular periodo de gracia automáticamente
     const periodoGracia = formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30;
     
-    // Incluir fecha_pago con el mismo valor que proximoPago para mantener consistencia
+    // Retornar con todos los campos sincronizados
     return { 
       ...formularioActual, 
       termino_vigencia, 
       proximoPago, 
       fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
+      fecha_vencimiento_pago: proximoPago, // Asegurar que fecha_vencimiento_pago esté sincronizada
       estatusPago, 
       periodo_gracia: periodoGracia 
     };
@@ -4571,16 +4641,40 @@ const estadoInicialFormulario = {
       const fechaActual = new Date().toISOString().split('T')[0];
       const proximoPago = calcularSiguientePago(expedienteActual);
 
-      // Solo campos de pago que cambian
+      // Determinar el nuevo estatus basado en si hay o no próximo pago
+      let nuevoEstatusPago = 'Pagado';
+      let nuevaFechaVencimiento = null;
+      
+      if (proximoPago && proximoPago.trim() !== '') {
+        // Hay un siguiente pago pendiente
+        nuevoEstatusPago = 'Pendiente';
+        nuevaFechaVencimiento = proximoPago;
+        console.log('✅ Pago aplicado. Siguiente pago pendiente:', proximoPago);
+      } else {
+        // No hay más pagos (Anual o último pago de fraccionado)
+        nuevoEstatusPago = 'Pagado';
+        nuevaFechaVencimiento = null;
+        console.log('✅ Pago aplicado. Póliza completamente pagada.');
+      }
+
+      // Campos que cambian al aplicar pago
       const datosActualizacion = {
-        estatusPago: 'Pagado',
+        estatusPago: nuevoEstatusPago,
+        fecha_vencimiento_pago: nuevaFechaVencimiento,
+        fecha_pago: nuevaFechaVencimiento, // Mantener compatibilidad
         fechaUltimoPago: fechaActual,
         proximoPago: proximoPago
       };
 
-      console.log('💰 Aplicando pago:', { expedienteId, fechaActual, proximoPago });
+      console.log('💰 Aplicando pago:', { 
+        expedienteId, 
+        fechaActual, 
+        proximoPago,
+        nuevoEstatusPago,
+        nuevaFechaVencimiento
+      });
 
-      // Actualizar en BD (solo los campos de pago)
+      // Actualizar en BD
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -4591,7 +4685,7 @@ const estadoInicialFormulario = {
         throw new Error(`Error ${response.status}: ${response.statusText}`);
       }
 
-      console.log('✅ Pago aplicado en BD');
+      console.log('✅ Pago registrado en BD');
 
       // Actualizar localmente
       setExpedientes(prev => prev.map(exp => 
@@ -4599,6 +4693,8 @@ const estadoInicialFormulario = {
           ? { ...exp, ...datosActualizacion }
           : exp
       ));
+      
+      console.log('✅ Lista actualizada localmente');
     } catch (error) {
       console.error('❌ Error al aplicar pago:', error);
       alert('Error al aplicar el pago: ' + error.message);
@@ -4862,6 +4958,7 @@ const estadoInicialFormulario = {
       inicio_vigencia: expedientePayload.inicio_vigencia,
       termino_vigencia: expedientePayload.termino_vigencia,
       fecha_pago: expedientePayload.fecha_pago,
+      fecha_vencimiento_pago: expedientePayload.fecha_vencimiento_pago,
       periodo_gracia: expedientePayload.periodo_gracia,
       
       // Pagos
