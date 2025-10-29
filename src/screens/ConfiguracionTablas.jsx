@@ -197,71 +197,21 @@ const ModuloConfiguracionCatalogos = () => {
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [itemEditando, setItemEditando] = useState(null);
 
-  // ========== CATÁLOGOS DE DATOS ==========
+  // ========== CATÁLOGOS DE DATOS - Listos para cargar desde BD ==========
   // 1. Tipos de Documentos - Persona Física
-  const [documentosPersonaFisica, setDocumentosPersonaFisica] = useState([
-    { id: 1, nombre: 'Identificación Oficial (INE/Pasaporte)', codigo: 'DOC_PF_001', obligatorio: true, vigenciaDias: 0, activo: true, orden: 1 },
-    { id: 2, nombre: 'Comprobante de Domicilio', codigo: 'DOC_PF_002', obligatorio: true, vigenciaDias: 90, activo: true, orden: 2 },
-    { id: 3, nombre: 'CURP', codigo: 'DOC_PF_003', obligatorio: false, vigenciaDias: 0, activo: true, orden: 3 },
-    { id: 4, nombre: 'RFC', codigo: 'DOC_PF_004', obligatorio: false, vigenciaDias: 0, activo: true, orden: 4 },
-    { id: 5, nombre: 'Comprobante de Ingresos', codigo: 'DOC_PF_005', obligatorio: false, vigenciaDias: 30, activo: true, orden: 5 },
-    { id: 6, nombre: 'Estado de Cuenta Bancario', codigo: 'DOC_PF_006', obligatorio: false, vigenciaDias: 30, activo: true, orden: 6 }
-  ]);
+  const [documentosPersonaFisica, setDocumentosPersonaFisica] = useState([]);
 
   // 2. Tipos de Documentos - Persona Moral
-  const [documentosPersonaMoral, setDocumentosPersonaMoral] = useState([
-    { id: 1, nombre: 'Acta Constitutiva', codigo: 'DOC_PM_001', obligatorio: true, vigenciaDias: 0, activo: true, orden: 1 },
-    { id: 2, nombre: 'Poder Notarial', codigo: 'DOC_PM_002', obligatorio: true, vigenciaDias: 0, activo: true, orden: 2 },
-    { id: 3, nombre: 'Identificación del Representante Legal', codigo: 'DOC_PM_003', obligatorio: true, vigenciaDias: 0, activo: true, orden: 3 },
-    { id: 4, nombre: 'Comprobante de Domicilio Fiscal', codigo: 'DOC_PM_004', obligatorio: true, vigenciaDias: 90, activo: true, orden: 4 },
-    { id: 5, nombre: 'RFC de la Empresa', codigo: 'DOC_PM_005', obligatorio: true, vigenciaDias: 0, activo: true, orden: 5 },
-    { id: 6, nombre: 'Constancia de Situación Fiscal', codigo: 'DOC_PM_006', obligatorio: false, vigenciaDias: 30, activo: true, orden: 6 },
-    { id: 7, nombre: 'Estados Financieros', codigo: 'DOC_PM_007', obligatorio: false, vigenciaDias: 365, activo: true, orden: 7 }
-  ]);
+  const [documentosPersonaMoral, setDocumentosPersonaMoral] = useState([]);
 
   // 3. Canales de Venta (Origen del Cliente)
-  const [canalesVenta, setCanalesVenta] = useState([
-    { id: 1, nombre: 'Directo', codigo: 'CV_001', descripcion: 'Cliente que llega directamente a la empresa', icono: 'UserCheck', color: 'primary', activo: true, orden: 1 },
-    { id: 2, nombre: 'Recomendación', codigo: 'CV_002', descripcion: 'Cliente referido por otro cliente', icono: 'Users', color: 'success', activo: true, orden: 2 },
-    { id: 3, nombre: 'Redes Sociales', codigo: 'CV_003', descripcion: 'Cliente captado por Facebook, Instagram, etc.', icono: 'Share2', color: 'info', activo: true, orden: 3 },
-    { id: 4, nombre: 'Google Ads', codigo: 'CV_004', descripcion: 'Cliente por publicidad en Google', icono: 'Globe', color: 'danger', activo: true, orden: 4 },
-    { id: 5, nombre: 'Llamada en Frío', codigo: 'CV_005', descripcion: 'Cliente contactado telefónicamente', icono: 'Phone', color: 'warning', activo: true, orden: 5 },
-    { id: 6, nombre: 'Email Marketing', codigo: 'CV_006', descripcion: 'Cliente por campañas de correo', icono: 'Mail', color: 'secondary', activo: true, orden: 6 },
-    { id: 7, nombre: 'Página Web', codigo: 'CV_007', descripcion: 'Cliente desde el sitio web', icono: 'Globe', color: 'primary', activo: true, orden: 7 },
-    { id: 8, nombre: 'WhatsApp Business', codigo: 'CV_008', descripcion: 'Cliente por WhatsApp', icono: 'MessageCircle', color: 'success', activo: true, orden: 8 }
-  ]);
+  const [canalesVenta, setCanalesVenta] = useState([]);
 
   // 4. Categorías de Clientes
-  const [categoriasClientes, setCategoriaClientes] = useState([
-    { id: 1, nombre: 'Normal', codigo: 'CAT_001', descripcion: 'Cliente estándar', color: 'secondary', activo: true, orden: 1 },
-    { id: 2, nombre: 'VIP', codigo: 'CAT_002', descripcion: 'Cliente preferencial con alto valor', color: 'warning', activo: true, orden: 2 },
-    { id: 3, nombre: 'Premium', codigo: 'CAT_003', descripcion: 'Cliente con beneficios especiales', color: 'primary', activo: true, orden: 3 },
-    { id: 4, nombre: 'Digital', codigo: 'CAT_004', descripcion: 'Cliente que opera principalmente online', color: 'info', activo: true, orden: 4 },
-    { id: 5, nombre: 'Corporativo', codigo: 'CAT_005', descripcion: 'Grandes empresas', color: 'dark', activo: true, orden: 5 },
-    { id: 6, nombre: 'Nuevo', codigo: 'CAT_006', descripcion: 'Cliente recién registrado', color: 'success', activo: true, orden: 6 }
-  ]);
+  const [categoriasClientes, setCategoriaClientes] = useState([]);
 
   // 5. Tipos de Trámites
-  const [tiposTramites, setTiposTramites] = useState([
-    { id: 1, nombre: 'MOVIMIENTO GENERAL EN PÓLIZA', codigo: 'TRAM_001', descripcion: 'Modificaciones generales en la póliza', tiempoEstimado: 24, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_002'], activo: true, orden: 1 },
-    { id: 2, nombre: 'CANCELACIÓN', codigo: 'TRAM_002', descripcion: 'Cancelación de póliza o servicio', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001'], activo: true, orden: 2 },
-    { id: 3, nombre: 'ALTA DE ASEGURADO', codigo: 'TRAM_003', descripcion: 'Registro de nuevo asegurado', tiempoEstimado: 24, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_002', 'DOC_PF_003'], activo: true, orden: 3 },
-    { id: 4, nombre: 'BAJA DE ASEGURADO', codigo: 'TRAM_004', descripcion: 'Eliminación de asegurado', tiempoEstimado: 24, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001'], activo: true, orden: 4 },
-    { id: 5, nombre: 'CORRECCIÓN DE SERIE', codigo: 'TRAM_005', descripcion: 'Corrección de número de serie', tiempoEstimado: 12, requiereDocumentos: false, documentosRequeridos: [], activo: true, orden: 5 },
-    { id: 6, nombre: 'CORRECCIÓN DE PLACAS', codigo: 'TRAM_006', descripcion: 'Corrección de placas vehiculares', tiempoEstimado: 12, requiereDocumentos: false, documentosRequeridos: [], activo: true, orden: 6 },
-    { id: 7, nombre: 'DEVOLUCIÓN DE PRIMAS', codigo: 'TRAM_007', descripcion: 'Reembolso de primas pagadas', tiempoEstimado: 72, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_006'], activo: true, orden: 7 },
-    { id: 8, nombre: 'FACTURA FISCAL', codigo: 'TRAM_008', descripcion: 'Emisión de factura fiscal', tiempoEstimado: 24, requiereDocumentos: false, documentosRequeridos: [], activo: true, orden: 8 },
-    { id: 9, nombre: 'ENDOSO DE INCREMENTO', codigo: 'TRAM_009', descripcion: 'Aumento en cobertura o suma asegurada', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_005'], activo: true, orden: 9 },
-    { id: 10, nombre: 'ENDOSO DE DECREMENTO', codigo: 'TRAM_010', descripcion: 'Disminución en cobertura o suma asegurada', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001'], activo: true, orden: 10 },
-    { id: 11, nombre: 'ENDOSO ACLARATORIO', codigo: 'TRAM_011', descripcion: 'Aclaraciones en la póliza', tiempoEstimado: 24, requiereDocumentos: false, documentosRequeridos: [], activo: true, orden: 11 },
-    { id: 12, nombre: 'APLICACIÓN DE PAGO', codigo: 'TRAM_012', descripcion: 'Registro de pago realizado', tiempoEstimado: 12, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_006'], activo: true, orden: 12 },
-    { id: 13, nombre: 'ACLARACIÓN DE PAGO', codigo: 'TRAM_013', descripcion: 'Aclaración sobre pagos realizados', tiempoEstimado: 24, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_006'], activo: true, orden: 13 },
-    { id: 14, nombre: 'CAMBIO DE AGENTE', codigo: 'TRAM_014', descripcion: 'Cambio de agente asignado', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001'], activo: true, orden: 14 },
-    { id: 15, nombre: 'RECONOCIMIENTO DE ANTIGÜEDAD', codigo: 'TRAM_015', descripcion: 'Reconocimiento de tiempo previo', tiempoEstimado: 72, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_002'], activo: true, orden: 15 },
-    { id: 16, nombre: 'ENDOSO DE BENEFICIARIO PREFERENTE', codigo: 'TRAM_016', descripcion: 'Cambio de beneficiario preferente', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001'], activo: true, orden: 16 },
-    { id: 17, nombre: 'RENOVACIÓN', codigo: 'TRAM_017', descripcion: 'Renovación de póliza', tiempoEstimado: 48, requiereDocumentos: true, documentosRequeridos: ['DOC_PF_001', 'DOC_PF_002'], activo: true, orden: 17 },
-    { id: 18, nombre: 'COTIZACIÓN', codigo: 'TRAM_018', descripcion: 'Solicitud de cotización', tiempoEstimado: 24, requiereDocumentos: false, documentosRequeridos: [], activo: true, orden: 18 }
-  ]);
+  const [tiposTramites, setTiposTramites] = useState([]);
 
   // 6. Tipos de Productos
   const [tiposProductos, setTiposProductos] = useState([]);
@@ -361,12 +311,7 @@ const ModuloConfiguracionCatalogos = () => {
     { valor: 'activity', icono: <Activity size={16} />, nombre: 'Actividad' },
     { valor: 'target', icono: <Target size={16} />, nombre: 'Objetivo' },
     { valor: 'layers', icono: <Layers size={16} />, nombre: 'Capas' },
-    { valor: 'zap', icono: <Zap size={16} />, nombre: 'Energía' },
-    { valor: 'plane', icono: '✈️', nombre: 'Avión' },
-    { valor: 'anchor', icono: '⛵', nombre: 'Barco' },
-    { valor: 'factory', icono: '🏭', nombre: 'Fábrica' },
-    { valor: 'house', icono: '🏠', nombre: 'Casa Emoji' },
-    { valor: 'truck', icono: '🚚', nombre: 'Camión' }
+    { valor: 'zap', icono: <Zap size={16} />, nombre: 'Energía' }
   ];
 
   // Colores disponibles
@@ -659,13 +604,10 @@ const ModuloConfiguracionCatalogos = () => {
         ));
       }
     } else {
-      // Crear nuevo - Generar código si no existe
-      const codigoGenerado = formulario.codigo || generarCodigo(prefijo, datos);
-      
+      // Crear nuevo
       if (tipo === 'producto') {
         // Llamar al backend para crear producto
-        const productoData = { ...formulario, codigo: codigoGenerado };
-        crearTipoProducto(productoData)
+        crearTipoProducto(formulario)
           .then(res => {
             if (res.success) cargarTiposProductos();
             else alert(res.error || 'Error al crear producto');
@@ -674,7 +616,6 @@ const ModuloConfiguracionCatalogos = () => {
         // Llamar al backend para crear documento
         const documentoData = {
           ...formulario,
-          codigo: codigoGenerado,
           tipo_persona: tipo === 'docFisica' ? 'Persona Física' : 'Persona Moral'
         };
         crearTipoDocumento(documentoData)
@@ -684,16 +625,14 @@ const ModuloConfiguracionCatalogos = () => {
           });
       } else if (tipo === 'canal') {
         // Llamar al backend para crear canal de venta
-        const canalData = { ...formulario, codigo: codigoGenerado };
-        crearCanalVenta(canalData)
+        crearCanalVenta(formulario)
           .then(res => {
             if (res.success) cargarCanalesVenta();
             else alert(res.error || 'Error al crear canal de venta');
           });
       } else if (tipo === 'categoria') {
         // Llamar al backend para crear categoría de cliente
-        const categoriaData = { ...formulario, codigo: codigoGenerado };
-        crearCategoriaCliente(categoriaData)
+        crearCategoriaCliente(formulario)
           .then(res => {
             if (res.success) cargarCategoriasClientes();
             else alert(res.error || 'Error al crear categoría de cliente');
@@ -702,7 +641,6 @@ const ModuloConfiguracionCatalogos = () => {
         // Llamar al backend para crear tipo de trámite
         const tramiteData = {
           ...formulario,
-          codigo: codigoGenerado,
           documentosRequeridos: formulario.requiereDocumentos ? formulario.documentosRequeridos : []
         };
         crearTipoTramite(tramiteData)

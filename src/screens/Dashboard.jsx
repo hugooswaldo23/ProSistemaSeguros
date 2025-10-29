@@ -27,130 +27,30 @@ const DashboardComponent = () => {
     { nombre: 'Endoso', codigo: 'EN', color: '#4c1d95' }
   ];
 
-  // Estados para demostración con más detalles
-  const [expedientes] = useState([
-    // Nuevas pólizas
-    { id: 1, tipo: 'nueva', etapa: 'Solicitud de cotización', producto: 'Autos', cliente: 'Juan Pérez García', empresa: 'Grupo Industrial Norte SA' },
-    { id: 2, tipo: 'nueva', etapa: 'Cotización enviada', producto: 'Vida', cliente: 'María García López', empresa: 'Consultores Asociados' },
-    { id: 3, tipo: 'nueva', etapa: 'Solicitar emisión', producto: 'Daños', cliente: 'Carlos López Martín', empresa: 'Logística Internacional' },
-    { id: 4, tipo: 'nueva', etapa: 'Emitida pendiente de pago', producto: 'Autos', cliente: 'Ana Martínez Ruiz', empresa: 'Servicios Corporativos' },
-    { id: 5, tipo: 'nueva', etapa: 'Pagada', producto: 'Vida', cliente: 'Roberto Silva Torres', empresa: 'Manufactura Global' },
-    // Trámites con información completa incluyendo roles
-    { 
-      id: 6, 
-      tipo: 'tramite', 
-      tramite: 'Cambio de beneficiario',
-      poliza: 'POL-2024-001',
-      // Roles en el trámite
-      cliente: 'Luis Rodríguez',
-      telefono: '33-1234-5678',
-      email: 'luis.rodriguez@email.com',
-      agente: 'Patricia Mendoza',
-      agenteEmail: 'patricia.mendoza@seguros.com',
-      agenteTelefono: '33-1111-2222',
-      vendedor: 'Roberto Sánchez',
-      vendedorEmail: 'roberto.sanchez@seguros.com',
-      vendedorTelefono: '33-3333-4444',
-      ejecutivo: 'María Elena Torres',
-      ejecutivoEmail: 'elena.torres@seguros.com',
-      ejecutivoTelefono: '33-5555-6666',
-      // Información de la póliza
-      aseguradora: 'Qualitas',
-      producto: 'Vida',
-      sumaAsegurada: 500000,
-      fechaSolicitud: '2024-01-15',
-      estado: 'En proceso',
-      descripcion: 'El cliente solicita cambiar el beneficiario de su póliza de vida debido a cambio en su estado civil',
-      beneficiarioActual: 'María López Hernández',
-      beneficiarioNuevo: 'Carmen Rodríguez Martín',
-      archivos: ['INE_nuevo_beneficiario.pdf', 'Acta_matrimonio.pdf'],
-      observaciones: 'Documentación completa, pendiente validación',
-      solicitadoPor: 'Cliente'
-    },
-    { 
-      id: 7, 
-      tipo: 'tramite', 
-      tramite: 'Actualización de datos',
-      poliza: 'POL-2024-002',
-      cliente: 'Patricia Gómez',
-      telefono: '33-9876-5432',
-      email: 'patricia.gomez@email.com',
-      agente: 'Carlos Ramírez',
-      agenteEmail: 'carlos.ramirez@seguros.com',
-      agenteTelefono: '33-7777-8888',
-      vendedor: null,
-      ejecutivo: 'Fernando López',
-      ejecutivoEmail: 'fernando.lopez@seguros.com',
-      ejecutivoTelefono: '33-9999-0000',
-      aseguradora: 'Banorte',
-      producto: 'Autos',
-      vehiculo: 'Honda CRV 2023',
-      placas: 'JKL-123-A',
-      fechaSolicitud: '2024-01-16',
-      estado: 'Pendiente',
-      descripcion: 'Cambio de domicilio y actualización de teléfono de contacto',
-      domicilioAnterior: 'Av. Patria 1234, Zapopan',
-      domicilioNuevo: 'Av. López Mateos 5678, Guadalajara',
-      archivos: ['Comprobante_domicilio.pdf'],
-      observaciones: 'Falta comprobante de domicilio actualizado',
-      solicitadoPor: 'Agente'
-    },
-    { 
-      id: 8, 
-      tipo: 'tramite', 
-      tramite: 'Cambio de cobertura',
-      poliza: 'POL-2024-003',
-      cliente: 'Miguel Herrera',
-      telefono: '33-5555-1234',
-      email: 'miguel.herrera@email.com',
-      agente: 'Ana Flores',
-      agenteEmail: 'ana.flores@seguros.com',
-      agenteTelefono: '33-2222-3333',
-      vendedor: 'José Luis Martínez',
-      vendedorEmail: 'jose.martinez@seguros.com',
-      vendedorTelefono: '33-4444-5555',
-      ejecutivo: 'María Elena Torres',
-      ejecutivoEmail: 'elena.torres@seguros.com',
-      ejecutivoTelefono: '33-5555-6666',
-      aseguradora: 'HDI',
-      producto: 'Autos',
-      vehiculo: 'Toyota Corolla 2022',
-      placas: 'ABC-789-B',
-      fechaSolicitud: '2024-01-17',
-      estado: 'Autorizado',
-      descripcion: 'Cambio de cobertura de Limitada a Amplia',
-      coberturaActual: 'Limitada',
-      coberturaNueva: 'Amplia',
-      primaMensualActual: 1200,
-      primaMensualNueva: 1800,
-      archivos: ['Cotizacion_nueva.pdf', 'Autorizacion_cliente.pdf'],
-      observaciones: 'Cliente autorizó el incremento en prima',
-      solicitadoPor: 'Vendedor'
-    },
-    // Pagos
-    { id: 9, tipo: 'pago', estatusPago: 'Vencido', poliza: 'POL-2024-003', monto: 5000, cliente: 'José Hernández', diasVencido: 5 },
-    { id: 10, tipo: 'pago', estatusPago: 'Por vencer', poliza: 'POL-2024-004', monto: 3500, cliente: 'Laura Díaz', diasParaVencer: 3 },
-    { id: 11, tipo: 'pago', estatusPago: 'En período de gracia', poliza: 'POL-2024-005', monto: 7800, cliente: 'Miguel Torres', diasGracia: 7 }
-  ]);
+  // Estados - Listos para conectar con la base de datos
+  const [expedientes, setExpedientes] = useState([]);
+  const [tramites, setTramites] = useState([]);
+  const [pagos, setPagos] = useState([]);
+  const [nuevasPolizas, setNuevasPolizas] = useState([]);
 
   // Función para abrir modal con detalles
   const abrirDetalleTramite = (tramite) => {
     setModalDetalle(tramite);
   };
 
-  // Estadísticas calculadas
+  // Estadísticas calculadas - se actualizarán cuando se carguen los datos
   const estadisticasTramites = useMemo(() => {
-    const tramites = expedientes.filter(exp => exp.tipo === 'tramite');
+    const tramitesActivos = expedientes.filter(exp => exp.tipo === 'tramite');
     const agrupados = {};
     
     tiposTramite.forEach(tipo => {
-      agrupados[tipo.nombre] = tramites.filter(t => t.tramite === tipo.nombre).length;
+      agrupados[tipo.nombre] = tramitesActivos.filter(t => t.tramite === tipo.nombre).length;
     });
     
     return {
-      total: tramites.length,
+      total: tramitesActivos.length,
       porTipo: agrupados,
-      tramites: tramites
+      tramites: tramitesActivos
     };
   }, [expedientes]);
 
