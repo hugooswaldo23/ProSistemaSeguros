@@ -2395,7 +2395,7 @@ const ListaExpedientes = React.memo(({
                     <th>Etapa Activa</th>
                     <th>Agente</th>
                     <th>Tipo/Estatus Pago</th>
-                    <th>Vigencia</th>
+                    <th>Vigencia/Pago</th>
                     <th width="180">Acciones</th>
                   </tr>
                 </thead>
@@ -2476,11 +2476,22 @@ const ListaExpedientes = React.memo(({
                         </td>
                         <td>
                           <div style={{ fontSize: '0.75rem' }}>
-                            {utils.formatearFecha(expediente.inicio_vigencia, 'compacto')}
+                            <small className="text-muted">Inicio:</small>{' '}
+                            {expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
                           <div style={{ fontSize: '0.75rem' }}>
-                            {utils.formatearFecha(expediente.termino_vigencia, 'compacto')}
+                            <small className="text-muted">Fin:</small>{' '}
+                            {expediente.termino_vigencia ? new Date(expediente.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
                           </div>
+                          {(expediente.fecha_pago || expediente.proximoPago) && (
+                            <div style={{ fontSize: '0.75rem', marginTop: '2px', paddingTop: '2px', borderTop: '1px solid #e9ecef' }}>
+                              <small className="text-muted">Pago:</small>{' '}
+                              <span className="text-primary">
+                                {expediente.fecha_pago ? new Date(expediente.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : 
+                                 expediente.proximoPago ? new Date(expediente.proximoPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td>
                           <div className="d-flex gap-1 flex-wrap">
