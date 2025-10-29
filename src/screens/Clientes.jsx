@@ -145,30 +145,33 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 const ModuloClientes = () => {
   // Estados principales del módulo de clientes
   const [clientes, setClientes] = useState([]);
+  const [expedientes, setExpedientes] = useState([]);
   const [cargando, setCargando] = useState(false);
   
-  // Cargar clientes desde el backend al montar el componente
+  // Cargar clientes y expedientes desde el backend al montar el componente
   useEffect(() => {
-    const cargarClientes = async () => {
-      console.log('🔄 Cargando clientes desde el backend...');
+    const cargarDatos = async () => {
+      console.log('🔄 Cargando datos desde el backend...');
       setCargando(true);
       
       try {
-        const resultado = await obtenerClientes();
+        // Cargar clientes
+        const resultadoClientes = await obtenerClientes();
         
-        if (resultado.success) {
-          console.log(`✅ ${resultado.data.length} clientes cargados desde el backend`);
+        if (resultadoClientes.success) {
+          console.log(`✅ ${resultadoClientes.data.length} clientes cargados desde el backend`);
           
           // Log de TODOS los campos del primer cliente (si existe)
-          if (resultado.data.length > 0) {
-            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', {
-              ...resultado.data[0],
-              _todos_los_campos: Object.keys(resultado.data[0])
+          if (resultadoClientes.data.length > 0) {
+            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', resultadoClientes.data[0]);
+            console.log('🔑 ID del cliente:', {
+              id: resultadoClientes.data[0].id,
+              tipo: typeof resultadoClientes.data[0].id
             });
           }
           
           // Log de campos específicos para todos los clientes
-          resultado.data.forEach((cliente, index) => {
+          resultadoClientes.data.forEach((cliente, index) => {
             if (index < 3) { // Solo los primeros 3 para no saturar
               console.log(`📋 Cliente ${index + 1} (${cliente.codigo || cliente.id}):`, {
                 tipoPersona: cliente.tipoPersona,
@@ -187,20 +190,42 @@ const ModuloClientes = () => {
             }
           });
           
-          setClientes(resultado.data);
+          setClientes(resultadoClientes.data);
         } else {
-          console.error('❌ Error al cargar clientes:', resultado.error);
+          console.error('❌ Error al cargar clientes:', resultadoClientes.error);
           setClientes([]);
         }
+        
+        // Cargar expedientes (pólizas)
+        console.log('🔄 Cargando expedientes desde el backend...');
+        const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
+        const expedientesData = await resExpedientes.json();
+        console.log(`✅ ${expedientesData.length} expedientes cargados desde el backend`);
+        
+        // Log de expedientes con cliente_id
+        const expedientesConCliente = expedientesData.filter(exp => exp.cliente_id);
+        console.log(`📊 Expedientes con cliente_id: ${expedientesConCliente.length} de ${expedientesData.length}`);
+        
+        if (expedientesData.length > 0) {
+          console.log('🔍 EJEMPLO - Primer expediente:', expedientesData[0]);
+          console.log('🔑 cliente_id en expediente:', {
+            cliente_id: expedientesData[0].cliente_id,
+            tipo: typeof expedientesData[0].cliente_id
+          });
+        }
+        
+        setExpedientes(expedientesData);
+        
       } catch (err) {
-        console.error('❌ Excepción al cargar clientes:', err);
+        console.error('❌ Excepción al cargar datos:', err);
         setClientes([]);
+        setExpedientes([]);
       } finally {
         setCargando(false);
       }
     };
-    
-    cargarClientes();
+
+    cargarDatos();
   }, []);
   const [vistaActual, setVistaActual] = useState('clientes');
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
@@ -212,15 +237,8 @@ const ModuloClientes = () => {
   const [documentoAVer, setDocumentoAVer] = useState(null);
   const [mostrarModalConfirmarEliminar, setMostrarModalConfirmarEliminar] = useState(false);
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
-  
-  // Simulación de expedientes existentes (en tu sistema real vendrían del estado principal)
-  const [expedientes] = useState([
-    { id: 1, nombre: 'Juan', apellidoPaterno: 'Pérez', producto: 'Autos', compania: 'Qualitas', etapaActiva: 'Pagado', clienteId: null },
-    { id: 2, nombre: 'María', apellidoPaterno: 'González', producto: 'Vida', compania: 'Banorte', etapaActiva: 'Pagado', clienteId: null },
-    { id: 3, nombre: 'Carlos', apellidoPaterno: 'López', producto: 'Daños', compania: 'HDI', etapaActiva: 'En cotización', clienteId: null },
-    { id: 4, nombre: 'Ana', apellidoPaterno: 'Martínez', producto: 'Autos', compania: 'Mapfre', etapaActiva: 'Emitida', clienteId: null },
-    { id: 5, nombre: 'Pedro', apellidoPaterno: 'Rodríguez', producto: 'Vida', compania: 'Chubb', etapaActiva: 'Pagado', clienteId: null }
-  ]);
+  const [mostrarModalPolizas, setMostrarModalPolizas] = useState(false);
+  const [polizasClienteSeleccionado, setPolizasClienteSeleccionado] = useState([]);
 
   // Tipos de cliente
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
@@ -528,6 +546,35 @@ const ModuloClientes = () => {
     setVistaActual('detalles-cliente');
   }, []);
 
+  // Función para ver pólizas del cliente
+  const verPolizasCliente = useCallback((cliente) => {
+    console.log('🔍 Ver pólizas del cliente:', {
+      cliente_id: cliente.id,
+      tipo: typeof cliente.id
+    });
+    
+    // Filtrar pólizas usando cliente_id
+    const polizas = expedientes.filter(exp => {
+      const coincide = exp.cliente_id == cliente.id;  // Comparación flexible
+      if (coincide) {
+        console.log('✅ Póliza encontrada:', {
+          numero_poliza: exp.numero_poliza,
+          exp_cliente_id: exp.cliente_id,
+          exp_cliente_id_tipo: typeof exp.cliente_id,
+          cliente_id: cliente.id,
+          cliente_id_tipo: typeof cliente.id
+        });
+      }
+      return coincide;
+    });
+    
+    console.log(`📋 Total pólizas encontradas: ${polizas.length}`);
+    
+    setClienteSeleccionado(cliente);
+    setPolizasClienteSeleccionado(polizas);
+    setMostrarModalPolizas(true);
+  }, [expedientes]);
+
   // Función para agregar documento
   const agregarDocumento = useCallback((tipoDocumento, nombreArchivo = null) => {
     // Simular que siempre son PDFs para este ejemplo
@@ -782,9 +829,12 @@ const ModuloClientes = () => {
                   </thead>
                   <tbody>
                     {paginacionClientes.itemsPaginados.map((cliente) => {
-                      const expedientesCliente = expedientes.filter(exp => 
-                        cliente.expedientesRelacionados?.includes(exp.id)
-                      );
+                      // Filtrar pólizas que pertenecen a este cliente usando cliente_id
+                      const expedientesCliente = expedientes.filter(exp => {
+                        // Comparación directa: exp.cliente_id debe ser igual a cliente.id
+                        // Soporta comparación flexible (número == string si tienen el mismo valor)
+                        return exp.cliente_id == cliente.id;  // Usar == en lugar de === para comparación flexible
+                      });
                       
                       return (
                         <tr key={cliente.id}>
@@ -828,9 +878,13 @@ const ModuloClientes = () => {
                             </span>
                           </td>
                           <td>
-                            <span className="badge bg-primary">
-                              {expedientesCliente.length} productos
-                            </span>
+                            <button 
+                              className="btn btn-sm btn-primary"
+                              onClick={() => verPolizasCliente(cliente)}
+                              disabled={expedientesCliente.length === 0}
+                            >
+                              {expedientesCliente.length} póliza{expedientesCliente.length !== 1 ? 's' : ''}
+                            </button>
                           </td>
                           <td>
                             <span className={`badge ${
@@ -2664,6 +2718,118 @@ const ModuloClientes = () => {
                   >
                     <Trash2 size={16} className="me-2" />
                     Sí, Eliminar Documento
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal para ver pólizas del cliente */}
+        {mostrarModalPolizas && clienteSeleccionado && (
+          <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+            <div className="modal-dialog modal-xl">
+              <div className="modal-content">
+                <div className="modal-header bg-primary text-white">
+                  <h5 className="modal-title">
+                    <Package size={20} className="me-2" />
+                    Pólizas de {clienteSeleccionado.tipoPersona === 'Persona Física' ? 
+                      `${clienteSeleccionado.nombre} ${clienteSeleccionado.apellidoPaterno}` :
+                      clienteSeleccionado.razonSocial
+                    }
+                  </h5>
+                  <button 
+                    type="button" 
+                    className="btn-close btn-close-white"
+                    onClick={() => {
+                      setMostrarModalPolizas(false);
+                      setPolizasClienteSeleccionado([]);
+                      setClienteSeleccionado(null);
+                    }}
+                  ></button>
+                </div>
+                <div className="modal-body">
+                  {polizasClienteSeleccionado.length === 0 ? (
+                    <div className="alert alert-info">
+                      <AlertCircle size={16} className="me-2" />
+                      Este cliente no tiene pólizas registradas.
+                    </div>
+                  ) : (
+                    <div className="table-responsive">
+                      <table className="table table-hover">
+                        <thead className="table-light">
+                          <tr>
+                            <th>No. Póliza</th>
+                            <th>Tipo</th>
+                            <th>Aseguradora</th>
+                            <th>Prima</th>
+                            <th>Vigencia</th>
+                            <th>Estado</th>
+                            <th>Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {polizasClienteSeleccionado.map((poliza) => (
+                            <tr key={poliza.id}>
+                              <td>
+                                <strong className="text-primary">{poliza.numero_poliza || poliza.numeroPoliza || '-'}</strong>
+                              </td>
+                              <td>{poliza.tipo_de_poliza || poliza.tipoPoliza || '-'}</td>
+                              <td>{poliza.aseguradora || '-'}</td>
+                              <td>
+                                {poliza.prima_neta ? 
+                                  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(poliza.prima_neta) :
+                                  '-'
+                                }
+                              </td>
+                              <td>
+                                <small>
+                                  {poliza.vigencia_de ? new Date(poliza.vigencia_de).toLocaleDateString('es-MX') : '-'}
+                                  {' - '}
+                                  {poliza.vigencia_hasta ? new Date(poliza.vigencia_hasta).toLocaleDateString('es-MX') : '-'}
+                                </small>
+                              </td>
+                              <td>
+                                <span className={`badge ${
+                                  poliza.etapa_activa === 'Pagado' ? 'bg-success' :
+                                  poliza.etapa_activa === 'Emitida' ? 'bg-info' :
+                                  poliza.etapa_activa === 'En cotización' ? 'bg-warning' :
+                                  'bg-secondary'
+                                }`}>
+                                  {poliza.etapa_activa || '-'}
+                                </span>
+                              </td>
+                              <td>
+                                <button
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => {
+                                    // Aquí podrías navegar al detalle del expediente
+                                    console.log('Ver detalle de póliza:', poliza.id);
+                                    alert(`Ver detalle de póliza ${poliza.numero_poliza || poliza.id}`);
+                                  }}
+                                  title="Ver detalles"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                <div className="modal-footer">
+                  <button 
+                    type="button" 
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setMostrarModalPolizas(false);
+                      setPolizasClienteSeleccionado([]);
+                      setClienteSeleccionado(null);
+                    }}
+                  >
+                    Cerrar
                   </button>
                 </div>
               </div>
