@@ -93,11 +93,8 @@ const DashboardComponent = () => {
     switch(tipo) {
       case 'emitidas':
         polizasFiltradas = expedientes.filter(exp => 
-          esMesActual(exp.fecha_emision) && (
-            exp.etapa_activa === 'Pagado' || 
-            exp.etapa_activa === 'Emitida' || 
-            exp.etapa_activa === 'Pendiente de pago'
-          )
+          esMesActual(exp.fecha_emision) && 
+          exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas
         );
         titulo = 'Primas Emitidas - Mes Actual';
         color = '#3B82F6';
@@ -105,7 +102,9 @@ const DashboardComponent = () => {
 
       case 'porVencer':
         polizasFiltradas = expedientes.filter(p => 
-          p.fecha_vencimiento_pago && p.estatusPago === 'Pago por vencer'
+          p.fecha_vencimiento_pago && 
+          p.estatus_pago === 'Por Vencer' &&
+          p.etapa_activa !== 'Cancelada'
         );
         titulo = 'Primas Por Vencer - Acumulado';
         color = '#F59E0B';
@@ -113,7 +112,9 @@ const DashboardComponent = () => {
 
       case 'vencidas':
         polizasFiltradas = expedientes.filter(p => 
-          p.fecha_vencimiento_pago && p.estatusPago === 'Vencido'
+          p.fecha_vencimiento_pago && 
+          p.estatus_pago === 'Vencido' &&
+          p.etapa_activa !== 'Cancelada'
         );
         titulo = 'Primas Vencidas - Acumulado';
         color = '#EF4444';
@@ -121,7 +122,7 @@ const DashboardComponent = () => {
 
       case 'canceladas':
         polizasFiltradas = expedientes.filter(exp => 
-          exp.etapa_activa === 'Cancelado' && esMesActual(exp.fecha_cancelacion)
+          exp.etapa_activa === 'Cancelada' && esMesActual(exp.fecha_cancelacion)
         );
         titulo = 'Primas Canceladas - Mes Actual';
         color = '#6B7280';
@@ -155,6 +156,9 @@ const DashboardComponent = () => {
   };
 
   // Estadísticas Financieras - Calculadas desde expedientes (MES EN CURSO)
+  // ⚠️ IMPORTANTE: Cada póliza tiene DOS estados independientes:
+  //    - etapa_activa: Estado operativo ("Cotizada", "Emitida", "Cancelada", "Renovada")
+  //    - estatus_pago: Estado financiero ("Pendiente", "Pagado", "Por Vencer", "Vencido")
   const estadisticasFinancieras = useMemo(() => {
     console.log('📈 Calculando estadísticas con', expedientes.length, 'expedientes');
     
@@ -184,13 +188,11 @@ const DashboardComponent = () => {
     
     console.log('✅ Expedientes del mes actual:', expedientesMesActual.length);
     
-    // PRIMAS EMITIDAS - Separar entre Venta Nueva y Renovación
+    // PRIMAS EMITIDAS - Todas las pólizas EMITIDAS en el mes (sin importar estado de pago)
+    // Nota: etapa_activa describe el workflow operativo, no el estado de pago
     const polizasEmitidas = expedientesMesActual.filter(exp => 
-      esMesActual(exp.fecha_emision) && (
-        exp.etapa_activa === 'Pagado' || 
-        exp.etapa_activa === 'Emitida' || 
-        exp.etapa_activa === 'Pendiente de pago'
-      )
+      esMesActual(exp.fecha_emision) && 
+      exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas (no canceladas ni cotizadas)
     );
     
     const ventasNuevas = polizasEmitidas.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
@@ -209,9 +211,12 @@ const DashboardComponent = () => {
     console.log('💰 Ventas Nuevas:', ventasNuevas.length, '- $', primasVentasNuevas);
     console.log('🔄 Renovaciones:', renovaciones.length, '- $', primasRenovaciones);
 
-    // PRIMAS POR VENCER - Separar mes actual y anteriores
+    // PRIMAS POR VENCER - Pólizas con pago pendiente que aún no vencen
+    // Nota: estatus_pago describe la situación financiera
     const polizasPorVencerTodas = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && p.estatusPago === 'Pago por vencer'
+      p.fecha_vencimiento_pago && 
+      p.estatus_pago === 'Por Vencer' &&
+      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
     );
     
     const porVencerMesActual = polizasPorVencerTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
@@ -234,9 +239,12 @@ const DashboardComponent = () => {
     console.log('⏰ Por Vencer Mes Actual:', porVencerMesActual.length, '- $', primasPorVencerMesActual);
     console.log('⏰ Por Vencer Anteriores:', porVencerAnteriores.length, '- $', primasPorVencerAnteriores);
 
-    // PRIMAS VENCIDAS - Separar mes actual y anteriores
+    // PRIMAS VENCIDAS - Pólizas con pago vencido que no han pagado
+    // Nota: estatus_pago = 'Vencido' significa que ya pasó fecha_vencimiento_pago y no pagó
     const polizasVencidasTodas = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && p.estatusPago === 'Vencido'
+      p.fecha_vencimiento_pago && 
+      p.estatus_pago === 'Vencido' &&
+      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
     );
     
     const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
@@ -259,10 +267,11 @@ const DashboardComponent = () => {
     console.log('🚨 Vencidas Mes Actual:', vencidasMesActual.length, '- $', primasVencidasMesActual);
     console.log('🚨 Vencidas Anteriores:', vencidasAnteriores.length, '- $', primasVencidasAnteriores);
 
-    // PRIMAS CANCELADAS - Cancelaciones del mes actual
+    // PRIMAS CANCELADAS - Pólizas canceladas en el mes actual
+    // Nota: etapa_activa = 'Cancelada' describe el estado operativo
     const polizasCanceladas = expedientesMesActual.filter(exp => {
       const canceladaMesActual = esMesActual(exp.fecha_cancelacion);
-      return exp.etapa_activa === 'Cancelado' && canceladaMesActual;
+      return exp.etapa_activa === 'Cancelada' && canceladaMesActual;
     });
     
     const primasCanceladas = polizasCanceladas.reduce((sum, p) => 
@@ -851,14 +860,25 @@ const DashboardComponent = () => {
                                 )}
                                 <td>
                                   <span className={`badge ${
-                                    poliza.etapa_activa === 'Pagado' ? 'bg-success' :
-                                    poliza.etapa_activa === 'Emitida' ? 'bg-info' :
-                                    poliza.etapa_activa === 'Pendiente de pago' ? 'bg-warning' :
-                                    poliza.etapa_activa === 'Cancelado' ? 'bg-secondary' :
+                                    poliza.etapa_activa === 'Emitida' ? 'bg-success' :
+                                    poliza.etapa_activa === 'Cancelada' ? 'bg-secondary' :
+                                    poliza.etapa_activa === 'Cotizada' ? 'bg-info' :
                                     'bg-primary'
                                   }`} style={{ fontSize: '10px' }}>
-                                    {poliza.etapa_activa || poliza.estatusPago || 'Sin estado'}
+                                    {poliza.etapa_activa || 'Sin etapa'}
                                   </span>
+                                  {poliza.estatus_pago && (
+                                    <div className="mt-1">
+                                      <span className={`badge ${
+                                        poliza.estatus_pago === 'Pagado' ? 'bg-success' :
+                                        poliza.estatus_pago === 'Por Vencer' ? 'bg-warning' :
+                                        poliza.estatus_pago === 'Vencido' ? 'bg-danger' :
+                                        'bg-secondary'
+                                      }`} style={{ fontSize: '9px' }}>
+                                        💰 {poliza.estatus_pago}
+                                      </span>
+                                    </div>
+                                  )}
                                   {poliza.tipo_movimiento && (
                                     <div>
                                       <small className="text-muted" style={{ fontSize: '10px' }}>
