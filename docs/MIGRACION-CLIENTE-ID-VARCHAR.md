@@ -1,13 +1,316 @@
-# 🔄 Migración de IDs a BIGINT
+# 🔄 Migración de cliente_id a VARCHAR(36)
 
 ## Objetivo
-Unificar todos los IDs del sistema para usar **BIGINT UNSIGNED** y establecer relaciones correctas entre tablas.
+Unificar el campo `cliente_id` en la tabla expedientes para usar **VARCHAR(36)** y soportar UUIDs correctamente.
 
-## ¿Por qué BIGINT?
-- **Escalabilidad**: Hasta 9 trillones de registros
-- **Rendimiento**: Índices más rápidos que VARCHAR/UUID
-- **Simplicidad**: Fácil de leer y depurar
-- **Estándar**: Común en sistemas empresariales
+## ¿Por qué VARCHAR(36)?
+- **Compatibilidad con UUIDs**: El formato UUID estándar tiene 36 caracteres (ej: '11c0b03d-b458-11f0-9cad-0ab39348df91')
+- **Flexibilidad**: Soporta diferentes formatos de identificadores si es necesario
+- **Simplicidad**: No requiere cambiar la estructura de la tabla clientes
+
+---
+
+## PASO 1: Verificar Estructura Actual
+
+```sql
+-- Ver estructura de tablas principales
+DESCRIBE clientes;
+DESCRIBE expedientes;
+```
+
+---
+
+## PASO 2: Backup Completo
+
+```sql
+-- Crear respaldo de todas las tablas
+CREATE TABLE clientes_backup_20251028 AS SELECT * FROM clientes;
+CREATE TABLE expedientes_backup_20251028 AS SELECT * FROM expedientes;
+
+-- Verificar que se crearon los backups
+SELECT COUNT(*) as total_clientes FROM clientes_backup_20251028;
+SELECT COUNT(*) as total_expedientes FROM expedientes_backup_20251028;
+```
+
+---
+
+## PASO 3: Modificar Tabla EXPEDIENTES
+
+```sql
+-- Eliminar foreign key si existe
+-- ALTER TABLE expedientes DROP FOREIGN KEY fk_expedientes_cliente;
+
+-- Modificar la columna cliente_id para que sea VARCHAR(36)
+ALTER TABLE expedientes 
+MODIFY COLUMN cliente_id VARCHAR(36) NULL;
+
+-- Verificar el cambio
+DESCRIBE expedientes;
+```
+
+---
+
+## PASO 4: Limpiar Datos Incorrectos
+
+```sql
+-- Ver cuántos expedientes tienen cliente_id truncado (menos de 30 caracteres)
+SELECT 
+    COUNT(*) as expedientes_con_id_incorrecto,
+    COUNT(CASE WHEN cliente_id IS NOT NULL THEN 1 END) as total_con_cliente
+FROM expedientes
+WHERE cliente_id IS NOT NULL AND LENGTH(cliente_id) < 30;
+
+-- Establecer cliente_id como NULL para los registros con valores truncados
+UPDATE expedientes 
+SET cliente_id = NULL 
+WHERE cliente_id IS NOT NULL 
+  AND LENGTH(cliente_id) < 30;
+
+-- Verificar limpieza
+SELECT 
+    id,
+    numero_poliza,
+    cliente_id,
+    nombre,
+    apellido_paterno,
+    created_at
+FROM expedientes
+WHERE cliente_id IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+---
+
+## PASO 5: Agregar Índices para Rendimiento
+
+```sql
+-- Agregar índice en cliente_id para búsquedas rápidas
+CREATE INDEX idx_expedientes_cliente_id ON expedientes(cliente_id);
+
+-- Verificar índices
+SHOW INDEX FROM expedientes;
+```
+
+---
+
+## PASO 6: Agregar Foreign Key (Opcional)
+
+```sql
+-- Solo si la tabla clientes también usa VARCHAR para id
+-- ALTER TABLE expedientes
+-- ADD CONSTRAINT fk_expedientes_cliente
+-- FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+-- ON DELETE SET NULL
+-- ON UPDATE CASCADE;
+
+-- Verificar constraint
+SELECT 
+    TABLE_NAME,
+    COLUMN_NAME,
+    CONSTRAINT_NAME,
+    REFERENCED_TABLE_NAME,
+    REFERENCED_COLUMN_NAME
+FROM
+    INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE
+    TABLE_NAME = 'expedientes' AND COLUMN_NAME = 'cliente_id';
+```
+
+---
+
+## PASO 7: Verificación Final
+
+```sql
+-- Ver estructura final
+DESCRIBE expedientes;
+
+-- Verificar tipo de dato
+SELECT 
+    COLUMN_NAME,
+    DATA_TYPE,
+    CHARACTER_MAXIMUM_LENGTH,
+    IS_NULLABLE,
+    COLUMN_KEY
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME = 'expedientes' AND COLUMN_NAME = 'cliente_id';
+
+-- Probar la relación
+SELECT 
+    c.id as cliente_id,
+    c.codigo as cliente_codigo,
+    c.nombre,
+    c.apellido_paterno,
+    COUNT(e.id) as total_polizas
+FROM clientes c
+LEFT JOIN expedientes e ON e.cliente_id = c.id
+GROUP BY c.id
+ORDER BY c.id;
+```
+
+---
+
+## PASO 8: Ajustes en el Backend
+
+### Endpoints que necesitan actualización:
+
+#### 1. POST /api/expedientes
+```javascript
+// Asegurarse de que cliente_id sea string (UUID)
+const clienteId = req.body.cliente_id ? String(req.body.cliente_id) : null;
+
+// Insertar expediente
+const query = `
+  INSERT INTO expedientes (
+    cliente_id, numero_poliza, tipo_de_poliza, aseguradora, coberturas, ...
+  ) VALUES (?, ?, ?, ?, ?, ...)
+`;
+await connection.query(query, [clienteId, numeroPoliza, tipoPoliza, aseguradora, coberturas, ...]);
+```
+
+#### 2. PUT /api/expedientes/:id
+```javascript
+// Asegurarse de que cliente_id sea string (UUID)
+const clienteId = req.body.cliente_id ? String(req.body.cliente_id) : null;
+
+// Actualizar expediente
+const query = `
+  UPDATE expedientes 
+  SET cliente_id = ?, numero_poliza = ?, tipo_de_poliza = ?, coberturas = ?, ...
+  WHERE id = ?
+`;
+await connection.query(query, [clienteId, numeroPoliza, tipoPoliza, coberturas, ..., expedienteId]);
+```
+
+#### 3. GET /api/expedientes
+```javascript
+// Devolver cliente_id como string (UUID)
+const expedientes = await connection.query('SELECT * FROM expedientes');
+
+// Asegurarse de que cliente_id sea string o null
+expedientes.forEach(exp => {
+  exp.cliente_id = exp.cliente_id ? String(exp.cliente_id) : null;
+});
+
+return res.json(expedientes);
+```
+
+#### 4. GET /api/clientes/:id/expedientes (nuevo endpoint recomendado)
+```javascript
+// Obtener todas las pólizas de un cliente
+router.get('/api/clientes/:id/expedientes', async (req, res) => {
+  const clienteId = req.params.id; // Ya es string (UUID)
+  
+  const query = `
+    SELECT e.* 
+    FROM expedientes e
+    WHERE e.cliente_id = ?
+    ORDER BY e.created_at DESC
+  `;
+  
+  const expedientes = await connection.query(query, [clienteId]);
+  return res.json(expedientes);
+});
+```
+
+---
+
+## PASO 9: Pruebas
+
+### 1. Crear un nuevo expediente con cliente existente
+```http
+POST /api/expedientes
+Content-Type: application/json
+
+{
+  "cliente_id": "11c0b03d-b458-11f0-9cad-0ab39348df91",  // UUID completo
+  "numero_poliza": "POL123456",
+  "tipo_de_poliza": "Autos",
+  "aseguradora": "Qualitas",
+  "coberturas": "[{\"tipo\":\"RC\",\"sumaAsegurada\":1000000}]",
+  ...
+}
+```
+
+**Respuesta esperada:**
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "cliente_id": "11c0b03d-b458-11f0-9cad-0ab39348df91",  // UUID completo (no truncado)
+    "numero_poliza": "POL123456",
+    ...
+  }
+}
+```
+
+### 2. Verificar en base de datos
+```sql
+SELECT 
+    id,
+    cliente_id,
+    LENGTH(cliente_id) as longitud_uuid,
+    numero_poliza,
+    tipo_de_poliza,
+    aseguradora
+FROM expedientes
+WHERE numero_poliza = 'POL123456';
+```
+
+**Resultado esperado:**
+- `longitud_uuid` debe ser 36 (no 2, no 11, sino 36)
+
+### 3. Verificar desde el frontend
+```javascript
+// En el módulo de Clientes, debería mostrar:
+// "1 póliza" o "2 pólizas"
+
+// Al hacer clic, debería abrir el modal con las pólizas correctas
+```
+
+---
+
+## Checklist Final
+
+- [ ] Backup creado de todas las tablas
+- [ ] Columna `expedientes.cliente_id` modificada a VARCHAR(36)
+- [ ] Datos truncados limpiados (cliente_id con longitud < 30)
+- [ ] Índice agregado en cliente_id
+- [ ] Backend actualizado para enviar/recibir UUID como string
+- [ ] Frontend probado: contador de pólizas funciona
+- [ ] Frontend probado: modal de pólizas se abre
+- [ ] Datos de prueba creados y verificados (UUID con 36 caracteres)
+
+---
+
+## Rollback (si algo sale mal)
+
+```sql
+-- Restaurar desde backup
+DROP TABLE IF EXISTS expedientes;
+CREATE TABLE expedientes AS SELECT * FROM expedientes_backup_20251028;
+
+-- Recrear índices
+CREATE INDEX idx_expedientes_cliente_id ON expedientes(cliente_id);
+```
+
+---
+
+## Notas Importantes
+
+1. **No ejecutar en producción sin backup**
+2. **Probar primero en ambiente de desarrollo**
+3. **Verificar que los UUIDs se guarden completos** (36 caracteres, no truncados)
+4. **Los expedientes existentes con cliente_id truncado** quedarán con NULL hasta que se reasignen
+5. **La comparación en el código debe ser flexible**: usar `==` en lugar de `===`
+
+---
+
+## Fecha de Migración
+**Completada**: 28 de octubre de 2025  
+**Estado**: ✅ Implementado VARCHAR(36)  
+**Responsable**: Equipo Backend
 
 ---
 

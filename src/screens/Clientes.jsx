@@ -163,15 +163,10 @@ const ModuloClientes = () => {
           
           // Log de TODOS los campos del primer cliente (si existe)
           if (resultadoClientes.data.length > 0) {
-            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', {
-              ...resultadoClientes.data[0],
-              _todos_los_campos: Object.keys(resultadoClientes.data[0])
-            });
-            console.log('🔑 IDs del cliente:', {
+            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', resultadoClientes.data[0]);
+            console.log('🔑 ID del cliente:', {
               id: resultadoClientes.data[0].id,
-              id_tipo: typeof resultadoClientes.data[0].id,
-              codigo: resultadoClientes.data[0].codigo,
-              tiene_id_numerico: resultadoClientes.data[0].id_numerico || 'NO'
+              tipo: typeof resultadoClientes.data[0].id
             });
           }
           
@@ -212,16 +207,10 @@ const ModuloClientes = () => {
         console.log(`📊 Expedientes con cliente_id: ${expedientesConCliente.length} de ${expedientesData.length}`);
         
         if (expedientesData.length > 0) {
-          console.log('🔍 EJEMPLO - Primer expediente:', {
-            ...expedientesData[0],
-            _todos_los_campos: Object.keys(expedientesData[0])
-          });
-          console.log('🔑 IDs en expediente:', {
-            id: expedientesData[0].id,
+          console.log('🔍 EJEMPLO - Primer expediente:', expedientesData[0]);
+          console.log('🔑 cliente_id en expediente:', {
             cliente_id: expedientesData[0].cliente_id,
-            cliente_id_tipo: typeof expedientesData[0].cliente_id,
-            clienteId: expedientesData[0].clienteId,
-            uuid_cliente: expedientesData[0].uuid_cliente || 'NO EXISTE'
+            tipo: typeof expedientesData[0].cliente_id
           });
         }
         
@@ -559,46 +548,31 @@ const ModuloClientes = () => {
 
   // Función para ver pólizas del cliente
   const verPolizasCliente = useCallback((cliente) => {
-    console.log('🔍 Ver pólizas del cliente:', cliente.id);
+    console.log('🔍 Ver pólizas del cliente:', {
+      cliente_id: cliente.id,
+      tipo: typeof cliente.id
+    });
     
-    // Usar el mismo filtro que en la tabla para encontrar pólizas
+    // Filtrar pólizas usando cliente_id
     const polizas = expedientes.filter(exp => {
-      // Opción 1: Comparación directa
-      if (exp.cliente_id === cliente.id) return true;
-      
-      // Opción 2: Comparación con conversión a string
-      if (String(exp.cliente_id) === String(cliente.id)) return true;
-      
-      // Opción 3: Si el cliente tiene un ID numérico adicional
-      if (cliente.id_numerico && exp.cliente_id === cliente.id_numerico) return true;
-      
-      // Opción 4: Comparar por nombre completo (temporal)
-      if (cliente.tipoPersona === 'Persona Física') {
-        const nombreCompletoCliente = `${cliente.nombre} ${cliente.apellidoPaterno} ${cliente.apellidoMaterno || ''}`.trim().toUpperCase();
-        const nombreCompletoExp = `${exp.nombre || ''} ${exp.apellido_paterno || ''} ${exp.apellido_materno || ''}`.trim().toUpperCase();
-        if (nombreCompletoCliente === nombreCompletoExp && nombreCompletoExp !== '') {
-          return true;
-        }
+      const coincide = exp.cliente_id == cliente.id;  // Comparación flexible
+      if (coincide) {
+        console.log('✅ Póliza encontrada:', {
+          numero_poliza: exp.numero_poliza,
+          exp_cliente_id: exp.cliente_id,
+          exp_cliente_id_tipo: typeof exp.cliente_id,
+          cliente_id: cliente.id,
+          cliente_id_tipo: typeof cliente.id
+        });
       }
-      
-      return false;
+      return coincide;
     });
     
-    console.log(`📋 Pólizas encontradas: ${polizas.length}`, polizas);
-    console.log('🔧 Estados antes de abrir modal:', {
-      mostrarModalPolizas: mostrarModalPolizas,
-      clienteSeleccionado: clienteSeleccionado,
-      polizasClienteSeleccionado: polizasClienteSeleccionado
-    });
+    console.log(`📋 Total pólizas encontradas: ${polizas.length}`);
     
     setClienteSeleccionado(cliente);
     setPolizasClienteSeleccionado(polizas);
     setMostrarModalPolizas(true);
-    
-    console.log('🔧 Abriendo modal con:', {
-      cliente: cliente.nombre,
-      cantidadPolizas: polizas.length
-    });
   }, [expedientes]);
 
   // Función para agregar documento
@@ -855,29 +829,11 @@ const ModuloClientes = () => {
                   </thead>
                   <tbody>
                     {paginacionClientes.itemsPaginados.map((cliente) => {
-                      // Filtrar pólizas que pertenecen a este cliente
-                      // Soporta tanto IDs numéricos como UUIDs
+                      // Filtrar pólizas que pertenecen a este cliente usando cliente_id
                       const expedientesCliente = expedientes.filter(exp => {
-                        // Opción 1: Comparación directa
-                        if (exp.cliente_id === cliente.id) return true;
-                        
-                        // Opción 2: Comparación con conversión a string
-                        if (String(exp.cliente_id) === String(cliente.id)) return true;
-                        
-                        // Opción 3: Si el cliente tiene un ID numérico adicional
-                        if (cliente.id_numerico && exp.cliente_id === cliente.id_numerico) return true;
-                        
-                        // Opción 4: Comparar por código de cliente (temporal)
-                        // Si el expediente tiene el nombre completo del cliente, podemos relacionar temporalmente
-                        if (cliente.tipoPersona === 'Persona Física') {
-                          const nombreCompletoCliente = `${cliente.nombre} ${cliente.apellidoPaterno} ${cliente.apellidoMaterno || ''}`.trim().toUpperCase();
-                          const nombreCompletoExp = `${exp.nombre || ''} ${exp.apellido_paterno || ''} ${exp.apellido_materno || ''}`.trim().toUpperCase();
-                          if (nombreCompletoCliente === nombreCompletoExp && nombreCompletoExp !== '') {
-                            return true;
-                          }
-                        }
-                        
-                        return false;
+                        // Comparación directa: exp.cliente_id debe ser igual a cliente.id
+                        // Soporta comparación flexible (número == string si tienen el mismo valor)
+                        return exp.cliente_id == cliente.id;  // Usar == en lugar de === para comparación flexible
                       });
                       
                       return (
