@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Plus, FileText, DollarSign, AlertCircle, 
   RefreshCw, Send, CheckCircle, Clock, Edit,
@@ -8,11 +8,14 @@ import {
   XCircle, Eye, UserCheck, Users, BarChart2, 
   Building2, Briefcase, FileCheck, Filter, Download
 } from 'lucide-react';
+import { API_URL } from '../constants/apiUrl';
 
 const DashboardComponent = () => {
   // Estados
   const [modalDetalle, setModalDetalle] = useState(null);
   const [filtroTramites, setFiltroTramites] = useState('todos');
+  const [cargando, setCargando] = useState(true);
+  const [modalDesglose, setModalDesglose] = useState(null); // { tipo: 'emitidas|porVencer|vencidas|canceladas', datos: [] }
   
   // Tipos de trámite - diseño ejecutivo
   const tiposTramite = [
@@ -34,25 +37,283 @@ const DashboardComponent = () => {
   const [pagos, setPagos] = useState([]);
   const [nuevasPolizas, setNuevasPolizas] = useState([]);
 
+  // Cargar expedientes desde el backend
+  useEffect(() => {
+    const cargarExpedientes = async () => {
+      try {
+        setCargando(true);
+        console.log('🔄 Cargando expedientes desde:', `${API_URL}/api/expedientes`);
+        const response = await fetch(`${API_URL}/api/expedientes`);
+        console.log('📡 Response status:', response.status, response.statusText);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Expedientes cargados:', data.length, 'registros');
+          console.log('📊 Datos:', data);
+          setExpedientes(data);
+        } else {
+          console.error('❌ Error al cargar expedientes:', response.statusText);
+        }
+      } catch (error) {
+        console.error('❌ Error en la petición:', error);
+      } finally {
+        setCargando(false);
+      }
+    };
+
+    cargarExpedientes();
+  }, []);
+
+  // Función para recargar datos
+  const recargarDatos = () => {
+    window.location.reload();
+  };
+
   // Función para abrir modal con detalles
   const abrirDetalleTramite = (tramite) => {
     setModalDetalle(tramite);
   };
 
-  // Estadísticas calculadas - se actualizarán cuando se carguen los datos
-  const estadisticasTramites = useMemo(() => {
-    const tramitesActivos = expedientes.filter(exp => exp.tipo === 'tramite');
-    const agrupados = {};
+  // Función para abrir modal de desglose
+  const abrirDesglose = (tipo) => {
+    let polizasFiltradas = [];
+    let titulo = '';
+    let color = '';
+
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const añoActual = hoy.getFullYear();
+
+    const esMesActual = (fecha) => {
+      if (!fecha) return false;
+      const fechaObj = new Date(fecha);
+      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
+    };
+
+    switch(tipo) {
+      case 'emitidas':
+        polizasFiltradas = expedientes.filter(exp => 
+          esMesActual(exp.fecha_emision) && (
+            exp.etapa_activa === 'Pagado' || 
+            exp.etapa_activa === 'Emitida' || 
+            exp.etapa_activa === 'Pendiente de pago'
+          )
+        );
+        titulo = 'Primas Emitidas - Mes Actual';
+        color = '#3B82F6';
+        break;
+
+      case 'porVencer':
+        polizasFiltradas = expedientes.filter(p => 
+          p.fecha_vencimiento_pago && p.estatusPago === 'Pago por vencer'
+        );
+        titulo = 'Primas Por Vencer - Acumulado';
+        color = '#F59E0B';
+        break;
+
+      case 'vencidas':
+        polizasFiltradas = expedientes.filter(p => 
+          p.fecha_vencimiento_pago && p.estatusPago === 'Vencido'
+        );
+        titulo = 'Primas Vencidas - Acumulado';
+        color = '#EF4444';
+        break;
+
+      case 'canceladas':
+        polizasFiltradas = expedientes.filter(exp => 
+          exp.etapa_activa === 'Cancelado' && esMesActual(exp.fecha_cancelacion)
+        );
+        titulo = 'Primas Canceladas - Mes Actual';
+        color = '#6B7280';
+        break;
+    }
+
+    // Agrupar por producto
+    const porProducto = polizasFiltradas.reduce((acc, poliza) => {
+      const producto = poliza.producto || 'Sin producto';
+      if (!acc[producto]) {
+        acc[producto] = {
+          polizas: [],
+          total: 0,
+          cantidad: 0
+        };
+      }
+      acc[producto].polizas.push(poliza);
+      acc[producto].total += parseFloat(poliza.importe_total) || 0;
+      acc[producto].cantidad += 1;
+      return acc;
+    }, {});
+
+    setModalDesglose({
+      tipo,
+      titulo,
+      color,
+      porProducto,
+      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + (parseFloat(p.importe_total) || 0), 0),
+      cantidadTotal: polizasFiltradas.length
+    });
+  };
+
+  // Estadísticas Financieras - Calculadas desde expedientes (MES EN CURSO)
+  const estadisticasFinancieras = useMemo(() => {
+    console.log('📈 Calculando estadísticas con', expedientes.length, 'expedientes');
     
-    tiposTramite.forEach(tipo => {
-      agrupados[tipo.nombre] = tramitesActivos.filter(t => t.tramite === tipo.nombre).length;
+    // Obtener mes y año actual
+    const hoy = new Date();
+    const mesActual = hoy.getMonth(); // 0-11
+    const añoActual = hoy.getFullYear();
+    
+    console.log(`📅 Filtrando datos del mes: ${mesActual + 1}/${añoActual}`);
+    
+    // Función helper para verificar si una fecha está en el mes actual
+    const esMesActual = (fecha) => {
+      if (!fecha) return false;
+      const fechaObj = new Date(fecha);
+      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
+    };
+    
+    // Filtrar solo pólizas del mes actual
+    const expedientesMesActual = expedientes.filter(exp => {
+      // Verificar si fue emitida en el mes actual
+      const emitidaMesActual = esMesActual(exp.fecha_emision);
+      // O si tiene movimiento de pago en el mes actual
+      const pagoMesActual = esMesActual(exp.fecha_vencimiento_pago);
+      
+      return emitidaMesActual || pagoMesActual;
     });
     
-    return {
-      total: tramitesActivos.length,
-      porTipo: agrupados,
-      tramites: tramitesActivos
+    console.log('✅ Expedientes del mes actual:', expedientesMesActual.length);
+    
+    // PRIMAS EMITIDAS - Separar entre Venta Nueva y Renovación
+    const polizasEmitidas = expedientesMesActual.filter(exp => 
+      esMesActual(exp.fecha_emision) && (
+        exp.etapa_activa === 'Pagado' || 
+        exp.etapa_activa === 'Emitida' || 
+        exp.etapa_activa === 'Pendiente de pago'
+      )
+    );
+    
+    const ventasNuevas = polizasEmitidas.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
+    const renovaciones = polizasEmitidas.filter(p => p.tipo_movimiento === 'renovacion' || p.tipo_movimiento === 'Renovación');
+    
+    const primasVentasNuevas = ventasNuevas.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasRenovaciones = renovaciones.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasEmitidas = primasVentasNuevas + primasRenovaciones;
+    
+    console.log('💰 Ventas Nuevas:', ventasNuevas.length, '- $', primasVentasNuevas);
+    console.log('🔄 Renovaciones:', renovaciones.length, '- $', primasRenovaciones);
+
+    // PRIMAS POR VENCER - Separar mes actual y anteriores
+    const polizasPorVencerTodas = expedientes.filter(p => 
+      p.fecha_vencimiento_pago && p.estatusPago === 'Pago por vencer'
+    );
+    
+    const porVencerMesActual = polizasPorVencerTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
+    const porVencerAnteriores = polizasPorVencerTodas.filter(p => {
+      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
+      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
+      return fechaVencimiento <= ultimoDiaMesAnterior;
+    });
+    
+    const primasPorVencerMesActual = porVencerMesActual.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasPorVencerAnteriores = porVencerAnteriores.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasPorVencerTotal = primasPorVencerMesActual + primasPorVencerAnteriores;
+    
+    console.log('⏰ Por Vencer Mes Actual:', porVencerMesActual.length, '- $', primasPorVencerMesActual);
+    console.log('⏰ Por Vencer Anteriores:', porVencerAnteriores.length, '- $', primasPorVencerAnteriores);
+
+    // PRIMAS VENCIDAS - Separar mes actual y anteriores
+    const polizasVencidasTodas = expedientes.filter(p => 
+      p.fecha_vencimiento_pago && p.estatusPago === 'Vencido'
+    );
+    
+    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
+    const vencidasAnteriores = polizasVencidasTodas.filter(p => {
+      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
+      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
+      return fechaVencimiento <= ultimoDiaMesAnterior;
+    });
+    
+    const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+    
+    const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
+    
+    console.log('🚨 Vencidas Mes Actual:', vencidasMesActual.length, '- $', primasVencidasMesActual);
+    console.log('🚨 Vencidas Anteriores:', vencidasAnteriores.length, '- $', primasVencidasAnteriores);
+
+    // PRIMAS CANCELADAS - Cancelaciones del mes actual
+    const polizasCanceladas = expedientesMesActual.filter(exp => {
+      const canceladaMesActual = esMesActual(exp.fecha_cancelacion);
+      return exp.etapa_activa === 'Cancelado' && canceladaMesActual;
+    });
+    
+    const primasCanceladas = polizasCanceladas.reduce((sum, p) => 
+      sum + (parseFloat(p.importe_total) || 0), 0
+    );
+
+    const stats = {
+      primasEmitidas: {
+        monto: primasEmitidas,
+        cantidad: polizasEmitidas.length,
+        ventasNuevas: {
+          monto: primasVentasNuevas,
+          cantidad: ventasNuevas.length
+        },
+        renovaciones: {
+          monto: primasRenovaciones,
+          cantidad: renovaciones.length
+        }
+      },
+      primasPorVencer: {
+        monto: primasPorVencerTotal,
+        cantidad: porVencerMesActual.length + porVencerAnteriores.length,
+        mesActual: {
+          monto: primasPorVencerMesActual,
+          cantidad: porVencerMesActual.length
+        },
+        anteriores: {
+          monto: primasPorVencerAnteriores,
+          cantidad: porVencerAnteriores.length
+        }
+      },
+      primasVencidas: {
+        monto: primasVencidasTotal,
+        cantidad: vencidasMesActual.length + vencidasAnteriores.length,
+        mesActual: {
+          monto: primasVencidasMesActual,
+          cantidad: vencidasMesActual.length
+        },
+        anteriores: {
+          monto: primasVencidasAnteriores,
+          cantidad: vencidasAnteriores.length
+        }
+      },
+      primasCanceladas: {
+        monto: primasCanceladas,
+        cantidad: polizasCanceladas.length
+      }
     };
+    
+    console.log('💰 Estadísticas calculadas (MES ACTUAL):', stats);
+    return stats;
   }, [expedientes]);
 
   // Etapas de nuevas pólizas - diseño ejecutivo
@@ -127,6 +388,7 @@ const DashboardComponent = () => {
           .executive-card:hover {
             box-shadow: 0 4px 6px rgba(0,0,0,0.07);
             border-color: #D1D5DB;
+            transform: translateY(-2px);
           }
           .kpi-card {
             background: white;
@@ -199,6 +461,16 @@ const DashboardComponent = () => {
           .mini-chart-bar:hover {
             background: #3B82F6;
           }
+          .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s ease-in-out infinite;
+            border-radius: 4px;
+          }
+          @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
         `}
       </style>
       
@@ -218,8 +490,12 @@ const DashboardComponent = () => {
                   <Download size={14} className="me-1" />
                   Exportar
                 </button>
-                <button className="btn btn-sm" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
-                  <RefreshCw size={14} className="me-1" />
+                <button 
+                  className="btn btn-sm" 
+                  style={{ border: '1px solid #E5E7EB', background: 'white' }}
+                  onClick={recargarDatos}
+                  disabled={cargando}>
+                  <RefreshCw size={14} className={`me-1 ${cargando ? 'spinner-border spinner-border-sm' : ''}`} />
                   Actualizar
                 </button>
                 <button className="btn btn-primary btn-sm">
@@ -232,444 +508,408 @@ const DashboardComponent = () => {
         </div>
 
         <div className="container-fluid px-4 py-3">
-          {/* KPIs Ejecutivos - Compactos */}
-          <div className="row g-3 mb-3">
+          {/* SECCIÓN ECONÓMICA - Tarjetas Financieras */}
+          <div className="mb-3">
+            <h5 className="fw-bold mb-0" style={{ color: '#111827' }}>Panel Financiero</h5>
+            <p className="text-muted mb-3" style={{ fontSize: '13px' }}>
+              Resumen de primas del mes en curso ({new Date().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })})
+              {cargando && <span className="ms-2"><span className="spinner-border spinner-border-sm me-1" /> Cargando...</span>}
+              {!cargando && expedientes.length > 0 && <span className="ms-2 text-success">• {expedientes.length} pólizas en base de datos</span>}
+            </p>
+          </div>
+
+          <div className="row g-3 mb-4">
+            {/* Primas Emitidas */}
             <div className="col-md-3">
-              <div className="kpi-card p-3" style={{ '--accent-color': '#3B82F6' }}>
-                <div className="d-flex justify-content-between align-items-start mb-2">
-                  <div style={{ flex: 1 }}>
-                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Total Operaciones
-                    </div>
-                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
-                      {expedientes.length}
-                    </h2>
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('emitidas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <FileCheck size={24} style={{ color: 'white' }} />
                   </div>
-                  <div style={{ padding: '8px', background: '#EFF6FF', borderRadius: '6px' }}>
-                    <BarChart2 size={20} style={{ color: '#3B82F6' }} />
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Primas Emitidas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#3B82F6' }}>
+                      ${estadisticasFinancieras.primasEmitidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
                   </div>
                 </div>
-                <div className="d-flex align-items-center justify-content-between">
-                  <span className="metric-badge" style={{ background: '#D1FAE5', color: '#065F46' }}>
-                    <TrendingUp size={10} className="me-1" />
-                    +12%
-                  </span>
-                  <small className="text-muted" style={{ fontSize: '11px' }}>vs mes anterior</small>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#10B981' }}></span>
+                      Nuevas: {estadisticasFinancieras.primasEmitidas.ventasNuevas.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#10B981', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.ventasNuevas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#06B6D4' }}></span>
+                      Renovaciones: {estadisticasFinancieras.primasEmitidas.renovaciones.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#06B6D4', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.renovaciones.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-            
+
+            {/* Primas Por Vencer */}
             <div className="col-md-3">
-              <div className="kpi-card p-3" style={{ '--accent-color': '#F59E0B' }}>
-                <div className="d-flex justify-content-between align-items-start mb-2">
-                  <div style={{ flex: 1 }}>
-                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Trámites Activos
-                    </div>
-                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
-                      {estadisticasTramites.total}
-                    </h2>
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('porVencer')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Clock size={24} style={{ color: 'white' }} />
                   </div>
-                  <div style={{ padding: '8px', background: '#FEF3C7', borderRadius: '6px' }}>
-                    <FileCheck size={20} style={{ color: '#F59E0B' }} />
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Por Vencer
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#F59E0B' }}>
+                      ${estadisticasFinancieras.primasPorVencer.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
                   </div>
                 </div>
-                <div className="d-flex align-items-center justify-content-between">
-                  <span className="metric-badge" style={{ background: '#FEF3C7', color: '#92400E' }}>
-                    <Activity size={10} className="me-1" />
-                    {estadisticasTramites.tramites.filter(t => t.estado === 'Pendiente').length} pendientes
-                  </span>
-                  <small className="text-muted" style={{ fontSize: '11px' }}>en proceso</small>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#F59E0B' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasPorVencer.mesActual.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#F59E0B', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPorVencer.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#D97706' }}></span>
+                      Anteriores: {estadisticasFinancieras.primasPorVencer.anteriores.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#D97706', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPorVencer.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-            
+
+            {/* Primas Vencidas */}
             <div className="col-md-3">
-              <div className="kpi-card p-3" style={{ '--accent-color': '#10B981' }}>
-                <div className="d-flex justify-content-between align-items-start mb-2">
-                  <div style={{ flex: 1 }}>
-                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Por Cobrar
-                    </div>
-                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
-                      ${estadisticasPagos.montoTotal.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </h2>
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('vencidas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <AlertTriangle size={24} style={{ color: 'white' }} />
                   </div>
-                  <div style={{ padding: '8px', background: '#D1FAE5', borderRadius: '6px' }}>
-                    <DollarSign size={20} style={{ color: '#10B981' }} />
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Vencidas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#EF4444' }}>
+                      ${estadisticasFinancieras.primasVencidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
                   </div>
                 </div>
-                <div className="d-flex align-items-center justify-content-between">
-                  <span className="metric-badge" style={{ background: '#FEE2E2', color: '#991B1B' }}>
-                    <AlertTriangle size={10} className="me-1" />
-                    {estadisticasPagos.vencidos.length} vencidos
-                  </span>
-                  <small className="text-muted" style={{ fontSize: '11px' }}>urgente</small>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#EF4444' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasVencidas.mesActual.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#EF4444', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#DC2626' }}></span>
+                      Anteriores: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasVencidas.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
-            
+
+            {/* Primas Canceladas */}
             <div className="col-md-3">
-              <div className="kpi-card p-3" style={{ '--accent-color': '#8B5CF6' }}>
-                <div className="d-flex justify-content-between align-items-start mb-2">
-                  <div style={{ flex: 1 }}>
-                    <div className="text-muted mb-1" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Tasa Conversión
-                    </div>
-                    <h2 className="mb-0 fw-bold" style={{ fontSize: '28px', color: '#111827' }}>
-                      87.3%
-                    </h2>
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('canceladas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #6B7280 0%, #4B5563 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <XCircle size={24} style={{ color: 'white' }} />
                   </div>
-                  <div style={{ padding: '8px', background: '#EDE9FE', borderRadius: '6px' }}>
-                    <TrendingUp size={20} style={{ color: '#8B5CF6' }} />
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Canceladas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#6B7280' }}>
+                      ${estadisticasFinancieras.primasCanceladas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
                   </div>
                 </div>
-                <div className="d-flex align-items-center justify-content-between">
-                  <span className="metric-badge" style={{ background: '#D1FAE5', color: '#065F46' }}>
-                    <Award size={10} className="me-1" />
-                    Excelente
+                <div className="d-flex align-items-center justify-content-between pt-2 border-top">
+                  <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                    {estadisticasFinancieras.primasCanceladas.cantidad} pólizas
                   </span>
-                  <small className="text-muted" style={{ fontSize: '11px' }}>cotización → póliza</small>
+                  <span className="metric-badge" style={{ background: '#F3F4F6', color: '#6B7280' }}>
+                    <X size={10} className="me-1" />
+                    Perdidas
+                  </span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* SECCIÓN 1: Gestión de Trámites */}
-          <div className="row g-4 mb-4">
-            <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <Briefcase size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Gestión de Trámites - Pólizas Vigentes</h5>
-                    </div>
-                    <span className="badge bg-secondary px-3 py-2">
-                      {estadisticasTramites.total} Activos
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {/* Panel de resumen */}
-                    <div className="col-md-4">
-                      <div className="border rounded p-3 bg-light">
-                        <h6 className="text-muted mb-3">Resumen Ejecutivo</h6>
-                        <div className="mb-4">
-                          <div className="d-flex justify-content-between mb-2">
-                            <span className="text-muted">Total procesado:</span>
-                            <strong>{estadisticasTramites.total}</strong>
-                          </div>
-                          <div className="progress" style={{ height: '6px' }}>
-                            <div className="progress-bar bg-primary" style={{ width: '65%' }}></div>
-                          </div>
-                          <small className="text-muted">65% completado este mes</small>
-                        </div>
-                        
-                        {/* Últimos trámites */}
-                        {estadisticasTramites.tramites.length > 0 && (
-                          <div>
-                            <h6 className="text-muted mb-2">Actividad Reciente</h6>
-                            {estadisticasTramites.tramites.slice(0, 3).map(t => (
-                              <div key={t.id} 
-                                   className="d-flex justify-content-between align-items-center py-2 border-bottom data-row"
-                                   style={{ cursor: 'pointer', fontSize: '14px' }}
-                                   onClick={() => abrirDetalleTramite(t)}>
-                                <div>
-                                  <div className="fw-semibold">{t.tramite}</div>
-                                  <small className="text-muted">{t.cliente}</small>
-                                </div>
-                                <Eye size={14} className="text-secondary" />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Grid de tipos de trámite */}
-                    <div className="col-md-8">
-                      <div className="row g-2">
-                        {tiposTramite.map(tipo => {
-                          const cantidad = estadisticasTramites.porTipo[tipo.nombre] || 0;
-                          const tramitesDelTipo = estadisticasTramites.tramites.filter(t => t.tramite === tipo.nombre);
-                          
-                          return (
-                            <div key={tipo.nombre} className="col-md-6">
-                              <div 
-                                className="border rounded p-3 d-flex align-items-center justify-content-between"
-                                style={{ 
-                                  cursor: tramitesDelTipo.length > 0 ? 'pointer' : 'default',
-                                  borderLeft: `3px solid ${tipo.color}`
-                                }}
-                                onClick={() => {
-                                  if (tramitesDelTipo.length > 0) {
-                                    abrirDetalleTramite(tramitesDelTipo[0]);
-                                  }
-                                }}>
-                                <div className="d-flex align-items-center">
-                                  <div className="me-3">
-                                    <div className="fw-bold" style={{ color: tipo.color, fontSize: '18px' }}>
-                                      {tipo.codigo}
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div className="fw-semibold" style={{ fontSize: '14px' }}>
-                                      {tipo.nombre}
-                                    </div>
-                                    {cantidad > 0 && (
-                                      <small className="text-muted">
-                                        {cantidad} {cantidad === 1 ? 'trámite' : 'trámites'}
-                                      </small>
-                                    )}
-                                  </div>
-                                </div>
-                                {cantidad > 0 && (
-                                  <span className="badge rounded-pill" 
-                                        style={{ backgroundColor: tipo.color }}>
-                                    {cantidad}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
+          {/* Mensaje cuando no hay datos */}
+          {!cargando && expedientes.length === 0 && (
+            <div className="row g-3 mb-4">
+              <div className="col-12">
+                <div className="executive-card p-5 text-center">
+                  <FileText size={48} className="text-muted mb-3" />
+                  <h5 className="text-muted mb-2">No hay pólizas registradas</h5>
+                  <p className="text-muted mb-3" style={{ fontSize: '13px' }}>
+                    Comienza creando tu primera póliza para ver las estadísticas financieras
+                  </p>
+                  <button className="btn btn-primary btn-sm">
+                    <Plus size={14} className="me-1" />
+                    Crear Primera Póliza
+                  </button>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* SECCIÓN 2: Nuevas Pólizas */}
-          <div className="row g-4 mb-4">
+          {/* Próximamente: Más secciones del dashboard */}
+          <div className="row g-3">
             <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <FileText size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Pipeline de Nuevas Pólizas</h5>
-                    </div>
-                    <span className="badge bg-primary px-3 py-2">
-                      {expedientes.filter(e => e.tipo === 'nueva').length} En Proceso
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {estadisticasNuevasPolizas.map((etapa, index) => {
-                      const Icono = etapa.icono;
-                      return (
-                        <div key={index} className="col">
-                          <div className="text-center">
-                            <div className="metric-card p-3" style={{ borderLeftColor: etapa.color }}>
-                              <div className="mb-2">
-                                <Icono size={24} style={{ color: etapa.color }} />
-                              </div>
-                              <h2 className="mb-1" style={{ color: etapa.color }}>
-                                {etapa.cantidad}
-                              </h2>
-                              <p className="text-muted mb-1" style={{ fontSize: '13px' }}>
-                                {etapa.nombre}
-                              </p>
-                              <small className="text-muted fw-bold">
-                                {etapa.codigo}
-                              </small>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  
-                  {/* Pipeline visual */}
-                  <div className="mt-4 p-3 bg-light rounded">
-                    <div className="d-flex justify-content-between align-items-center position-relative">
-                      <div className="position-absolute w-100" 
-                           style={{ 
-                             height: '2px',
-                             backgroundColor: '#e0e0e0',
-                             top: '50%',
-                             transform: 'translateY(-50%)',
-                             zIndex: 0
-                           }} />
-                      {estadisticasNuevasPolizas.map((etapa, index) => (
-                        <div key={index} className="text-center position-relative bg-light px-2"
-                             style={{ zIndex: 1 }}>
-                          <div className={`rounded-circle d-inline-flex align-items-center justify-content-center ${etapa.cantidad > 0 ? 'bg-white border' : 'bg-secondary bg-opacity-10'}`}
-                               style={{ 
-                                 width: '36px', 
-                                 height: '36px',
-                                 borderColor: etapa.cantidad > 0 ? etapa.color : 'transparent',
-                                 color: etapa.cantidad > 0 ? etapa.color : '#999',
-                                 fontWeight: '600',
-                                 fontSize: '14px'
-                               }}>
-                            {etapa.cantidad}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* SECCIÓN 3: Control de Pagos */}
-          <div className="row g-4">
-            <div className="col-12">
-              <div className="corporate-card p-0">
-                <div className="card-header bg-white border-bottom p-3">
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div className="d-flex align-items-center">
-                      <CreditCard size={20} className="text-secondary me-2" />
-                      <h5 className="mb-0 fw-normal">Control Financiero de Pagos</h5>
-                    </div>
-                    <span className="badge bg-warning px-3 py-2">
-                      {estadisticasPagos.vencidos.length + estadisticasPagos.porVencer.length + estadisticasPagos.enGracia.length} Requieren Atención
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="card-body p-4">
-                  <div className="row g-3">
-                    {/* Pagos vencidos */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#dc2626' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Pagos Vencidos
-                            </p>
-                            <h3 className="mb-0 text-danger">{estadisticasPagos.vencidos.length}</h3>
-                          </div>
-                          <AlertTriangle size={20} className="text-danger" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-danger mb-0">
-                            ${estadisticasPagos.vencidos.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.vencidos.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-danger w-100">
-                              Gestionar Vencidos
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Por vencer */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#f59e0b' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Por Vencer
-                            </p>
-                            <h3 className="mb-0 text-warning">{estadisticasPagos.porVencer.length}</h3>
-                          </div>
-                          <Clock size={20} className="text-warning" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-warning mb-0">
-                            ${estadisticasPagos.porVencer.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.porVencer.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-warning w-100">
-                              Enviar Recordatorios
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* En período de gracia */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#3b82f6' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              En Período de Gracia
-                            </p>
-                            <h3 className="mb-0 text-info">{estadisticasPagos.enGracia.length}</h3>
-                          </div>
-                          <Calendar size={20} className="text-info" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <small className="text-muted d-block mb-1">Monto total</small>
-                          <h5 className="text-info mb-0">
-                            ${estadisticasPagos.enGracia.reduce((sum, p) => sum + p.monto, 0).toLocaleString('es-MX')}
-                          </h5>
-                        </div>
-                        
-                        {estadisticasPagos.enGracia.length > 0 && (
-                          <div className="mt-3">
-                            <button className="btn btn-sm btn-outline-info w-100">
-                              Notificar Clientes
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Resumen financiero */}
-                    <div className="col-md-3">
-                      <div className="metric-card p-3" style={{ borderLeftColor: '#10b981' }}>
-                        <div className="d-flex justify-content-between align-items-start mb-3">
-                          <div>
-                            <p className="text-muted mb-1" style={{ fontSize: '12px', textTransform: 'uppercase' }}>
-                              Total Por Cobrar
-                            </p>
-                            <h3 className="mb-0 text-success">
-                              ${estadisticasPagos.montoTotal.toLocaleString('es-MX')}
-                            </h3>
-                          </div>
-                          <TrendingUp size={20} className="text-success" />
-                        </div>
-                        
-                        <div className="border-top pt-3">
-                          <div className="d-flex justify-content-between mb-2">
-                            <small>Eficiencia cobro:</small>
-                            <strong className="text-success">78%</strong>
-                          </div>
-                          <div className="progress" style={{ height: '4px' }}>
-                            <div className="progress-bar bg-success" style={{ width: '78%' }}></div>
-                          </div>
-                        </div>
-                        
-                        <div className="mt-3">
-                          <button className="btn btn-sm btn-success w-100">
-                            Registrar Pago
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+              <div className="executive-card p-4 text-center">
+                <Activity size={48} className="text-muted mb-3" />
+                <h5 className="text-muted">Secciones adicionales en desarrollo</h5>
+                <p className="text-muted mb-0" style={{ fontSize: '13px' }}>
+                  Próximamente: Trámites, Pipeline de Ventas, y más métricas operativas
+                </p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* MODAL DE DETALLE DE TRÁMITE - Diseño Corporativo */}
+      {/* MODAL DE DESGLOSE - Por Producto */}
+      {modalDesglose && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setModalDesglose(null)}>
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              {/* Header del modal */}
+              <div className="modal-header" style={{ background: modalDesglose.color, color: 'white' }}>
+                <div>
+                  <h5 className="modal-title fw-bold mb-1">{modalDesglose.titulo}</h5>
+                  <small style={{ opacity: 0.9 }}>
+                    {modalDesglose.cantidadTotal} pólizas • ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                  </small>
+                </div>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white"
+                  onClick={() => setModalDesglose(null)}>
+                </button>
+              </div>
+              
+              {/* Body del modal */}
+              <div className="modal-body p-0">
+                {Object.keys(modalDesglose.porProducto).length === 0 ? (
+                  <div className="text-center py-5">
+                    <FileText size={48} className="text-muted mb-3" />
+                    <h6 className="text-muted">No hay pólizas en esta categoría</h6>
+                  </div>
+                ) : (
+                  Object.entries(modalDesglose.porProducto).map(([producto, data], idx) => (
+                    <div key={idx} className="border-bottom">
+                      {/* Header por producto */}
+                      <div className="p-3" style={{ background: '#F9FAFB' }}>
+                        <div className="d-flex justify-content-between align-items-center">
+                          <div>
+                            <h6 className="mb-1 fw-bold" style={{ color: '#111827' }}>
+                              <Package size={18} className="me-2" style={{ color: modalDesglose.color }} />
+                              {producto}
+                            </h6>
+                            <small className="text-muted">
+                              {data.cantidad} póliza{data.cantidad !== 1 ? 's' : ''}
+                            </small>
+                          </div>
+                          <div className="text-end">
+                            <div className="fw-bold" style={{ color: modalDesglose.color, fontSize: '18px' }}>
+                              ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                            </div>
+                            <small className="text-muted">Total</small>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tabla de pólizas */}
+                      <div className="table-responsive">
+                        <table className="table table-hover mb-0 compact-table">
+                          <thead>
+                            <tr>
+                              <th>Póliza</th>
+                              <th>Cliente</th>
+                              <th>Aseguradora</th>
+                              <th>Fecha Emisión</th>
+                              {modalDesglose.tipo !== 'emitidas' && <th>Fecha Vencimiento</th>}
+                              <th>Estado</th>
+                              <th className="text-end">Importe</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.polizas.map((poliza, pIdx) => (
+                              <tr key={pIdx} className="data-row">
+                                <td>
+                                  <span className="fw-semibold" style={{ color: '#111827' }}>
+                                    {poliza.numero_poliza || 'Sin número'}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div>
+                                    <div className="fw-medium" style={{ fontSize: '13px' }}>
+                                      {poliza.cliente_nombre || 'Sin nombre'}
+                                    </div>
+                                    <small className="text-muted">
+                                      {poliza.cliente_id}
+                                    </small>
+                                  </div>
+                                </td>
+                                <td>{poliza.aseguradora || '-'}</td>
+                                <td>
+                                  <small>
+                                    {poliza.fecha_emision 
+                                      ? new Date(poliza.fecha_emision).toLocaleDateString('es-MX')
+                                      : '-'
+                                    }
+                                  </small>
+                                </td>
+                                {modalDesglose.tipo !== 'emitidas' && (
+                                  <td>
+                                    <small>
+                                      {poliza.fecha_vencimiento_pago 
+                                        ? new Date(poliza.fecha_vencimiento_pago).toLocaleDateString('es-MX')
+                                        : '-'
+                                      }
+                                    </small>
+                                  </td>
+                                )}
+                                <td>
+                                  <span className={`badge ${
+                                    poliza.etapa_activa === 'Pagado' ? 'bg-success' :
+                                    poliza.etapa_activa === 'Emitida' ? 'bg-info' :
+                                    poliza.etapa_activa === 'Pendiente de pago' ? 'bg-warning' :
+                                    poliza.etapa_activa === 'Cancelado' ? 'bg-secondary' :
+                                    'bg-primary'
+                                  }`} style={{ fontSize: '10px' }}>
+                                    {poliza.etapa_activa || poliza.estatusPago || 'Sin estado'}
+                                  </span>
+                                  {poliza.tipo_movimiento && (
+                                    <div>
+                                      <small className="text-muted" style={{ fontSize: '10px' }}>
+                                        {poliza.tipo_movimiento}
+                                      </small>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="text-end">
+                                  <span className="fw-bold" style={{ color: modalDesglose.color }}>
+                                    ${parseFloat(poliza.importe_total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot style={{ background: '#F9FAFB' }}>
+                            <tr>
+                              <td colSpan={modalDesglose.tipo !== 'emitidas' ? 6 : 5} className="text-end fw-bold">
+                                Subtotal {producto}:
+                              </td>
+                              <td className="text-end fw-bold" style={{ color: modalDesglose.color }}>
+                                ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              {/* Footer del modal */}
+              <div className="modal-footer" style={{ background: '#F9FAFB' }}>
+                <div className="d-flex justify-content-between w-100 align-items-center">
+                  <div>
+                    <strong style={{ fontSize: '16px', color: '#111827' }}>Total General:</strong>
+                    <span className="ms-2 text-muted">{modalDesglose.cantidadTotal} pólizas</span>
+                  </div>
+                  <h4 className="mb-0 fw-bold" style={{ color: modalDesglose.color }}>
+                    ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                  </h4>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DETALLE - Comentado temporalmente */}
       {modalDetalle && (
         <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg modal-dialog-centered">

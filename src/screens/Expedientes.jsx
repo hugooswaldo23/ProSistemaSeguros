@@ -756,11 +756,33 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           }
         }
         
-        // ==================== DOMICILIO ====================
+        // ==================== DOMICILIO COMPLETO ====================
         // Capturar solo hasta antes de "R.F.C:" para evitar incluir el RFC
         const domicilioMatch = textoCompleto.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
         const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
         console.log('🏠 Domicilio extraído:', domicilio);
+        
+        // ==================== MUNICIPIO, COLONIA, ESTADO, CP Y PAÍS ====================
+        // En pólizas de Qualitas, después del domicilio vienen:
+        // C.P.: xxxxx Municipio: NOMBRE_MUNICIPIO Estado: NOMBRE_ESTADO Colonia: NOMBRE_COLONIA
+        const cpMatch = textoCompleto.match(/C\.P\.:\s*(\d{5})/i);
+        const municipioMatch = textoCompleto.match(/Municipio:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Estado:|\n)/i);
+        const estadoMatch = textoCompleto.match(/Estado:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Colonia:|\n)/i);
+        const coloniaMatch = textoCompleto.match(/Colonia:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
+        const paisMatch = textoCompleto.match(/Pa[ií]s:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
+        
+        const cp = cpMatch ? cpMatch[1] : '';
+        const municipio = municipioMatch ? municipioMatch[1].trim() : '';
+        const estado = estadoMatch ? estadoMatch[1].trim() : '';
+        const colonia = coloniaMatch ? coloniaMatch[1].trim() : '';
+        const pais = paisMatch ? paisMatch[1].trim() : 'MEXICO';
+        
+        console.log('📍 Datos de ubicación extraídos:');
+        console.log('   - CP:', cp);
+        console.log('   - Municipio:', municipio);
+        console.log('   - Estado:', estado);
+        console.log('   - Colonia:', colonia);
+        console.log('   - País:', pais);
         
         // ==================== AGENTE (buscar en ambas páginas) ====================
         let agente = '';
@@ -811,7 +833,31 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
         const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i);
         const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
-        const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]+)/i);
+        
+        // MEJORAR EXTRACCIÓN DE PLACAS - Excluir palabras como VIGENCIA
+        // Las placas en México suelen tener formato: 3 letras + 3 números (ABC123) o 3 letras + 2 números + 1 letra (ABC12D)
+        // También pueden tener guiones: ABC-123 o ABC-12-D
+        let placasExtraidas = '';
+        const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]{3,10})(?=\s|$|\n)/i);
+        if (placasMatch) {
+          const posiblePlaca = placasMatch[1].toUpperCase();
+          // Validar que no sea una palabra común o tenga un formato razonable de placa
+          // Placas válidas: ABC123, ABC-123, ABC12D, etc.
+          // Excluir: VIGENCIA, AMPARADA, NA, SIN, NINGUNA, palabras largas
+          const esPlacaValida = posiblePlaca.length >= 3 && 
+                                posiblePlaca.length <= 10 && 
+                                !/^(VIGENCIA|AMPARADA|NA|N\/A|SIN|NINGUNA|TEMPORAL|PENDIENTE)$/i.test(posiblePlaca);
+          
+          if (esPlacaValida) {
+            placasExtraidas = posiblePlaca;
+            console.log('✅ Placas extraídas:', placasExtraidas);
+          } else {
+            console.log('⚠️ Placas rechazadas (no válida):', posiblePlaca);
+          }
+        } else {
+          console.log('⚠️ No se encontró patrón de placas en el PDF');
+        }
+        
         const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
         
         // Extracción alternativa más específica para marca y modelo
@@ -832,6 +878,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         
         console.log('🚗 Marca extraída:', marca);
         console.log('🚗 Modelo extraído:', modeloCompleto);
+        console.log('🚗 Placas extraídas:', placasExtraidas);
         
         // ==================== VIGENCIA ====================
         const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
@@ -965,6 +1012,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           rfc: rfcExtraido,
           curp: curpMatch ? curpMatch[1] : '',
           domicilio: domicilio,
+          municipio: municipio,
+          colonia: colonia,
+          estado: estado,
+          codigo_postal: cp,
+          pais: pais,
           email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
           
           // PÓLIZA
@@ -1003,11 +1055,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
           numero_serie: serieMatch ? serieMatch[1] : '',
           motor: motorMatch ? motorMatch[1] : '',
-          placas: placasMatch ? placasMatch[1] : 'NA',
+          placas: placasExtraidas || '',
           color: colorMatch ? colorMatch[1].trim() : '',
           codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
-          tipo_vehiculo: 'Automóviles Importados',
-          tipo_cobertura: planMatch ? planMatch[1] : 'AMPLIA',
+          tipo_vehiculo: '', // Se debe seleccionar manualmente
+          tipo_cobertura: planMatch ? planMatch[1] : '',
           
           // COBERTURAS DETALLADAS
           coberturas: coberturasExtraidas,
@@ -1016,7 +1068,48 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
         };
         
-        console.log('📊 Datos extraídos:', datosExtraidos);
+        // ==================== NORMALIZACIÓN DE VALORES ====================
+        // Normalizar marca para que coincida con las opciones disponibles
+        const marcasDisponibles = [
+          'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
+          'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
+          'Mitsubishi', 'Nissan', 'Peugeot', 'Porsche', 'Renault', 'Seat', 
+          'Suzuki', 'Toyota', 'Volkswagen', 'Volvo'
+        ];
+        
+        if (datosExtraidos.marca) {
+          const marcaNormalizada = marcasDisponibles.find(
+            m => m.toUpperCase() === datosExtraidos.marca.toUpperCase()
+          );
+          datosExtraidos.marca = marcaNormalizada || 'Otra';
+          console.log('✅ Marca normalizada:', datosExtraidos.marca);
+        }
+        
+        // Normalizar tipo de cobertura (Amplia, Limitada, RC)
+        if (datosExtraidos.tipo_cobertura) {
+          const cobertura = datosExtraidos.tipo_cobertura.toUpperCase();
+          if (cobertura.includes('AMPLIA')) {
+            datosExtraidos.tipo_cobertura = 'Amplia';
+          } else if (cobertura.includes('LIMITADA')) {
+            datosExtraidos.tipo_cobertura = 'Limitada';
+          } else if (cobertura.includes('RC') || cobertura.includes('RESPONSABILIDAD')) {
+            datosExtraidos.tipo_cobertura = 'RC (Responsabilidad Civil)';
+          }
+          console.log('✅ Tipo de cobertura normalizado:', datosExtraidos.tipo_cobertura);
+        }
+        
+        console.log('📊 Datos extraídos completos:', datosExtraidos);
+        console.log('🚗 DEBUG - Datos del vehículo después de extracción:', {
+          marca: datosExtraidos.marca,
+          modelo: datosExtraidos.modelo,
+          anio: datosExtraidos.anio,
+          numero_serie: datosExtraidos.numero_serie,
+          motor: datosExtraidos.motor,
+          placas: datosExtraidos.placas,
+          color: datosExtraidos.color,
+          tipo_vehiculo: datosExtraidos.tipo_vehiculo,
+          tipo_cobertura: datosExtraidos.tipo_cobertura
+        });
         
       } else {
         console.log('🔧 Aplicando extractor genérico');
@@ -1027,6 +1120,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           apellido_paterno: extraerDato(/(?:APELLIDO\s+PATERNO|AP\.\s*PATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
           apellido_materno: extraerDato(/(?:APELLIDO\s+MATERNO|AP\.\s*MATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
           rfc: extraerDato(/RFC[:\s]+([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i, textoCompleto) || '',
+          domicilio: extraerDato(/(?:DOMICILIO|DIRECCI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*C\.P\.|CP:|Municipio:|Ciudad:|Estado:|\n\n)/i, textoCompleto) || '',
+          municipio: extraerDato(/(?:MUNICIPIO|DELEGACI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*Estado:|Colonia:|País:|\n)/i, textoCompleto) || '',
+          colonia: extraerDato(/(?:COLONIA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Estado:|País:|\n)/i, textoCompleto) || '',
+          estado: extraerDato(/(?:ESTADO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Municipio:|Colonia:|País:|\n)/i, textoCompleto) || '',
+          codigo_postal: extraerDato(/(?:C\.P\.|CP)[:\s]*(\d{5})/i, textoCompleto) || '',
+          pais: extraerDato(/(?:PA[IÍ]S)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i, textoCompleto) || 'MEXICO',
           email: extraerDato(/(?:E-?MAIL|CORREO)[:\s]+([\w\.-]+@[\w\.-]+\.\w+)/i, textoCompleto) || '',
           telefono_fijo: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:FIJO|CASA))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
           telefono_movil: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:M[OÓ]VIL|CELULAR))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
@@ -1193,6 +1292,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           razonSocial: datosExtraidos.razonSocial || 'Empresa',
           rfc: datosExtraidos.rfc || '',
           direccion: datosExtraidos.domicilio || '',
+          municipio: datosExtraidos.municipio || '',
+          colonia: datosExtraidos.colonia || '',
+          estado: datosExtraidos.estado || '',
+          codigoPostal: datosExtraidos.codigo_postal || '',
+          pais: datosExtraidos.pais || 'MEXICO',
           email: datosExtraidos.email || '',
           activo: true
         };
@@ -1205,6 +1309,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           apellidoMaterno: datosExtraidos.apellido_materno || '',
           rfc: datosExtraidos.rfc || '',
           direccion: datosExtraidos.domicilio || '',
+          municipio: datosExtraidos.municipio || '',
+          colonia: datosExtraidos.colonia || '',
+          estado: datosExtraidos.estado || '',
+          codigoPostal: datosExtraidos.codigo_postal || '',
+          pais: datosExtraidos.pais || 'MEXICO',
           email: datosExtraidos.email || '',
           activo: true
         };
@@ -1219,6 +1328,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.log('   - Nombre:', nuevoCliente.nombre);
         console.log('   - Apellidos:', nuevoCliente.apellidoPaterno, nuevoCliente.apellidoMaterno);
       }
+      console.log('   - Dirección completa:', nuevoCliente.direccion);
+      console.log('   - Colonia:', nuevoCliente.colonia);
+      console.log('   - Municipio:', nuevoCliente.municipio);
+      console.log('   - Estado:', nuevoCliente.estado);
+      console.log('   - CP:', nuevoCliente.codigoPostal);
+      console.log('   - País:', nuevoCliente.pais);
       console.log('   - JSON completo:', JSON.stringify(nuevoCliente, null, 2));
       
       const { crearCliente } = await import('../services/clientesService');
@@ -3148,195 +3263,6 @@ const Formulario = React.memo(({
             </div>
           </div>
 
-          {/* Datos del Vehículo - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
-              <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label">Marca</label>
-                  <select
-                    className="form-select"
-                    value={formulario.marca}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, marca: e.target.value }))}
-                  >
-                    <option value="">Seleccionar marca</option>
-                    {marcasVehiculo.map(marca => (
-                      <option key={marca} value={marca}>{marca}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Modelo</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.modelo}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, modelo: e.target.value }))}
-                    placeholder="Ej: Civic, Jetta, etc."
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Año</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={formulario.anio}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, anio: e.target.value }))}
-                    min={CONSTANTS.MIN_YEAR}
-                    max={CONSTANTS.MAX_YEAR}
-                    placeholder="Ej: 2023"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Número de Serie (VIN)</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.numero_serie}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_serie: e.target.value.toUpperCase() }))}
-                    placeholder={`${CONSTANTS.VIN_LENGTH} caracteres`}
-                    maxLength={CONSTANTS.VIN_LENGTH}
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Placas</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.placas}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, placas: e.target.value.toUpperCase() }))}
-                    placeholder="Ej: ABC-123"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Color</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.color}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, color: e.target.value }))}
-                    placeholder="Ej: Rojo, Azul, etc."
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Tipo de Vehículo</label>
-                  <select
-                    className="form-select"
-                    value={formulario.tipo_vehiculo}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_vehiculo: e.target.value }))}
-                  >
-                    <option value="">Seleccionar tipo</option>
-                    {tiposVehiculo.map(tipo => (
-                      <option key={tipo} value={tipo}>{tipo}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Datos de la Póliza - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
-              <div className="row g-3">
-                <div className="col-md-6">
-                  <label className="form-label">Número de Póliza</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.numero_poliza}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, numero_poliza: e.target.value }))}
-                    placeholder="Número asignado por la aseguradora"
-                  />
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Tipo de Cobertura</label>
-                  <select
-                    className="form-select"
-                    value={formulario.tipo_cobertura}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, tipo_cobertura: e.target.value }))}
-                  >
-                    <option value="">Seleccionar cobertura</option>
-                    {tiposCobertura.map(tipo => (
-                      <option key={tipo} value={tipo}>{tipo}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Deducible</label>
-                  <div className="input-group">
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formulario.deducible}
-                      onChange={(e) => setFormulario(prev => ({ ...prev, deducible: e.target.value }))}
-                      placeholder="Porcentaje o monto"
-                      step="0.01"
-                    />
-                    <span className="input-group-text">%</span>
-                  </div>
-                </div>
-                <div className="col-md-6">
-                  <label className="form-label">Suma Asegurada</label>
-                  <div className="input-group">
-                    <span className="input-group-text">$</span>
-                    <input
-                      type="number"
-                      className="form-control"
-                      value={formulario.suma_asegurada}
-                      onChange={(e) => setFormulario(prev => ({ ...prev, suma_asegurada: e.target.value }))}
-                      placeholder="Valor del vehículo"
-                      step="0.01"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Datos del Conductor - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
-              <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label">Conductor Habitual</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.conductor_habitual}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, conductor_habitual: e.target.value }))}
-                    placeholder="Nombre completo"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Edad del Conductor</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={formulario.edad_conductor}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, edad_conductor: e.target.value }))}
-                    min="18"
-                    max="100"
-                    placeholder="Años"
-                  />
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Licencia de Conducir</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.licencia_conducir}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, licencia_conducir: e.target.value }))}
-                    placeholder="Número de licencia"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Configuración de Pagos */}
           <div className="mb-4">
             <h5 className="card-title border-bottom pb-2">Configuración de Pagos</h5>
@@ -4179,8 +4105,8 @@ const ModuloExpedientes = () => {
   const marcasVehiculo = useMemo(() => [
     'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
     'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
-    'Mitsubishi', 'Nissan', 'Peugeot', 'Renault', 'Seat', 'Suzuki', 
-    'Toyota', 'Volkswagen', 'Volvo', 'Otra'
+    'Mitsubishi', 'Nissan', 'Peugeot', 'Porsche', 'Renault', 'Seat', 
+    'Suzuki', 'Toyota', 'Volkswagen', 'Volvo', 'Otra'
   ], []);
 const estadoInicialFormulario = {
   cliente_id: null,
@@ -4363,32 +4289,40 @@ const estadoInicialFormulario = {
 
   const cambiarEstadoExpediente = useCallback(async (expedienteId, nuevoEstado, motivo = '') => {
     try {
-      // 1. Actualizar en la base de datos
+      // Solo campos de gestión que cambian
+      const datosActualizacion = {
+        etapa_activa: nuevoEstado,
+        fecha_actualizacion: new Date().toISOString().split('T')[0]
+      };
+      
+      if (motivo) {
+        datosActualizacion.motivoCancelacion = motivo;
+      }
+
+      console.log('🔄 Cambiando etapa:', { expedienteId, nuevoEstado });
+
+      // Actualizar en BD (solo enviar los campos que cambian)
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          etapa_activa: nuevoEstado,
-          motivoCancelacion: motivo,
-          fecha_actualizacion: new Date().toISOString().split('T')[0]
-        })
+        body: JSON.stringify(datosActualizacion)
       });
 
       if (!response.ok) {
-        throw new Error('Error al actualizar el estado en la base de datos');
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
       }
 
-      console.log('✅ Estado actualizado en BD:', { expedienteId, nuevoEstado, motivo });
+      console.log('✅ Etapa actualizada en BD');
 
-      // 2. Actualizar el estado local
+      // Actualizar localmente
       setExpedientes(prev => prev.map(exp => 
         exp.id === expedienteId 
-          ? { ...exp, etapa_activa: nuevoEstado, motivoCancelacion: motivo, fecha_actualizacion: new Date().toISOString().split('T')[0] }
+          ? { ...exp, ...datosActualizacion }
           : exp
       ));
     } catch (error) {
-      console.error('❌ Error al cambiar estado del expediente:', error);
-      alert('Error al actualizar el estado: ' + error.message);
+      console.error('❌ Error al cambiar etapa:', error);
+      alert('Error al actualizar: ' + error.message);
     }
   }, []);
 
@@ -4447,42 +4381,40 @@ const estadoInicialFormulario = {
 
   const aplicarPago = useCallback(async (expedienteId) => {
     try {
-      // Buscar el expediente actual para calcular el siguiente pago
       const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
       if (!expedienteActual) return;
 
       const fechaActual = new Date().toISOString().split('T')[0];
       const proximoPago = calcularSiguientePago(expedienteActual);
 
-      // 1. Actualizar en la base de datos
+      // Solo campos de pago que cambian
+      const datosActualizacion = {
+        estatusPago: 'Pagado',
+        fechaUltimoPago: fechaActual,
+        proximoPago: proximoPago
+      };
+
+      console.log('💰 Aplicando pago:', { expedienteId, fechaActual, proximoPago });
+
+      // Actualizar en BD (solo los campos de pago)
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          estatusPago: 'Pagado',
-          fechaUltimoPago: fechaActual,
-          proximoPago: proximoPago
-        })
+        body: JSON.stringify(datosActualizacion)
       });
 
       if (!response.ok) {
-        throw new Error('Error al aplicar el pago en la base de datos');
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
       }
 
-      console.log('✅ Pago aplicado en BD:', { expedienteId, fechaActual, proximoPago });
+      console.log('✅ Pago aplicado en BD');
 
-      // 2. Actualizar el estado local
-      setExpedientes(prev => prev.map(exp => {
-        if (exp.id === expedienteId) {
-          return { 
-            ...exp, 
-            estatusPago: 'Pagado',
-            fechaUltimoPago: fechaActual,
-            proximoPago: proximoPago
-          };
-        }
-        return exp;
-      }));
+      // Actualizar localmente
+      setExpedientes(prev => prev.map(exp => 
+        exp.id === expedienteId 
+          ? { ...exp, ...datosActualizacion }
+          : exp
+      ));
     } catch (error) {
       console.error('❌ Error al aplicar pago:', error);
       alert('Error al aplicar el pago: ' + error.message);
