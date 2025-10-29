@@ -385,12 +385,53 @@ const ModuloClientes = () => {
       }
     }
 
-    // Preparar datos del cliente
+    // Preparar datos del cliente - SOLO campos que existen en la BD
     const datosCliente = {
-      ...formularioCliente,
-      // Asegurar que el código esté presente
+      // ID (solo para edición)
+      ...(modoEdicion && { id: formularioCliente.id }),
+      
+      // Básicos
       codigo: formularioCliente.codigo || generarCodigoCliente(),
-      // Convertir arrays a JSON string si es necesario
+      tipoPersona: formularioCliente.tipoPersona,
+      categoria_id: formularioCliente.categoria_id,
+      
+      // Persona Física
+      nombre: formularioCliente.nombre,
+      apellidoPaterno: formularioCliente.apellidoPaterno,
+      apellidoMaterno: formularioCliente.apellidoMaterno,
+      curp: formularioCliente.curp,
+      fechaNacimiento: formularioCliente.fechaNacimiento,
+      
+      // Persona Moral
+      razonSocial: formularioCliente.razonSocial,
+      nombreComercial: formularioCliente.nombreComercial,
+      representanteLegal: formularioCliente.representanteLegal,
+      puestoRepresentante: formularioCliente.puestoRepresentante,
+      telefonoRepresentante: formularioCliente.telefonoRepresentante,
+      emailRepresentante: formularioCliente.emailRepresentante,
+      
+      // Contacto
+      rfc: formularioCliente.rfc,
+      email: formularioCliente.email,
+      telefonoFijo: formularioCliente.telefonoFijo,
+      telefonoMovil: formularioCliente.telefonoMovil,
+      
+      // Dirección
+      direccion: formularioCliente.direccion,
+      ciudad: formularioCliente.ciudad,
+      estado: formularioCliente.estado,
+      codigoPostal: formularioCliente.codigoPostal,
+      pais: formularioCliente.pais,
+      
+      // Clasificación
+      segmento: formularioCliente.segmento,
+      
+      // Control
+      activo: formularioCliente.activo,
+      notas: formularioCliente.notas,
+      fechaAlta: formularioCliente.fechaAlta,
+      
+      // Arrays convertidos a JSON string
       contactos: formularioCliente.contactos && Array.isArray(formularioCliente.contactos) 
         ? JSON.stringify(formularioCliente.contactos) 
         : formularioCliente.contactos,
@@ -813,18 +854,18 @@ const ModuloClientes = () => {
           ) : (
             <>
               <div className="table-responsive">
-                <table className="table table-hover mb-0">
+                <table className="table table-hover mb-0 table-sm">
                   <thead className="table-light">
-                    <tr>
-                      <th>Código</th>
-                      <th>Cliente</th>
-                      <th>RFC</th>
-                      <th>Contacto</th>
-                      <th>Segmento</th>
+                    <tr style={{ fontSize: '0.85rem' }}>
+                      <th style={{ width: '80px' }}>Código</th>
+                      <th>Cliente / Contacto</th>
+                      <th style={{ width: '140px' }}>RFC / Tipo</th>
+                      <th style={{ width: '100px' }}>Categoría</th>
                       <th>Productos</th>
-                      <th>Documentos</th>
-                      <th>Estado</th>
-                      <th width="150">Acciones</th>
+                      <th style={{ width: '90px' }}>Pólizas</th>
+                      <th style={{ width: '90px' }}>Docs</th>
+                      <th style={{ width: '80px' }}>Estado</th>
+                      <th style={{ width: '130px' }}>Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -836,35 +877,57 @@ const ModuloClientes = () => {
                         return exp.cliente_id == cliente.id;  // Usar == en lugar de === para comparación flexible
                       });
                       
+                      // Agrupar pólizas por tipo de producto
+                      const productosPorTipo = expedientesCliente.reduce((acc, exp) => {
+                        const tipo = exp.tipo_de_poliza || exp.tipoPoliza || exp.producto || 'Otro';
+                        acc[tipo] = (acc[tipo] || 0) + 1;
+                        return acc;
+                      }, {});
+                      
+                      // Iconos por tipo de producto
+                      const iconosPorTipo = {
+                        'Autos': '🚗',
+                        'Vida': '👤',
+                        'Daños': '🏢',
+                        'GMM': '🏥',
+                        'Gastos Médicos': '🏥',
+                        'AP': '👥',
+                        'Accidentes Personales': '👥',
+                        'Ahorro': '💰',
+                        'Educativo': '🎓',
+                        'Otro': '📋'
+                      };
+                      
                       return (
-                        <tr key={cliente.id}>
+                        <tr key={cliente.id} style={{ fontSize: '0.875rem' }}>
                           <td>
-                            <strong className="text-primary">{cliente.codigo}</strong>
+                            <strong className="text-primary" style={{ fontSize: '0.85rem' }}>{cliente.codigo}</strong>
                           </td>
                           <td>
                             <div>
-                              <div className="fw-semibold">
+                              <div className="fw-semibold" style={{ fontSize: '0.9rem' }}>
                                 {cliente.tipoPersona === 'Persona Física' ? 
                                   `${cliente.nombre} ${cliente.apellidoPaterno} ${cliente.apellidoMaterno || ''}` :
                                   cliente.razonSocial
                                 }
                               </div>
-                              <small className="text-muted">
-                                {cliente.tipoPersona === 'Persona Física' ? 
-                                  <UserCircle size={14} className="me-1" /> :
-                                  <Building2 size={14} className="me-1" />
-                                }
-                                {cliente.tipoPersona}
+                              <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                📧 {cliente.email || 'Sin email'}
+                              </small>
+                              <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                📱 {cliente.telefonoMovil || 'N/A'} {cliente.telefonoFijo && `• ☎️ ${cliente.telefonoFijo}`}
                               </small>
                             </div>
                           </td>
                           <td>
-                            <small>{cliente.rfc || '-'}</small>
-                          </td>
-                          <td>
                             <div>
-                              <small className="d-block">{cliente.email || '-'}</small>
-                              <small className="text-muted">{cliente.telefonoMovil || cliente.telefonoFijo || '-'}</small>
+                              <small className="d-block fw-semibold" style={{ fontSize: '0.85rem' }}>{cliente.rfc || '-'}</small>
+                              <small className="text-muted d-flex align-items-center gap-1" style={{ fontSize: '0.75rem' }}>
+                                {cliente.tipoPersona === 'Persona Física' ? 
+                                  <><UserCircle size={12} /> Física</> :
+                                  <><Building2 size={12} /> Moral</>
+                                }
+                              </small>
                             </div>
                           </td>
                           <td>
@@ -873,28 +936,43 @@ const ModuloClientes = () => {
                               cliente.segmento === 'Premium' ? 'bg-warning' :
                               cliente.segmento === 'Estándar' ? 'bg-info' :
                               'bg-secondary'
-                            }`}>
+                            }`} style={{ fontSize: '0.75rem' }}>
                               {cliente.segmento}
                             </span>
                           </td>
                           <td>
+                            {Object.keys(productosPorTipo).length > 0 ? (
+                              <div className="d-flex flex-wrap gap-1">
+                                {Object.entries(productosPorTipo).map(([tipo, cantidad]) => (
+                                  <span key={tipo} className="badge bg-light text-dark border" style={{ fontSize: '0.7rem' }}>
+                                    {iconosPorTipo[tipo] || '📋'} {tipo} ({cantidad})
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <small className="text-muted" style={{ fontSize: '0.75rem' }}>Sin productos</small>
+                            )}
+                          </td>
+                          <td className="text-center">
                             <button 
                               className="btn btn-sm btn-primary"
+                              style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
                               onClick={() => verPolizasCliente(cliente)}
                               disabled={expedientesCliente.length === 0}
                             >
-                              {expedientesCliente.length} póliza{expedientesCliente.length !== 1 ? 's' : ''}
+                              <Package size={12} className="me-1" />
+                              {expedientesCliente.length}
                             </button>
                           </td>
-                          <td>
+                          <td className="text-center">
                             <span className={`badge ${
                               cliente.documentos?.length > 0 ? 'bg-success' : 'bg-warning'
-                            }`}>
-                              {cliente.documentos?.length || 0} docs
+                            }`} style={{ fontSize: '0.75rem' }}>
+                              {cliente.documentos?.length || 0}
                             </span>
                           </td>
-                          <td>
-                            <span className={`badge ${cliente.activo ? 'bg-success' : 'bg-secondary'}`}>
+                          <td className="text-center">
+                            <span className={`badge ${cliente.activo ? 'bg-success' : 'bg-secondary'}`} style={{ fontSize: '0.75rem' }}>
                               {cliente.activo ? 'Activo' : 'Inactivo'}
                             </span>
                           </td>
@@ -903,24 +981,27 @@ const ModuloClientes = () => {
                               <button
                                 onClick={() => verDetallesCliente(cliente)}
                                 className="btn btn-outline-primary"
+                                style={{ padding: '0.25rem 0.4rem' }}
                                 title="Ver detalles"
                               >
-                                <Eye size={14} />
+                                <Eye size={12} />
                               </button>
                               <button
                                 onClick={() => editarCliente(cliente)}
                                 className="btn btn-outline-success"
+                                style={{ padding: '0.25rem 0.4rem' }}
                                 title="Editar"
                               >
-                                <Edit size={14} />
+                                <Edit size={12} />
                               </button>
                               <button
                                 onClick={() => eliminarClienteLocal(cliente.id)}
                                 className="btn btn-outline-danger"
+                                style={{ padding: '0.25rem 0.4rem' }}
                                 title="Eliminar"
                                 disabled={cargando}
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={12} />
                               </button>
                             </div>
                           </td>
@@ -1059,14 +1140,14 @@ const ModuloClientes = () => {
                 </div>
                 
                 <div className="col-md-4">
-                  <label className="form-label">Segmento</label>
+                  <label className="form-label">Categoría</label>
                   <select
                     className="form-select"
                     value={formularioCliente.segmento}
                     onChange={(e) => setFormularioCliente({...formularioCliente, segmento: e.target.value})}
                   >
-                    {segmentosCliente.map(segmento => (
-                      <option key={segmento} value={segmento}>{segmento}</option>
+                    {segmentosCliente.map(categoria => (
+                      <option key={categoria} value={categoria}>{categoria}</option>
                     ))}
                   </select>
                 </div>
@@ -1591,7 +1672,7 @@ const ModuloClientes = () => {
                       </div>
                     )}
                     <div className="col-md-6">
-                      <strong className="d-block text-muted">Segmento:</strong>
+                      <strong className="d-block text-muted">Categoría:</strong>
                       <span className={`badge ${
                         clienteSeleccionado.segmento === 'VIP' ? 'bg-purple' :
                         clienteSeleccionado.segmento === 'Premium' ? 'bg-warning' :
