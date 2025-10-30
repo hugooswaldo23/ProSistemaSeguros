@@ -313,6 +313,14 @@ const ModuloClientes = () => {
     email: '',
     telefonoFijo: '',
     telefonoMovil: '',
+    // Campos del gestor/contacto (solo Persona Física)
+    contactoNombre: '',
+    contactoApellidoPaterno: '',
+    contactoApellidoMaterno: '',
+    contactoEmail: '',
+    contactoTelefonoFijo: '',
+    contactoTelefonoMovil: '',
+    contactoPuesto: '',
     direccion: '',
     colonia: '',
     municipio: '',
@@ -435,6 +443,15 @@ const ModuloClientes = () => {
       email: formularioCliente.email,
       telefonoFijo: formularioCliente.telefonoFijo,
       telefonoMovil: formularioCliente.telefonoMovil,
+      
+      // Gestor/Contacto Principal (solo Persona Física)
+      contactoNombre: formularioCliente.contactoNombre,
+      contactoApellidoPaterno: formularioCliente.contactoApellidoPaterno,
+      contactoApellidoMaterno: formularioCliente.contactoApellidoMaterno,
+      contactoEmail: formularioCliente.contactoEmail,
+      contactoTelefonoFijo: formularioCliente.contactoTelefonoFijo,
+      contactoTelefonoMovil: formularioCliente.contactoTelefonoMovil,
+      contactoPuesto: formularioCliente.contactoPuesto,
       
       // Dirección
       direccion: formularioCliente.direccion,
@@ -580,6 +597,25 @@ const ModuloClientes = () => {
     // Normalizar el estado antes de setear el formulario
     const clienteNormalizado = {
       ...cliente,
+      // Mapear campos de snake_case a camelCase
+      nombre: cliente.nombre || '',
+      apellidoPaterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
+      apellidoMaterno: cliente.apellidoMaterno || cliente.apellido_materno || '',
+      razonSocial: cliente.razonSocial || cliente.razon_social || '',
+      nombreComercial: cliente.nombreComercial || cliente.nombre_comercial || '',
+      fechaNacimiento: cliente.fechaNacimiento || cliente.fecha_nacimiento || '',
+      telefonoFijo: cliente.telefonoFijo || cliente.telefono_fijo || '',
+      telefonoMovil: cliente.telefonoMovil || cliente.telefono_movil || '',
+      codigoPostal: cliente.codigoPostal || cliente.codigo_postal || '',
+      tipoPersona: cliente.tipoPersona || cliente.tipo_persona || 'Persona Física',
+      // Mapear campos de gestor/contacto (Persona Física)
+      contactoNombre: cliente.contactoNombre || cliente.contacto_nombre || '',
+      contactoApellidoPaterno: cliente.contactoApellidoPaterno || cliente.contacto_apellido_paterno || '',
+      contactoApellidoMaterno: cliente.contactoApellidoMaterno || cliente.contacto_apellido_materno || '',
+      contactoEmail: cliente.contactoEmail || cliente.contacto_email || '',
+      contactoTelefonoFijo: cliente.contactoTelefonoFijo || cliente.contacto_telefono_fijo || '',
+      contactoTelefonoMovil: cliente.contactoTelefonoMovil || cliente.contacto_telefono_movil || '',
+      contactoPuesto: cliente.contactoPuesto || cliente.contacto_puesto || '',
       estado: normalizarEstado(cliente.estado),
       // Asegurar que contactos sea un array
       contactos: (() => {
@@ -597,12 +633,7 @@ const ModuloClientes = () => {
       })()
     };
     
-    console.log('📝 Cliente a editar - Estado y contactos normalizados:', {
-      estadoOriginal: cliente.estado,
-      estadoNormalizado: clienteNormalizado.estado,
-      contactosOriginal: cliente.contactos,
-      contactosNormalizados: clienteNormalizado.contactos
-    });
+    console.log('📝 Cliente a editar - normalizado:', clienteNormalizado);
     
     setFormularioCliente(clienteNormalizado);
     setModoEdicion(true);
@@ -1567,11 +1598,11 @@ const ModuloClientes = () => {
               </div>
             )}
 
-            {/* SECCIÓN 4: Información de Contacto (Múltiples contactos) */}
+            {/* SECCIÓN 4: Información de Contacto */}
             <div className="mb-4">
               <div className="d-flex justify-content-between align-items-center mb-3">
                 <h5 className="card-title mb-0">
-                  {formularioCliente.tipoPersona === 'Persona Física' ? 'Información de Contacto' : 'Contactos Adicionales'}
+                  {formularioCliente.tipoPersona === 'Persona Física' ? 'Información de Contacto del Cliente' : 'Contacto Principal de la Empresa'}
                 </h5>
                 {formularioCliente.tipoPersona === 'Persona Moral' && (
                   <button
@@ -1587,10 +1618,10 @@ const ModuloClientes = () => {
               <div className="border-bottom mb-3"></div>
               
               {formularioCliente.tipoPersona === 'Persona Física' ? (
-                // Para Persona Física - Contacto único
+                // Para Persona Física - Contacto del cliente (asegurado)
                 <div className="row g-3">
                   <div className="col-md-4">
-                    <label className="form-label">Email</label>
+                    <label className="form-label">Email del Cliente</label>
                     <input
                       type="email"
                       className="form-control"
@@ -1723,6 +1754,92 @@ const ModuloClientes = () => {
                 </>
               )}
             </div>
+
+            {/* SECCIÓN 5: Gestor/Contacto Principal (solo Persona Física) */}
+            {formularioCliente.tipoPersona === 'Persona Física' && (
+              <div className="mb-4">
+                <h5 className="card-title border-bottom pb-2">
+                  Gestor/Contacto Principal 
+                  <small className="text-muted ms-2">(Persona que gestiona las pólizas)</small>
+                </h5>
+                <div className="alert alert-info">
+                  <AlertCircle size={16} className="me-2" />
+                  Si el cliente gestiona sus propias pólizas, deja estos campos vacíos o repite sus datos.
+                </div>
+                <div className="row g-3">
+                  <div className="col-md-4">
+                    <label className="form-label">Nombre del Gestor</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.contactoNombre || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoNombre: e.target.value})}
+                      placeholder="Nombre"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Paterno</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.contactoApellidoPaterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoApellidoPaterno: e.target.value})}
+                      placeholder="Apellido Paterno"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Materno</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.contactoApellidoMaterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoApellidoMaterno: e.target.value})}
+                      placeholder="Apellido Materno"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Email del Gestor</label>
+                    <input
+                      type="email"
+                      className="form-control"
+                      value={formularioCliente.contactoEmail || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoEmail: e.target.value})}
+                      placeholder="correo@ejemplo.com"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Teléfono Fijo</label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={formularioCliente.contactoTelefonoFijo || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoTelefonoFijo: e.target.value})}
+                      placeholder="55 5555 5555"
+                    />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Teléfono Móvil</label>
+                    <input
+                      type="tel"
+                      className="form-control"
+                      value={formularioCliente.contactoTelefonoMovil || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoTelefonoMovil: e.target.value})}
+                      placeholder="55 5555 5555"
+                    />
+                  </div>
+                  <div className="col-md-12">
+                    <label className="form-label">Puesto/Relación</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioCliente.contactoPuesto || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoPuesto: e.target.value})}
+                      placeholder="Ej: Hijo, Cónyuge, Contador, Asistente, etc."
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Notas */}
             <div className="mb-4">
