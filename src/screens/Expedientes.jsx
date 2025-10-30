@@ -1368,6 +1368,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           codigoPostal: datosExtraidos.codigo_postal || '',
           pais: datosExtraidos.pais || 'MEXICO',
           email: datosExtraidos.email || '',
+          fechaRegistro: new Date().toISOString().split('T')[0],
+          categoria: 'Normal',
           activo: true
         };
       } else {
@@ -1385,6 +1387,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           codigoPostal: datosExtraidos.codigo_postal || '',
           pais: datosExtraidos.pais || 'MEXICO',
           email: datosExtraidos.email || '',
+          fechaRegistro: new Date().toISOString().split('T')[0],
+          categoria: 'Normal',
           activo: true
         };
       }
@@ -2980,7 +2984,7 @@ const Formulario = React.memo(({
                     <div className="col-12">
                       <hr className="my-3" />
                       <h6 className="text-muted mb-3">
-                        💼 Datos del Contacto
+                        💼 Datos del Contacto Principal
                         <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
                           (Editable - Se actualizará el cliente)
                         </small>
@@ -2992,8 +2996,8 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.nombre || ''}
-                        onChange={(e) => setFormulario({...formulario, nombre: e.target.value})}
+                        value={formulario.contacto_nombre || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
                       />
                     </div>
@@ -3002,8 +3006,8 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_paterno || ''}
-                        onChange={(e) => setFormulario({...formulario, apellido_paterno: e.target.value})}
+                        value={formulario.contacto_apellido_paterno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
                         placeholder="Apellido Paterno"
                       />
                     </div>
@@ -3012,28 +3016,38 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_materno || ''}
-                        onChange={(e) => setFormulario({...formulario, apellido_materno: e.target.value})}
+                        value={formulario.contacto_apellido_materno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
                         placeholder="Apellido Materno"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Email del Contacto</label>
                       <input
                         type="email"
                         className="form-control"
-                        value={formulario.email || ''}
-                        onChange={(e) => setFormulario({...formulario, email: e.target.value})}
+                        value={formulario.contacto_email || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.contacto_telefono_fijo || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
+                        placeholder="55 1234 5678"
+                      />
+                    </div>
+                    <div className="col-md-4">
                       <label className="form-label">Teléfono Móvil</label>
                       <input
                         type="tel"
                         className="form-control"
-                        value={formulario.telefono_movil || ''}
-                        onChange={(e) => setFormulario({...formulario, telefono_movil: e.target.value})}
+                        value={formulario.contacto_telefono_movil || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
                       />
                     </div>
@@ -3041,58 +3055,149 @@ const Formulario = React.memo(({
                 ) : (
                   // Campos para Persona Física
                   <>
-                    <div className="col-md-6">
+                    {/* Datos del Cliente (Solo lectura) */}
+                    <div className="col-12">
+                      <h6 className="text-muted mb-3">
+                        👤 Datos del Cliente
+                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                          (Solo lectura)
+                        </small>
+                      </h6>
+                    </div>
+                    
+                    <div className="col-md-4">
                       <label className="form-label">Nombre</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control bg-light"
                         value={formulario.nombre}
-                        disabled
+                        readOnly
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Paterno</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.apellido_paterno}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Materno</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.apellido_materno}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">RFC</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.rfc}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Email</label>
+                      <input
+                        type="email"
+                        className="form-control bg-light"
+                        value={formulario.email}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Móvil</label>
+                      <input
+                        type="tel"
+                        className="form-control bg-light"
+                        value={formulario.telefono_movil}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control bg-light"
+                        value={formulario.telefono_fijo}
+                        readOnly
+                      />
+                    </div>
+                    
+                    {/* Datos de Contacto Adicional/Gestor - Editables */}
+                    <div className="col-12">
+                      <hr className="my-3" />
+                      <h6 className="text-muted mb-3">
+                        💼 Contacto Adicional / Gestor
+                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                          (Opcional - Editable)
+                        </small>
+                      </h6>
+                    </div>
+                    
+                    <div className="col-md-4">
+                      <label className="form-label">Nombre del Contacto</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={formulario.contacto_nombre || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
+                        placeholder="Nombre"
+                      />
+                    </div>
+                    <div className="col-md-4">
                       <label className="form-label">Apellido Paterno</label>
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_paterno}
-                        disabled
+                        value={formulario.contacto_apellido_paterno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
+                        placeholder="Apellido Paterno"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Apellido Materno</label>
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_materno}
-                        disabled
+                        value={formulario.contacto_apellido_materno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
+                        placeholder="Apellido Materno"
                       />
                     </div>
-                    <div className="col-md-6">
-                      <label className="form-label">RFC</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formulario.rfc}
-                        disabled
-                      />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Email</label>
+                    <div className="col-md-4">
+                      <label className="form-label">Email del Contacto</label>
                       <input
                         type="email"
                         className="form-control"
-                        value={formulario.email}
-                        disabled
+                        value={formulario.contacto_email || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
+                        placeholder="correo@ejemplo.com"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.contacto_telefono_fijo || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
+                        placeholder="55 1234 5678"
+                      />
+                    </div>
+                    <div className="col-md-4">
                       <label className="form-label">Teléfono Móvil</label>
                       <input
                         type="tel"
                         className="form-control"
-                        value={formulario.telefono_movil}
-                        disabled
+                        value={formulario.contacto_telefono_movil || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
+                        placeholder="55 5555 5555"
                       />
                     </div>
                   </>
@@ -4376,6 +4481,13 @@ const estadoInicialFormulario = {
   telefono_movil: '',
   email: '',
   rfc: '',
+  // Campos de contacto adicional (Persona Física) o contacto principal (Persona Moral)
+  contacto_nombre: '',
+  contacto_apellido_paterno: '',
+  contacto_apellido_materno: '',
+  contacto_email: '',
+  contacto_telefono_fijo: '',
+  contacto_telefono_movil: '',
   compania: '',
   producto: '',
   etapa_activa: 'En cotización',
@@ -4749,6 +4861,7 @@ const estadoInicialFormulario = {
       // Manejar tanto camelCase como snake_case del backend
       const datosFormulario = {
         cliente_id: cliente.id,
+        // Datos principales del cliente (solo lectura)
         nombre: cliente.nombre || '',
         apellido_paterno: cliente.apellido_paterno || cliente.apellidoPaterno || '',
         apellido_materno: cliente.apellido_materno || cliente.apellidoMaterno || '',
@@ -4757,7 +4870,14 @@ const estadoInicialFormulario = {
         email: cliente.email || '',
         telefono_fijo: cliente.telefono_fijo || cliente.telefonoFijo || '',
         telefono_movil: cliente.telefono_movil || cliente.telefonoMovil || '',
-        rfc: cliente.rfc || ''
+        rfc: cliente.rfc || '',
+        // Datos de contacto adicional/gestor (editables)
+        contacto_nombre: cliente.contacto_nombre || cliente.contactoNombre || '',
+        contacto_apellido_paterno: cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || '',
+        contacto_apellido_materno: cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || '',
+        contacto_email: cliente.contacto_email || cliente.contactoEmail || '',
+        contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
+        contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || ''
       };
 
       console.log('📝 Datos que se aplicarán al formulario:', datosFormulario);
@@ -4779,7 +4899,13 @@ const estadoInicialFormulario = {
         email: '',
         telefono_fijo: '',
         telefono_movil: '',
-        rfc: ''
+        rfc: '',
+        contacto_nombre: '',
+        contacto_apellido_paterno: '',
+        contacto_apellido_materno: '',
+        contacto_email: '',
+        contacto_telefono_fijo: '',
+        contacto_telefono_movil: ''
       }));
     }
   }, []);
@@ -4892,25 +5018,26 @@ const estadoInicialFormulario = {
           tipoPersona: clienteSeleccionado.tipoPersona
         });
         
-        let datosActualizados = {};
+        // LÓGICA CORRECTA:
+        // - Persona Moral: NO tiene nombre/apellido en cliente, SIEMPRE usa contacto_* para el contacto principal
+        // - Persona Física: tiene nombre/apellido en cliente (el cliente mismo), PUEDE tener contacto_* adicional/gestor
+        // 
+        // En AMBOS casos, desde el formulario de pólizas SOLO actualizamos campos contacto_*
+        // (Los campos principales del cliente se editan desde el módulo de Clientes)
         
-        // TANTO Persona Física como Persona Moral usan los mismos campos de contacto
-        // La diferencia es conceptual:
-        // - Persona Física: el contacto es EL MISMO CLIENTE
-        // - Persona Moral: el contacto es LA PERSONA con quien hablas en la empresa
-        datosActualizados = {
-          nombre: formulario.nombre || '',
-          apellido_paterno: formulario.apellido_paterno || '',
-          apellido_materno: formulario.apellido_materno || '',
-          email: formulario.email || '',
-          telefono_fijo: formulario.telefono_fijo || '',
-          telefono_movil: formulario.telefono_movil || ''
+        const datosActualizados = {
+          contacto_nombre: formulario.contacto_nombre || null,
+          contacto_apellido_paterno: formulario.contacto_apellido_paterno || null,
+          contacto_apellido_materno: formulario.contacto_apellido_materno || null,
+          contacto_email: formulario.contacto_email || null,
+          contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
+          contacto_telefono_movil: formulario.contacto_telefono_movil || null
         };
         
         if (clienteSeleccionado.tipoPersona === 'Persona Moral') {
           console.log('📝 Actualizando CONTACTO PRINCIPAL de Persona Moral:', datosActualizados);
         } else {
-          console.log('📝 Actualizando CONTACTO (cliente) de Persona Física:', datosActualizados);
+          console.log('📝 Actualizando CONTACTO ADICIONAL/GESTOR de Persona Física:', datosActualizados);
         }
         
         const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
@@ -4951,8 +5078,15 @@ const estadoInicialFormulario = {
     delete expedientePayload.nombre_comercial;
     delete expedientePayload.rfc;
     delete expedientePayload.curp;
+    // Eliminar campos de contacto (pertenecen al cliente, no al expediente)
+    delete expedientePayload.contacto_nombre;
+    delete expedientePayload.contacto_apellido_paterno;
+    delete expedientePayload.contacto_apellido_materno;
+    delete expedientePayload.contacto_email;
+    delete expedientePayload.contacto_telefono_fijo;
+    delete expedientePayload.contacto_telefono_movil;
     
-    console.log('🧹 Campos de cliente eliminados del payload (solo se envía cliente_id)');
+    console.log('🧹 Campos de cliente y contacto eliminados del payload (solo se envía cliente_id)');
     
     // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
     if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
