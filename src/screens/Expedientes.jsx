@@ -139,9 +139,22 @@ const CampoFechaCalculada = React.memo(({
   </div>
 ));
 
-const InfoCliente = React.memo(({ expediente }) => {
-  // Determinar si es Persona Moral por el campo razon_social
-  const esPersonaMoral = expediente.razon_social && expediente.razon_social.trim() !== '';
+const InfoCliente = React.memo(({ expediente, cliente }) => {
+  if (!cliente) {
+    return (
+      <div className="text-muted">
+        <small>⚠️ Sin cliente asignado</small>
+        {expediente.cliente_id && (
+          <div style={{ fontSize: '10px' }}>
+            ID: {expediente.cliente_id}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  // Determinar si es Persona Moral
+  const esPersonaMoral = cliente.tipoPersona === 'Persona Moral' || cliente.tipo_persona === 'Persona Moral';
   
   return (
     <div>
@@ -150,54 +163,61 @@ const InfoCliente = React.memo(({ expediente }) => {
           // Persona Moral - Razón Social, Contacto Principal, Teléfonos y Email
           <div>
             {/* 1. Razón Social */}
-            <div>{expediente.razon_social}</div>
+            <div>{cliente.razonSocial || cliente.razon_social}</div>
             
             {/* 2. Contacto Principal */}
-            {(expediente.nombre || expediente.apellido_paterno) && (
-              <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '3px' }}>
-                👤 {expediente.nombre} {expediente.apellido_paterno}
+            {cliente.contacto_nombre && (
+              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '3px' }}>
+                👤 {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
               </div>
             )}
             
-            {/* 3. Teléfonos y Email */}
+            {/* 3. Teléfonos y Email del Contacto */}
             <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-              {expediente.telefono_movil && (
-                <div>📱 {expediente.telefono_movil}</div>
+              {cliente.contacto_telefono_movil && (
+                <div>📱 {cliente.contacto_telefono_movil}</div>
               )}
-              {expediente.telefono_fijo && (
-                <div>☎️ {expediente.telefono_fijo}</div>
+              {cliente.contacto_telefono_fijo && (
+                <div>☎️ {cliente.contacto_telefono_fijo}</div>
               )}
-              {expediente.email && (
-                <div>📧 {expediente.email}</div>
+              {cliente.contacto_email && (
+                <div>📧 {cliente.contacto_email}</div>
               )}
             </div>
           </div>
         ) : (
           // Persona Física - Nombre, Teléfonos y Email
           <div>
-            {/* 1. Nombre Completo */}
-            <div>{expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}</div>
+            {/* 1. Nombre Completo del Cliente */}
+            <div>
+              {cliente.nombre} {cliente.apellidoPaterno || cliente.apellido_paterno} {cliente.apellidoMaterno || cliente.apellido_materno}
+            </div>
             
-            {/* 2. Teléfonos y Email */}
+            {/* 2. Gestor/Contacto Adicional (si existe) */}
+            {cliente.contacto_nombre && (
+              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '3px' }}>
+                👤 Gestor: {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
+              </div>
+            )}
+            
+            {/* 3. Teléfonos y Email del Gestor (si existe) o del Cliente */}
             <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-              {expediente.telefono_movil && (
-                <div>📱 {expediente.telefono_movil}</div>
+              {(cliente.contacto_telefono_movil || cliente.telefonoMovil) && (
+                <div>📱 {cliente.contacto_telefono_movil || cliente.telefonoMovil}</div>
               )}
-              {expediente.telefono_fijo && (
-                <div>☎️ {expediente.telefono_fijo}</div>
+              {(cliente.contacto_telefono_fijo || cliente.telefonoFijo) && (
+                <div>☎️ {cliente.contacto_telefono_fijo || cliente.telefonoFijo}</div>
               )}
-              {expediente.email && (
-                <div>📧 {expediente.email}</div>
+              {(cliente.contacto_email || cliente.email) && (
+                <div>📧 {cliente.contacto_email || cliente.email}</div>
               )}
             </div>
           </div>
         )}
       </div>
       {expediente.producto === 'Autos' && expediente.marca && (
-        <div>
-          <small className="text-primary">
-            🚗 {expediente.marca} {expediente.modelo} {expediente.año}
-          </small>
+        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px', fontWeight: 'normal' }}>
+          🚗 {expediente.marca} {expediente.modelo} {expediente.año}
         </div>
       )}
     </div>
@@ -231,21 +251,6 @@ const EstadoPago = React.memo(({ expediente }) => {
         <br />
         <Badge tipo="pago" valor={expediente.estatusPago || 'Pendiente'} className="badge-sm" />
       </div>
-
-      {/* Fecha de Pago (solo si está pendiente) */}
-      {fechaPago && expediente.estatusPago !== 'Pagado' && (
-        <div>
-          <small className="text-muted">Fecha pago:</small>
-          <br />
-          <small className={`${
-            estaVencido ? 'text-danger fw-bold' :
-            'text-secondary'
-          }`}>
-            {estaVencido && '⚠️ '}
-            {new Date(fechaPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '')}
-          </small>
-        </div>
-      )}
     </div>
   );
 });
@@ -1525,7 +1530,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           perfil: 'Agente',
           activo: true,
           fechaIngreso: new Date().toISOString().split('T')[0],
-          fechaRegistro: new Date().toISOString().split('T')[0],
           productosAseguradoras: []
         };
         
@@ -1553,11 +1557,18 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
+      console.log('🔍 DEBUG aplicarDatos:');
+      console.log('   - clienteEncontrado:', clienteEncontrado);
+      console.log('   - clienteEncontrado.id:', clienteEncontrado?.id);
+      console.log('   - datosExtraidos.cliente_id:', datosExtraidos.cliente_id);
+      
       // Combinar los datos extraídos del PDF con los datos normalizados del cliente
       const datosConCliente = {
         ...datosExtraidos,
         cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
       };
+      
+      console.log('   - datosConCliente.cliente_id FINAL:', datosConCliente.cliente_id);
 
       // Si tenemos clienteEncontrado, usar sus datos normalizados (ya en camelCase)
       if (clienteEncontrado) {
@@ -2340,7 +2351,8 @@ const ListaExpedientes = React.memo(({
   verDetalles,
   editarExpediente,
   eliminarExpediente,
-  calcularProximoPago
+  calcularProximoPago,
+  clientesMap
 }) => {
   const paginacion = usePaginacion(expedientes, 10);
 
@@ -2483,7 +2495,7 @@ const ListaExpedientes = React.memo(({
                             )}
                           </div>
                         </td>
-                        <td><InfoCliente expediente={expediente} /></td>
+                        <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
                         <td>{expediente.compania}</td>
                         <td>
                           <div>
@@ -2980,7 +2992,7 @@ const Formulario = React.memo(({
                     <div className="col-12">
                       <hr className="my-3" />
                       <h6 className="text-muted mb-3">
-                        💼 Datos del Contacto
+                        💼 Datos del Contacto Principal
                         <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
                           (Editable - Se actualizará el cliente)
                         </small>
@@ -2992,8 +3004,8 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.nombre || ''}
-                        onChange={(e) => setFormulario({...formulario, nombre: e.target.value})}
+                        value={formulario.contacto_nombre || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
                       />
                     </div>
@@ -3002,8 +3014,8 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_paterno || ''}
-                        onChange={(e) => setFormulario({...formulario, apellido_paterno: e.target.value})}
+                        value={formulario.contacto_apellido_paterno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
                         placeholder="Apellido Paterno"
                       />
                     </div>
@@ -3012,13 +3024,93 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_materno || ''}
-                        onChange={(e) => setFormulario({...formulario, apellido_materno: e.target.value})}
+                        value={formulario.contacto_apellido_materno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
                         placeholder="Apellido Materno"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Email del Contacto</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={formulario.contacto_email || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
+                        placeholder="correo@ejemplo.com"
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.contacto_telefono_fijo || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
+                        placeholder="55 1234 5678"
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Móvil</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.contacto_telefono_movil || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
+                        placeholder="55 5555 5555"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  // Campos para Persona Física
+                  <>
+                    {/* Datos del Cliente (Solo lectura) */}
+                    <div className="col-12">
+                      <h6 className="text-muted mb-3">
+                        👤 Datos del Cliente
+                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                          (Solo lectura)
+                        </small>
+                      </h6>
+                    </div>
+                    
+                    <div className="col-md-4">
+                      <label className="form-label">Nombre</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.nombre}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Paterno</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.apellido_paterno}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Apellido Materno</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.apellido_materno}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">RFC</label>
+                      <input
+                        type="text"
+                        className="form-control bg-light"
+                        value={formulario.rfc}
+                        readOnly
+                      />
+                    </div>
+                    <div className="col-md-4">
+                      <label className="form-label">Email</label>
                       <input
                         type="email"
                         className="form-control"
@@ -3027,7 +3119,7 @@ const Formulario = React.memo(({
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Teléfono Móvil</label>
                       <input
                         type="tel"
@@ -3037,62 +3129,86 @@ const Formulario = React.memo(({
                         placeholder="55 5555 5555"
                       />
                     </div>
-                  </>
-                ) : (
-                  // Campos para Persona Física
-                  <>
-                    <div className="col-md-6">
-                      <label className="form-label">Nombre</label>
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.telefono_fijo || ''}
+                        onChange={(e) => setFormulario({...formulario, telefono_fijo: e.target.value})}
+                        placeholder="55 5555 5555"
+                      />
+                    </div>
+                    
+                    {/* Datos de Contacto Adicional/Gestor - Editables */}
+                    <div className="col-12">
+                      <hr className="my-3" />
+                      <h6 className="text-muted mb-3">
+                        💼 Contacto Adicional / Gestor
+                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                          (Opcional - Editable)
+                        </small>
+                      </h6>
+                    </div>
+                    
+                    <div className="col-md-4">
+                      <label className="form-label">Nombre del Contacto</label>
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.nombre}
-                        disabled
+                        value={formulario.contacto_nombre || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
+                        placeholder="Nombre"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Apellido Paterno</label>
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_paterno}
-                        disabled
+                        value={formulario.contacto_apellido_paterno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
+                        placeholder="Apellido Paterno"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
                       <label className="form-label">Apellido Materno</label>
                       <input
                         type="text"
                         className="form-control"
-                        value={formulario.apellido_materno}
-                        disabled
+                        value={formulario.contacto_apellido_materno || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
+                        placeholder="Apellido Materno"
                       />
                     </div>
-                    <div className="col-md-6">
-                      <label className="form-label">RFC</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={formulario.rfc}
-                        disabled
-                      />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Email</label>
+                    <div className="col-md-4">
+                      <label className="form-label">Email del Contacto</label>
                       <input
                         type="email"
                         className="form-control"
-                        value={formulario.email}
-                        disabled
+                        value={formulario.contacto_email || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
+                        placeholder="correo@ejemplo.com"
                       />
                     </div>
-                    <div className="col-md-6">
+                    <div className="col-md-4">
+                      <label className="form-label">Teléfono Fijo</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        value={formulario.contacto_telefono_fijo || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
+                        placeholder="55 1234 5678"
+                      />
+                    </div>
+                    <div className="col-md-4">
                       <label className="form-label">Teléfono Móvil</label>
                       <input
                         type="tel"
                         className="form-control"
-                        value={formulario.telefono_movil}
-                        disabled
+                        value={formulario.contacto_telefono_movil || ''}
+                        onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
+                        placeholder="55 5555 5555"
                       />
                     </div>
                   </>
@@ -4132,6 +4248,8 @@ const DetallesExpediente = React.memo(({
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
   const [expedientes, setExpedientes] = useState([]);
+  const [clientes, setClientes] = useState([]);
+  const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
   useEffect(() => {
     const fetchAgentes = async () => {
@@ -4149,65 +4267,85 @@ const ModuloExpedientes = () => {
     };
     fetchAgentes();
   }, []);
-  // Cargar expedientes desde el backend al montar
+  
+  // Cargar expedientes y clientes desde el backend
   useEffect(() => {
-    const cargarExpedientesConClientes = async () => {
+    const cargarDatos = async () => {
       try {
-        console.log('📋 ============ CARGANDO EXPEDIENTES AL MONTAR ============');
+        console.log('🔄 Iniciando carga de datos...');
         
-        // Obtener expedientes (ahora vienen con datos de Persona Moral enriquecidos desde backend)
+        // 1. Obtener expedientes
         const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
-        const expedientes = await resExpedientes.json();
-        console.log(`📊 ${expedientes.length} expedientes obtenidos del backend (con datos de cliente enriquecidos)`);
+        const expedientesData = await resExpedientes.json();
+        console.log('📋 Expedientes cargados:', expedientesData.length);
         
-        // Procesar expedientes: solo calcular estatus de pago si es necesario
-        const expedientesConEstatus = expedientes.map(exp => {
+        // 2. Obtener todos los clientes
+        const resClientes = await fetch(`${API_URL}/api/clientes`);
+        const clientesData = await resClientes.json();
+        console.log('👥 Clientes cargados:', clientesData.length);
+        
+        // 3. Crear un mapa de clientes por ID para búsqueda rápida
+        const mapa = {};
+        clientesData.forEach(cliente => {
+          mapa[cliente.id] = cliente;
+        });
+        console.log('🗺️ Mapa de clientes creado con', Object.keys(mapa).length, 'clientes');
+        
+        setClientes(clientesData);
+        setClientesMap(mapa);
+        
+        // 4. Calcular estatusPago en los expedientes basándose en la fecha de vencimiento
+        const expedientesProcesados = expedientesData.map(exp => {
           let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
           
-          // Si el estatus es inválido o no existe, calcularlo desde la fecha
-          const estatusInvalidos = ['Sin definir', 'Pago por vencer', null, undefined, ''];
-          if (estatusInvalidos.includes(estatusPagoCalculado)) {
-            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-            if (fechaVencimiento) {
-              const fechaVenc = new Date(fechaVencimiento);
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              fechaVenc.setHours(0, 0, 0, 0);
-              
-              if (fechaVenc < hoy) {
-                estatusPagoCalculado = 'Vencido';
-              } else {
-                estatusPagoCalculado = 'Pendiente';
-              }
+          // Si el estatus es 'Pagado', mantenerlo
+          if (estatusPagoCalculado === 'Pagado') {
+            return {
+              ...exp,
+              estatusPago: 'Pagado'
+            };
+          }
+          
+          // Para cualquier otro estatus, recalcular basándose en la fecha
+          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+          if (fechaVencimiento) {
+            const fechaVenc = new Date(fechaVencimiento);
+            const hoy = new Date();
+            hoy.setHours(0, 0, 0, 0);
+            fechaVenc.setHours(0, 0, 0, 0);
+            
+            if (fechaVenc < hoy) {
+              estatusPagoCalculado = 'Vencido';
             } else {
               estatusPagoCalculado = 'Pendiente';
             }
+          } else {
+            estatusPagoCalculado = 'Pendiente';
           }
           
-          // Los datos de Persona Moral ya vienen del backend enriquecidos
           return {
             ...exp,
             estatusPago: estatusPagoCalculado
           };
         });
         
-        console.log('✅ Expedientes cargados con datos de cliente enriquecidos:', {
-          cantidad: expedientesConEstatus.length,
-          ejemplo: expedientesConEstatus[0] ? {
-            id: expedientesConEstatus[0].id,
-            nombre: expedientesConEstatus[0].nombre,
-            razon_social: expedientesConEstatus[0].razon_social,
-            rfc: expedientesConEstatus[0].rfc,
-            numero_identificacion: expedientesConEstatus[0].numero_identificacion
-          } : 'sin expedientes'
-        });
+        console.log('✅ Expedientes procesados:', expedientesProcesados.length);
         
-        setExpedientes(expedientesConEstatus);
+        // Debug: Verificar coincidencias cliente_id
+        if (expedientesProcesados.length > 0 && Object.keys(mapa).length > 0) {
+          const primerExp = expedientesProcesados[0];
+          console.log('🔍 Debug primer expediente:');
+          console.log('   - cliente_id del expediente:', primerExp.cliente_id, '(tipo:', typeof primerExp.cliente_id, ')');
+          console.log('   - IDs disponibles en mapa:', Object.keys(mapa));
+          console.log('   - Cliente encontrado?:', mapa[primerExp.cliente_id] ? '✅ SÍ' : '❌ NO');
+        }
         
-        // Detectar pólizas duplicadas (mismo número, compañía y vigencia)
-        if (expedientesConEstatus.length > 0) {
+        setExpedientes(expedientesProcesados);
+        
+        // Detectar pólizas duplicadas
+        if (expedientesProcesados.length > 0) {
           const grupos = {};
-          expedientesConEstatus.forEach(exp => {
+          expedientesProcesados.forEach(exp => {
             if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
               const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
               if (!grupos[clave]) {
@@ -4224,19 +4362,20 @@ const ModuloExpedientes = () => {
             duplicados.forEach(([clave, exps]) => {
               console.warn(`  📋 ${clave}:`, exps.map(e => ({
                 id: e.id,
-                cliente: `${e.nombre} ${e.apellido_paterno}`,
+                cliente_id: e.cliente_id,
                 etapa: e.etapa_activa
               })));
             });
           }
         }
       } catch (err) {
-        console.error('Error al cargar expedientes:', err);
+        console.error('Error al cargar datos:', err);
       }
     };
     
-    cargarExpedientesConClientes();
+    cargarDatos();
   }, []);
+  
   const [vistaActual, setVistaActual] = useState('lista');
   const [expedienteSeleccionado, setExpedienteSeleccionado] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -4349,6 +4488,13 @@ const estadoInicialFormulario = {
   telefono_movil: '',
   email: '',
   rfc: '',
+  // Campos de contacto adicional (Persona Física) o contacto principal (Persona Moral)
+  contacto_nombre: '',
+  contacto_apellido_paterno: '',
+  contacto_apellido_materno: '',
+  contacto_email: '',
+  contacto_telefono_fijo: '',
+  contacto_telefono_movil: '',
   compania: '',
   producto: '',
   etapa_activa: 'En cotización',
@@ -4722,6 +4868,7 @@ const estadoInicialFormulario = {
       // Manejar tanto camelCase como snake_case del backend
       const datosFormulario = {
         cliente_id: cliente.id,
+        // Datos principales del cliente (solo lectura)
         nombre: cliente.nombre || '',
         apellido_paterno: cliente.apellido_paterno || cliente.apellidoPaterno || '',
         apellido_materno: cliente.apellido_materno || cliente.apellidoMaterno || '',
@@ -4730,7 +4877,14 @@ const estadoInicialFormulario = {
         email: cliente.email || '',
         telefono_fijo: cliente.telefono_fijo || cliente.telefonoFijo || '',
         telefono_movil: cliente.telefono_movil || cliente.telefonoMovil || '',
-        rfc: cliente.rfc || ''
+        rfc: cliente.rfc || '',
+        // Datos de contacto adicional/gestor (editables)
+        contacto_nombre: cliente.contacto_nombre || cliente.contactoNombre || '',
+        contacto_apellido_paterno: cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || '',
+        contacto_apellido_materno: cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || '',
+        contacto_email: cliente.contacto_email || cliente.contactoEmail || '',
+        contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
+        contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || ''
       };
 
       console.log('📝 Datos que se aplicarán al formulario:', datosFormulario);
@@ -4752,7 +4906,13 @@ const estadoInicialFormulario = {
         email: '',
         telefono_fijo: '',
         telefono_movil: '',
-        rfc: ''
+        rfc: '',
+        contacto_nombre: '',
+        contacto_apellido_paterno: '',
+        contacto_apellido_materno: '',
+        contacto_email: '',
+        contacto_telefono_fijo: '',
+        contacto_telefono_movil: ''
       }));
     }
   }, []);
@@ -4865,25 +5025,39 @@ const estadoInicialFormulario = {
           tipoPersona: clienteSeleccionado.tipoPersona
         });
         
+        // LÓGICA CORRECTA:
+        // - Persona Moral: usa contacto_* para el contacto principal
+        // - Persona Física: usa email/telefono_* para el cliente + contacto_* para el gestor (opcional)
+        
         let datosActualizados = {};
         
-        // TANTO Persona Física como Persona Moral usan los mismos campos de contacto
-        // La diferencia es conceptual:
-        // - Persona Física: el contacto es EL MISMO CLIENTE
-        // - Persona Moral: el contacto es LA PERSONA con quien hablas en la empresa
-        datosActualizados = {
-          nombre: formulario.nombre || '',
-          apellido_paterno: formulario.apellido_paterno || '',
-          apellido_materno: formulario.apellido_materno || '',
-          email: formulario.email || '',
-          telefono_fijo: formulario.telefono_fijo || '',
-          telefono_movil: formulario.telefono_movil || ''
-        };
-        
         if (clienteSeleccionado.tipoPersona === 'Persona Moral') {
+          // Persona Moral: solo actualizar contacto_* (contacto principal)
+          datosActualizados = {
+            contacto_nombre: formulario.contacto_nombre || null,
+            contacto_apellido_paterno: formulario.contacto_apellido_paterno || null,
+            contacto_apellido_materno: formulario.contacto_apellido_materno || null,
+            contacto_email: formulario.contacto_email || null,
+            contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
+            contacto_telefono_movil: formulario.contacto_telefono_movil || null
+          };
           console.log('📝 Actualizando CONTACTO PRINCIPAL de Persona Moral:', datosActualizados);
         } else {
-          console.log('📝 Actualizando CONTACTO (cliente) de Persona Física:', datosActualizados);
+          // Persona Física: actualizar campos principales DEL CLIENTE + contacto_* del gestor
+          datosActualizados = {
+            // Datos principales del cliente (editables desde póliza)
+            email: formulario.email || null,
+            telefonoMovil: formulario.telefono_movil || null,
+            telefonoFijo: formulario.telefono_fijo || null,
+            // Datos del gestor/contacto adicional (opcional)
+            contacto_nombre: formulario.contacto_nombre || null,
+            contacto_apellido_paterno: formulario.contacto_apellido_paterno || null,
+            contacto_apellido_materno: formulario.contacto_apellido_materno || null,
+            contacto_email: formulario.contacto_email || null,
+            contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
+            contacto_telefono_movil: formulario.contacto_telefono_movil || null
+          };
+          console.log('📝 Actualizando datos de CLIENTE + GESTOR de Persona Física:', datosActualizados);
         }
         
         const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
@@ -4929,9 +5103,27 @@ const estadoInicialFormulario = {
       ...formularioConCalculos
     };
     
-    // NO ELIMINAR los datos del cliente - los necesitamos guardados en la BD
-    // para que se devuelvan cuando se recargue la tabla
-    console.log('✅ Enviando datos del cliente junto con el expediente');
+    // ELIMINAR campos que pertenecen al cliente, no al expediente
+    // Solo enviamos cliente_id, no sus datos individuales
+    delete expedientePayload.nombre;
+    delete expedientePayload.apellido_paterno;
+    delete expedientePayload.apellido_materno;
+    delete expedientePayload.email;
+    delete expedientePayload.telefono_fijo;
+    delete expedientePayload.telefono_movil;
+    delete expedientePayload.razon_social;
+    delete expedientePayload.nombre_comercial;
+    delete expedientePayload.rfc;
+    delete expedientePayload.curp;
+    // Eliminar campos de contacto (pertenecen al cliente, no al expediente)
+    delete expedientePayload.contacto_nombre;
+    delete expedientePayload.contacto_apellido_paterno;
+    delete expedientePayload.contacto_apellido_materno;
+    delete expedientePayload.contacto_email;
+    delete expedientePayload.contacto_telefono_fijo;
+    delete expedientePayload.contacto_telefono_movil;
+    
+    console.log('🧹 Campos de cliente y contacto eliminados del payload (solo se envía cliente_id)');
     
     // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
     if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
@@ -5086,30 +5278,107 @@ const estadoInicialFormulario = {
       const expedientes = await resExpedientes.json();
       console.log(`📊 ${expedientes.length} expedientes obtenidos del backend`);
       
-      // Calcular estatus de pago para cada uno, pero mantener todos los datos del expediente
-      const expedientesConEstatus = expedientes.map(exp => {
-        let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
-        
-        // Si el estatus es inválido, calcularlo desde la fecha
-        const estatusInvalidos = ['Sin definir', 'Pago por vencer', null, undefined, ''];
-        if (estatusInvalidos.includes(estatusPagoCalculado)) {
-          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-          if (fechaVencimiento) {
-            const fechaVenc = new Date(fechaVencimiento);
-            const hoy = new Date();
-            hoy.setHours(0, 0, 0, 0);
-            fechaVenc.setHours(0, 0, 0, 0);
-            
-            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
-          } else {
-            estatusPagoCalculado = 'Pendiente';
+      // Log del PRIMER expediente completo para ver estructura
+      if (expedientes.length > 0) {
+        console.log('🔍 EJEMPLO - Primer expediente recibido:', {
+          ...expedientes[0],
+          _todos_los_campos: Object.keys(expedientes[0])
+        });
+      }
+      
+      // Debug: verificar coberturas en expedientes
+      let expedientesConCoberturas = 0;
+      expedientes.forEach((exp, index) => {
+        if (exp.coberturas) {
+          expedientesConCoberturas++;
+          if (index < 3) { // Solo los primeros 3 para no saturar
+            console.log(`🛡️ Expediente ${exp.numero_poliza} tiene coberturas:`, {
+              tipo: typeof exp.coberturas,
+              es_array: Array.isArray(exp.coberturas),
+              es_string: typeof exp.coberturas === 'string',
+              cantidad: Array.isArray(exp.coberturas) ? exp.coberturas.length : 'N/A',
+              longitud_string: typeof exp.coberturas === 'string' ? exp.coberturas.length : 'N/A',
+              preview: typeof exp.coberturas === 'string' ? exp.coberturas.substring(0, 100) + '...' : exp.coberturas
+            });
+          }
+        }
+      });
+      console.log(`📈 Total de expedientes con coberturas: ${expedientesConCoberturas} de ${expedientes.length}`);
+      
+      // 2. Obtener todos los clientes
+      const resClientes = await fetch(`${API_URL}/api/clientes`);
+      const clientesData = await resClientes.json();
+      console.log('👥 Clientes obtenidos:', clientesData.length);
+      
+      // 3. Crear un mapa de clientes por ID para búsqueda rápida
+      const mapa = {};
+      clientesData.forEach(cliente => {
+        mapa[cliente.id] = cliente;
+      });
+      console.log('🗺️ Mapa de clientes creado con', Object.keys(mapa).length, 'entradas');
+      
+      // 4. Actualizar estados de clientes
+      setClientes(clientesData);
+      setClientesMap(mapa);
+      console.log('✅ Estados de clientes actualizados');
+      
+      // 5. Enriquecer cada expediente con los datos del cliente
+      const expedientesEnriquecidos = expedientes.map(exp => {
+        // Parsear coberturas si vienen como string JSON
+        if (exp.coberturas && typeof exp.coberturas === 'string') {
+          try {
+            exp.coberturas = JSON.parse(exp.coberturas);
+            console.log(`✅ Coberturas parseadas para ${exp.numero_poliza}:`, exp.coberturas.length);
+          } catch (error) {
+            console.error(`❌ Error parseando coberturas para ${exp.numero_poliza}:`, error);
+            exp.coberturas = null;
           }
         }
         
-        return {
-          ...exp,
-          estatusPago: estatusPagoCalculado
-        };
+        // Debug: mostrar TODOS los campos del expediente
+        console.log('🔍 Expediente:', exp.numero_poliza, 'Campos relacionados con cliente:', {
+          cliente_id: exp.cliente_id,
+          clienteId: exp.clienteId,
+          nombre: exp.nombre,
+          apellido_paterno: exp.apellido_paterno,
+          razonSocial: exp.razonSocial
+        });
+        
+        const cliente = mapa[exp.cliente_id];
+        
+        // Debug para póliza específica
+        if (exp.numero_poliza === '1970064839') {
+          console.log('🔍 DEBUG Póliza 1970064839:', {
+            expediente_id: exp.id,
+            cliente_id: exp.cliente_id,
+            cliente_encontrado: !!cliente,
+            expediente_nombre: exp.nombre,
+            expediente_razon_social: exp.razon_social,
+            expediente_apellido_paterno: exp.apellido_paterno
+          });
+        }
+        
+        // IMPORTANTE: Enriquecer con datos del cliente actual desde el mapa
+        // Esto asegura que siempre se muestren los datos correctos del cliente
+        if (cliente) {
+          return {
+            ...exp,
+            // Datos del cliente desde la tabla clientes (datos actuales)
+            nombre: cliente.nombre || '',
+            apellido_paterno: cliente.apellidoPaterno || '',
+            apellido_materno: cliente.apellidoMaterno || '',
+            razon_social: cliente.razonSocial || '',
+            nombre_comercial: cliente.nombreComercial || '',
+            rfc: cliente.rfc || '',
+            email: cliente.email || '',
+            telefono_movil: cliente.telefonoMovil || '',
+            telefono_fijo: cliente.telefonoFijo || ''
+          };
+        } else {
+          // Si no se encuentra el cliente, mantener los datos del expediente
+          console.warn(`⚠️ Cliente ${exp.cliente_id} no encontrado para expediente ${exp.numero_poliza}`);
+          return exp;
+        }
       });
       
       console.log('✅ Expedientes recargados desde API:', expedientesConEstatus.length);
@@ -5171,6 +5440,7 @@ const eliminarExpediente = useCallback((id) => {
             editarExpediente={editarExpediente}
             eliminarExpediente={eliminarExpediente}
             calcularProximoPago={calcularProximoPago}
+            clientesMap={clientesMap}
           />
         )}
         

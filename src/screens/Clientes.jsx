@@ -161,9 +161,32 @@ const ModuloClientes = () => {
         if (resultadoClientes.success) {
           console.log(`✅ ${resultadoClientes.data.length} clientes cargados desde el backend`);
           
-          // Parsear contactos si vienen como string
+          // Parsear contactos si vienen como string Y normalizar campos de contacto
           const clientesParseados = resultadoClientes.data.map(cliente => ({
             ...cliente,
+            // Normalizar campos de contacto principal (snake_case → camelCase)
+            contacto_nombre: cliente.contacto_nombre || cliente.contactoNombre || '',
+            contacto_apellido_paterno: cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || '',
+            contacto_apellido_materno: cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || '',
+            contacto_email: cliente.contacto_email || cliente.contactoEmail || '',
+            contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
+            contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || '',
+            contacto_puesto: cliente.contacto_puesto || cliente.contactoPuesto || '',
+            // Normalizar fechaRegistro (usar created_at como respaldo)
+            fechaRegistro: cliente.fecha_registro || cliente.fechaRegistro || cliente.created_at || cliente.fecha_alta || cliente.fechaAlta || '',
+            // Normalizar categoria (puede venir como objeto o string)
+            categoria: (() => {
+              // Si categoria es un objeto (ej: {id: 1, nombre: 'Normal'}), extraer el nombre
+              if (cliente.categoria && typeof cliente.categoria === 'object') {
+                return cliente.categoria.nombre || cliente.categoria.name || 'Normal';
+              }
+              // Si es string, usarlo directamente
+              if (typeof cliente.categoria === 'string') return cliente.categoria;
+              // Si tiene segmento, usarlo
+              if (cliente.segmento) return cliente.segmento;
+              // Por defecto
+              return 'Normal';
+            })(),
             contactos: (() => {
               if (!cliente.contactos) return [];
               if (Array.isArray(cliente.contactos)) return cliente.contactos;
@@ -182,9 +205,21 @@ const ModuloClientes = () => {
           // Log de TODOS los campos del primer cliente (si existe)
           if (clientesParseados.length > 0) {
             console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', clientesParseados[0]);
-            console.log('🔑 ID del cliente:', {
+            console.log('� ID del cliente:', {
               id: clientesParseados[0].id,
               tipo: typeof clientesParseados[0].id
+            });
+            console.log('�📅 Campos de fecha:', {
+              fecha_registro: clientesParseados[0].fecha_registro,
+              fechaRegistro: clientesParseados[0].fechaRegistro,
+              fecha_alta: clientesParseados[0].fecha_alta,
+              fechaAlta: clientesParseados[0].fechaAlta,
+              created_at: clientesParseados[0].created_at
+            });
+            console.log('🏷️ Campos de categoría:', {
+              categoria: clientesParseados[0].categoria,
+              categoria_id: clientesParseados[0].categoria_id,
+              segmento: clientesParseados[0].segmento
             });
           }
           
@@ -195,15 +230,17 @@ const ModuloClientes = () => {
                 tipoPersona: cliente.tipoPersona,
                 nombre: cliente.nombre,
                 apellidoPaterno: cliente.apellidoPaterno,
-                apellidoMaterno: cliente.apellidoMaterno,
                 razonSocial: cliente.razonSocial,
                 email: cliente.email,
                 telefonoFijo: cliente.telefonoFijo,
                 telefonoMovil: cliente.telefonoMovil,
+                // Campos de contacto normalizados
+                contacto_nombre: cliente.contacto_nombre,
+                contacto_email: cliente.contacto_email,
+                contacto_telefono_fijo: cliente.contacto_telefono_fijo,
+                contacto_telefono_movil: cliente.contacto_telefono_movil,
                 contactos: cliente.contactos,
-                contactos_tipo: typeof cliente.contactos,
-                contactos_cantidad: Array.isArray(cliente.contactos) ? cliente.contactos.length : 'No es array',
-                documentos_cantidad: cliente.documentos?.length || 0
+                contactos_cantidad: Array.isArray(cliente.contactos) ? cliente.contactos.length : 'No es array'
               });
             }
           });
@@ -313,14 +350,14 @@ const ModuloClientes = () => {
     email: '',
     telefonoFijo: '',
     telefonoMovil: '',
-    // Campos del gestor/contacto (solo Persona Física)
-    contactoNombre: '',
-    contactoApellidoPaterno: '',
-    contactoApellidoMaterno: '',
-    contactoEmail: '',
-    contactoTelefonoFijo: '',
-    contactoTelefonoMovil: '',
-    contactoPuesto: '',
+    // Campos del contacto principal (para ambos tipos)
+    contacto_nombre: '',
+    contacto_apellido_paterno: '',
+    contacto_apellido_materno: '',
+    contacto_email: '',
+    contacto_telefono_fijo: '',
+    contacto_telefono_movil: '',
+    contacto_puesto: '',
     direccion: '',
     colonia: '',
     municipio: '',
@@ -444,14 +481,14 @@ const ModuloClientes = () => {
       telefonoFijo: formularioCliente.telefonoFijo,
       telefonoMovil: formularioCliente.telefonoMovil,
       
-      // Gestor/Contacto Principal (solo Persona Física)
-      contactoNombre: formularioCliente.contactoNombre,
-      contactoApellidoPaterno: formularioCliente.contactoApellidoPaterno,
-      contactoApellidoMaterno: formularioCliente.contactoApellidoMaterno,
-      contactoEmail: formularioCliente.contactoEmail,
-      contactoTelefonoFijo: formularioCliente.contactoTelefonoFijo,
-      contactoTelefonoMovil: formularioCliente.contactoTelefonoMovil,
-      contactoPuesto: formularioCliente.contactoPuesto,
+      // Contacto Principal (para ambos tipos de persona)
+      contacto_nombre: formularioCliente.contacto_nombre,
+      contacto_apellido_paterno: formularioCliente.contacto_apellido_paterno,
+      contacto_apellido_materno: formularioCliente.contacto_apellido_materno,
+      contacto_email: formularioCliente.contacto_email,
+      contacto_telefono_fijo: formularioCliente.contacto_telefono_fijo,
+      contacto_telefono_movil: formularioCliente.contacto_telefono_movil,
+      contacto_puesto: formularioCliente.contacto_puesto,
       
       // Dirección
       direccion: formularioCliente.direccion,
@@ -608,14 +645,14 @@ const ModuloClientes = () => {
       telefonoMovil: cliente.telefonoMovil || cliente.telefono_movil || '',
       codigoPostal: cliente.codigoPostal || cliente.codigo_postal || '',
       tipoPersona: cliente.tipoPersona || cliente.tipo_persona || 'Persona Física',
-      // Mapear campos de gestor/contacto (Persona Física)
-      contactoNombre: cliente.contactoNombre || cliente.contacto_nombre || '',
-      contactoApellidoPaterno: cliente.contactoApellidoPaterno || cliente.contacto_apellido_paterno || '',
-      contactoApellidoMaterno: cliente.contactoApellidoMaterno || cliente.contacto_apellido_materno || '',
-      contactoEmail: cliente.contactoEmail || cliente.contacto_email || '',
-      contactoTelefonoFijo: cliente.contactoTelefonoFijo || cliente.contacto_telefono_fijo || '',
-      contactoTelefonoMovil: cliente.contactoTelefonoMovil || cliente.contacto_telefono_movil || '',
-      contactoPuesto: cliente.contactoPuesto || cliente.contacto_puesto || '',
+      // Mapear campos de contacto principal (para ambos tipos de persona)
+      contacto_nombre: cliente.contacto_nombre || '',
+      contacto_apellido_paterno: cliente.contacto_apellido_paterno || '',
+      contacto_apellido_materno: cliente.contacto_apellido_materno || '',
+      contacto_email: cliente.contacto_email || '',
+      contacto_telefono_fijo: cliente.contacto_telefono_fijo || '',
+      contacto_telefono_movil: cliente.contacto_telefono_movil || '',
+      contacto_puesto: cliente.contacto_puesto || '',
       estado: normalizarEstado(cliente.estado),
       // Asegurar que contactos sea un array
       contactos: (() => {
@@ -676,9 +713,53 @@ const ModuloClientes = () => {
 
   // Función para ver detalles
   const verDetallesCliente = useCallback((cliente) => {
-    // Parsear contactos si vienen como string
+    // Función helper para sanitizar valores (convertir objetos a strings)
+    const sanitizarValor = (valor) => {
+      if (valor === null || valor === undefined) return '';
+      if (typeof valor === 'object') {
+        // Si es un Date, formatear
+        if (valor instanceof Date) return valor.toISOString().split('T')[0];
+        // Si es otro objeto, convertir a JSON o retornar string vacío
+        return '';
+      }
+      return valor;
+    };
+
+    // Parsear contactos si vienen como string Y sanitizar todos los campos
     const clienteConContactos = {
       ...cliente,
+      // Sanitizar campos principales
+      nombre: sanitizarValor(cliente.nombre),
+      apellidoPaterno: sanitizarValor(cliente.apellidoPaterno || cliente.apellido_paterno),
+      apellidoMaterno: sanitizarValor(cliente.apellidoMaterno || cliente.apellido_materno),
+      razonSocial: sanitizarValor(cliente.razonSocial || cliente.razon_social),
+      nombreComercial: sanitizarValor(cliente.nombreComercial || cliente.nombre_comercial),
+      email: sanitizarValor(cliente.email),
+      telefonoFijo: sanitizarValor(cliente.telefonoFijo || cliente.telefono_fijo),
+      telefonoMovil: sanitizarValor(cliente.telefonoMovil || cliente.telefono_movil),
+      rfc: sanitizarValor(cliente.rfc),
+      curp: sanitizarValor(cliente.curp),
+      direccion: sanitizarValor(cliente.direccion),
+      municipio: sanitizarValor(cliente.municipio),
+      estado: sanitizarValor(cliente.estado),
+      codigoPostal: sanitizarValor(cliente.codigoPostal || cliente.codigo_postal),
+      // Sanitizar campos de contacto
+      contacto_nombre: sanitizarValor(cliente.contacto_nombre),
+      contacto_apellido_paterno: sanitizarValor(cliente.contacto_apellido_paterno),
+      contacto_apellido_materno: sanitizarValor(cliente.contacto_apellido_materno),
+      contacto_email: sanitizarValor(cliente.contacto_email),
+      contacto_telefono_fijo: sanitizarValor(cliente.contacto_telefono_fijo),
+      contacto_telefono_movil: sanitizarValor(cliente.contacto_telefono_movil),
+      // Sanitizar fecha y categoría con lógica correcta
+      fechaRegistro: sanitizarValor(cliente.fechaRegistro || cliente.fecha_registro || cliente.created_at || cliente.fechaAlta || cliente.fecha_alta),
+      categoria: (() => {
+        // Si categoria es un objeto, extraer el nombre
+        if (cliente.categoria && typeof cliente.categoria === 'object') {
+          return sanitizarValor(cliente.categoria.nombre || cliente.categoria.name || 'Normal');
+        }
+        // Si es string, usarlo directamente
+        return sanitizarValor(cliente.categoria || cliente.segmento) || 'Normal';
+      })(),
       contactos: (() => {
         if (!cliente.contactos) return [];
         if (Array.isArray(cliente.contactos)) return cliente.contactos;
@@ -695,17 +776,7 @@ const ModuloClientes = () => {
     };
     
     console.log('👁️ ==== VER DETALLES DEL CLIENTE ====');
-    console.log('Cliente completo:', clienteConContactos);
-    console.log('Campos de contacto principal:', {
-      tipoPersona: clienteConContactos.tipoPersona,
-      nombre: clienteConContactos.nombre,
-      apellidoPaterno: clienteConContactos.apellidoPaterno,
-      apellidoMaterno: clienteConContactos.apellidoMaterno,
-      email: clienteConContactos.email,
-      telefonoMovil: clienteConContactos.telefonoMovil,
-      telefonoFijo: clienteConContactos.telefonoFijo
-    });
-    console.log('Array de contactos:', clienteConContactos.contactos);
+    console.log('Cliente completo sanitizado:', clienteConContactos);
     console.log('====================================');
     
     setClienteSeleccionado(clienteConContactos);
@@ -1030,18 +1101,34 @@ const ModuloClientes = () => {
                           </td>
                           <td>
                             <div>
+                              {/* Nombre del Cliente */}
                               <div className="fw-semibold" style={{ fontSize: '0.9rem' }}>
                                 {cliente.tipoPersona === 'Persona Física' ? 
                                   `${cliente.nombre} ${cliente.apellidoPaterno} ${cliente.apellidoMaterno || ''}` :
                                   cliente.razonSocial
                                 }
                               </div>
-                              <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
-                                📧 {cliente.email || 'Sin email'}
-                              </small>
-                              <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
-                                📱 {cliente.telefonoMovil || 'N/A'} {cliente.telefonoFijo && `• ☎️ ${cliente.telefonoFijo}`}
-                              </small>
+                              
+                              {/* Contacto Principal - Solo si existe */}
+                              {(cliente.contacto_nombre || cliente.contacto_email || cliente.contacto_telefono_fijo || cliente.contacto_telefono_movil) && (
+                                <>
+                                  <div className="text-muted mt-1" style={{ fontSize: '0.8rem', borderTop: '1px solid #eee', paddingTop: '4px' }}>
+                                    <strong>Contacto:</strong> {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
+                                  </div>
+                                  {cliente.contacto_email && (
+                                    <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                      📧 {cliente.contacto_email}
+                                    </small>
+                                  )}
+                                  {(cliente.contacto_telefono_movil || cliente.contacto_telefono_fijo) && (
+                                    <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                      {cliente.contacto_telefono_movil && `📱 ${cliente.contacto_telefono_movil}`}
+                                      {cliente.contacto_telefono_fijo && cliente.contacto_telefono_movil && ' • '}
+                                      {cliente.contacto_telefono_fijo && `☎️ ${cliente.contacto_telefono_fijo}`}
+                                    </small>
+                                  )}
+                                </>
+                              )}
                             </div>
                           </td>
                           <td>
@@ -1539,8 +1626,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.nombre || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, nombre: e.target.value})}
+                      value={formularioCliente.contacto_nombre || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_nombre: e.target.value})}
                       placeholder="Nombre(s) del contacto"
                     />
                   </div>
@@ -1549,8 +1636,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.apellidoPaterno || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, apellidoPaterno: e.target.value})}
+                      value={formularioCliente.contacto_apellido_paterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_apellido_paterno: e.target.value})}
                       placeholder="Apellido paterno"
                     />
                   </div>
@@ -1559,8 +1646,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.apellidoMaterno || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, apellidoMaterno: e.target.value})}
+                      value={formularioCliente.contacto_apellido_materno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_apellido_materno: e.target.value})}
                       placeholder="Apellido materno"
                     />
                   </div>
@@ -1569,8 +1656,8 @@ const ModuloClientes = () => {
                     <input
                       type="email"
                       className="form-control"
-                      value={formularioCliente.email || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, email: e.target.value})}
+                      value={formularioCliente.contacto_email || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_email: e.target.value})}
                       placeholder="correo@empresa.com"
                     />
                   </div>
@@ -1579,8 +1666,8 @@ const ModuloClientes = () => {
                     <input
                       type="tel"
                       className="form-control"
-                      value={formularioCliente.telefonoFijo || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, telefonoFijo: e.target.value})}
+                      value={formularioCliente.contacto_telefono_fijo || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_telefono_fijo: e.target.value})}
                       placeholder="55 5555 5555"
                     />
                   </div>
@@ -1589,8 +1676,8 @@ const ModuloClientes = () => {
                     <input
                       type="tel"
                       className="form-control"
-                      value={formularioCliente.telefonoMovil || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, telefonoMovil: e.target.value})}
+                      value={formularioCliente.contacto_telefono_movil || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_telefono_movil: e.target.value})}
                       placeholder="55 5555 5555"
                     />
                   </div>
@@ -1772,8 +1859,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.contactoNombre || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoNombre: e.target.value})}
+                      value={formularioCliente.contacto_nombre || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_nombre: e.target.value})}
                       placeholder="Nombre"
                     />
                   </div>
@@ -1782,8 +1869,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.contactoApellidoPaterno || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoApellidoPaterno: e.target.value})}
+                      value={formularioCliente.contacto_apellido_paterno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_apellido_paterno: e.target.value})}
                       placeholder="Apellido Paterno"
                     />
                   </div>
@@ -1792,8 +1879,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.contactoApellidoMaterno || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoApellidoMaterno: e.target.value})}
+                      value={formularioCliente.contacto_apellido_materno || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_apellido_materno: e.target.value})}
                       placeholder="Apellido Materno"
                     />
                   </div>
@@ -1802,8 +1889,8 @@ const ModuloClientes = () => {
                     <input
                       type="email"
                       className="form-control"
-                      value={formularioCliente.contactoEmail || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoEmail: e.target.value})}
+                      value={formularioCliente.contacto_email || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_email: e.target.value})}
                       placeholder="correo@ejemplo.com"
                     />
                   </div>
@@ -1812,8 +1899,8 @@ const ModuloClientes = () => {
                     <input
                       type="tel"
                       className="form-control"
-                      value={formularioCliente.contactoTelefonoFijo || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoTelefonoFijo: e.target.value})}
+                      value={formularioCliente.contacto_telefono_fijo || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_telefono_fijo: e.target.value})}
                       placeholder="55 5555 5555"
                     />
                   </div>
@@ -1822,8 +1909,8 @@ const ModuloClientes = () => {
                     <input
                       type="tel"
                       className="form-control"
-                      value={formularioCliente.contactoTelefonoMovil || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoTelefonoMovil: e.target.value})}
+                      value={formularioCliente.contacto_telefono_movil || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_telefono_movil: e.target.value})}
                       placeholder="55 5555 5555"
                     />
                   </div>
@@ -1832,8 +1919,8 @@ const ModuloClientes = () => {
                     <input
                       type="text"
                       className="form-control"
-                      value={formularioCliente.contactoPuesto || ''}
-                      onChange={(e) => setFormularioCliente({...formularioCliente, contactoPuesto: e.target.value})}
+                      value={formularioCliente.contacto_puesto || ''}
+                      onChange={(e) => setFormularioCliente({...formularioCliente, contacto_puesto: e.target.value})}
                       placeholder="Ej: Hijo, Cónyuge, Contador, Asistente, etc."
                     />
                   </div>
@@ -1966,12 +2053,12 @@ const ModuloClientes = () => {
                     <div className="col-md-6">
                       <strong className="d-block text-muted">Categoría:</strong>
                       <span className={`badge ${
-                        clienteSeleccionado.segmento === 'VIP' ? 'bg-purple' :
-                        clienteSeleccionado.segmento === 'Premium' ? 'bg-warning' :
-                        clienteSeleccionado.segmento === 'Estándar' ? 'bg-info' :
+                        (clienteSeleccionado.categoria || clienteSeleccionado.segmento) === 'VIP' ? 'bg-purple' :
+                        (clienteSeleccionado.categoria || clienteSeleccionado.segmento) === 'Premium' ? 'bg-warning' :
+                        (clienteSeleccionado.categoria || clienteSeleccionado.segmento) === 'Estándar' ? 'bg-info' :
                         'bg-secondary'
                       }`}>
-                        {clienteSeleccionado.segmento}
+                        {clienteSeleccionado.categoria || clienteSeleccionado.segmento || 'Normal'}
                       </span>
                     </div>
                     <div className="col-md-6">
@@ -1982,7 +2069,15 @@ const ModuloClientes = () => {
                     </div>
                     <div className="col-md-6">
                       <strong className="d-block text-muted">Fecha de Alta:</strong>
-                      {clienteSeleccionado.fechaAlta}
+                      {(() => {
+                        const fecha = clienteSeleccionado.fechaRegistro || clienteSeleccionado.fecha_registro || clienteSeleccionado.fechaAlta || clienteSeleccionado.fecha_alta;
+                        if (!fecha) return '-';
+                        // Si es un objeto Date, convertir a string
+                        if (fecha instanceof Date) return fecha.toLocaleDateString('es-MX');
+                        // Si ya es string, mostrarlo
+                        if (typeof fecha === 'string') return new Date(fecha).toLocaleDateString('es-MX');
+                        return '-';
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1996,38 +2091,86 @@ const ModuloClientes = () => {
                   </h5>
                   
                   {clienteSeleccionado.tipoPersona === 'Persona Física' ? (
-                    // Para Persona Física - mostrar contacto único
-                    <div className="row g-3">
-                      <div className="col-md-6">
-                        <div className="d-flex align-items-center mb-2">
-                          <Mail size={16} className="text-muted me-2" />
-                          <strong className="text-muted">Email:</strong>
-                        </div>
-                        {clienteSeleccionado.email || '-'}
-                      </div>
-                      <div className="col-md-6">
-                        <div className="d-flex align-items-center mb-2">
-                          <Phone size={16} className="text-muted me-2" />
-                          <strong className="text-muted">Teléfonos:</strong>
-                        </div>
-                        <div>Móvil: {clienteSeleccionado.telefonoMovil || '-'}</div>
-                        <div>Fijo: {clienteSeleccionado.telefonoFijo || '-'}</div>
-                      </div>
-                      <div className="col-12">
-                        <div className="d-flex align-items-center mb-2">
-                          <MapPin size={16} className="text-muted me-2" />
-                          <strong className="text-muted">Dirección:</strong>
-                        </div>
-                        {clienteSeleccionado.direccion || '-'}
-                        {(clienteSeleccionado.municipio || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
-                          <div>
-                            {clienteSeleccionado.municipio && `${clienteSeleccionado.municipio}, `}
-                            {clienteSeleccionado.estado} 
-                            {clienteSeleccionado.codigoPostal && ` C.P. ${clienteSeleccionado.codigoPostal}`}
+                    // Para Persona Física - mostrar contacto del cliente + gestor si existe
+                    <>
+                      <div className="row g-3 mb-3">
+                        <div className="col-md-6">
+                          <div className="d-flex align-items-center mb-2">
+                            <Mail size={16} className="text-muted me-2" />
+                            <strong className="text-muted">Email:</strong>
                           </div>
-                        )}
+                          {clienteSeleccionado.email || '-'}
+                        </div>
+                        <div className="col-md-6">
+                          <div className="d-flex align-items-center mb-2">
+                            <Phone size={16} className="text-muted me-2" />
+                            <strong className="text-muted">Teléfonos:</strong>
+                          </div>
+                          <div>Móvil: {clienteSeleccionado.telefonoMovil || '-'}</div>
+                          <div>Fijo: {clienteSeleccionado.telefonoFijo || '-'}</div>
+                        </div>
+                        <div className="col-12">
+                          <div className="d-flex align-items-center mb-2">
+                            <MapPin size={16} className="text-muted me-2" />
+                            <strong className="text-muted">Dirección:</strong>
+                          </div>
+                          {clienteSeleccionado.direccion || '-'}
+                          {(clienteSeleccionado.municipio || clienteSeleccionado.estado || clienteSeleccionado.codigoPostal) && (
+                            <div>
+                              {clienteSeleccionado.municipio && `${clienteSeleccionado.municipio}, `}
+                              {clienteSeleccionado.estado} 
+                              {clienteSeleccionado.codigoPostal && ` C.P. ${clienteSeleccionado.codigoPostal}`}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                      
+                      {/* Gestor/Contacto Principal (si existe) */}
+                      {(clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre) && (
+                        <div className="card border-info mt-3">
+                          <div className="card-header bg-info bg-opacity-10 py-2">
+                            <strong className="text-info">
+                              <User size={16} className="me-2" />
+                              Gestor/Contacto Principal (Persona que gestiona las pólizas)
+                            </strong>
+                          </div>
+                          <div className="card-body">
+                            <div className="row g-3">
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <User size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Nombre:</strong>
+                                </div>
+                                <div>
+                                  {clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre || ''} {clienteSeleccionado.contacto_apellido_paterno || clienteSeleccionado.contactoApellidoPaterno || ''} {clienteSeleccionado.contacto_apellido_materno || clienteSeleccionado.contactoApellidoMaterno || ''}
+                                </div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Mail size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Email:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.contacto_email || clienteSeleccionado.contactoEmail || '-'}</div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Phone size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Teléfono Móvil:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contactoTelefonoMovil || '-'}</div>
+                              </div>
+                              <div className="col-md-6">
+                                <div className="d-flex align-items-center mb-1">
+                                  <Phone size={14} className="text-muted me-2" />
+                                  <strong className="text-muted small">Teléfono Fijo:</strong>
+                                </div>
+                                <div>{clienteSeleccionado.contacto_telefono_fijo || clienteSeleccionado.contactoTelefonoFijo || '-'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   ) : (
                     // Para Persona Moral - mostrar contacto principal + múltiples contactos
                     <>
@@ -2051,7 +2194,7 @@ const ModuloClientes = () => {
                                   <strong className="text-muted small">Nombre:</strong>
                                 </div>
                                 <div>
-                                  {clienteSeleccionado.nombre || '-'} {clienteSeleccionado.apellidoPaterno || ''} {clienteSeleccionado.apellidoMaterno || ''}
+                                  {clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre || '-'} {clienteSeleccionado.contacto_apellido_paterno || clienteSeleccionado.contactoApellidoPaterno || ''} {clienteSeleccionado.contacto_apellido_materno || clienteSeleccionado.contactoApellidoMaterno || ''}
                                 </div>
                               </div>
                               <div className="col-md-6">
@@ -2059,21 +2202,21 @@ const ModuloClientes = () => {
                                   <Mail size={14} className="text-muted me-2" />
                                   <strong className="text-muted small">Email:</strong>
                                 </div>
-                                <div>{clienteSeleccionado.email || '-'}</div>
+                                <div>{clienteSeleccionado.contacto_email || clienteSeleccionado.contactoEmail || '-'}</div>
                               </div>
                               <div className="col-md-6">
                                 <div className="d-flex align-items-center mb-1">
                                   <Phone size={14} className="text-muted me-2" />
                                   <strong className="text-muted small">Teléfono Móvil:</strong>
                                 </div>
-                                <div>{clienteSeleccionado.telefonoMovil || '-'}</div>
+                                <div>{clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contactoTelefonoMovil || '-'}</div>
                               </div>
                               <div className="col-md-6">
                                 <div className="d-flex align-items-center mb-1">
                                   <Phone size={14} className="text-muted me-2" />
                                   <strong className="text-muted small">Teléfono Fijo:</strong>
                                 </div>
-                                <div>{clienteSeleccionado.telefonoFijo || '-'}</div>
+                                <div>{clienteSeleccionado.contacto_telefono_fijo || clienteSeleccionado.contactoTelefonoFijo || '-'}</div>
                               </div>
                             </div>
                           </div>
