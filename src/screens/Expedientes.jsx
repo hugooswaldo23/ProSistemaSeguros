@@ -8,6 +8,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 
 // Configurar worker de PDF.js - ruta local copiada por Vite
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
+
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
   MIN_YEAR: 1900,
@@ -146,32 +147,52 @@ const InfoCliente = React.memo(({ expediente }) => {
     <div>
       <div className="fw-semibold">
         {esPersonaMoral ? (
-          // Persona Moral - Mostrar RAZÓN SOCIAL (empresa), NO nombre del contacto
+          // Persona Moral - Razón Social, Contacto Principal, Teléfonos y Email
           <div>
+            {/* 1. Razón Social */}
             <div>{expediente.razon_social}</div>
-            {expediente.nombre_comercial && (
-              <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                ({expediente.nombre_comercial})
-              </small>
-            )}
-            {(expediente.nombre || expediente.email || expediente.telefono_movil) && (
-              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-                {expediente.nombre && expediente.apellido_paterno && (
-                  <div>👤 Contacto: {expediente.nombre} {expediente.apellido_paterno}</div>
-                )}
-                {expediente.email && <div>📧 {expediente.email}</div>}
-                {expediente.telefono_movil && <div>📱 {expediente.telefono_movil}</div>}
+            
+            {/* 2. Contacto Principal */}
+            {(expediente.nombre || expediente.apellido_paterno) && (
+              <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '3px' }}>
+                👤 {expediente.nombre} {expediente.apellido_paterno}
               </div>
             )}
+            
+            {/* 3. Teléfonos y Email */}
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
+              {expediente.telefono_movil && (
+                <div>📱 {expediente.telefono_movil}</div>
+              )}
+              {expediente.telefono_fijo && (
+                <div>☎️ {expediente.telefono_fijo}</div>
+              )}
+              {expediente.email && (
+                <div>📧 {expediente.email}</div>
+              )}
+            </div>
           </div>
         ) : (
-          // Persona Física - Mostrar Nombre y Apellidos del cliente
-          <>{expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}</>
+          // Persona Física - Nombre, Teléfonos y Email
+          <div>
+            {/* 1. Nombre Completo */}
+            <div>{expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}</div>
+            
+            {/* 2. Teléfonos y Email */}
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
+              {expediente.telefono_movil && (
+                <div>📱 {expediente.telefono_movil}</div>
+              )}
+              {expediente.telefono_fijo && (
+                <div>☎️ {expediente.telefono_fijo}</div>
+              )}
+              {expediente.email && (
+                <div>📧 {expediente.email}</div>
+              )}
+            </div>
+          </div>
         )}
       </div>
-      {!esPersonaMoral && expediente.email && (
-        <small className="text-muted">{expediente.email}</small>
-      )}
       {expediente.producto === 'Autos' && expediente.marca && (
         <div>
           <small className="text-primary">
@@ -2764,7 +2785,7 @@ const Formulario = React.memo(({
             tipo_vehiculo: datosExtraidos.tipo_vehiculo,
             tipo_cobertura: datosExtraidos.tipo_cobertura,
             codigo_vehiculo: datosExtraidos.codigo_vehiculo
-            };
+          };
           });
           console.log('✅ Cálculos automáticos aplicados');
         }, 150);
@@ -4873,28 +4894,23 @@ const estadoInicialFormulario = {
         
         let datosActualizados = {};
         
+        // TANTO Persona Física como Persona Moral usan los mismos campos de contacto
+        // La diferencia es conceptual:
+        // - Persona Física: el contacto es EL MISMO CLIENTE
+        // - Persona Moral: el contacto es LA PERSONA con quien hablas en la empresa
+        datosActualizados = {
+          nombre: formulario.nombre || '',
+          apellido_paterno: formulario.apellido_paterno || '',
+          apellido_materno: formulario.apellido_materno || '',
+          email: formulario.email || '',
+          telefono_fijo: formulario.telefono_fijo || '',
+          telefono_movil: formulario.telefono_movil || ''
+        };
+        
         if (clienteSeleccionado.tipoPersona === 'Persona Moral') {
-          // PERSONA MORAL: nombre/apellidos/email/teléfonos son DEL CONTACTO (persona con quien hablas)
-          datosActualizados = {
-            nombre: formulario.nombre || '',
-            apellido_paterno: formulario.apellido_paterno || '',
-            apellido_materno: formulario.apellido_materno || '',
-            email: formulario.email || '',
-            telefono_fijo: formulario.telefono_fijo || '',
-            telefono_movil: formulario.telefono_movil || ''
-          };
-          console.log('📝 Actualizando CONTACTO de Persona Moral:', datosActualizados);
+          console.log('📝 Actualizando CONTACTO PRINCIPAL de Persona Moral:', datosActualizados);
         } else {
-          // PERSONA FÍSICA: nombre/apellidos son DEL CLIENTE, contacto_* son del GESTOR
-          datosActualizados = {
-            contacto_nombre: formulario.nombre || '',
-            contacto_apellido_paterno: formulario.apellido_paterno || '',
-            contacto_apellido_materno: formulario.apellido_materno || '',
-            contacto_email: formulario.email || '',
-            contacto_telefono_fijo: formulario.telefono_fijo || '',
-            contacto_telefono_movil: formulario.telefono_movil || ''
-          };
-          console.log('📝 Actualizando GESTOR/CONTACTO de Persona Física:', datosActualizados);
+          console.log('📝 Actualizando CONTACTO (cliente) de Persona Física:', datosActualizados);
         }
         
         const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
@@ -4922,6 +4938,21 @@ const estadoInicialFormulario = {
     const expedientePayload = {
       ...formularioConCalculos
     };
+    
+    // ELIMINAR campos que pertenecen al cliente, no al expediente
+    // Solo enviamos cliente_id, no sus datos individuales
+    delete expedientePayload.nombre;
+    delete expedientePayload.apellido_paterno;
+    delete expedientePayload.apellido_materno;
+    delete expedientePayload.email;
+    delete expedientePayload.telefono_fijo;
+    delete expedientePayload.telefono_movil;
+    delete expedientePayload.razon_social;
+    delete expedientePayload.nombre_comercial;
+    delete expedientePayload.rfc;
+    delete expedientePayload.curp;
+    
+    console.log('🧹 Campos de cliente eliminados del payload (solo se envía cliente_id)');
     
     // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
     if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
@@ -5145,19 +5176,27 @@ const estadoInicialFormulario = {
           });
         }
         
-        // IMPORTANTE: NO sobrescribir los datos del expediente con datos actuales del cliente
-        // El expediente debe mantener los datos que tenía cuando se creó la póliza
-        // Solo usar los datos que YA están en el expediente
-        return {
-          ...exp,
-          // Mantener los datos originales del expediente
-          nombre: exp.nombre || '',
-          apellido_paterno: exp.apellido_paterno || '',
-          apellido_materno: exp.apellido_materno || '',
-          razon_social: exp.razon_social || '',
-          nombre_comercial: exp.nombre_comercial || '',
-          rfc: exp.rfc || ''
-        };
+        // IMPORTANTE: Enriquecer con datos del cliente actual desde el mapa
+        // Esto asegura que siempre se muestren los datos correctos del cliente
+        if (cliente) {
+          return {
+            ...exp,
+            // Datos del cliente desde la tabla clientes (datos actuales)
+            nombre: cliente.nombre || '',
+            apellido_paterno: cliente.apellidoPaterno || '',
+            apellido_materno: cliente.apellidoMaterno || '',
+            razon_social: cliente.razonSocial || '',
+            nombre_comercial: cliente.nombreComercial || '',
+            rfc: cliente.rfc || '',
+            email: cliente.email || '',
+            telefono_movil: cliente.telefonoMovil || '',
+            telefono_fijo: cliente.telefonoFijo || ''
+          };
+        } else {
+          // Si no se encuentra el cliente, mantener los datos del expediente
+          console.warn(`⚠️ Cliente ${exp.cliente_id} no encontrado para expediente ${exp.numero_poliza}`);
+          return exp;
+        }
       });
       
       console.log('✅ Expedientes enriquecidos:', expedientesEnriquecidos.length);
