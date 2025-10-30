@@ -151,7 +151,6 @@ const ModuloClientes = () => {
   // Cargar clientes y expedientes desde el backend al montar el componente
   useEffect(() => {
     const cargarDatos = async () => {
-      console.log('🔄 Cargando datos desde el backend...');
       setCargando(true);
       
       try {
@@ -159,8 +158,6 @@ const ModuloClientes = () => {
         const resultadoClientes = await obtenerClientes();
         
         if (resultadoClientes.success) {
-          console.log(`✅ ${resultadoClientes.data.length} clientes cargados desde el backend`);
-          
           // Parsear contactos si vienen como string Y normalizar campos de contacto
           const clientesParseados = resultadoClientes.data.map(cliente => ({
             ...cliente,
@@ -194,7 +191,6 @@ const ModuloClientes = () => {
                 try {
                   return JSON.parse(cliente.contactos);
                 } catch (error) {
-                  console.error('Error al parsear contactos del cliente:', cliente.id, error);
                   return [];
                 }
               }
@@ -202,77 +198,17 @@ const ModuloClientes = () => {
             })()
           }));
           
-          // Log de TODOS los campos del primer cliente (si existe)
-          if (clientesParseados.length > 0) {
-            console.log('🔍 EJEMPLO - Primer cliente recibido del backend:', clientesParseados[0]);
-            console.log('� ID del cliente:', {
-              id: clientesParseados[0].id,
-              tipo: typeof clientesParseados[0].id
-            });
-            console.log('�📅 Campos de fecha:', {
-              fecha_registro: clientesParseados[0].fecha_registro,
-              fechaRegistro: clientesParseados[0].fechaRegistro,
-              fecha_alta: clientesParseados[0].fecha_alta,
-              fechaAlta: clientesParseados[0].fechaAlta,
-              created_at: clientesParseados[0].created_at
-            });
-            console.log('🏷️ Campos de categoría:', {
-              categoria: clientesParseados[0].categoria,
-              categoria_id: clientesParseados[0].categoria_id,
-              segmento: clientesParseados[0].segmento
-            });
-          }
-          
-          // Log de campos específicos para todos los clientes
-          clientesParseados.forEach((cliente, index) => {
-            if (index < 3) { // Solo los primeros 3 para no saturar
-              console.log(`📋 Cliente ${index + 1} (${cliente.codigo || cliente.id}):`, {
-                tipoPersona: cliente.tipoPersona,
-                nombre: cliente.nombre,
-                apellidoPaterno: cliente.apellidoPaterno,
-                razonSocial: cliente.razonSocial,
-                email: cliente.email,
-                telefonoFijo: cliente.telefonoFijo,
-                telefonoMovil: cliente.telefonoMovil,
-                // Campos de contacto normalizados
-                contacto_nombre: cliente.contacto_nombre,
-                contacto_email: cliente.contacto_email,
-                contacto_telefono_fijo: cliente.contacto_telefono_fijo,
-                contacto_telefono_movil: cliente.contacto_telefono_movil,
-                contactos: cliente.contactos,
-                contactos_cantidad: Array.isArray(cliente.contactos) ? cliente.contactos.length : 'No es array'
-              });
-            }
-          });
-          
           setClientes(clientesParseados);
         } else {
-          console.error('❌ Error al cargar clientes:', resultadoClientes.error);
           setClientes([]);
         }
         
         // Cargar expedientes (pólizas)
-        console.log('🔄 Cargando expedientes desde el backend...');
         const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
         const expedientesData = await resExpedientes.json();
-        console.log(`✅ ${expedientesData.length} expedientes cargados desde el backend`);
-        
-        // Log de expedientes con cliente_id
-        const expedientesConCliente = expedientesData.filter(exp => exp.cliente_id);
-        console.log(`📊 Expedientes con cliente_id: ${expedientesConCliente.length} de ${expedientesData.length}`);
-        
-        if (expedientesData.length > 0) {
-          console.log('🔍 EJEMPLO - Primer expediente:', expedientesData[0]);
-          console.log('🔑 cliente_id en expediente:', {
-            cliente_id: expedientesData[0].cliente_id,
-            tipo: typeof expedientesData[0].cliente_id
-          });
-        }
-        
         setExpedientes(expedientesData);
         
       } catch (err) {
-        console.error('❌ Excepción al cargar datos:', err);
         setClientes([]);
         setExpedientes([]);
       } finally {
@@ -519,37 +455,6 @@ const ModuloClientes = () => {
     };
 
     // Log detallado ANTES de enviar
-    console.log('💾 GUARDANDO CLIENTE - Datos del formulario:', {
-      tipoPersona: datosCliente.tipoPersona,
-      nombre: datosCliente.nombre,
-      apellidoPaterno: datosCliente.apellidoPaterno,
-      apellidoMaterno: datosCliente.apellidoMaterno,
-      razonSocial: datosCliente.razonSocial,
-      nombreComercial: datosCliente.nombreComercial,
-      rfc: datosCliente.rfc,
-      curp: datosCliente.curp,
-      fechaNacimiento: datosCliente.fechaNacimiento,
-      email: datosCliente.email,
-      telefonoFijo: datosCliente.telefonoFijo,
-      telefonoMovil: datosCliente.telefonoMovil,
-      direccion: datosCliente.direccion,
-      colonia: datosCliente.colonia,
-      municipio: datosCliente.municipio,
-      estado: datosCliente.estado,
-      codigoPostal: datosCliente.codigoPostal,
-      pais: datosCliente.pais,
-      segmento: datosCliente.segmento,
-      representanteLegal: datosCliente.representanteLegal,
-      puestoRepresentante: datosCliente.puestoRepresentante,
-      telefonoRepresentante: datosCliente.telefonoRepresentante,
-      emailRepresentante: datosCliente.emailRepresentante,
-      contactos_tipo: typeof datosCliente.contactos,
-      contactos_es_string: typeof datosCliente.contactos === 'string',
-      documentos_cantidad: formularioCliente.documentos?.length || 0,
-      activo: datosCliente.activo,
-      notas: datosCliente.notas
-    });
-
     setCargando(true);
 
     try {
@@ -557,20 +462,15 @@ const ModuloClientes = () => {
       
       if (modoEdicion) {
         // Actualizar cliente
-        console.log(`🔄 Actualizando cliente ID: ${datosCliente.id}`);
         resultado = await actualizarCliente(datosCliente.id, datosCliente);
       } else {
         // Crear cliente
-        console.log('🆕 Creando nuevo cliente');
         resultado = await crearCliente(datosCliente);
       }
-      
-      console.log('📡 Resultado del servidor:', resultado);
       
       if (resultado.success) {
         // Verificar que la respuesta tenga datos
         if (!resultado.data) {
-          console.error('⚠️ El servidor devolvió success pero sin datos');
           alert('El cliente fue guardado pero no se recibió confirmación completa. Recargando lista...');
           
           // Recargar toda la lista de clientes
@@ -579,8 +479,6 @@ const ModuloClientes = () => {
             setClientes(clientesActualizados.data);
           }
         } else {
-          console.log('✅ Cliente guardado correctamente:', resultado.data);
-          
           // Parsear arrays si vienen como strings
           const clienteGuardado = {
             ...resultado.data,
@@ -605,11 +503,9 @@ const ModuloClientes = () => {
         limpiarFormularioCliente();
         setVistaActual('clientes');
       } else {
-        console.error('❌ Error del servidor:', resultado.error);
         alert('Error al guardar cliente: ' + resultado.error);
       }
     } catch (err) {
-      console.error('💥 Excepción al guardar cliente:', err);
       alert('Error inesperado al guardar cliente: ' + err.message);
     } finally {
       setCargando(false);
@@ -669,8 +565,6 @@ const ModuloClientes = () => {
         return [];
       })()
     };
-    
-    console.log('📝 Cliente a editar - normalizado:', clienteNormalizado);
     
     setFormularioCliente(clienteNormalizado);
     setModoEdicion(true);
@@ -775,39 +669,25 @@ const ModuloClientes = () => {
       })()
     };
     
-    console.log('👁️ ==== VER DETALLES DEL CLIENTE ====');
-    console.log('Cliente completo sanitizado:', clienteConContactos);
-    console.log('====================================');
-    
     setClienteSeleccionado(clienteConContactos);
     setVistaActual('detalles-cliente');
   }, []);
 
   // Función para ver pólizas del cliente
   const verPolizasCliente = useCallback((cliente) => {
-    console.log('🔍 Ver pólizas del cliente:', {
-      cliente_id: cliente.id,
-      tipo: typeof cliente.id
-    });
-    
     // Filtrar pólizas usando cliente_id
-    const polizas = expedientes.filter(exp => {
-      const coincide = exp.cliente_id == cliente.id;  // Comparación flexible
-      if (coincide) {
-        console.log('✅ Póliza encontrada:', {
-          numero_poliza: exp.numero_poliza,
-          exp_cliente_id: exp.cliente_id,
-          exp_cliente_id_tipo: typeof exp.cliente_id,
-          cliente_id: cliente.id,
-          cliente_id_tipo: typeof cliente.id
-        });
-      }
-      return coincide;
-    });
+    const polizas = expedientes.filter(exp => exp.cliente_id == cliente.id);
     
-    console.log(`📋 Total pólizas encontradas: ${polizas.length}`);
+    // Asegurarse que el cliente tiene todos los campos necesarios
+    const clienteConDatos = {
+      ...cliente,
+      tipoPersona: cliente.tipoPersona || cliente.tipo_persona || 'Persona Física',
+      nombre: cliente.nombre || '',
+      apellidoPaterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
+      razonSocial: cliente.razonSocial || cliente.razon_social || ''
+    };
     
-    setClienteSeleccionado(cliente);
+    setClienteSeleccionado(clienteConDatos);
     setPolizasClienteSeleccionado(polizas);
     setMostrarModalPolizas(true);
   }, [expedientes]);
@@ -1171,6 +1051,7 @@ const ModuloClientes = () => {
                               style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
                               onClick={() => verPolizasCliente(cliente)}
                               disabled={expedientesCliente.length === 0}
+                              title={expedientesCliente.length === 0 ? "Sin pólizas" : "Ver pólizas de este cliente"}
                             >
                               <Package size={12} className="me-1" />
                               {expedientesCliente.length}
@@ -3288,118 +3169,6 @@ const ModuloClientes = () => {
             </div>
           </div>
         )}
-
-        {/* Modal para ver pólizas del cliente */}
-        {mostrarModalPolizas && clienteSeleccionado && (
-          <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-            <div className="modal-dialog modal-xl">
-              <div className="modal-content">
-                <div className="modal-header bg-primary text-white">
-                  <h5 className="modal-title">
-                    <Package size={20} className="me-2" />
-                    Pólizas de {clienteSeleccionado.tipoPersona === 'Persona Física' ? 
-                      `${clienteSeleccionado.nombre} ${clienteSeleccionado.apellidoPaterno}` :
-                      clienteSeleccionado.razonSocial
-                    }
-                  </h5>
-                  <button 
-                    type="button" 
-                    className="btn-close btn-close-white"
-                    onClick={() => {
-                      setMostrarModalPolizas(false);
-                      setPolizasClienteSeleccionado([]);
-                      setClienteSeleccionado(null);
-                    }}
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  {polizasClienteSeleccionado.length === 0 ? (
-                    <div className="alert alert-info">
-                      <AlertCircle size={16} className="me-2" />
-                      Este cliente no tiene pólizas registradas.
-                    </div>
-                  ) : (
-                    <div className="table-responsive">
-                      <table className="table table-hover">
-                        <thead className="table-light">
-                          <tr>
-                            <th>No. Póliza</th>
-                            <th>Tipo</th>
-                            <th>Aseguradora</th>
-                            <th>Prima</th>
-                            <th>Vigencia</th>
-                            <th>Estado</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {polizasClienteSeleccionado.map((poliza) => (
-                            <tr key={poliza.id}>
-                              <td>
-                                <strong className="text-primary">{poliza.numero_poliza || poliza.numeroPoliza || '-'}</strong>
-                              </td>
-                              <td>{poliza.tipo_de_poliza || poliza.tipoPoliza || '-'}</td>
-                              <td>{poliza.aseguradora || '-'}</td>
-                              <td>
-                                {poliza.prima_neta ? 
-                                  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(poliza.prima_neta) :
-                                  '-'
-                                }
-                              </td>
-                              <td>
-                                <small>
-                                  {poliza.vigencia_de ? new Date(poliza.vigencia_de).toLocaleDateString('es-MX') : '-'}
-                                  {' - '}
-                                  {poliza.vigencia_hasta ? new Date(poliza.vigencia_hasta).toLocaleDateString('es-MX') : '-'}
-                                </small>
-                              </td>
-                              <td>
-                                <span className={`badge ${
-                                  poliza.etapa_activa === 'Pagado' ? 'bg-success' :
-                                  poliza.etapa_activa === 'Emitida' ? 'bg-info' :
-                                  poliza.etapa_activa === 'En cotización' ? 'bg-warning' :
-                                  'bg-secondary'
-                                }`}>
-                                  {poliza.etapa_activa || '-'}
-                                </span>
-                              </td>
-                              <td>
-                                <button
-                                  className="btn btn-sm btn-outline-primary"
-                                  onClick={() => {
-                                    // Aquí podrías navegar al detalle del expediente
-                                    console.log('Ver detalle de póliza:', poliza.id);
-                                    alert(`Ver detalle de póliza ${poliza.numero_poliza || poliza.id}`);
-                                  }}
-                                  title="Ver detalles"
-                                >
-                                  <Eye size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-                <div className="modal-footer">
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      setMostrarModalPolizas(false);
-                      setPolizasClienteSeleccionado([]);
-                      setClienteSeleccionado(null);
-                    }}
-                  >
-                    Cerrar
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -3414,6 +3183,121 @@ const ModuloClientes = () => {
       {vistaActual === 'clientes' && renderListaClientes()}
       {vistaActual === 'formulario-cliente' && renderFormularioCliente()}
       {vistaActual === 'detalles-cliente' && renderDetallesCliente()}
+
+      {/* Modal para ver pólizas del cliente - FUERA de renderDetallesCliente */}
+      {mostrarModalPolizas && clienteSeleccionado && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-xl">
+            <div className="modal-content">
+              <div className="modal-header bg-primary text-white">
+                <h5 className="modal-title">
+                  <Package size={20} className="me-2" />
+                  Pólizas de {clienteSeleccionado.tipoPersona === 'Persona Física' ? 
+                    `${clienteSeleccionado.nombre} ${clienteSeleccionado.apellidoPaterno}` :
+                    clienteSeleccionado.razonSocial
+                  }
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white"
+                  onClick={() => {
+                    setMostrarModalPolizas(false);
+                    setPolizasClienteSeleccionado([]);
+                    setClienteSeleccionado(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body">
+                {polizasClienteSeleccionado.length === 0 ? (
+                  <div className="alert alert-info">
+                    <AlertCircle size={16} className="me-2" />
+                    Este cliente no tiene pólizas registradas.
+                  </div>
+                ) : (
+                  <div className="table-responsive">
+                    <table className="table table-hover">
+                      <thead className="table-light">
+                        <tr>
+                          <th>No. Póliza</th>
+                          <th>Tipo</th>
+                          <th>Aseguradora</th>
+                          <th>Prima</th>
+                          <th>Vigencia</th>
+                          <th>Estado</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {polizasClienteSeleccionado.map((poliza) => (
+                          <tr key={poliza.id}>
+                            <td>
+                              <strong className="text-primary">{poliza.numero_poliza || '-'}</strong>
+                            </td>
+                            <td>{poliza.producto || '-'}</td>
+                            <td>{poliza.compania || '-'}</td>
+                            <td>
+                              {poliza.prima_pagada ? 
+                                new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(parseFloat(poliza.prima_pagada)) :
+                                (poliza.total ? 
+                                  new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(parseFloat(poliza.total)) :
+                                  '-'
+                                )
+                              }
+                            </td>
+                            <td>
+                              <small>
+                                {poliza.inicio_vigencia ? new Date(poliza.inicio_vigencia).toLocaleDateString('es-MX') : '-'}
+                                {' - '}
+                                {poliza.termino_vigencia ? new Date(poliza.termino_vigencia).toLocaleDateString('es-MX') : '-'}
+                              </small>
+                            </td>
+                            <td>
+                              <span className={`badge ${
+                                poliza.etapa_activa === 'Pagado' ? 'bg-success' :
+                                poliza.etapa_activa === 'Emitida' ? 'bg-info' :
+                                poliza.etapa_activa === 'En cotización' ? 'bg-warning' :
+                                'bg-secondary'
+                              }`}>
+                                {poliza.etapa_activa || '-'}
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-sm btn-outline-primary"
+                                onClick={() => {
+                                  // Aquí podrías navegar al detalle del expediente
+                                  console.log('Ver detalle de póliza:', poliza.id);
+                                  alert(`Ver detalle de póliza ${poliza.numero_poliza || poliza.id}`);
+                                }}
+                                title="Ver detalles"
+                              >
+                                <Eye size={14} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalPolizas(false);
+                    setPolizasClienteSeleccionado([]);
+                    setClienteSeleccionado(null);
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
