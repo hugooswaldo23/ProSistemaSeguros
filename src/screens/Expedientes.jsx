@@ -4153,25 +4153,15 @@ const ModuloExpedientes = () => {
   useEffect(() => {
     const cargarExpedientesConClientes = async () => {
       try {
-        // 1. Obtener expedientes
+        console.log('📋 ============ CARGANDO EXPEDIENTES AL MONTAR ============');
+        
+        // Obtener expedientes (ahora vienen con datos de Persona Moral enriquecidos desde backend)
         const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
         const expedientes = await resExpedientes.json();
+        console.log(`📊 ${expedientes.length} expedientes obtenidos del backend (con datos de cliente enriquecidos)`);
         
-        // 2. Obtener todos los clientes
-        const resClientes = await fetch(`${API_URL}/api/clientes`);
-        const clientes = await resClientes.json();
-        
-        // 3. Crear un mapa de clientes por ID para búsqueda rápida
-        const clientesMap = {};
-        clientes.forEach(cliente => {
-          clientesMap[cliente.id] = cliente;
-        });
-        
-        // 4. Enriquecer cada expediente con los datos del cliente
-        const expedientesEnriquecidos = expedientes.map(exp => {
-          const cliente = clientesMap[exp.cliente_id];
-          
-          // Calcular estatusPago automáticamente si es necesario
+        // Procesar expedientes: solo calcular estatus de pago si es necesario
+        const expedientesConEstatus = expedientes.map(exp => {
           let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
           
           // Si el estatus es inválido o no existe, calcularlo desde la fecha
@@ -4194,47 +4184,30 @@ const ModuloExpedientes = () => {
             }
           }
           
-          if (cliente) {
-            // Si es Persona Moral, usar razón social como nombre completo
-            if (cliente.tipoPersona === 'Persona Moral') {
-              return {
-                ...exp,
-                nombre: cliente.razonSocial || '',
-                apellido_paterno: '',
-                apellido_materno: '',
-                email: cliente.email || '',
-                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || '',
-                estatusPago: estatusPagoCalculado
-              };
-            } else {
-              // Persona Física: usar nombre y apellidos
-              return {
-                ...exp,
-                nombre: cliente.nombre || '',
-                apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
-                apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || '',
-                email: cliente.email || '',
-                telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || '',
-                rfc: cliente.rfc || '',
-                estatusPago: estatusPagoCalculado
-              };
-            }
-          }
-          
-          // Si no se encuentra el cliente, mantener el expediente con estatus calculado
+          // Los datos de Persona Moral ya vienen del backend enriquecidos
           return {
             ...exp,
             estatusPago: estatusPagoCalculado
           };
         });
         
-        setExpedientes(expedientesEnriquecidos);
+        console.log('✅ Expedientes cargados con datos de cliente enriquecidos:', {
+          cantidad: expedientesConEstatus.length,
+          ejemplo: expedientesConEstatus[0] ? {
+            id: expedientesConEstatus[0].id,
+            nombre: expedientesConEstatus[0].nombre,
+            razon_social: expedientesConEstatus[0].razon_social,
+            rfc: expedientesConEstatus[0].rfc,
+            numero_identificacion: expedientesConEstatus[0].numero_identificacion
+          } : 'sin expedientes'
+        });
+        
+        setExpedientes(expedientesConEstatus);
         
         // Detectar pólizas duplicadas (mismo número, compañía y vigencia)
-        if (expedientesEnriquecidos.length > 0) {
+        if (expedientesConEstatus.length > 0) {
           const grupos = {};
-          expedientesEnriquecidos.forEach(exp => {
+          expedientesConEstatus.forEach(exp => {
             if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
               const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
               if (!grupos[clave]) {
@@ -4932,27 +4905,33 @@ const estadoInicialFormulario = {
       }
     }
 
+    // LOG DE DIAGNÓSTICO: Verificar datos de Persona Moral ANTES de guardar
+    console.log('🔍 DIAGNÓSTICO - DATOS DE FORMULARIO ANTES DE GUARDAR:', {
+      formulario_razon_social: formulario.razon_social,
+      formulario_rfc: formulario.rfc,
+      formulario_nombre_comercial: formulario.nombre_comercial,
+      formulario_numero_identificacion: formulario.numero_identificacion,
+      formulario_cliente_id: formulario.cliente_id,
+      formulario_nombre: formulario.nombre
+    });
+
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
+    
+    console.log('🔍 DIAGNÓSTICO - DATOS DESPUÉS DE actualizarCalculosAutomaticos:', {
+      fc_razon_social: formularioConCalculos.razon_social,
+      fc_rfc: formularioConCalculos.rfc,
+      fc_nombre_comercial: formularioConCalculos.nombre_comercial,
+      fc_numero_identificacion: formularioConCalculos.numero_identificacion
+    });
     
     // Normalizar apellidos para backend
     const expedientePayload = {
       ...formularioConCalculos
     };
     
-    // ELIMINAR campos que pertenecen al cliente, no al expediente
-    // Solo enviamos cliente_id, no sus datos individuales
-    delete expedientePayload.nombre;
-    delete expedientePayload.apellido_paterno;
-    delete expedientePayload.apellido_materno;
-    delete expedientePayload.email;
-    delete expedientePayload.telefono_fijo;
-    delete expedientePayload.telefono_movil;
-    delete expedientePayload.razon_social;
-    delete expedientePayload.nombre_comercial;
-    delete expedientePayload.rfc;
-    delete expedientePayload.curp;
-    
-    console.log('🧹 Campos de cliente eliminados del payload (solo se envía cliente_id)');
+    // NO ELIMINAR los datos del cliente - los necesitamos guardados en la BD
+    // para que se devuelvan cuando se recargue la tabla
+    console.log('✅ Enviando datos del cliente junto con el expediente');
     
     // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
     if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
@@ -4974,6 +4953,12 @@ const estadoInicialFormulario = {
       nombre: expedientePayload.nombre,
       apellido_paterno: expedientePayload.apellido_paterno,
       apellido_materno: expedientePayload.apellido_materno,
+      razon_social: expedientePayload.razon_social,
+      nombre_comercial: expedientePayload.nombre_comercial,
+      rfc: expedientePayload.rfc,
+      numero_identificacion: expedientePayload.numero_identificacion,
+      email: expedientePayload.email,
+      telefono_movil: expedientePayload.telefono_movil,
       
       // Producto y Compañía
       compania: expedientePayload.compania,
@@ -5094,113 +5079,41 @@ const estadoInicialFormulario = {
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario, clienteSeleccionado]);
   const recargarExpedientes = useCallback(async () => {
     try {
-      console.log('🔄 ============ RECARGANDO EXPEDIENTES ============');
+      console.log('🔄 ============ RECARGANDO EXPEDIENTES DESDE API ============');
       
-      // 1. Obtener expedientes
-      const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
+      // Obtener expedientes frescos SIN cache
+      const resExpedientes = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
       const expedientes = await resExpedientes.json();
       console.log(`📊 ${expedientes.length} expedientes obtenidos del backend`);
       
-      // Log del PRIMER expediente completo para ver estructura
-      if (expedientes.length > 0) {
-        console.log('🔍 EJEMPLO - Primer expediente recibido:', {
-          ...expedientes[0],
-          _todos_los_campos: Object.keys(expedientes[0])
-        });
-      }
-      
-      // Debug: verificar coberturas en expedientes
-      let expedientesConCoberturas = 0;
-      expedientes.forEach((exp, index) => {
-        if (exp.coberturas) {
-          expedientesConCoberturas++;
-          if (index < 3) { // Solo los primeros 3 para no saturar
-            console.log(`🛡️ Expediente ${exp.numero_poliza} tiene coberturas:`, {
-              tipo: typeof exp.coberturas,
-              es_array: Array.isArray(exp.coberturas),
-              es_string: typeof exp.coberturas === 'string',
-              cantidad: Array.isArray(exp.coberturas) ? exp.coberturas.length : 'N/A',
-              longitud_string: typeof exp.coberturas === 'string' ? exp.coberturas.length : 'N/A',
-              preview: typeof exp.coberturas === 'string' ? exp.coberturas.substring(0, 100) + '...' : exp.coberturas
-            });
-          }
-        }
-      });
-      console.log(`📈 Total de expedientes con coberturas: ${expedientesConCoberturas} de ${expedientes.length}`);
-      
-      // 2. Obtener todos los clientes
-      const resClientes = await fetch(`${API_URL}/api/clientes`);
-      const clientes = await resClientes.json();
-      console.log('👥 Clientes obtenidos:', clientes.length);
-      
-      // 3. Crear un mapa de clientes por ID para búsqueda rápida
-      const clientesMap = {};
-      clientes.forEach(cliente => {
-        clientesMap[cliente.id] = cliente;
-      });
-      console.log('🗺️ Mapa de clientes creado con', Object.keys(clientesMap).length, 'entradas');
-      
-      // 4. Enriquecer cada expediente con los datos del cliente
-      const expedientesEnriquecidos = expedientes.map(exp => {
-        // Parsear coberturas si vienen como string JSON
-        if (exp.coberturas && typeof exp.coberturas === 'string') {
-          try {
-            exp.coberturas = JSON.parse(exp.coberturas);
-            console.log(`✅ Coberturas parseadas para ${exp.numero_poliza}:`, exp.coberturas.length);
-          } catch (error) {
-            console.error(`❌ Error parseando coberturas para ${exp.numero_poliza}:`, error);
-            exp.coberturas = null;
+      // Calcular estatus de pago para cada uno, pero mantener todos los datos del expediente
+      const expedientesConEstatus = expedientes.map(exp => {
+        let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
+        
+        // Si el estatus es inválido, calcularlo desde la fecha
+        const estatusInvalidos = ['Sin definir', 'Pago por vencer', null, undefined, ''];
+        if (estatusInvalidos.includes(estatusPagoCalculado)) {
+          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+          if (fechaVencimiento) {
+            const fechaVenc = new Date(fechaVencimiento);
+            const hoy = new Date();
+            hoy.setHours(0, 0, 0, 0);
+            fechaVenc.setHours(0, 0, 0, 0);
+            
+            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
+          } else {
+            estatusPagoCalculado = 'Pendiente';
           }
         }
         
-        // Debug: mostrar TODOS los campos del expediente
-        console.log('🔍 Expediente:', exp.numero_poliza, 'Campos relacionados con cliente:', {
-          cliente_id: exp.cliente_id,
-          clienteId: exp.clienteId,
-          nombre: exp.nombre,
-          apellido_paterno: exp.apellido_paterno,
-          razonSocial: exp.razonSocial
-        });
-        
-        const cliente = clientesMap[exp.cliente_id];
-        
-        // Debug para póliza específica
-        if (exp.numero_poliza === '1970064839') {
-          console.log('🔍 DEBUG Póliza 1970064839:', {
-            expediente_id: exp.id,
-            cliente_id: exp.cliente_id,
-            cliente_encontrado: !!cliente,
-            expediente_nombre: exp.nombre,
-            expediente_razon_social: exp.razon_social,
-            expediente_apellido_paterno: exp.apellido_paterno
-          });
-        }
-        
-        // IMPORTANTE: Enriquecer con datos del cliente actual desde el mapa
-        // Esto asegura que siempre se muestren los datos correctos del cliente
-        if (cliente) {
-          return {
-            ...exp,
-            // Datos del cliente desde la tabla clientes (datos actuales)
-            nombre: cliente.nombre || '',
-            apellido_paterno: cliente.apellidoPaterno || '',
-            apellido_materno: cliente.apellidoMaterno || '',
-            razon_social: cliente.razonSocial || '',
-            nombre_comercial: cliente.nombreComercial || '',
-            rfc: cliente.rfc || '',
-            email: cliente.email || '',
-            telefono_movil: cliente.telefonoMovil || '',
-            telefono_fijo: cliente.telefonoFijo || ''
-          };
-        } else {
-          // Si no se encuentra el cliente, mantener los datos del expediente
-          console.warn(`⚠️ Cliente ${exp.cliente_id} no encontrado para expediente ${exp.numero_poliza}`);
-          return exp;
-        }
+        return {
+          ...exp,
+          estatusPago: estatusPagoCalculado
+        };
       });
       
-      console.log('✅ Expedientes enriquecidos:', expedientesEnriquecidos.length);
-      setExpedientes(expedientesEnriquecidos);
+      console.log('✅ Expedientes recargados desde API:', expedientesConEstatus.length);
+      setExpedientes(expedientesConEstatus);
     } catch (err) {
       console.error('Error al recargar expedientes:', err);
     }
