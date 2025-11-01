@@ -1,8 +1,10 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader, Share2, Mail } from 'lucide-react';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
 import { obtenerTiposProductosActivos } from '../services/tiposProductosService';
+import * as clientesService from '../services/clientesService';
+import * as pdfService from '../services/pdfService';
 import BuscadorCliente from '../components/BuscadorCliente';
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -37,6 +39,7 @@ const utils = {
     
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
+      cortaY: { day: '2-digit', month: 'short', year: 'numeric' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
       larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' },
       simple: null, // Para retornar solo YYYY-MM-DD
@@ -63,13 +66,14 @@ const utils = {
   getBadgeClass: (tipo, valor) => {
     const mapas = {
       etapa: {
-        'Pagado': 'bg-success',
-        'Cancelado': 'bg-danger',
-        'Emitida': 'bg-info',
-        'Autorizado': 'bg-primary',
+        'En cotización': 'bg-secondary',
         'Cotización enviada': 'bg-warning',
+        'Autorizado': 'bg-success',
         'En proceso emisión': 'bg-info',
-        'Pendiente de pago': 'bg-warning'
+        'Emitida': 'bg-primary',
+        'Enviada al Cliente': 'bg-info',
+        'Renovada': 'bg-primary',
+        'Cancelada': 'bg-danger'
       },
       pago: {
         'Pagado': 'bg-success',
@@ -2352,7 +2356,8 @@ const ListaExpedientes = React.memo(({
   editarExpediente,
   eliminarExpediente,
   calcularProximoPago,
-  clientesMap
+  clientesMap,
+  abrirModalCompartir
 }) => {
   const paginacion = usePaginacion(expedientes, 10);
 
@@ -2552,8 +2557,19 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td>
-                          <div className="d-flex gap-1 flex-wrap">
-                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Pendiente de pago' || expediente.etapa_activa === 'Pagado') && 
+                          <div className="d-flex gap-1 flex-wrap align-items-start">
+                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
+                              <button
+                                onClick={() => abrirModalCompartir(expediente)}
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Compartir"
+                              >
+                                <Share2 size={12} />
+                              </button>
+                            )}
+
+                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Renovada') && 
                              expediente.estatusPago !== 'Pagado' && (
                               <button
                                 onClick={() => aplicarPago(expediente.id)}
@@ -2565,23 +2581,13 @@ const ListaExpedientes = React.memo(({
                               </button>
                             )}
 
-                            {puedeAvanzarEstado(expediente.etapa_activa) && (
-                              <button
-                                onClick={() => avanzarEstado(expediente)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title={`Avanzar a: ${obtenerSiguienteEstado(expediente.etapa_activa)}`}
-                              >
-                                <ArrowRight size={12} />
-                              </button>
-                            )}
                             
-                            {puedeCancelar(expediente.etapa_activa) && (
+                            {expediente.etapa_activa !== 'Cancelada' && (
                               <button
                                 onClick={() => iniciarCancelacion(expediente)}
                                 className="btn btn-danger btn-sm"
                                 style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Cancelar"
+                                title="Cancelar Póliza"
                               >
                                 <XCircle size={12} />
                               </button>
@@ -3724,6 +3730,121 @@ const Formulario = React.memo(({
             </div>
           </div>
 
+            {/* Sección de Documento PDF - PREPARADA PARA CUANDO HUGO IMPLEMENTE EL BACKEND */}
+            {modoEdicion && formulario.id && (
+              <div className="mb-4">
+                <h5 className="card-title border-bottom pb-2">Documento de Póliza (PDF)</h5>
+                <div className="alert alert-info" role="alert">
+                  <AlertCircle size={16} className="me-2" />
+                  <strong>Funcionalidad en preparación:</strong> Esta sección estará disponible cuando Hugo complete la implementación del backend y AWS S3.
+                  Ver documento: <code>docs/IMPLEMENTACION-PDF-POLIZAS-AWS.md</code>
+                </div>
+              
+                {/* Mostrar PDF actual si existe */}
+                {formulario.pdf_nombre && (
+                  <div className="card mb-3">
+                    <div className="card-body">
+                      <div className="d-flex justify-content-between align-items-center">
+                        <div>
+                          <FileText size={20} className="me-2 text-primary" />
+                          <strong>{formulario.pdf_nombre}</strong>
+                          {formulario.pdf_size && (
+                            <span className="text-muted ms-2">
+                              ({pdfService.formatearTamañoArchivo(formulario.pdf_size)})
+                            </span>
+                          )}
+                          {formulario.pdf_fecha_subida && (
+                            <div className="text-muted small mt-1">
+                              Subido el {new Date(formulario.pdf_fecha_subida).toLocaleDateString('es-MX')}
+                            </div>
+                          )}
+                        </div>
+                        <div className="d-flex gap-2">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const pdfData = await pdfService.obtenerURLFirmadaPDF(formulario.id);
+                                window.open(pdfData.signed_url, '_blank');
+                              } catch (error) {
+                                alert('Error al abrir PDF: ' + error.message);
+                              }
+                            }}
+                            className="btn btn-sm btn-outline-primary"
+                            disabled
+                            title="Disponible cuando se implemente el backend"
+                          >
+                            <Eye size={14} className="me-1" />
+                            Ver
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => eliminarPDFPoliza(formulario.id)}
+                            className="btn btn-sm btn-outline-danger"
+                            disabled
+                            title="Disponible cuando se implemente el backend"
+                          >
+                            <Trash2 size={14} className="me-1" />
+                            Eliminar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Formulario para subir PDF */}
+                {!formulario.pdf_nombre && (
+                  <div className="card">
+                    <div className="card-body">
+                      <div className="mb-3">
+                        <label className="form-label">Seleccionar archivo PDF de la póliza</label>
+                        <input
+                          type="file"
+                          className="form-control"
+                          accept=".pdf,application/pdf"
+                          onChange={handleSeleccionarPDF}
+                          disabled
+                        />
+                        <small className="form-text text-muted">
+                          Tamaño máximo: 10MB. Solo archivos PDF.
+                        </small>
+                      </div>
+                    
+                      {archivoSeleccionado && (
+                        <div className="alert alert-success mb-3">
+                          <FileText size={16} className="me-2" />
+                          <strong>Archivo seleccionado:</strong> {archivoSeleccionado.name}
+                          <span className="ms-2">
+                            ({pdfService.formatearTamañoArchivo(archivoSeleccionado.size)})
+                          </span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => subirPDFPoliza(formulario.id)}
+                        className="btn btn-primary"
+                        disabled
+                      >
+                        {subiendoPDF ? (
+                          <>
+                            <Loader size={16} className="me-2 spinner-border spinner-border-sm" />
+                            Subiendo...
+                          </>
+                        ) : (
+                          <>
+                            <Upload size={16} className="me-2" />
+                            Subir PDF
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
           <div className="d-flex justify-content-end gap-3">
             <button
               type="button"
@@ -3742,6 +3863,8 @@ const Formulario = React.memo(({
           </div>
         </div>
       </div>
+
+        
 
       {mostrarExtractorPDF && (
         <>
@@ -3772,7 +3895,8 @@ const DetallesExpediente = React.memo(({
   editarExpediente,
   calcularSiguientePago,
   calculartermino_vigencia,
-  calcularProximoPago
+  calcularProximoPago,
+  abrirModalCompartir
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
   const [mostrarCoberturas, setMostrarCoberturas] = useState(true); // Abierto por defecto
@@ -3842,8 +3966,7 @@ const DetallesExpediente = React.memo(({
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
          (expedienteSeleccionado.etapa_activa === 'Emitida' || 
-          expedienteSeleccionado.etapa_activa === 'Pendiente de pago' || 
-          expedienteSeleccionado.etapa_activa === 'Pagado') && 
+          expedienteSeleccionado.etapa_activa === 'Renovada') && 
          expedienteSeleccionado.estatusPago !== 'Pagado' && (
           <button
             onClick={() => {
@@ -3871,23 +3994,25 @@ const DetallesExpediente = React.memo(({
           </button>
         )}
 
-        {expedienteSeleccionado && puedeAvanzarEstado(expedienteSeleccionado.etapa_activa) && (
+        {expedienteSeleccionado && 
+         (expedienteSeleccionado.etapa_activa === 'Emitida' || 
+          expedienteSeleccionado.etapa_activa === 'Enviada al Cliente') && (
           <button
-            onClick={() => avanzarEstado(expedienteSeleccionado)}
+            onClick={() => abrirModalCompartir(expedienteSeleccionado)}
             className="btn btn-success d-flex align-items-center"
           >
-            <ArrowRight size={16} className="me-2" />
-            Avanzar a: {obtenerSiguienteEstado(expedienteSeleccionado.etapa_activa)}
+            <Share2 size={16} className="me-2" />
+            Compartir
           </button>
         )}
-        
-        {expedienteSeleccionado && puedeCancelar(expedienteSeleccionado.etapa_activa) && (
+
+        {expedienteSeleccionado && expedienteSeleccionado.etapa_activa !== 'Cancelada' && (
           <button
             onClick={() => iniciarCancelacion(expedienteSeleccionado)}
             className="btn btn-danger d-flex align-items-center"
           >
             <XCircle size={16} className="me-2" />
-            Cancelar
+            Cancelar Póliza
           </button>
         )}
         
@@ -4373,6 +4498,22 @@ const ModuloExpedientes = () => {
   const [mostrarModalCancelacion, setMostrarModalCancelacion] = useState(false);
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
   const [expedienteACancelar, setExpedienteACancelar] = useState(null);
+  
+    // Estados para manejo de PDFs
+    const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
+    const [subiendoPDF, setSubiendoPDF] = useState(false);
+
+  // Modal de compartir
+  const [mostrarModalCompartir, setMostrarModalCompartir] = useState(false);
+  const [expedienteParaCompartir, setExpedienteParaCompartir] = useState(null);
+  const abrirModalCompartir = useCallback((expediente) => {
+    setExpedienteParaCompartir(expediente);
+    setMostrarModalCompartir(true);
+  }, []);
+  const cerrarModalCompartir = useCallback(() => {
+    setMostrarModalCompartir(false);
+    setExpedienteParaCompartir(null);
+  }, []);
 
   const [aseguradoras, setAseguradoras] = useState([]);
   const [tiposProductos, setTiposProductos] = useState([]);
@@ -4438,19 +4579,19 @@ const ModuloExpedientes = () => {
   
   const etapasActivas = useMemo(() => [
     'En cotización',
-    'Cotización enviada', 
+    'Cotización enviada',
     'Autorizado',
     'En proceso emisión',
     'Emitida',
-    'Pendiente de pago',
-    'Pagado',
-    'Cancelado'
+    'Enviada al Cliente',
+    'Renovada',
+    'Cancelada'
   ], []);
 
   const tiposPago = useMemo(() => ['Anual', 'Fraccionado'], []);
   const frecuenciasPago = useMemo(() => Object.keys(CONSTANTS.PAGOS_POR_FRECUENCIA).sort(), []);
   const periodosGracia = useMemo(() => [14, 30], []);
-  const estatusPago = useMemo(() => ['Pendiente', 'Pagado', 'Vencido'], []);
+  const estatusPago = useMemo(() => ['Pendiente', 'Por Vencer', 'Vencido', 'Pagado'], []);
   const motivosCancelacion = useMemo(() => [
     'Cliente desistió',
     'Documentación incompleta',
@@ -4488,7 +4629,7 @@ const estadoInicialFormulario = {
   contacto_telefono_movil: '',
   compania: '',
   producto: '',
-  etapa_activa: 'En cotización',
+  etapa_activa: 'Emitida',
   agente: '',
   sub_agente: '',
   inicio_vigencia: '',
@@ -4725,12 +4866,284 @@ const estadoInicialFormulario = {
 
   const confirmarCancelacion = useCallback(() => {
     if (motivoCancelacion && expedienteACancelar) {
-      cambiarEstadoExpediente(expedienteACancelar.id, 'Cancelado', motivoCancelacion);
+      cambiarEstadoExpediente(expedienteACancelar.id, 'Cancelada', motivoCancelacion);
       setMostrarModalCancelacion(false);
       setMotivoCancelacion('');
       setExpedienteACancelar(null);
     }
   }, [motivoCancelacion, expedienteACancelar, cambiarEstadoExpediente]);
+
+  const compartirPorWhatsApp = useCallback(async (expediente) => {
+    try {
+      // Obtener datos del cliente
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (!respCliente?.success) {
+        alert('No se pudo obtener la información del cliente');
+        return;
+      }
+      const cliente = respCliente.data;
+      
+      // Verificar que el cliente tenga teléfono móvil
+      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil;
+      if (!telefono) {
+        alert('El cliente no tiene un número de teléfono móvil registrado');
+        return;
+      }
+
+      // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
+      const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
+      
+        // Obtener URL firmada del PDF si existe
+        let pdfUrl = null;
+        if (expediente.pdf_key) {
+          try {
+            const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
+            pdfUrl = pdfData.signed_url;
+          } catch (error) {
+            console.warn('No se pudo obtener URL del PDF:', error);
+          }
+        }
+      
+      // Construir el mensaje enriquecido (fechas/moneda formateadas y emojis)
+        const numeroPoliza = expediente.numero_poliza || 'Sin número';
+        const compania = expediente.compania || 'N/A';
+  const producto = expediente.producto || 'N/A';
+  const esAuto = (producto || '').toLowerCase().includes('auto');
+  const marca = expediente.marca || expediente.marcaVehiculo || '';
+  const modelo = expediente.modelo || '';
+  const anio = expediente.año || expediente.anio || '';
+  const placas = expediente.placas || expediente.placa || expediente.placa_vehicular || '';
+  const vin = expediente.vin || expediente.numero_serie || '';
+  const inicioVig = utils.formatearFecha(expediente.inicio_vigencia, 'cortaY');
+  const finVig = utils.formatearFecha(expediente.termino_vigencia, 'cortaY');
+        const primaTotal = utils.formatearMoneda(expediente.total || 0);
+  const fechaPagoFmt = utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY');
+        const diasRest = utils.calcularDiasRestantes(expediente.fecha_vencimiento_pago);
+
+        let lineaPago = `📆 *Pago:* ${fechaPagoFmt}`;
+        if (expediente.estatusPago === 'Pagado') {
+          lineaPago += '  ✅ Pagado';
+        } else if (typeof diasRest === 'number') {
+          if (diasRest > 0) lineaPago += `  ⏳ en ${diasRest} día(s)`;
+          if (diasRest === 0) lineaPago += '  ⏳ vence hoy';
+          if (diasRest < 0) lineaPago += `  ⚠️ vencido hace ${Math.abs(diasRest)} día(s)`;
+        }
+
+        // Encabezado con emoji ampliamente soportado
+        let mensaje = [
+          `*✅ Póliza emitida • ${numeroPoliza}*`,
+          '',
+          'Estimado cliente,',
+          'Te compartimos los detalles de tu póliza:',
+          '',
+          `🏢 *Aseguradora:* ${compania}`,
+          `📦 *Producto:* ${producto}`,
+          ...(esAuto || marca || modelo || anio || placas ? [
+            `🚗 *Vehículo:* ${[marca, modelo, anio].filter(Boolean).join(' ')}` + (placas ? `  •  Placas: ${placas}` : '')
+          ] : []),
+          `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
+          `💵 *Prima total:* ${primaTotal}`,
+          lineaPago
+        ].join('\n');
+
+        // Agregar enlace al PDF si existe
+        if (pdfUrl) {
+          mensaje += `\n\n📄 *Descargar póliza:* ${pdfUrl}`;
+        }
+
+        mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales.`;
+
+      // Crear la URL de WhatsApp
+      const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
+      
+      // Abrir WhatsApp
+      window.open(url, '_blank');
+      
+      // Actualizar la etapa a "Enviada al Cliente"
+      await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+      
+    } catch (error) {
+      console.error('Error al compartir por WhatsApp:', error);
+      alert('Error al compartir por WhatsApp. Por favor intente nuevamente.');
+    }
+  }, [cambiarEstadoExpediente]);
+
+    // Compartir póliza por Email - PREPARADA PARA IMPLEMENTACIÓN FUTURA
+    const compartirPorEmail = useCallback(async (expediente) => {
+      try {
+        // Obtener datos del cliente
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (!respCliente?.success) {
+          alert('No se pudo obtener la información del cliente');
+          return;
+        }
+        const cliente = respCliente.data;
+      
+        // Verificar que el cliente tenga email
+        const email = cliente?.contacto_email || cliente?.email;
+        if (!email) {
+          alert('El cliente no tiene un correo electrónico registrado');
+          return;
+        }
+
+        // Obtener URL firmada del PDF si existe
+        let pdfUrl = null;
+        if (expediente.pdf_key) {
+          try {
+            const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
+            pdfUrl = pdfData.signed_url;
+          } catch (error) {
+            console.warn('No se pudo obtener URL del PDF:', error);
+          }
+        }
+
+        // Construir asunto y cuerpo del email
+        const asunto = `Póliza Emitida - ${expediente.numero_poliza || 'Sin número'}`;
+      
+        let cuerpo = `Estimado cliente,
+
+  Le informamos que su póliza ha sido emitida exitosamente:
+
+  Póliza: ${expediente.numero_poliza || 'Sin número'}
+  Aseguradora: ${expediente.compania || 'N/A'}
+  Producto: ${expediente.producto || 'N/A'}
+  Vigencia: ${expediente.inicio_vigencia || 'N/A'} al ${expediente.termino_vigencia || 'N/A'}
+  Prima Total: $${expediente.total ? Number(expediente.total).toLocaleString('es-MX', { minimumFractionDigits: 2 }) : '0.00'}
+  Fecha de pago: ${expediente.fecha_vencimiento_pago || 'N/A'}`;
+
+        if (pdfUrl) {
+          cuerpo += `\n\nPuede descargar su póliza desde el siguiente enlace:\n${pdfUrl}`;
+        }
+
+        cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales.`;
+
+        // Opción 1: Usar mailto (cliente de correo local)
+        const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+        window.location.href = mailtoUrl;
+      
+        // TODO: Implementar envío real mediante backend (SendGrid, Mailgun, etc.)
+        // const response = await fetch(`${API_URL}/expedientes/${expediente.id}/enviar-email`, {
+        //   method: 'POST',
+        //   headers: { 'Content-Type': 'application/json' },
+        //   body: JSON.stringify({ email, asunto, cuerpo, pdfUrl })
+        // });
+      
+        // Actualizar la etapa a "Enviada al Cliente"
+        await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+      
+      } catch (error) {
+        console.error('Error al compartir por Email:', error);
+        alert('Error al compartir por Email. Por favor intente nuevamente.');
+      }
+    }, [cambiarEstadoExpediente]);
+
+    // Manejar selección de archivo PDF
+    const handleSeleccionarPDF = useCallback((event) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const validacion = pdfService.validarArchivoPDF(file);
+      if (!validacion.valid) {
+        alert(validacion.error);
+        event.target.value = '';
+        return;
+      }
+
+      setArchivoSeleccionado(file);
+    }, []);
+
+    // Subir PDF de póliza
+    const subirPDFPoliza = useCallback(async (expedienteId) => {
+      if (!archivoSeleccionado) {
+        alert('Por favor seleccione un archivo PDF');
+        return;
+      }
+
+      setSubiendoPDF(true);
+      try {
+        const pdfData = await pdfService.subirPDFPoliza(expedienteId, archivoSeleccionado);
+      
+        // Actualizar expediente con datos del PDF
+        setExpedientes(prevExpedientes =>
+          prevExpedientes.map(exp =>
+            exp.id === expedienteId
+              ? {
+                  ...exp,
+                  pdf_url: pdfData.pdf_url,
+                  pdf_nombre: pdfData.pdf_nombre,
+                  pdf_key: pdfData.pdf_key,
+                  pdf_size: pdfData.pdf_size,
+                  pdf_fecha_subida: pdfData.pdf_fecha_subida
+                }
+              : exp
+          )
+        );
+
+        // Si estamos en vista de detalle, actualizar también
+        if (expedienteSeleccionado?.id === expedienteId) {
+          setExpedienteSeleccionado(prev => ({
+            ...prev,
+            pdf_url: pdfData.pdf_url,
+            pdf_nombre: pdfData.pdf_nombre,
+            pdf_key: pdfData.pdf_key,
+            pdf_size: pdfData.pdf_size,
+            pdf_fecha_subida: pdfData.pdf_fecha_subida
+          }));
+        }
+
+        setArchivoSeleccionado(null);
+        alert('PDF subido correctamente');
+      } catch (error) {
+        console.error('Error al subir PDF:', error);
+        alert('Error al subir el PDF: ' + error.message);
+      } finally {
+        setSubiendoPDF(false);
+      }
+    }, [archivoSeleccionado, expedienteSeleccionado]);
+
+    // Eliminar PDF de póliza
+    const eliminarPDFPoliza = useCallback(async (expedienteId) => {
+      if (!confirm('¿Está seguro de eliminar el PDF de esta póliza?')) {
+        return;
+      }
+
+      try {
+        await pdfService.eliminarPDFPoliza(expedienteId);
+
+        // Actualizar expediente removiendo datos del PDF
+        setExpedientes(prevExpedientes =>
+          prevExpedientes.map(exp =>
+            exp.id === expedienteId
+              ? {
+                  ...exp,
+                  pdf_url: null,
+                  pdf_nombre: null,
+                  pdf_key: null,
+                  pdf_size: null,
+                  pdf_fecha_subida: null
+                }
+              : exp
+          )
+        );
+
+        // Si estamos en vista de detalle, actualizar también
+        if (expedienteSeleccionado?.id === expedienteId) {
+          setExpedienteSeleccionado(prev => ({
+            ...prev,
+            pdf_url: null,
+            pdf_nombre: null,
+            pdf_key: null,
+            pdf_size: null,
+            pdf_fecha_subida: null
+          }));
+        }
+
+        alert('PDF eliminado correctamente');
+      } catch (error) {
+        console.error('Error al eliminar PDF:', error);
+        alert('Error al eliminar el PDF: ' + error.message);
+      }
+    }, [expedienteSeleccionado]);
 
   const calcularSiguientePago = useCallback((expediente) => {
     if (!expediente.inicio_vigencia || expediente.tipo_pago === 'Anual') return '';
@@ -5381,6 +5794,7 @@ const eliminarExpediente = useCallback((id) => {
             eliminarExpediente={eliminarExpediente}
             calcularProximoPago={calcularProximoPago}
             clientesMap={clientesMap}
+            abrirModalCompartir={abrirModalCompartir}
           />
         )}
         
@@ -5426,10 +5840,52 @@ const eliminarExpediente = useCallback((id) => {
             calcularSiguientePago={calcularSiguientePago}
             calculartermino_vigencia={calculartermino_vigencia}
             calcularProximoPago={calcularProximoPago}
+            abrirModalCompartir={abrirModalCompartir}
           />
         )}
       </div>
       
+      {/* Modal Compartir - global al módulo */}
+      {mostrarModalCompartir && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-sm modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Compartir póliza</h5>
+                <button type="button" className="btn-close" onClick={cerrarModalCompartir} aria-label="Cerrar"></button>
+              </div>
+              <div className="modal-body">
+                {expedienteParaCompartir && (
+                  <div className="mb-3 small text-muted">
+                    <div><strong>Póliza:</strong> {expedienteParaCompartir.numero_poliza || 'Sin número'}</div>
+                    <div><strong>Aseguradora:</strong> {expedienteParaCompartir.compania || 'N/A'}</div>
+                  </div>
+                )}
+
+                <div className="d-grid gap-2">
+                  <button
+                    className="btn btn-success d-flex align-items-center justify-content-center"
+                    onClick={() => { compartirPorWhatsApp(expedienteParaCompartir); cerrarModalCompartir(); }}
+                  >
+                    <Share2 size={16} className="me-2" /> WhatsApp
+                  </button>
+                  <button
+                    className="btn btn-info d-flex align-items-center justify-content-center"
+                    onClick={() => { compartirPorEmail(expedienteParaCompartir); cerrarModalCompartir(); }}
+                    title="Envío por correo"
+                  >
+                    <Mail size={16} className="me-2" /> Email
+                  </button>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={cerrarModalCompartir}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ModalCancelacion 
         mostrarModalCancelacion={mostrarModalCancelacion}
         setMostrarModalCancelacion={setMostrarModalCancelacion}
