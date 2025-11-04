@@ -7,6 +7,7 @@ import BuscadorCliente from '../components/BuscadorCliente';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
 import { obtenerTiposProductosActivos } from '../services/tiposProductosService';
 import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfService from '../services/pdfService';
 
 // Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
@@ -128,21 +129,79 @@ const CampoFechaCalculada = React.memo(({
   </div>
 ));
 
-const InfoCliente = React.memo(({ expediente }) => (
-  <div>
-    <div className="fw-semibold">
-      {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
+const InfoCliente = React.memo(({ expediente, cliente }) => {
+  // Mostrar SIEMPRE el nombre del cliente (asegurado/razón social) en la primera línea
+  // Debajo, mostrar datos de contacto si existen; si no, datos del propio asegurado
+
+  // 1) Nombre del cliente (asegurado)
+  let nombreCliente = '';
+  if (cliente) {
+    if (cliente.razon_social || cliente.razonSocial) {
+      nombreCliente = cliente.razon_social || cliente.razonSocial;
+    } else {
+      const n = cliente.nombre || '';
+      const ap = cliente.apellido_paterno || cliente.apellidoPaterno || '';
+      const am = cliente.apellido_materno || cliente.apellidoMaterno || '';
+      nombreCliente = `${n} ${ap} ${am}`.trim();
+    }
+  } else {
+    // Fallback si no hay cliente en mapa
+    if (expediente.razon_social) {
+      nombreCliente = expediente.razon_social;
+    } else {
+      nombreCliente = `${expediente.nombre || ''} ${expediente.apellido_paterno || ''} ${expediente.apellido_materno || ''}`.trim();
+    }
+  }
+
+  // 2) Datos de contacto: preferir contacto principal; si no, usar datos del cliente
+  const tieneContacto = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+  const contactoNombre = tieneContacto
+    ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+    : '';
+  const emailMostrar = tieneContacto
+    ? (cliente?.contacto_email || cliente?.contactoEmail || '')
+    : (cliente?.email || expediente.email || '');
+
+  // Teléfonos: mostrar AMBOS si existen (móvil y fijo). Priorizar contacto_* y si no hay, caer a los del cliente
+  const telContactoMovil = cliente?.contacto_telefono_movil || cliente?.contactoTelefonoMovil || '';
+  const telContactoFijo = cliente?.contacto_telefono_fijo || cliente?.contactoTelefonoFijo || '';
+  const telClienteMovil = cliente?.telefono_movil || cliente?.telefonoMovil || expediente.telefono_movil || '';
+  const telClienteFijo = cliente?.telefono_fijo || cliente?.telefonoFijo || expediente.telefono_fijo || '';
+
+  return (
+    <div>
+      <div className="fw-semibold">{nombreCliente || 'Sin nombre'}</div>
+      {tieneContacto && contactoNombre && (
+        <div><small className="text-muted">Contacto: {contactoNombre}</small></div>
+      )}
+      {emailMostrar && (
+        <div><small className="text-muted">✉️ {emailMostrar}</small></div>
+      )}
+      {/* Teléfonos: si hay contacto, mostrar ambos (móvil y fijo). Si no hay contacto, caer a teléfonos del cliente */}
+      {tieneContacto ? (
+        (telContactoMovil || telContactoFijo) && (
+          <div>
+            <small className="text-muted">
+              {telContactoMovil && (<><span>📱 {telContactoMovil}</span></>)}
+              {telContactoMovil && telContactoFijo && <span> • </span>}
+              {telContactoFijo && (<><span>☎️ {telContactoFijo}</span></>)}
+            </small>
+          </div>
+        )
+      ) : (
+        (telClienteMovil || telClienteFijo) && (
+          <div>
+            <small className="text-muted">
+              {telClienteMovil && (<><span>📱 {telClienteMovil}</span></>)}
+              {telClienteMovil && telClienteFijo && <span> • </span>}
+              {telClienteFijo && (<><span>☎️ {telClienteFijo}</span></>)}
+            </small>
+          </div>
+        )
+      )}
     </div>
-    <small className="text-muted">{expediente.email}</small>
-    {expediente.producto === 'Autos' && expediente.marca && (
-      <div>
-        <small className="text-primary">
-          🚗 {expediente.marca} {expediente.modelo} {expediente.año}
-        </small>
-      </div>
-    )}
-  </div>
-));
+  );
+});
 
 const EstadoPago = React.memo(({ expediente }) => (
   <div>
@@ -1499,6 +1558,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         datosConCliente.telefono_fijo = clienteEncontrado.telefonoFijo || clienteEncontrado.telefono_fijo || datosConCliente.telefono_fijo;
         datosConCliente.telefono_movil = clienteEncontrado.telefonoMovil || clienteEncontrado.telefono_movil || datosConCliente.telefono_movil;
       }
+      // Adjuntar archivo PDF seleccionado para subirlo automáticamente tras crear el expediente
+      if (archivo) {
+        try {
+          datosConCliente.__pdfFile = archivo;
+          if (informacionArchivo?.nombre) datosConCliente.__pdfNombre = informacionArchivo.nombre;
+          if (archivo?.size) datosConCliente.__pdfSize = archivo.size;
+        } catch (e) {
+          console.warn('No se pudo adjuntar el archivo PDF al payload de datos extraídos:', e);
+        }
+      }
       
       console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
@@ -2625,7 +2694,11 @@ const Formulario = React.memo(({
           sub_agente: '',
           etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
           compania: datosExtraidos.compania,
-          producto: datosExtraidos.producto
+          producto: datosExtraidos.producto,
+          // Guardar temporalmente el archivo PDF traído desde el extractor (no se envía al backend)
+          __pdfFile: datosExtraidos.__pdfFile || prev.__pdfFile,
+          __pdfNombre: datosExtraidos.__pdfNombre || prev.__pdfNombre,
+          __pdfSize: datosExtraidos.__pdfSize || prev.__pdfSize
         };
         
         console.log('✅ Formulario actualizado - Datos del cliente preservados:', {
@@ -4138,6 +4211,27 @@ const ModuloExpedientes = () => {
     cargarTiposProductos();
   }, []);
 
+  // Recargar solo CLIENTES y su mapa cuando alguien emita el evento 'clientes-actualizados'
+  const recargarClientes = useCallback(async () => {
+    try {
+      const resClientes = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`);
+      const clientesData = await resClientes.json();
+      const mapa = {};
+      clientesData.forEach(c => { mapa[c.id] = c; });
+      setClientes(clientesData);
+      setClientesMap(mapa);
+      console.log('🔁 Clientes recargados por evento externo. Total:', clientesData.length);
+    } catch (error) {
+      console.error('❌ Error recargando clientes tras evento:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = () => recargarClientes();
+    window.addEventListener('clientes-actualizados', handler);
+    return () => window.removeEventListener('clientes-actualizados', handler);
+  }, [recargarClientes]);
+
   const companias = useMemo(() => {
     return aseguradoras
       .map(a => a.nombre)
@@ -5009,6 +5103,19 @@ const estadoInicialFormulario = {
       }
     }
 
+    // Regla de negocio: En Persona Moral debe existir Contacto Principal para poder crear/editar póliza
+    if (clienteSeleccionado?.tipoPersona === 'Persona Moral') {
+      const nombreContacto = (formulario.contacto_nombre || clienteSeleccionado.contacto_nombre || '').trim();
+      const medioContacto = (
+        formulario.contacto_email || formulario.contacto_telefono_movil || formulario.contacto_telefono_fijo ||
+        clienteSeleccionado.contacto_email || clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_fijo || ''
+      ).trim();
+      if (!nombreContacto || !medioContacto) {
+        alert('Para Persona Moral es obligatorio tener Contacto Principal (nombre) y al menos un dato de contacto (email o teléfono) para poder guardar la póliza.');
+        return false;
+      }
+    }
+
     return true;
   }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
 
@@ -5067,6 +5174,31 @@ const estadoInicialFormulario = {
         if (response.ok) {
           const resultado = await response.json();
           console.log('✅ Datos de contacto del cliente actualizados correctamente:', resultado);
+          
+          // ⚠️ IMPORTANTE: Actualizar clientesMap inmediatamente para que InfoCliente vea los cambios
+          const clienteActualizado = resultado.data || resultado;
+          setClientesMap(prevMap => ({
+            ...prevMap,
+            [clienteSeleccionado.id]: {
+              ...prevMap[clienteSeleccionado.id],
+              ...clienteActualizado,
+              // Normalizar campos en camelCase para compatibilidad
+              contacto_nombre: clienteActualizado.contacto_nombre || clienteActualizado.contactoNombre,
+              contacto_apellido_paterno: clienteActualizado.contacto_apellido_paterno || clienteActualizado.contactoApellidoPaterno,
+              contacto_apellido_materno: clienteActualizado.contacto_apellido_materno || clienteActualizado.contactoApellidoMaterno,
+              contacto_email: clienteActualizado.contacto_email || clienteActualizado.contactoEmail,
+              contacto_telefono_fijo: clienteActualizado.contacto_telefono_fijo || clienteActualizado.contactoTelefonoFijo,
+              contacto_telefono_movil: clienteActualizado.contacto_telefono_movil || clienteActualizado.contactoTelefonoMovil,
+              email: clienteActualizado.email,
+              telefono_movil: clienteActualizado.telefono_movil || clienteActualizado.telefonoMovil,
+              telefono_fijo: clienteActualizado.telefono_fijo || clienteActualizado.telefonoFijo
+            }
+          }));
+          console.log('✅ ClientesMap actualizado con nuevos datos de contacto');
+          // Notificar globalmente para que otros módulos (Clientes) recarguen su lista
+          try {
+            window.dispatchEvent(new CustomEvent('clientes-actualizados', { detail: { origen: 'Expedientes.jsx', tipo: 'update', id: clienteSeleccionado.id, ts: Date.now() } }));
+          } catch (_) { /* noop */ }
         } else {
           const errorText = await response.text();
           console.warn('⚠️ No se pudo actualizar el cliente:', errorText);
@@ -5100,8 +5232,24 @@ const estadoInicialFormulario = {
     const expedientePayload = {
       ...formularioConCalculos
     };
+    // No enviar referencias a archivos temporales en el payload
+    if ('__pdfFile' in expedientePayload) delete expedientePayload.__pdfFile;
+    if ('__pdfNombre' in expedientePayload) delete expedientePayload.__pdfNombre;
+    if ('__pdfSize' in expedientePayload) delete expedientePayload.__pdfSize;
     
-    // ✅ CAMBIO IMPORTANTE: Ya NO eliminamos campos del cliente
+    // ⚠️ IMPORTANTE: NO enviar campos contacto_* al backend de expedientes
+    // Estos campos solo existen en la tabla de clientes, NO en expedientes
+    // El backend de expedientes no tiene columnas para contacto_nombre, contacto_email, etc.
+    if ('contacto_nombre' in expedientePayload) delete expedientePayload.contacto_nombre;
+    if ('contacto_apellido_paterno' in expedientePayload) delete expedientePayload.contacto_apellido_paterno;
+    if ('contacto_apellido_materno' in expedientePayload) delete expedientePayload.contacto_apellido_materno;
+    if ('contacto_email' in expedientePayload) delete expedientePayload.contacto_email;
+    if ('contacto_telefono_fijo' in expedientePayload) delete expedientePayload.contacto_telefono_fijo;
+    if ('contacto_telefono_movil' in expedientePayload) delete expedientePayload.contacto_telefono_movil;
+    
+    console.log('🔒 Campos contacto_* removidos del payload (solo van a tabla clientes)');
+    
+    // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
     // El backend los necesita para enriquecer el expediente
     // Solo enviamos lo que el usuario puede editar
     
@@ -5237,8 +5385,29 @@ const estadoInicialFormulario = {
           });
           return response.json();
         })
-        .then(data => {
+        .then(async (data) => {
           console.log('✅ Expediente creado, respuesta del servidor:', data);
+          try {
+            // Obtener ID del expediente creado (compatibilidad con posibles estructuras)
+            const nuevoId = data?.id || data?.data?.id;
+            if (nuevoId && formulario.__pdfFile) {
+              console.log('📤 Subiendo PDF automáticamente para expediente recién creado:', nuevoId);
+              setSubiendoPDF(true);
+              try {
+                const pdfData = await pdfService.subirPDFPoliza(nuevoId, formulario.__pdfFile);
+                // Refrescar listado para reflejar metadatos del PDF
+                await recargarExpedientes();
+                console.log('✅ PDF subido automáticamente:', pdfData?.pdf_nombre || formulario.__pdfNombre || 'PDF');
+              } catch (error) {
+                console.error('⚠️ Error al subir automáticamente el PDF:', error);
+                alert('El expediente se creó, pero no se pudo subir el PDF automáticamente: ' + error.message);
+              } finally {
+                setSubiendoPDF(false);
+              }
+            }
+          } catch (e) {
+            console.warn('No fue posible realizar la subida automática del PDF:', e);
+          }
           limpiarFormulario();
           recargarExpedientes();
           setVistaActual('lista');
@@ -5323,13 +5492,64 @@ const estadoInicialFormulario = {
       console.error('Error al recargar expedientes:', err);
     }
   }, []);
-  const editarExpediente = useCallback((expediente) => {
+  const editarExpediente = useCallback(async (expediente) => {
+    // Aplicar datos del expediente al formulario PRIMERO
     setFormulario({
       ...expediente
     });
+    
+    // Restaurar cliente seleccionado si el expediente tiene cliente_id
+    if (expediente.cliente_id) {
+      try {
+        // Buscar el cliente completo desde clientesMap o cargar desde API
+        let clienteCompleto = clientesMap[expediente.cliente_id];
+        
+        if (!clienteCompleto) {
+          console.log('🔍 Cliente no está en el mapa, obteniendo desde API...');
+          const response = await fetch(`${API_URL}/api/clientes/${expediente.cliente_id}`);
+          if (response.ok) {
+            const data = await response.json();
+            clienteCompleto = data.data || data;
+          }
+        }
+        
+        if (clienteCompleto) {
+          console.log('✅ Cliente recuperado para edición:', clienteCompleto);
+          
+          // Aplicar solo los campos del cliente que no sobrescriban datos del expediente
+          // Esto permite que si el expediente tiene contacto_*, se respeten, pero si no, se tomen del cliente
+          setFormulario(prevFormulario => ({
+            ...prevFormulario,
+            // Datos principales del cliente (solo si no vienen del expediente)
+            nombre: prevFormulario.nombre || clienteCompleto.nombre || '',
+            apellido_paterno: prevFormulario.apellido_paterno || clienteCompleto.apellido_paterno || clienteCompleto.apellidoPaterno || '',
+            apellido_materno: prevFormulario.apellido_materno || clienteCompleto.apellido_materno || clienteCompleto.apellidoMaterno || '',
+            razon_social: prevFormulario.razon_social || clienteCompleto.razon_social || clienteCompleto.razonSocial || '',
+            nombre_comercial: prevFormulario.nombre_comercial || clienteCompleto.nombre_comercial || clienteCompleto.nombreComercial || '',
+            email: prevFormulario.email || clienteCompleto.email || '',
+            telefono_fijo: prevFormulario.telefono_fijo || clienteCompleto.telefono_fijo || clienteCompleto.telefonoFijo || '',
+            telefono_movil: prevFormulario.telefono_movil || clienteCompleto.telefono_movil || clienteCompleto.telefonoMovil || '',
+            rfc: prevFormulario.rfc || clienteCompleto.rfc || '',
+            // Datos de contacto adicional/gestor (tomar del cliente si no vienen del expediente)
+            contacto_nombre: prevFormulario.contacto_nombre || clienteCompleto.contacto_nombre || clienteCompleto.contactoNombre || '',
+            contacto_apellido_paterno: prevFormulario.contacto_apellido_paterno || clienteCompleto.contacto_apellido_paterno || clienteCompleto.contactoApellidoPaterno || '',
+            contacto_apellido_materno: prevFormulario.contacto_apellido_materno || clienteCompleto.contacto_apellido_materno || clienteCompleto.contactoApellidoMaterno || '',
+            contacto_email: prevFormulario.contacto_email || clienteCompleto.contacto_email || clienteCompleto.contactoEmail || '',
+            contacto_telefono_fijo: prevFormulario.contacto_telefono_fijo || clienteCompleto.contacto_telefono_fijo || clienteCompleto.contactoTelefonoFijo || '',
+            contacto_telefono_movil: prevFormulario.contacto_telefono_movil || clienteCompleto.contacto_telefono_movil || clienteCompleto.contactoTelefonoMovil || ''
+          }));
+          
+          // Guardar referencia al cliente seleccionado
+          setClienteSeleccionado(clienteCompleto);
+        }
+      } catch (error) {
+        console.error('⚠️ Error al recuperar cliente completo:', error);
+      }
+    }
+    
     setModoEdicion(true);
     setVistaActual('formulario');
-  }, []);
+  }, [clientesMap]);
 
 const eliminarExpediente = useCallback((id) => {
   if (confirm('¿Está seguro de eliminar este expediente?')) {
