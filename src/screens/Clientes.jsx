@@ -1,7 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck, ExternalLink } from 'lucide-react';
+import DetalleExpediente from '../components/DetalleExpediente';
 import { obtenerClientes, crearCliente, actualizarCliente, eliminarCliente } from '../services/clientesService';
+import * as pdfService from '../services/pdfService';
 
 // Hook personalizado para paginación (reutilizado del código original)
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -230,6 +232,11 @@ const ModuloClientes = () => {
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
   const [mostrarModalPolizas, setMostrarModalPolizas] = useState(false);
   const [polizasClienteSeleccionado, setPolizasClienteSeleccionado] = useState([]);
+  const [mostrarVisorPDF, setMostrarVisorPDF] = useState(false);
+  const [pdfUrlActual, setPdfUrlActual] = useState(null);
+  const [pdfNombreActual, setPdfNombreActual] = useState(null);
+  const [mostrarDetallePoliza, setMostrarDetallePoliza] = useState(false);
+  const [polizaParaDetalle, setPolizaParaDetalle] = useState(null);
 
   // Tipos de cliente
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
@@ -3233,7 +3240,16 @@ const ModuloClientes = () => {
                             <td>
                               <strong className="text-primary">{poliza.numero_poliza || '-'}</strong>
                             </td>
-                            <td>{poliza.producto || '-'}</td>
+                            <td>
+                              <div>
+                                <div>{poliza.producto || '-'}</div>
+                                {(poliza.marca || poliza.modelo || poliza.anio) && (
+                                  <small className="text-muted">
+                                    {poliza.marca} {poliza.modelo} {poliza.anio}
+                                  </small>
+                                )}
+                              </div>
+                            </td>
                             <td>{poliza.compania || '-'}</td>
                             <td>
                               {poliza.prima_pagada ? 
@@ -3262,17 +3278,42 @@ const ModuloClientes = () => {
                               </span>
                             </td>
                             <td>
-                              <button
-                                className="btn btn-sm btn-outline-primary"
-                                onClick={() => {
-                                  // Aquí podrías navegar al detalle del expediente
-                                  console.log('Ver detalle de póliza:', poliza.id);
-                                  alert(`Ver detalle de póliza ${poliza.numero_poliza || poliza.id}`);
-                                }}
-                                title="Ver detalles"
-                              >
-                                <Eye size={14} />
-                              </button>
+                              <div className="btn-group" role="group">
+                                <button
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => {
+                                    setPolizaParaDetalle(poliza);
+                                    setMostrarDetallePoliza(true);
+                                  }}
+                                  title="Ver expediente completo"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-outline-success"
+                                  onClick={async () => {
+                                    if (!poliza.pdf_url) {
+                                      alert('Esta póliza no tiene PDF disponible');
+                                      return;
+                                    }
+                                    try {
+                                      const { signed_url } = await pdfService.obtenerURLFirmadaPDF(poliza.id);
+                                      const link = document.createElement('a');
+                                      link.href = signed_url;
+                                      link.download = poliza.pdf_nombre || `poliza-${poliza.numero_poliza}.pdf`;
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                    } catch (error) {
+                                      alert('Error al descargar la póliza: ' + error.message);
+                                    }
+                                  }}
+                                  title={poliza.pdf_url ? "Descargar póliza" : "PDF no disponible"}
+                                  disabled={!poliza.pdf_url}
+                                >
+                                  <Download size={14} />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -3289,6 +3330,116 @@ const ModuloClientes = () => {
                     setMostrarModalPolizas(false);
                     setPolizasClienteSeleccionado([]);
                     setClienteSeleccionado(null);
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Visor de PDF */}
+      {mostrarVisorPDF && pdfUrlActual && (
+        <div className="modal fade show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+          <div className="modal-dialog modal-xl modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Vista Previa de Póliza: {pdfNombreActual}
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => {
+                    setMostrarVisorPDF(false);
+                    setPdfUrlActual(null);
+                    setPdfNombreActual(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body p-0" style={{height: '80vh'}}>
+                <iframe
+                  src={pdfUrlActual}
+                  style={{width: '100%', height: '100%', border: 'none'}}
+                  title="Visor de Póliza"
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarVisorPDF(false);
+                    setPdfUrlActual(null);
+                    setPdfNombreActual(null);
+                  }}
+                >
+                  Cerrar
+                </button>
+                <a
+                  href={pdfUrlActual}
+                  download={pdfNombreActual}
+                  className="btn btn-primary"
+                >
+                  <Download size={16} className="me-2" />
+                  Descargar PDF
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detalle de Póliza */}
+      {mostrarDetallePoliza && polizaParaDetalle && (
+        <div className="modal fade show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Detalles del Expediente
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => {
+                    setMostrarDetallePoliza(false);
+                    setPolizaParaDetalle(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body">
+                {/* Vista unificada de detalles usando DetalleExpediente */}
+                <DetalleExpediente
+                  datos={polizaParaDetalle}
+                  modo="caratula"
+                  coberturas={(() => {
+                    try {
+                      if (!polizaParaDetalle.coberturas) return [];
+                      return typeof polizaParaDetalle.coberturas === 'string'
+                        ? JSON.parse(polizaParaDetalle.coberturas)
+                        : polizaParaDetalle.coberturas;
+                    } catch {
+                      return [];
+                    }
+                  })()}
+                  mensajes={polizaParaDetalle.mensajes || []}
+                  utils={{
+                    formatearMoneda: (valor) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(parseFloat(valor)),
+                  }}
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarDetallePoliza(false);
+                    setPolizaParaDetalle(null);
                   }}
                 >
                   Cerrar

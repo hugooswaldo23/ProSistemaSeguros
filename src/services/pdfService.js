@@ -17,6 +17,13 @@ const API_URL = import.meta.env.VITE_API_URL;
  */
 export async function subirPDFPoliza(expedienteId, file) {
   try {
+    console.log('📤 Iniciando subida de PDF...', {
+      expedienteId,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
     // Validar que sea un PDF
     if (file.type !== 'application/pdf') {
       throw new Error('El archivo debe ser un PDF');
@@ -31,20 +38,40 @@ export async function subirPDFPoliza(expedienteId, file) {
     const formData = new FormData();
     formData.append('file', file);
 
-  const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf`, {
+    const url = `${API_URL}/api/expedientes/${expedienteId}/pdf`;
+    console.log('📍 URL del endpoint:', url);
+
+    const response = await fetch(url, {
       method: 'POST',
       body: formData
     });
 
+    console.log('📨 Respuesta del servidor:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    });
+
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Error al subir el PDF');
+      const errorText = await response.text();
+      console.error('❌ Error del servidor:', errorText);
+      let errorMessage = 'Error al subir el PDF';
+      
+      try {
+        const error = JSON.parse(errorText);
+        errorMessage = error.message || errorMessage;
+      } catch (e) {
+        errorMessage = errorText || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
     }
 
     const data = await response.json();
+    console.log('✅ PDF subido exitosamente:', data);
     return data.data;
   } catch (error) {
-    console.error('Error en subirPDFPoliza:', error);
+    console.error('❌ Error en subirPDFPoliza:', error);
     throw error;
   }
 }

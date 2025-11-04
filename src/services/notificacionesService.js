@@ -1,0 +1,423 @@
+/**
+ * Servicio para gestión de notificaciones/comunicaciones con clientes
+ * 
+ * Funcionalidades:
+ * - Registrar envío de notificaciones (WhatsApp, Email, SMS)
+ * - Obtener historial de notificaciones por expediente o cliente
+ * - Generar mensajes dinámicos según el estado de la póliza
+ */
+
+const API_URL = import.meta.env.VITE_API_URL;
+
+/**
+ * Tipos de notificación soportados
+ */
+export const TIPOS_NOTIFICACION = {
+  WHATSAPP: 'whatsapp',
+  EMAIL: 'email',
+  SMS: 'sms'
+};
+
+/**
+ * Tipos de mensaje según el propósito
+ */
+export const TIPOS_MENSAJE = {
+  EMISION: 'emision',
+  RECORDATORIO_PAGO: 'recordatorio_pago',
+  PAGO_VENCIDO: 'pago_vencido',
+  PAGO_RECIBIDO: 'pago_recibido',
+  RENOVACION: 'renovacion',
+  CANCELACION: 'cancelacion',
+  MODIFICACION: 'modificacion',
+  OTRO: 'otro'
+};
+
+/**
+ * Registrar una notificación enviada
+ * @param {Object} datos - Datos de la notificación
+ * @returns {Promise<Object>} Notificación registrada
+ */
+export async function registrarNotificacion(datos) {
+  try {
+    const response = await fetch(`${API_URL}/api/notificaciones`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(datos)
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al registrar notificación');
+    }
+
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Error en registrarNotificacion:', error);
+    throw error;
+  }
+}
+
+/**
+ * Obtener historial de notificaciones por expediente
+ * @param {number} expedienteId - ID del expediente
+ * @returns {Promise<Array>} Lista de notificaciones
+ */
+export async function obtenerNotificacionesPorExpediente(expedienteId) {
+  try {
+    const response = await fetch(`${API_URL}/api/notificaciones/expediente/${expedienteId}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener notificaciones');
+    }
+
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Error en obtenerNotificacionesPorExpediente:', error);
+    throw error;
+  }
+}
+
+/**
+ * Obtener historial de notificaciones por cliente
+ * @param {string} clienteId - ID del cliente
+ * @returns {Promise<Array>} Lista de notificaciones
+ */
+export async function obtenerNotificacionesPorCliente(clienteId) {
+  try {
+    const response = await fetch(`${API_URL}/api/notificaciones/cliente/${clienteId}`);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener notificaciones');
+    }
+
+    const result = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error('Error en obtenerNotificacionesPorCliente:', error);
+    throw error;
+  }
+}
+
+/**
+ * Determinar el tipo de mensaje según el estado del expediente
+ * @param {Object} expediente - Datos del expediente
+ * @returns {string} Tipo de mensaje
+ */
+export function determinarTipoMensaje(expediente) {
+  // Si está cancelada
+  if (expediente.etapa_activa === 'Cancelada') {
+    return TIPOS_MENSAJE.CANCELACION;
+  }
+
+  // Si es emisión o envío al cliente
+  if (expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') {
+    return TIPOS_MENSAJE.EMISION;
+  }
+
+  // Según el estatus de pago
+  if (expediente.estatusPago === 'Pagado') {
+    return TIPOS_MENSAJE.PAGO_RECIBIDO;
+  }
+
+  if (expediente.estatusPago === 'Vencido') {
+    return TIPOS_MENSAJE.PAGO_VENCIDO;
+  }
+
+  if (expediente.estatusPago === 'Por Vencer') {
+    return TIPOS_MENSAJE.RECORDATORIO_PAGO;
+  }
+
+  // Por defecto
+  return TIPOS_MENSAJE.OTRO;
+}
+
+/**
+ * Generar mensaje dinámico para WhatsApp según el estado
+ * @param {Object} expediente - Datos del expediente
+ * @param {Object} utils - Utilidades de formateo
+ * @param {string} pdfUrl - URL del PDF (opcional)
+ * @returns {Object} { tipoMensaje, mensaje }
+ */
+export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null) {
+  const tipoMensaje = determinarTipoMensaje(expediente);
+  
+  const numeroPoliza = expediente.numero_poliza || 'Sin número';
+  const compania = expediente.compania || 'N/A';
+  const producto = expediente.producto || 'N/A';
+  const esAuto = (producto || '').toLowerCase().includes('auto');
+  const marca = expediente.marca || expediente.marcaVehiculo || '';
+  const modelo = expediente.modelo || '';
+  const anio = expediente.año || expediente.anio || '';
+  const placas = expediente.placas || expediente.placa || expediente.placa_vehicular || '';
+  const inicioVig = utils.formatearFecha(expediente.inicio_vigencia, 'cortaY');
+  const finVig = utils.formatearFecha(expediente.termino_vigencia, 'cortaY');
+  const primaTotal = utils.formatearMoneda(expediente.total || 0);
+  const fechaPagoFmt = utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY');
+  const diasRest = utils.calcularDiasRestantes(expediente.fecha_vencimiento_pago);
+
+  let mensaje = '';
+  let lineaPago = '';
+
+  // Construir línea de pago
+  if (expediente.estatusPago === 'Pagado') {
+    lineaPago = `📆 *Pago:* ${fechaPagoFmt}  ✅ *Pagado*`;
+  } else if (typeof diasRest === 'number') {
+    lineaPago = `📆 *Fecha de pago:* ${fechaPagoFmt}`;
+    if (diasRest > 0) lineaPago += `  ⏳ Vence en ${diasRest} día(s)`;
+    if (diasRest === 0) lineaPago += `  ⚠️ *Vence HOY*`;
+    if (diasRest < 0) lineaPago += `  🚨 *VENCIDO* hace ${Math.abs(diasRest)} día(s)`;
+  }
+
+  // Información común del vehículo (si aplica)
+  const infoVehiculo = (esAuto || marca || modelo || anio || placas) ? [
+    `🚗 *Vehículo:* ${[marca, modelo, anio].filter(Boolean).join(' ')}` + (placas ? `  •  Placas: ${placas}` : '')
+  ] : [];
+
+  // Generar mensaje según el tipo
+  switch (tipoMensaje) {
+    case TIPOS_MENSAJE.EMISION:
+      mensaje = [
+        `*✅ Póliza emitida • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        'Te compartimos los detalles de tu póliza:',
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
+        `💵 *Prima total:* ${primaTotal}`,
+        lineaPago
+      ].join('\n');
+      break;
+
+    case TIPOS_MENSAJE.RECORDATORIO_PAGO:
+      mensaje = [
+        `*⏰ Recordatorio de pago • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        `Te recordamos que tu pago está próximo a vencer:`,
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        lineaPago,
+        '',
+        '💡 *Por favor realiza tu pago a tiempo para mantener tu cobertura activa.*'
+      ].join('\n');
+      break;
+
+    case TIPOS_MENSAJE.PAGO_VENCIDO:
+      mensaje = [
+        `*🚨 Pago vencido • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        `Tu pago se encuentra vencido:`,
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        lineaPago,
+        '',
+        '⚠️ *IMPORTANTE: Tu cobertura puede estar en riesgo.*',
+        '💡 Por favor ponte al corriente a la brevedad para mantener tu protección activa.'
+      ].join('\n');
+      break;
+
+    case TIPOS_MENSAJE.PAGO_RECIBIDO:
+      mensaje = [
+        `*✅ Pago recibido • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        `Hemos recibido tu pago. ¡Gracias por tu preferencia!`,
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        lineaPago,
+        `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
+        '',
+        '✅ Tu cobertura continúa activa.'
+      ].join('\n');
+      break;
+
+    case TIPOS_MENSAJE.CANCELACION:
+      mensaje = [
+        `*❌ Póliza cancelada • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        `Te informamos que tu póliza ha sido cancelada:`,
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        `📅 *Vigencia original:* ${inicioVig} → ${finVig}`,
+        '',
+        expediente.motivoCancelacion ? `📝 *Motivo:* ${expediente.motivoCancelacion}` : '',
+        '',
+        '💡 Si tienes dudas o deseas reactivarla, contáctanos.'
+      ].filter(Boolean).join('\n');
+      break;
+
+    case TIPOS_MENSAJE.RENOVACION:
+      mensaje = [
+        `*🔄 Renovación de póliza • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        `Tu póliza está próxima a vencer. Te invitamos a renovarla:`,
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        `📅 *Vence:* ${finVig}`,
+        '',
+        '💡 Renueva antes del vencimiento para mantener tu cobertura sin interrupciones.'
+      ].join('\n');
+      break;
+
+    default:
+      mensaje = [
+        `*📋 Información de póliza • ${numeroPoliza}*`,
+        '',
+        'Estimado cliente,',
+        'Te compartimos información de tu póliza:',
+        '',
+        `🏢 *Aseguradora:* ${compania}`,
+        `📦 *Producto:* ${producto}`,
+        ...infoVehiculo,
+        `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
+        lineaPago
+      ].join('\n');
+  }
+
+  // Agregar enlace al PDF si existe
+  if (pdfUrl) {
+    mensaje += `\n\n📄 *Descargar póliza:* ${pdfUrl}`;
+  }
+
+  mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales.`;
+
+  return {
+    tipoMensaje,
+    mensaje
+  };
+}
+
+/**
+ * Generar mensaje para Email según el estado
+ * @param {Object} expediente - Datos del expediente
+ * @returns {Object} { tipoMensaje, asunto, cuerpo }
+ */
+export function generarMensajeEmail(expediente, pdfUrl = null) {
+  const tipoMensaje = determinarTipoMensaje(expediente);
+  
+  const numeroPoliza = expediente.numero_poliza || 'Sin número';
+  const compania = expediente.compania || 'N/A';
+  const producto = expediente.producto || 'N/A';
+  const inicioVig = expediente.inicio_vigencia || 'N/A';
+  const finVig = expediente.termino_vigencia || 'N/A';
+  const primaTotal = expediente.total ? Number(expediente.total).toLocaleString('es-MX', { minimumFractionDigits: 2 }) : '0.00';
+  const fechaPago = expediente.fecha_vencimiento_pago || 'N/A';
+
+  let asunto = '';
+  let cuerpo = '';
+
+  switch (tipoMensaje) {
+    case TIPOS_MENSAJE.EMISION:
+      asunto = `Póliza Emitida - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Le informamos que su póliza ha sido emitida exitosamente:
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Producto: ${producto}
+Vigencia: ${inicioVig} al ${finVig}
+Prima Total: $${primaTotal}
+Fecha de pago: ${fechaPago}`;
+      break;
+
+    case TIPOS_MENSAJE.RECORDATORIO_PAGO:
+      asunto = `Recordatorio de Pago - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Le recordamos que su pago está próximo a vencer:
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Fecha de pago: ${fechaPago}
+Monto: $${primaTotal}
+
+Por favor realice su pago a tiempo para mantener su cobertura activa.`;
+      break;
+
+    case TIPOS_MENSAJE.PAGO_VENCIDO:
+      asunto = `URGENTE: Pago Vencido - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Su pago se encuentra VENCIDO:
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Fecha de vencimiento: ${fechaPago}
+Monto pendiente: $${primaTotal}
+
+IMPORTANTE: Su cobertura puede estar en riesgo. Por favor póngase al corriente a la brevedad.`;
+      break;
+
+    case TIPOS_MENSAJE.PAGO_RECIBIDO:
+      asunto = `Pago Recibido - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Hemos recibido su pago. ¡Gracias por su preferencia!
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Monto pagado: $${primaTotal}
+
+Su cobertura continúa activa hasta ${finVig}.`;
+      break;
+
+    case TIPOS_MENSAJE.CANCELACION:
+      asunto = `Póliza Cancelada - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Le informamos que su póliza ha sido cancelada:
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Vigencia original: ${inicioVig} al ${finVig}${expediente.motivoCancelacion ? `\nMotivo: ${expediente.motivoCancelacion}` : ''}
+
+Si tiene dudas o desea reactivarla, por favor contáctenos.`;
+      break;
+
+    default:
+      asunto = `Información de Póliza - ${numeroPoliza}`;
+      cuerpo = `Estimado cliente,
+
+Le compartimos información de su póliza:
+
+Póliza: ${numeroPoliza}
+Aseguradora: ${compania}
+Producto: ${producto}
+Vigencia: ${inicioVig} al ${finVig}`;
+  }
+
+  if (pdfUrl) {
+    cuerpo += `\n\nPuede descargar su póliza desde el siguiente enlace:\n${pdfUrl}`;
+  }
+
+  cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales.`;
+
+  return {
+    tipoMensaje,
+    asunto,
+    cuerpo
+  };
+}

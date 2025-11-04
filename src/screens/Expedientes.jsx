@@ -1,14 +1,14 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, Search, Save, Upload, CheckCircle, Loader, Share2, Mail } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock } from 'lucide-react';
+import DetalleExpediente from '../components/DetalleExpediente';
+import HistorialNotificaciones from '../components/HistorialNotificaciones';
+import BuscadorCliente from '../components/BuscadorCliente';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
 import { obtenerTiposProductosActivos } from '../services/tiposProductosService';
-import * as clientesService from '../services/clientesService';
-import * as pdfService from '../services/pdfService';
-import BuscadorCliente from '../components/BuscadorCliente';
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configurar worker de PDF.js - ruta local copiada por Vite
+// Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
 
 // ============= CONSTANTES GLOBALES =============
@@ -33,26 +33,12 @@ const CONSTANTS = {
 const utils = {
   formatearFecha: (fecha, formato = 'corta') => {
     if (!fecha) return '-';
-    
-    // Si la fecha tiene formato ISO (con T), solo tomar la parte de la fecha
-    const fechaSinHora = fecha.includes('T') ? fecha.split('T')[0] : fecha;
-    
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
-      cortaY: { day: '2-digit', month: 'short', year: 'numeric' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
-      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' },
-      simple: null, // Para retornar solo YYYY-MM-DD
-      compacto: null // Para formato DD/MM/YYYY
+      larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     };
-    
-    if (formato === 'simple') return fechaSinHora;
-    if (formato === 'compacto') {
-      const [year, month, day] = fechaSinHora.split('-');
-      return `${day}/${month}/${year}`;
-    }
-    
-    return new Date(fechaSinHora).toLocaleDateString('es-MX', opciones[formato]);
+    return new Date(fecha).toLocaleDateString('es-MX', opciones[formato]);
   },
 
   formatearMoneda: (monto) => {
@@ -66,20 +52,19 @@ const utils = {
   getBadgeClass: (tipo, valor) => {
     const mapas = {
       etapa: {
-        'En cotización': 'bg-secondary',
+        'Pagado': 'bg-success',
+        'Cancelado': 'bg-danger',
+        'Emitida': 'bg-info',
+        'Autorizado': 'bg-primary',
         'Cotización enviada': 'bg-warning',
-        'Autorizado': 'bg-success',
         'En proceso emisión': 'bg-info',
-        'Emitida': 'bg-primary',
-        'Enviada al Cliente': 'bg-info',
-        'Renovada': 'bg-primary',
-        'Cancelada': 'bg-danger'
+        'Pendiente de pago': 'bg-warning'
       },
       pago: {
         'Pagado': 'bg-success',
-        'Pendiente': 'bg-secondary',
-        'Por Vencer': 'bg-warning',
-        'Vencido': 'bg-danger'
+        'Vencido': 'bg-danger',
+        'Pago por vencer': 'bg-warning',
+        'Sin definir': 'bg-secondary'
       },
       tipo_pago: {
         'Fraccionado': 'bg-info',
@@ -143,121 +128,42 @@ const CampoFechaCalculada = React.memo(({
   </div>
 ));
 
-const InfoCliente = React.memo(({ expediente, cliente }) => {
-  if (!cliente) {
-    return (
-      <div className="text-muted">
-        <small>⚠️ Sin cliente asignado</small>
-        {expediente.cliente_id && (
-          <div style={{ fontSize: '10px' }}>
-            ID: {expediente.cliente_id}
-          </div>
-        )}
-      </div>
-    );
-  }
-  
-  // Determinar si es Persona Moral
-  const esPersonaMoral = cliente.tipoPersona === 'Persona Moral' || cliente.tipo_persona === 'Persona Moral';
-  
-  return (
-    <div>
-      <div className="fw-semibold">
-        {esPersonaMoral ? (
-          // Persona Moral - Razón Social, Contacto Principal, Teléfonos y Email
-          <div>
-            {/* 1. Razón Social */}
-            <div>{cliente.razonSocial || cliente.razon_social}</div>
-            
-            {/* 2. Contacto Principal */}
-            {cliente.contacto_nombre && (
-              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '3px' }}>
-                👤 {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
-              </div>
-            )}
-            
-            {/* 3. Teléfonos y Email del Contacto */}
-            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-              {cliente.contacto_telefono_movil && (
-                <div>📱 {cliente.contacto_telefono_movil}</div>
-              )}
-              {cliente.contacto_telefono_fijo && (
-                <div>☎️ {cliente.contacto_telefono_fijo}</div>
-              )}
-              {cliente.contacto_email && (
-                <div>📧 {cliente.contacto_email}</div>
-              )}
-            </div>
-          </div>
-        ) : (
-          // Persona Física - Nombre, Teléfonos y Email
-          <div>
-            {/* 1. Nombre Completo del Cliente */}
-            <div>
-              {cliente.nombre} {cliente.apellidoPaterno || cliente.apellido_paterno} {cliente.apellidoMaterno || cliente.apellido_materno}
-            </div>
-            
-            {/* 2. Gestor/Contacto Adicional (si existe) */}
-            {cliente.contacto_nombre && (
-              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '3px' }}>
-                👤 Gestor: {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
-              </div>
-            )}
-            
-            {/* 3. Teléfonos y Email del Gestor (si existe) o del Cliente */}
-            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-              {(cliente.contacto_telefono_movil || cliente.telefonoMovil) && (
-                <div>📱 {cliente.contacto_telefono_movil || cliente.telefonoMovil}</div>
-              )}
-              {(cliente.contacto_telefono_fijo || cliente.telefonoFijo) && (
-                <div>☎️ {cliente.contacto_telefono_fijo || cliente.telefonoFijo}</div>
-              )}
-              {(cliente.contacto_email || cliente.email) && (
-                <div>📧 {cliente.contacto_email || cliente.email}</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-      {expediente.producto === 'Autos' && expediente.marca && (
-        <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px', fontWeight: 'normal' }}>
+const InfoCliente = React.memo(({ expediente }) => (
+  <div>
+    <div className="fw-semibold">
+      {expediente.nombre} {expediente.apellido_paterno} {expediente.apellido_materno}
+    </div>
+    <small className="text-muted">{expediente.email}</small>
+    {expediente.producto === 'Autos' && expediente.marca && (
+      <div>
+        <small className="text-primary">
           🚗 {expediente.marca} {expediente.modelo} {expediente.año}
-        </div>
-      )}
-    </div>
-  );
-});
-
-const EstadoPago = React.memo(({ expediente }) => {
-  // Determinar si el pago está vencido
-  const fechaPago = expediente.fecha_vencimiento_pago || expediente.proximoPago || expediente.fecha_pago;
-  const hoy = new Date();
-  const fechaPagoDate = fechaPago ? new Date(fechaPago) : null;
-  const estaVencido = fechaPagoDate && fechaPagoDate < hoy && expediente.estatusPago !== 'Pagado';
-  
-  return (
-    <div>
-      {/* Tipo de Pago */}
-      <div className="mb-1">
-        <small className="text-muted">Tipo:</small>
-        <br />
-        <small className="fw-semibold text-primary">{expediente.tipo_pago || '-'}</small>
-        {expediente.frecuenciaPago && (
-          <span className="ms-1">
-            <small className="text-muted">({expediente.frecuenciaPago})</small>
-          </span>
-        )}
+        </small>
       </div>
+    )}
+  </div>
+));
 
-      {/* Estatus de Pago */}
-      <div className="mb-1">
-        <small className="text-muted">Estatus:</small>
-        <br />
-        <Badge tipo="pago" valor={expediente.estatusPago || 'Pendiente'} className="badge-sm" />
+const EstadoPago = React.memo(({ expediente }) => (
+  <div>
+    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+    {expediente.frecuenciaPago && (
+      <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
+    )}
+    <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+    {expediente.proximoPago && expediente.estatusPago !== 'Pagado' && (
+      <div>
+        <small className={`${
+          expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
+          expediente.estatusPago === 'Pago por vencer' ? 'text-warning' :
+          'text-muted'
+        }`}>
+          Pago: {utils.formatearFecha(expediente.proximoPago)}
+        </small>
       </div>
-    </div>
-  );
-});
+    )}
+  </div>
+));
 
 const CalendarioPagos = React.memo(({ 
   expediente, 
@@ -1994,234 +1900,190 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                   </div>
                   <div className="card-body" style={{ padding: '0.5rem' }}>
                     <div className="row g-1">
-                      {/* INFORMACIÓN DEL ASEGURADO */}
+                      {/* DATOS GENERALES DE PÓLIZA (AGRUPADO) */}
                       <div className="col-12">
-                        <div className="p-2 bg-light rounded">
-                          <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>👤 INFORMACIÓN DEL ASEGURADO</h6>
-                          <div className="row g-1">
-                            <div className="col-md-6">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</strong></div>
-                            </div>
-                            <div className="col-md-6">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
+                        <div className="accordion mb-3" id="accordionDatosGeneralesPoliza">
+                          <div className="accordion-item">
+                            <h2 className="accordion-header" id="headingDatosGeneralesPoliza">
+                              <button className="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDatosGeneralesPoliza" aria-expanded="true" aria-controls="collapseDatosGeneralesPoliza">
+                                Datos Generales de Póliza
+                              </button>
+                            </h2>
+                            <div id="collapseDatosGeneralesPoliza" className="accordion-collapse collapse show" aria-labelledby="headingDatosGeneralesPoliza" data-bs-parent="#accordionDatosGeneralesPoliza">
+                              <div className="accordion-body">
+                                {/* INFORMACIÓN DEL ASEGURADO */}
+                                <div className="p-2 bg-light rounded mb-2">
+                                  <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>👤 INFORMACIÓN DEL ASEGURADO</h6>
+                                  <div className="row g-1">
+                                    <div className="col-md-6">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</strong></div>
+                                    </div>
+                                    <div className="col-md-6">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* DATOS DE LA PÓLIZA */}
+                                <div className="p-2 bg-primary bg-opacity-10 rounded mb-2">
+                                  <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📋 DATOS DE LA PÓLIZA</h6>
+                                  <div className="row g-1">
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Compañía:</small>
+                                      <div><strong className="text-primary" style={{ fontSize: '0.8rem' }}>{datosExtraidos.compania}</strong></div>
+                                    </div>
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Número de Póliza:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.numero_poliza || '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Endoso:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.endoso || '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Inciso:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inciso || '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Plan:</small>
+                                      <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.plan || '-'}</strong></div>
+                                    </div>
+                                  </div>
+                                  <div className="row g-1 mt-1">
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Producto:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.producto}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.agente || '-'}</strong></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* VIGENCIA */}
+                                <div className="p-2 bg-success bg-opacity-10 rounded mb-2">
+                                  <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
+                                  <div className="row g-1">
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inicio_vigencia ? new Date(datosExtraidos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.termino_vigencia ? new Date(datosExtraidos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha Vencimiento del pago:</small>
+                                      <div><strong className="text-warning-emphasis" style={{ fontSize: '0.8rem' }}>
+                                        {datosExtraidos.fecha_pago ? new Date(datosExtraidos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
+                                        {datosExtraidos.plazo_pago_dias && ` (${datosExtraidos.plazo_pago_dias} días)`}
+                                      </strong></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* DESCRIPCIÓN DEL VEHÍCULO ASEGURADO */}
+                                <div className="p-2 bg-info bg-opacity-10 rounded mb-2">
+                                  <h6 className="text-info mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🚗 DESCRIPCIÓN DEL VEHÍCULO ASEGURADO</h6>
+                                  <div className="row g-1">
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Marca:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.marca}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Modelo:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.modelo}</strong></div>
+                                    </div>
+                                    <div className="col-md-1">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Año:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.anio}</strong></div>
+                                    </div>
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Placas:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.placas}</strong></div>
+                                    </div>
+                                    <div className="col-md-2">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Color:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.color || '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-1">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_vehiculo}</strong></div>
+                                    </div>
+                                  </div>
+                                  <div className="row g-1 mt-1">
+                                    <div className="col-md-6">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Serie (VIN):</small>
+                                      <div><strong className="font-monospace" style={{ fontSize: '0.75rem' }}>{datosExtraidos.numero_serie}</strong></div>
+                                    </div>
+                                    <div className="col-md-6">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Motor:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.motor || '-'}</strong></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                {/* INFORMACIÓN FINANCIERA */}
+                                <div className="p-2 bg-secondary bg-opacity-10 rounded mb-2">
+                                  <h6 className="text-secondary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
+                                  <div className="row g-1">
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.prima_pagada ? utils.formatearMoneda(datosExtraidos.prima_pagada) : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tasa Financiamiento:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.cargo_pago_fraccionado ? utils.formatearMoneda(datosExtraidos.cargo_pago_fraccionado) : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-4">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos por Expedición:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.gastos_expedicion ? utils.formatearMoneda(datosExtraidos.gastos_expedicion) : '-'}</strong></div>
+                                    </div>
+                                  </div>
+                                  <div className="row g-1 mt-1">
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subtotal:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.subtotal ? utils.formatearMoneda(datosExtraidos.subtotal) : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A. 16%:</small>
+                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.iva ? utils.formatearMoneda(datosExtraidos.iva) : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>IMPORTE TOTAL:</small>
+                                      <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datosExtraidos.total ? utils.formatearMoneda(datosExtraidos.total) : '-'}</strong></div>
+                                    </div>
+                                    <div className="col-md-3">
+                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
+                                      <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago || '-'}</strong></div>
+                                    </div>
+                                  </div>
+                                  {datosExtraidos.fecha_pago && (
+                                    <div className="row g-1 mt-1">
+                                      <div className="col-md-6">
+                                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Pago Único:</small>
+                                        <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.pago_unico ? utils.formatearMoneda(datosExtraidos.pago_unico) : '-'}</strong></div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      {/* DATOS DE LA PÓLIZA */}
+                      {/* Detalle de expediente unificado */}
                       <div className="col-12">
-                        <div className="p-2 bg-primary bg-opacity-10 rounded">
-                          <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📋 DATOS DE LA PÓLIZA</h6>
-                          <div className="row g-1">
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Compañía:</small>
-                              <div><strong className="text-primary" style={{ fontSize: '0.8rem' }}>{datosExtraidos.compania}</strong></div>
-                            </div>
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Número de Póliza:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.numero_poliza || '-'}</strong></div>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Endoso:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.endoso || '-'}</strong></div>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Inciso:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inciso || '-'}</strong></div>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Plan:</small>
-                              <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.plan || '-'}</strong></div>
-                            </div>
-                          </div>
-                          <div className="row g-1 mt-1">
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Producto:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.producto}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.agente || '-'}</strong></div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* VIGENCIA */}
-                      <div className="col-12">
-                        <div className="p-2 bg-success bg-opacity-10 rounded">
-                          <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
-                          <div className="row g-1">
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inicio_vigencia ? new Date(datosExtraidos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.termino_vigencia ? new Date(datosExtraidos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha Vencimiento del pago:</small>
-                              <div><strong className="text-warning-emphasis" style={{ fontSize: '0.8rem' }}>
-                                {datosExtraidos.fecha_pago ? new Date(datosExtraidos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
-                                {datosExtraidos.plazo_pago_dias && ` (${datosExtraidos.plazo_pago_dias} días)`}
-                              </strong></div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* DESCRIPCIÓN DEL VEHÍCULO ASEGURADO */}
-                      <div className="col-12">
-                        <div className="p-2 bg-info bg-opacity-10 rounded">
-                          <h6 className="text-info mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🚗 DESCRIPCIÓN DEL VEHÍCULO ASEGURADO</h6>
-                          <div className="row g-1">
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Marca:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.marca}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Modelo:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.modelo}</strong></div>
-                            </div>
-                            <div className="col-md-1">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Año:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.anio}</strong></div>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Placas:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.placas}</strong></div>
-                            </div>
-                            <div className="col-md-2">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Color:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.color || '-'}</strong></div>
-                            </div>
-                            <div className="col-md-1">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_vehiculo}</strong></div>
-                            </div>
-                          </div>
-                          <div className="row g-1 mt-1">
-                            <div className="col-md-6">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Serie (VIN):</small>
-                              <div><strong className="font-monospace" style={{ fontSize: '0.75rem' }}>{datosExtraidos.numero_serie}</strong></div>
-                            </div>
-                            <div className="col-md-6">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Motor:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.motor || '-'}</strong></div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* COBERTURAS Y DEDUCIBLES */}
-                      <div className="col-12">
-                        <div className="p-2 bg-warning bg-opacity-10 rounded">
-                          <h6 className="text-warning-emphasis mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🛡️ COBERTURAS CONTRATADAS</h6>
-                          
-                          {datosExtraidos.coberturas && datosExtraidos.coberturas.length > 0 ? (
-                            <div className="table-responsive">
-                              <table className="table table-sm table-hover mb-0" style={{ fontSize: '0.75rem' }}>
-                                <thead className="table-light">
-                                  <tr>
-                                    <th style={{ padding: '0.25rem 0.5rem' }}>Cobertura</th>
-                                    <th className="text-end" style={{ padding: '0.25rem 0.5rem' }}>Suma Asegurada</th>
-                                    <th className="text-center" style={{ padding: '0.25rem 0.5rem' }}>Deducible</th>
-                                    <th className="text-end" style={{ padding: '0.25rem 0.5rem' }}>Prima</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {datosExtraidos.coberturas.map((cob, idx) => (
-                                    <tr key={idx}>
-                                      <td className="fw-medium" style={{ padding: '0.25rem 0.5rem' }}>{cob.nombre}</td>
-                                      <td className="text-end" style={{ padding: '0.25rem 0.5rem' }}>
-                                        {cob.suma_asegurada === 'AMPARADA' ? (
-                                          <span className="badge bg-success">AMPARADA</span>
-                                        ) : (
-                                          `$${parseFloat(cob.suma_asegurada).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                        )}
-                                        {cob.tipo === 'por_evento' && <small className="d-block text-muted">POR EVENTO</small>}
-                                      </td>
-                                      <td className="text-center">
-                                        <span className="badge bg-secondary">{cob.deducible}</span>
-                                      </td>
-                                      <td className="text-end">
-                                        ${parseFloat(cob.prima).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          ) : (
-                            <div className="row g-2">
-                              <div className="col-md-4">
-                                <small className="text-muted">Tipo de Cobertura:</small><br/>
-                                <strong className="text-uppercase">{datosExtraidos.tipo_cobertura}</strong>
-                              </div>
-                              <div className="col-md-4">
-                                <small className="text-muted">Suma Asegurada:</small><br/>
-                                <strong>{utils.formatearMoneda(datosExtraidos.suma_asegurada)}</strong>
-                              </div>
-                              <div className="col-md-4">
-                                <small className="text-muted">Deducible:</small><br/>
-                                <strong>{datosExtraidos.deducible}%</strong>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>                      {/* INFORMACIÓN FINANCIERA */}
-                      <div className="col-12">
-                        <div className="p-2 bg-secondary bg-opacity-10 rounded">
-                          <h6 className="text-secondary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
-                          <div className="row g-1">
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.prima_pagada ? utils.formatearMoneda(datosExtraidos.prima_pagada) : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tasa Financiamiento:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.cargo_pago_fraccionado ? utils.formatearMoneda(datosExtraidos.cargo_pago_fraccionado) : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-4">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos por Expedición:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.gastos_expedicion ? utils.formatearMoneda(datosExtraidos.gastos_expedicion) : '-'}</strong></div>
-                            </div>
-                          </div>
-                          <div className="row g-1 mt-1">
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subtotal:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.subtotal ? utils.formatearMoneda(datosExtraidos.subtotal) : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A. 16%:</small>
-                              <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.iva ? utils.formatearMoneda(datosExtraidos.iva) : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>IMPORTE TOTAL:</small>
-                              <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datosExtraidos.total ? utils.formatearMoneda(datosExtraidos.total) : '-'}</strong></div>
-                            </div>
-                            <div className="col-md-3">
-                              <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
-                              <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago || '-'}</strong></div>
-                            </div>
-                          </div>
-                          {datosExtraidos.fecha_pago && (
-                            <div className="row g-1 mt-1">
-                              <div className="col-md-6">
-                                <small className="text-muted" style={{ fontSize: '0.7rem' }}>Pago Único:</small>
-                                <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.pago_unico ? utils.formatearMoneda(datosExtraidos.pago_unico) : '-'}</strong></div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        <DetalleExpediente
+                          datos={datosExtraidos}
+                          coberturas={datosExtraidos.coberturas || []}
+                          mensajes={datosExtraidos.mensajes || []}
+                          utils={utils}
+                        />
                       </div>
                     </div>
                   </div>
@@ -2661,7 +2523,11 @@ const Formulario = React.memo(({
   calcularProximoPago,
   CONSTANTS,
   handleClienteSeleccionado,
-  clienteSeleccionado
+  clienteSeleccionado,
+  handleSeleccionarPDF,
+  archivoSeleccionado,
+  subiendoPDF,
+  subirPDFPoliza
 }) => {
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
@@ -3804,7 +3670,6 @@ const Formulario = React.memo(({
                           className="form-control"
                           accept=".pdf,application/pdf"
                           onChange={handleSeleccionarPDF}
-                          disabled
                         />
                         <small className="form-text text-muted">
                           Tamaño máximo: 10MB. Solo archivos PDF.
@@ -3825,7 +3690,7 @@ const Formulario = React.memo(({
                         type="button"
                         onClick={() => subirPDFPoliza(formulario.id)}
                         className="btn btn-primary"
-                        disabled
+                        disabled={!archivoSeleccionado || subiendoPDF}
                       >
                         {subiendoPDF ? (
                           <>
@@ -3899,7 +3764,15 @@ const DetallesExpediente = React.memo(({
   abrirModalCompartir
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
-  const [mostrarCoberturas, setMostrarCoberturas] = useState(true); // Abierto por defecto
+  
+  // Estados para controlar secciones colapsables (todas cerradas por defecto)
+  const [mostrarAsegurado, setMostrarAsegurado] = useState(false);
+  const [mostrarPoliza, setMostrarPoliza] = useState(false);
+  const [mostrarVigencia, setMostrarVigencia] = useState(false);
+  const [mostrarVehiculo, setMostrarVehiculo] = useState(false);
+  const [mostrarFinanciera, setMostrarFinanciera] = useState(false);
+  const [mostrarCoberturas, setMostrarCoberturas] = useState(false);
+  const [mostrarHistorial, setMostrarHistorial] = useState(false);
   
   // Helper: parsear coberturas de forma segura
   const obtenerCoberturas = useMemo(() => {
@@ -4036,320 +3909,21 @@ const DetallesExpediente = React.memo(({
       <div className="card">
         <div className="card-body p-3">
           <div className="row g-3">
-            
-            {/* INFORMACIÓN DEL ASEGURADO */}
             <div className="col-12">
-              <div className="p-2 bg-light rounded">
-                <h6 className="text-primary mb-1 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                  <span className="me-2">👤</span> INFORMACIÓN DEL ASEGURADO
-                </h6>
-                <div className="row g-1">
-                  <div className="col-md-6">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>
-                      {clienteInfo ? (
-                        clienteInfo.tipoPersona === 'Persona Moral' ? 
-                          clienteInfo.razonSocial :
-                          `${clienteInfo.nombre || ''} ${clienteInfo.apellidoPaterno || clienteInfo.apellido_paterno || ''} ${clienteInfo.apellidoMaterno || clienteInfo.apellido_materno || ''}`
-                      ) : (expedienteSeleccionado.nombre || expedienteSeleccionado.apellido_paterno ? 
-                        `${expedienteSeleccionado.nombre || ''} ${expedienteSeleccionado.apellido_paterno || ''} ${expedienteSeleccionado.apellido_materno || ''}` : 
-                        '-'
-                      )}
-                    </strong></div>
-                  </div>
-                  {expedienteSeleccionado.conductor_habitual && (
-                    <div className="col-md-6">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.conductor_habitual}</strong></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* DATOS DE LA PÓLIZA */}
-            <div className="col-12">
-              <div className="p-2 bg-primary bg-opacity-10 rounded">
-                <h6 className="text-primary mb-1 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                  <span className="me-2">📋</span> DATOS DE LA PÓLIZA
-                </h6>
-                <div className="row g-2">
-                  {/* Columna 1: Compañía / Producto */}
-                  <div className="col-md-3">
-                    <div className="mb-2">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Compañía:</small>
-                      <div><strong className="text-primary" style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.compania}</strong></div>
-                    </div>
-                    <div>
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Producto:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.producto}</strong></div>
-                    </div>
-                  </div>
-                  
-                  {/* Columna 2: Póliza / Tipo de Pago */}
-                  <div className="col-md-3">
-                    <div className="mb-2">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Número de Póliza:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.numero_poliza || '-'}</strong></div>
-                    </div>
-                    <div>
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.tipo_pago || 'Anual'}</strong></div>
-                    </div>
-                  </div>
-                  
-                  {/* Columna 3: Endoso / Inciso */}
-                  <div className="col-md-3">
-                    <div className="mb-2">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Endoso:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.endoso || '000000'}</strong></div>
-                    </div>
-                    <div>
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Inciso:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.inciso || '0001'}</strong></div>
-                    </div>
-                  </div>
-                  
-                  {/* Columna 4: Plan / Agente */}
-                  <div className="col-md-3">
-                    <div className="mb-2">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Plan:</small>
-                      <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.plan || 'AMPLIA'}</strong></div>
-                    </div>
-                    <div>
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.agente || '-'}</strong></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* VIGENCIA DE LA PÓLIZA */}
-            <div className="col-12">
-              <div className="p-2 bg-success bg-opacity-10 rounded">
-                <h6 className="text-success mb-1 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                  <span className="me-2">📅</span> VIGENCIA DE LA PÓLIZA
-                </h6>
-                <div className="row g-1">
-                  <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.inicio_vigencia ? new Date(expedienteSeleccionado.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                  </div>
-                  <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.termino_vigencia ? new Date(expedienteSeleccionado.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                  </div>
-                  <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha Vencimiento del pago:</small>
-                    <div><strong className="text-warning-emphasis" style={{ fontSize: '0.8rem' }}>
-                      {expedienteSeleccionado.fecha_pago ? new Date(expedienteSeleccionado.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
-                      {expedienteSeleccionado.periodo_gracia && ` (${expedienteSeleccionado.periodo_gracia} días)`}
-                    </strong></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* DESCRIPCIÓN DEL VEHÍCULO - Solo si es Autos */}
-            {expedienteSeleccionado.producto && expedienteSeleccionado.producto.toLowerCase().includes('auto') && (
-              <div className="col-12">
-                <div className="p-2 bg-info bg-opacity-10 rounded">
-                  <h6 className="text-info mb-1 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                    <span className="me-2">🚗</span> DESCRIPCIÓN DEL VEHÍCULO ASEGURADO
-                  </h6>
-                  <div className="row g-2">
-                    {/* Columna 1: Marca / Modelo */}
-                    <div className="col-md-3">
-                      <div className="mb-2">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Marca:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.marca || '-'}</strong></div>
-                      </div>
-                      <div>
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Modelo:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.modelo || '-'}</strong></div>
-                      </div>
-                    </div>
-                    
-                    {/* Columna 2: VIN / Motor */}
-                    <div className="col-md-3">
-                      <div className="mb-2">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Serie (VIN):</small>
-                        <div><strong className="font-monospace" style={{ fontSize: '0.75rem' }}>{expedienteSeleccionado.numero_serie || '-'}</strong></div>
-                      </div>
-                      <div>
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Motor:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.motor || '-'}</strong></div>
-                      </div>
-                    </div>
-                    
-                    {/* Columna 3: Año / Color */}
-                    <div className="col-md-3">
-                      <div className="mb-2">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Año:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.anio || '-'}</strong></div>
-                      </div>
-                      <div>
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Color:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.color || '-'}</strong></div>
-                      </div>
-                    </div>
-                    
-                    {/* Columna 4: Tipo / Placas */}
-                    <div className="col-md-3">
-                      <div className="mb-2">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.tipo_vehiculo || '-'}</strong></div>
-                      </div>
-                      <div>
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Placas:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.placas || '-'}</strong></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* INFORMACIÓN FINANCIERA */}
-            <div className="col-12">
-              <div className="p-2 bg-secondary bg-opacity-10 rounded">
-                <h6 className="text-secondary mb-1 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                  <span className="me-2">💰</span> INFORMACIÓN FINANCIERA
-                </h6>
-                <div className="row g-1">
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(expedienteSeleccionado.prima_pagada)}</strong></div>
-                  </div>
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tasa Financiamiento:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(expedienteSeleccionado.cargoPagoFraccionado || expedienteSeleccionado.cargo_pago_fraccionado)}</strong></div>
-                  </div>
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos por Expedición:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(expedienteSeleccionado.gastosExpedicion || expedienteSeleccionado.gastos_expedicion)}</strong></div>
-                  </div>
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subtotal:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(expedienteSeleccionado.subtotal)}</strong></div>
-                  </div>
-                </div>
-                <div className="row g-1 mt-1">
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A. 16%:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(expedienteSeleccionado.iva)}</strong></div>
-                  </div>
-                  <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
-                    <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{expedienteSeleccionado.tipo_pago || 'ANUAL'}</strong></div>
-                  </div>
-                  <div className="col-md-6">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>IMPORTE TOTAL:</small>
-                    <div><strong className="text-success" style={{ fontSize: '1.1rem' }}>{utils.formatearMoneda(expedienteSeleccionado.total)}</strong></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* COBERTURAS CONTRATADAS - Siempre desplegable */}
-            <div className="col-12">
-              <div className="p-2 bg-warning bg-opacity-10 rounded">
-                <div 
-                  className="d-flex align-items-center justify-content-between mb-1"
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => setMostrarCoberturas(!mostrarCoberturas)}
-                >
-                  <h6 className="text-warning-emphasis mb-0 d-flex align-items-center" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
-                    <span className="me-2">🛡️</span> COBERTURAS CONTRATADAS
-                    {obtenerCoberturas.length > 0 && (
-                      <span className="badge bg-warning text-dark ms-2" style={{ fontSize: '0.7rem' }}>{obtenerCoberturas.length}</span>
-                    )}
-                  </h6>
-                  <button 
-                    className="btn btn-sm btn-outline-warning"
-                    type="button"
-                    style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem' }}
-                  >
-                    {mostrarCoberturas ? '▲ Ocultar' : '▼ Ver detalles'}
-                  </button>
-                </div>
-                
-                {mostrarCoberturas && (
-                  <div>
-                    {obtenerCoberturas.length > 0 ? (
-                      <div className="table-responsive">
-                        <table className="table table-sm table-hover mb-0 bg-white" style={{ fontSize: '0.8rem' }}>
-                          <thead className="table-light">
-                            <tr>
-                              <th style={{ width: '40%' }}>Cobertura</th>
-                              <th style={{ width: '25%' }}>Suma Asegurada</th>
-                              <th className="text-center" style={{ width: '15%' }}>Deducible</th>
-                              <th className="text-end" style={{ width: '20%' }}>Prima</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {obtenerCoberturas.map((cob, idx) => (
-                              <tr key={idx}>
-                                <td className="fw-medium">{cob.nombre}</td>
-                                <td>
-                                  {cob.suma_asegurada === 'AMPARADA' ? (
-                                    <span className="badge bg-success" style={{ fontSize: '0.7rem' }}>AMPARADA</span>
-                                  ) : (
-                                    `$${parseFloat(cob.suma_asegurada || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                                  )}
-                                  {cob.tipo === 'por_evento' && <small className="d-block text-muted" style={{ fontSize: '0.7rem' }}>POR EVENTO</small>}
-                                </td>
-                                <td className="text-center">
-                                  <span className="badge bg-secondary" style={{ fontSize: '0.7rem' }}>{cob.deducible}</span>
-                                </td>
-                                <td className="text-end">
-                                  ${parseFloat(cob.prima || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      // Si no hay coberturas detalladas, mostrar datos básicos o mensaje
-                      (expedienteSeleccionado.tipo_cobertura || expedienteSeleccionado.suma_asegurada || expedienteSeleccionado.deducible) ? (
-                        <div className="row g-2">
-                          {expedienteSeleccionado.tipo_cobertura && (
-                            <div className="col-md-4">
-                              <small className="text-muted">Tipo de Cobertura:</small><br/>
-                              <strong className="text-uppercase">{expedienteSeleccionado.tipo_cobertura}</strong>
-                            </div>
-                          )}
-                          {expedienteSeleccionado.suma_asegurada && (
-                            <div className="col-md-4">
-                              <small className="text-muted">Suma Asegurada:</small><br/>
-                              <strong>{utils.formatearMoneda(expedienteSeleccionado.suma_asegurada)}</strong>
-                            </div>
-                          )}
-                          {expedienteSeleccionado.deducible && (
-                            <div className="col-md-4">
-                              <small className="text-muted">Deducible:</small><br/>
-                              <strong>{expedienteSeleccionado.deducible}{typeof expedienteSeleccionado.deducible === 'number' ? '%' : ''}</strong>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="alert alert-info mb-0">
-                          <small>
-                            ℹ️ No hay información detallada de coberturas disponible para esta póliza.
-                            <br/>
-                            <em className="text-muted">Las coberturas detalladas se extraen automáticamente al importar pólizas desde PDF.</em>
-                          </small>
-                        </div>
-                      )
-                    )}
-                  </div>
+              <DetalleExpediente
+                datos={expedienteSeleccionado}
+                coberturas={obtenerCoberturas}
+                utils={utils}
+                modo="caratula"
+                historialSlot={(
+                  <HistorialNotificaciones 
+                    expedienteId={expedienteSeleccionado.id}
+                    clienteId={expedienteSeleccionado.cliente_id}
+                    modo="expediente"
+                  />
                 )}
-              </div>
+              />
             </div>
-
-            {/* CALENDARIO DE PAGOS - Si es Fraccionado */}
             {expedienteSeleccionado.tipo_pago === 'Fraccionado' && 
              expedienteSeleccionado.frecuenciaPago && 
              expedienteSeleccionado.inicio_vigencia && (
@@ -4361,7 +3935,6 @@ const DetallesExpediente = React.memo(({
                 />
               </div>
             )}
-
           </div>
         </div>
       </div>
@@ -4893,65 +4466,31 @@ const estadoInicialFormulario = {
       // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
       const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
       
-        // Obtener URL firmada del PDF si existe
-        let pdfUrl = null;
-        if (expediente.pdf_key) {
-          try {
-            const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
-            pdfUrl = pdfData.signed_url;
-          } catch (error) {
-            console.warn('No se pudo obtener URL del PDF:', error);
-          }
+      // Obtener URL firmada del PDF si existe
+      let pdfUrl = null;
+      let pdfExpiracion = null;
+      if (expediente.pdf_key) {
+        try {
+          const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
+          pdfUrl = pdfData.signed_url;
+          // Calcular fecha de expiración (24 horas desde ahora)
+          pdfExpiracion = new Date(Date.now() + 86400 * 1000).toISOString();
+        } catch (error) {
+          console.warn('No se pudo obtener URL del PDF:', error);
         }
+      }
       
-      // Construir el mensaje enriquecido (fechas/moneda formateadas y emojis)
-        const numeroPoliza = expediente.numero_poliza || 'Sin número';
-        const compania = expediente.compania || 'N/A';
-  const producto = expediente.producto || 'N/A';
-  const esAuto = (producto || '').toLowerCase().includes('auto');
-  const marca = expediente.marca || expediente.marcaVehiculo || '';
-  const modelo = expediente.modelo || '';
-  const anio = expediente.año || expediente.anio || '';
-  const placas = expediente.placas || expediente.placa || expediente.placa_vehicular || '';
-  const vin = expediente.vin || expediente.numero_serie || '';
-  const inicioVig = utils.formatearFecha(expediente.inicio_vigencia, 'cortaY');
-  const finVig = utils.formatearFecha(expediente.termino_vigencia, 'cortaY');
-        const primaTotal = utils.formatearMoneda(expediente.total || 0);
-  const fechaPagoFmt = utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY');
-        const diasRest = utils.calcularDiasRestantes(expediente.fecha_vencimiento_pago);
+      // Generar mensaje dinámico según el estado usando el servicio
+      const { tipoMensaje, mensaje } = notificacionesService.generarMensajeWhatsApp(
+        expediente, 
+        utils, 
+        pdfUrl
+      );
 
-        let lineaPago = `📆 *Pago:* ${fechaPagoFmt}`;
-        if (expediente.estatusPago === 'Pagado') {
-          lineaPago += '  ✅ Pagado';
-        } else if (typeof diasRest === 'number') {
-          if (diasRest > 0) lineaPago += `  ⏳ en ${diasRest} día(s)`;
-          if (diasRest === 0) lineaPago += '  ⏳ vence hoy';
-          if (diasRest < 0) lineaPago += `  ⚠️ vencido hace ${Math.abs(diasRest)} día(s)`;
-        }
-
-        // Encabezado con emoji ampliamente soportado
-        let mensaje = [
-          `*✅ Póliza emitida • ${numeroPoliza}*`,
-          '',
-          'Estimado cliente,',
-          'Te compartimos los detalles de tu póliza:',
-          '',
-          `🏢 *Aseguradora:* ${compania}`,
-          `📦 *Producto:* ${producto}`,
-          ...(esAuto || marca || modelo || anio || placas ? [
-            `🚗 *Vehículo:* ${[marca, modelo, anio].filter(Boolean).join(' ')}` + (placas ? `  •  Placas: ${placas}` : '')
-          ] : []),
-          `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
-          `💵 *Prima total:* ${primaTotal}`,
-          lineaPago
-        ].join('\n');
-
-        // Agregar enlace al PDF si existe
-        if (pdfUrl) {
-          mensaje += `\n\n📄 *Descargar póliza:* ${pdfUrl}`;
-        }
-
-        mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales.`;
+      // Obtener nombre del cliente
+      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+        ? cliente.razonSocial || cliente.razon_social
+        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
 
       // Crear la URL de WhatsApp
       const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
@@ -4959,8 +4498,35 @@ const estadoInicialFormulario = {
       // Abrir WhatsApp
       window.open(url, '_blank');
       
-      // Actualizar la etapa a "Enviada al Cliente"
-      await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+      // Registrar la notificación en el historial
+      try {
+        await notificacionesService.registrarNotificacion({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
+          tipo_mensaje: tipoMensaje,
+          destinatario_nombre: nombreCliente,
+          destinatario_contacto: telefono,
+          mensaje: mensaje,
+          numero_poliza: expediente.numero_poliza,
+          compania: expediente.compania,
+          producto: expediente.producto,
+          estatus_pago: expediente.estatusPago,
+          fecha_vencimiento_pago: expediente.fecha_vencimiento_pago,
+          pdf_url: pdfUrl,
+          pdf_expiracion: pdfExpiracion,
+          estado_envio: 'enviado'
+        });
+        console.log('✅ Notificación registrada en el historial');
+      } catch (error) {
+        console.error('⚠️ Error al registrar notificación (no crítico):', error);
+        // No interrumpir el flujo si falla el registro
+      }
+      
+      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+      if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
+        await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+      }
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
@@ -4988,38 +4554,53 @@ const estadoInicialFormulario = {
 
         // Obtener URL firmada del PDF si existe
         let pdfUrl = null;
+        let pdfExpiracion = null;
         if (expediente.pdf_key) {
           try {
             const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
             pdfUrl = pdfData.signed_url;
+            pdfExpiracion = new Date(Date.now() + 86400 * 1000).toISOString();
           } catch (error) {
             console.warn('No se pudo obtener URL del PDF:', error);
           }
         }
 
-        // Construir asunto y cuerpo del email
-        const asunto = `Póliza Emitida - ${expediente.numero_poliza || 'Sin número'}`;
-      
-        let cuerpo = `Estimado cliente,
+        // Generar mensaje dinámico según el estado
+        const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl);
 
-  Le informamos que su póliza ha sido emitida exitosamente:
-
-  Póliza: ${expediente.numero_poliza || 'Sin número'}
-  Aseguradora: ${expediente.compania || 'N/A'}
-  Producto: ${expediente.producto || 'N/A'}
-  Vigencia: ${expediente.inicio_vigencia || 'N/A'} al ${expediente.termino_vigencia || 'N/A'}
-  Prima Total: $${expediente.total ? Number(expediente.total).toLocaleString('es-MX', { minimumFractionDigits: 2 }) : '0.00'}
-  Fecha de pago: ${expediente.fecha_vencimiento_pago || 'N/A'}`;
-
-        if (pdfUrl) {
-          cuerpo += `\n\nPuede descargar su póliza desde el siguiente enlace:\n${pdfUrl}`;
-        }
-
-        cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales.`;
+        // Obtener nombre del cliente
+        const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
 
         // Opción 1: Usar mailto (cliente de correo local)
         const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
         window.location.href = mailtoUrl;
+      
+        // Registrar la notificación en el historial
+        try {
+          await notificacionesService.registrarNotificacion({
+            expediente_id: expediente.id,
+            cliente_id: expediente.cliente_id,
+            tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
+            tipo_mensaje: tipoMensaje,
+            destinatario_nombre: nombreCliente,
+            destinatario_contacto: email,
+            asunto: asunto,
+            mensaje: cuerpo,
+            numero_poliza: expediente.numero_poliza,
+            compania: expediente.compania,
+            producto: expediente.producto,
+            estatus_pago: expediente.estatusPago,
+            fecha_vencimiento_pago: expediente.fecha_vencimiento_pago,
+            pdf_url: pdfUrl,
+            pdf_expiracion: pdfExpiracion,
+            estado_envio: 'enviado'
+          });
+          console.log('✅ Notificación registrada en el historial');
+        } catch (error) {
+          console.error('⚠️ Error al registrar notificación (no crítico):', error);
+        }
       
         // TODO: Implementar envío real mediante backend (SendGrid, Mailgun, etc.)
         // const response = await fetch(`${API_URL}/expedientes/${expediente.id}/enviar-email`, {
@@ -5028,8 +4609,10 @@ const estadoInicialFormulario = {
         //   body: JSON.stringify({ email, asunto, cuerpo, pdfUrl })
         // });
       
-        // Actualizar la etapa a "Enviada al Cliente"
-        await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+        if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
+          await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        }
       
       } catch (error) {
         console.error('Error al compartir por Email:', error);
@@ -5822,6 +5405,10 @@ const eliminarExpediente = useCallback((id) => {
             CONSTANTS={CONSTANTS}
             handleClienteSeleccionado={handleClienteSeleccionado}
             clienteSeleccionado={clienteSeleccionado}
+            handleSeleccionarPDF={handleSeleccionarPDF}
+            archivoSeleccionado={archivoSeleccionado}
+            subiendoPDF={subiendoPDF}
+            subirPDFPoliza={subirPDFPoliza}
           />
         )}
         
