@@ -2936,16 +2936,19 @@ const Formulario = React.memo(({
                     {/* Datos de Contacto - Editables */}
                     <div className="col-12">
                       <hr className="my-3" />
-                      <h6 className="text-muted mb-3">
+                      <h6 className="text-muted mb-2">
                         💼 Datos del Contacto Principal
                         <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
                           (Editable - Se actualizará el cliente)
                         </small>
                       </h6>
+                      <div className="alert alert-info py-2 px-3 mb-3" role="alert" style={{ fontSize: '0.85rem' }}>
+                        Requisito mínimo para guardar póliza (PM): <strong>Nombre</strong> y <strong>Email</strong> o <strong>Teléfono Móvil</strong>.
+                      </div>
                     </div>
                     
                     <div className="col-md-4">
-                      <label className="form-label">Nombre del Contacto</label>
+                      <label className="form-label">Nombre del Contacto <span className="text-danger">*</span></label>
                       <input
                         type="text"
                         className="form-control"
@@ -2975,7 +2978,7 @@ const Formulario = React.memo(({
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Email del Contacto</label>
+                      <label className="form-label">Email del Contacto <span className="text-muted">(uno de estos)</span></label>
                       <input
                         type="email"
                         className="form-control"
@@ -2995,7 +2998,7 @@ const Formulario = React.memo(({
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil</label>
+                      <label className="form-label">Teléfono Móvil <span className="text-muted">(uno de estos)</span></label>
                       <input
                         type="tel"
                         className="form-control"

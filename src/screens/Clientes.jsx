@@ -1647,9 +1647,12 @@ const ModuloClientes = () => {
                   Contacto Principal
                   <span className="badge bg-primary ms-2">Principal</span>
                 </h5>
+                <div className="alert alert-info py-2 px-3 mb-3" role="alert" style={{ fontSize: '0.85rem' }}>
+                  Requisito mínimo para guardar: <strong>Nombre</strong> y <strong>Email</strong> o <strong>Teléfono Móvil</strong>.
+                </div>
                 <div className="row g-3">
                   <div className="col-md-4">
-                    <label className="form-label">Nombre(s)</label>
+                    <label className="form-label">Nombre(s) <span className="text-danger">*</span></label>
                     <input
                       type="text"
                       className="form-control"
@@ -1679,7 +1682,7 @@ const ModuloClientes = () => {
                     />
                   </div>
                   <div className="col-md-4">
-                    <label className="form-label">Email</label>
+                    <label className="form-label">Email <span className="text-muted">(uno de estos)</span></label>
                     <input
                       type="email"
                       className="form-control"
@@ -1699,7 +1702,7 @@ const ModuloClientes = () => {
                     />
                   </div>
                   <div className="col-md-4">
-                    <label className="form-label">Teléfono Móvil</label>
+                    <label className="form-label">Teléfono Móvil <span className="text-muted">(uno de estos)</span></label>
                     <input
                       type="tel"
                       className="form-control"
