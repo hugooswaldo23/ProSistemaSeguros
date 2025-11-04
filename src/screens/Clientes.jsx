@@ -461,11 +461,11 @@ const ModuloClientes = () => {
         alert('Por favor complete los campos obligatorios: Razón Social y RFC');
         return;
       }
-      // Persona Moral: contacto principal obligatorio
+      // Persona Moral: contacto principal obligatorio (nombre + [email o móvil])
       const nombreContacto = (formularioCliente.contacto_nombre || '').trim();
-      const medioContacto = (formularioCliente.contacto_email || formularioCliente.contacto_telefono_movil || formularioCliente.contacto_telefono_fijo || '').trim();
-      if (!nombreContacto || !medioContacto) {
-        alert('En Persona Moral es obligatorio capturar el Contacto Principal (nombre) y al menos un dato de contacto (email o teléfono).');
+      const tieneEmailOMovil = !!(formularioCliente.contacto_email?.trim() || formularioCliente.contacto_telefono_movil?.trim());
+      if (!nombreContacto || !tieneEmailOMovil) {
+        alert('En Persona Moral es obligatorio capturar el Contacto Principal con nombre y al menos Email o Teléfono Móvil.');
         return;
       }
     }

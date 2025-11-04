@@ -5103,15 +5103,15 @@ const estadoInicialFormulario = {
       }
     }
 
-    // Regla de negocio: En Persona Moral debe existir Contacto Principal para poder crear/editar póliza
+    // Regla de negocio: En Persona Moral debe existir Contacto Principal (nombre) y al menos Email o Teléfono Móvil
     if (clienteSeleccionado?.tipoPersona === 'Persona Moral') {
       const nombreContacto = (formulario.contacto_nombre || clienteSeleccionado.contacto_nombre || '').trim();
-      const medioContacto = (
-        formulario.contacto_email || formulario.contacto_telefono_movil || formulario.contacto_telefono_fijo ||
-        clienteSeleccionado.contacto_email || clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_fijo || ''
-      ).trim();
-      if (!nombreContacto || !medioContacto) {
-        alert('Para Persona Moral es obligatorio tener Contacto Principal (nombre) y al menos un dato de contacto (email o teléfono) para poder guardar la póliza.');
+      const tieneEmailOMovil = !!(
+        (formulario.contacto_email || clienteSeleccionado.contacto_email || '').trim() ||
+        (formulario.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_movil || '').trim()
+      );
+      if (!nombreContacto || !tieneEmailOMovil) {
+        alert('Para Persona Moral es obligatorio capturar Contacto Principal con nombre y al menos Email o Teléfono Móvil para poder guardar la póliza.');
         return false;
       }
     }
