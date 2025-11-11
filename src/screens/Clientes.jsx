@@ -1,7 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck, ExternalLink } from 'lucide-react';
+import DetalleExpediente from '../components/DetalleExpediente';
 import { obtenerClientes, crearCliente, actualizarCliente, eliminarCliente } from '../services/clientesService';
+import * as pdfService from '../services/pdfService';
 
 // Hook personalizado para paginación (reutilizado del código original)
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -143,6 +145,38 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 ));
 
 const ModuloClientes = () => {
+  // Helper: normaliza un registro de cliente a las claves que usa la UI
+  const normalizarCliente = useCallback((cliente) => ({
+    ...cliente,
+    // Normalizar campos de contacto principal (snake_case → camelCase estable en este módulo)
+    contacto_nombre: cliente.contacto_nombre || cliente.contactoNombre || '',
+    contacto_apellido_paterno: cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || '',
+    contacto_apellido_materno: cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || '',
+    contacto_email: cliente.contacto_email || cliente.contactoEmail || '',
+    contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
+    contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || '',
+    contacto_puesto: cliente.contacto_puesto || cliente.contactoPuesto || '',
+    // Normalizar fechaRegistro (usar created_at como respaldo)
+    fechaRegistro: cliente.fecha_registro || cliente.fechaRegistro || cliente.created_at || cliente.fecha_alta || cliente.fechaAlta || '',
+    // Normalizar categoria (puede venir como objeto o string)
+    categoria: (() => {
+      if (cliente.categoria && typeof cliente.categoria === 'object') {
+        return cliente.categoria.nombre || cliente.categoria.name || 'Normal';
+      }
+      if (typeof cliente.categoria === 'string') return cliente.categoria;
+      if (cliente.segmento) return cliente.segmento;
+      return 'Normal';
+    })(),
+    // Normalizar arreglos serializados
+    contactos: (() => {
+      if (!cliente.contactos) return [];
+      if (Array.isArray(cliente.contactos)) return cliente.contactos;
+      if (typeof cliente.contactos === 'string') {
+        try { return JSON.parse(cliente.contactos); } catch { return []; }
+      }
+      return [];
+    })()
+  }), []);
   // Estados principales del módulo de clientes
   const [clientes, setClientes] = useState([]);
   const [expedientes, setExpedientes] = useState([]);
@@ -158,46 +192,7 @@ const ModuloClientes = () => {
         const resultadoClientes = await obtenerClientes();
         
         if (resultadoClientes.success) {
-          // Parsear contactos si vienen como string Y normalizar campos de contacto
-          const clientesParseados = resultadoClientes.data.map(cliente => ({
-            ...cliente,
-            // Normalizar campos de contacto principal (snake_case → camelCase)
-            contacto_nombre: cliente.contacto_nombre || cliente.contactoNombre || '',
-            contacto_apellido_paterno: cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || '',
-            contacto_apellido_materno: cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || '',
-            contacto_email: cliente.contacto_email || cliente.contactoEmail || '',
-            contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
-            contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || '',
-            contacto_puesto: cliente.contacto_puesto || cliente.contactoPuesto || '',
-            // Normalizar fechaRegistro (usar created_at como respaldo)
-            fechaRegistro: cliente.fecha_registro || cliente.fechaRegistro || cliente.created_at || cliente.fecha_alta || cliente.fechaAlta || '',
-            // Normalizar categoria (puede venir como objeto o string)
-            categoria: (() => {
-              // Si categoria es un objeto (ej: {id: 1, nombre: 'Normal'}), extraer el nombre
-              if (cliente.categoria && typeof cliente.categoria === 'object') {
-                return cliente.categoria.nombre || cliente.categoria.name || 'Normal';
-              }
-              // Si es string, usarlo directamente
-              if (typeof cliente.categoria === 'string') return cliente.categoria;
-              // Si tiene segmento, usarlo
-              if (cliente.segmento) return cliente.segmento;
-              // Por defecto
-              return 'Normal';
-            })(),
-            contactos: (() => {
-              if (!cliente.contactos) return [];
-              if (Array.isArray(cliente.contactos)) return cliente.contactos;
-              if (typeof cliente.contactos === 'string') {
-                try {
-                  return JSON.parse(cliente.contactos);
-                } catch (error) {
-                  return [];
-                }
-              }
-              return [];
-            })()
-          }));
-          
+          const clientesParseados = resultadoClientes.data.map(normalizarCliente);
           setClientes(clientesParseados);
         } else {
           setClientes([]);
@@ -230,6 +225,88 @@ const ModuloClientes = () => {
   const [documentoAEliminar, setDocumentoAEliminar] = useState(null);
   const [mostrarModalPolizas, setMostrarModalPolizas] = useState(false);
   const [polizasClienteSeleccionado, setPolizasClienteSeleccionado] = useState([]);
+  const [mostrarVisorPDF, setMostrarVisorPDF] = useState(false);
+  const [pdfUrlActual, setPdfUrlActual] = useState(null);
+  const [pdfNombreActual, setPdfNombreActual] = useState(null);
+  const [mostrarDetallePoliza, setMostrarDetallePoliza] = useState(false);
+  const [polizaParaDetalle, setPolizaParaDetalle] = useState(null);
+
+  // Subir PDF desde Clientes (modal/listado)
+  const subirPDFDesdeClientes = useCallback(async (expedienteId, file) => {
+    if (!file) return;
+    const validacion = pdfService.validarArchivoPDF(file);
+    if (!validacion.valid) {
+      alert(validacion.error);
+      return;
+    }
+    try {
+      const pdfData = await pdfService.subirPDFPoliza(expedienteId, file);
+      // Actualizar colección general de expedientes
+      setExpedientes(prev => prev.map(exp => exp.id === expedienteId ? {
+        ...exp,
+        pdf_url: pdfData.pdf_url,
+        pdf_nombre: pdfData.pdf_nombre,
+        pdf_key: pdfData.pdf_key,
+        pdf_size: pdfData.pdf_size,
+        pdf_fecha_subida: pdfData.pdf_fecha_subida
+      } : exp));
+      // Si hay modal abierto, refrescar su arreglo local
+      setPolizasClienteSeleccionado(prev => prev.map(p => p.id === expedienteId ? {
+        ...p,
+        pdf_url: pdfData.pdf_url,
+        pdf_nombre: pdfData.pdf_nombre,
+        pdf_key: pdfData.pdf_key,
+        pdf_size: pdfData.pdf_size,
+        pdf_fecha_subida: pdfData.pdf_fecha_subida
+      } : p));
+      alert('PDF subido correctamente');
+    } catch (error) {
+      alert('Error al subir PDF: ' + (error?.message || 'desconocido'));
+    }
+  }, []);
+
+  // ===================== Helpers de clasificación de pólizas =====================
+  const getFecha = useCallback((valor) => {
+    if (!valor) return null;
+    try { return new Date(valor); } catch { return null; }
+  }, []);
+
+  const getTerminoVigencia = useCallback((p) => getFecha(p.termino_vigencia || p.terminoVigencia), [getFecha]);
+  const getInicioVigencia = useCallback((p) => getFecha(p.inicio_vigencia || p.inicioVigencia), [getFecha]);
+
+  const esCancelada = useCallback((p) => {
+    const etapa = (p.etapa_activa || p.etapaActiva || '').toLowerCase();
+    return etapa.includes('cancelado');
+  }, []);
+
+  const estaVencidaPorVigencia = useCallback((p) => {
+    const fin = getTerminoVigencia(p);
+    if (!fin) return false; // sin fecha fin, la tratamos como vigente
+    const hoy = new Date();
+    // Comparación solo por fecha (sin horas)
+    const finY = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate());
+    const hoyY = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    return finY < hoyY;
+  }, [getTerminoVigencia]);
+
+  const esVigente = useCallback((p) => {
+    if (esCancelada(p)) return false;
+    return !estaVencidaPorVigencia(p);
+  }, [esCancelada, estaVencidaPorVigencia]);
+
+  const diasParaVencer = useCallback((p) => {
+    const fin = getTerminoVigencia(p);
+    if (!fin) return null;
+    const hoy = new Date();
+    const diffMs = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate()) - new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  }, [getTerminoVigencia]);
+
+  const renovacionPendiente = useCallback((p) => {
+    if (!esVigente(p)) return false;
+    const dias = diasParaVencer(p);
+    return dias !== null && dias <= 30; // 30 días antes del fin de vigencia
+  }, [esVigente, diasParaVencer]);
 
   // Tipos de cliente
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
@@ -384,6 +461,13 @@ const ModuloClientes = () => {
         alert('Por favor complete los campos obligatorios: Razón Social y RFC');
         return;
       }
+      // Persona Moral: contacto principal obligatorio (nombre + [email o móvil])
+      const nombreContacto = (formularioCliente.contacto_nombre || '').trim();
+      const tieneEmailOMovil = !!(formularioCliente.contacto_email?.trim() || formularioCliente.contacto_telefono_movil?.trim());
+      if (!nombreContacto || !tieneEmailOMovil) {
+        alert('En Persona Moral es obligatorio capturar el Contacto Principal con nombre y al menos Email o Teléfono Móvil.');
+        return;
+      }
     }
 
     // Preparar datos del cliente - SOLO campos que existen en la BD
@@ -476,7 +560,11 @@ const ModuloClientes = () => {
           // Recargar toda la lista de clientes
           const clientesActualizados = await obtenerClientes();
           if (clientesActualizados.success) {
-            setClientes(clientesActualizados.data);
+            setClientes(clientesActualizados.data.map(normalizarCliente));
+            // Notificar globalmente que los clientes se actualizaron
+            try {
+              window.dispatchEvent(new CustomEvent('clientes-actualizados', { detail: { origen: 'Clientes.jsx', tipo: modoEdicion ? 'update' : 'create', ts: Date.now() } }));
+            } catch (e) { /* noop */ }
           }
         } else {
           // Parsear arrays si vienen como strings
@@ -494,10 +582,15 @@ const ModuloClientes = () => {
           };
           
           if (modoEdicion) {
-            setClientes(prev => prev.map(c => c.id === clienteGuardado.id ? clienteGuardado : c));
+            setClientes(prev => prev.map(c => c.id === clienteGuardado.id ? normalizarCliente(clienteGuardado) : c));
           } else {
-            setClientes(prev => [...prev, clienteGuardado]);
+            setClientes(prev => [...prev, normalizarCliente(clienteGuardado)]);
           }
+
+          // Notificar globalmente que los clientes se actualizaron
+          try {
+            window.dispatchEvent(new CustomEvent('clientes-actualizados', { detail: { origen: 'Clientes.jsx', tipo: modoEdicion ? 'update' : 'create', id: clienteGuardado.id, ts: Date.now() } }));
+          } catch (e) { /* noop */ }
         }
         
         limpiarFormularioCliente();
@@ -511,6 +604,19 @@ const ModuloClientes = () => {
       setCargando(false);
     }
   }, [formularioCliente, modoEdicion, limpiarFormularioCliente, generarCodigoCliente]);
+
+  // Recargar clientes cuando otro módulo emita el evento global
+  useEffect(() => {
+    const recargarClientes = async () => {
+      const resultado = await obtenerClientes();
+      if (resultado.success) {
+        setClientes(resultado.data.map(normalizarCliente));
+      }
+    };
+    const handler = () => recargarClientes();
+    window.addEventListener('clientes-actualizados', handler);
+    return () => window.removeEventListener('clientes-actualizados', handler);
+  }, [normalizarCliente]);
 
   // Función para normalizar el nombre del estado
   const normalizarEstado = (estado) => {
@@ -854,10 +960,25 @@ const ModuloClientes = () => {
   const paginacionClientes = usePaginacion(clientes, 10);
 
   // Memos para los expedientes
-  const expedientesDelCliente = useMemo(() => 
-    expedientes.filter(exp => clienteSeleccionado?.expedientesRelacionados?.includes(exp.id)),
-    [expedientes, clienteSeleccionado]
-  );
+  const expedientesDelCliente = useMemo(() => {
+    if (!clienteSeleccionado) return [];
+    // Incluir tanto expedientes vinculados explícitamente como los que tienen cliente_id asignado
+    const setIdsRelacionados = new Set(clienteSeleccionado.expedientesRelacionados || []);
+    return expedientes.filter(exp => {
+      const pertenecePorId = exp.cliente_id == clienteSeleccionado.id || exp.clienteId == clienteSeleccionado.id;
+      const pertenecePorRelacion = setIdsRelacionados.has(exp.id);
+      return pertenecePorId || pertenecePorRelacion;
+    });
+  }, [expedientes, clienteSeleccionado]);
+
+  // Dividir pólizas del cliente en Vigentes y Anteriores
+  const polizasVigentesCliente = useMemo(() =>
+    expedientesDelCliente.filter(esVigente),
+  [expedientesDelCliente, esVigente]);
+
+  const polizasAnterioresCliente = useMemo(() =>
+    expedientesDelCliente.filter(p => !esVigente(p)),
+  [expedientesDelCliente, esVigente]);
 
   const expedientesNoRelacionados = useMemo(() => 
     expedientes.filter(exp => 
@@ -989,8 +1110,10 @@ const ModuloClientes = () => {
                                 }
                               </div>
                               
-                              {/* Contacto Principal - Solo si existe */}
-                              {(cliente.contacto_nombre || cliente.contacto_email || cliente.contacto_telefono_fijo || cliente.contacto_telefono_movil) && (
+                              {/* Contacto Principal (si existe) o fallback a datos del cliente para PF */}
+                              {(
+                                cliente.contacto_nombre || cliente.contacto_email || cliente.contacto_telefono_fijo || cliente.contacto_telefono_movil
+                              ) ? (
                                 <>
                                   <div className="text-muted mt-1" style={{ fontSize: '0.8rem', borderTop: '1px solid #eee', paddingTop: '4px' }}>
                                     <strong>Contacto:</strong> {cliente.contacto_nombre} {cliente.contacto_apellido_paterno || ''} {cliente.contacto_apellido_materno || ''}
@@ -1008,6 +1131,29 @@ const ModuloClientes = () => {
                                     </small>
                                   )}
                                 </>
+                              ) : (
+                                // Fallback visible solo para Persona Física: mostrar email/teléfonos del cliente
+                                cliente.tipoPersona === 'Persona Física' && (
+                                  <>
+                                    {(cliente.email || cliente.telefonoMovil || cliente.telefonoFijo) && (
+                                      <div className="text-muted mt-1" style={{ fontSize: '0.8rem', borderTop: '1px solid #eee', paddingTop: '4px' }}>
+                                        <strong>Datos del cliente</strong>
+                                      </div>
+                                    )}
+                                    {cliente.email && (
+                                      <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                        📧 {cliente.email}
+                                      </small>
+                                    )}
+                                    {(cliente.telefonoMovil || cliente.telefonoFijo) && (
+                                      <small className="text-muted d-block" style={{ fontSize: '0.75rem' }}>
+                                        {cliente.telefonoMovil && `📱 ${cliente.telefonoMovil}`}
+                                        {cliente.telefonoFijo && cliente.telefonoMovil && ' • '}
+                                        {cliente.telefonoFijo && `☎️ ${cliente.telefonoFijo}`}
+                                      </small>
+                                    )}
+                                  </>
+                                )
                               )}
                             </div>
                           </td>
@@ -1501,9 +1647,12 @@ const ModuloClientes = () => {
                   Contacto Principal
                   <span className="badge bg-primary ms-2">Principal</span>
                 </h5>
+                <div className="alert alert-info py-2 px-3 mb-3" role="alert" style={{ fontSize: '0.85rem' }}>
+                  Requisito mínimo para guardar: <strong>Nombre</strong> y <strong>Email</strong> o <strong>Teléfono Móvil</strong>.
+                </div>
                 <div className="row g-3">
                   <div className="col-md-4">
-                    <label className="form-label">Nombre(s)</label>
+                    <label className="form-label">Nombre(s) <span className="text-danger">*</span></label>
                     <input
                       type="text"
                       className="form-control"
@@ -1533,7 +1682,7 @@ const ModuloClientes = () => {
                     />
                   </div>
                   <div className="col-md-4">
-                    <label className="form-label">Email</label>
+                    <label className="form-label">Email <span className="text-muted">(uno de estos)</span></label>
                     <input
                       type="email"
                       className="form-control"
@@ -1553,7 +1702,7 @@ const ModuloClientes = () => {
                     />
                   </div>
                   <div className="col-md-4">
-                    <label className="form-label">Teléfono Móvil</label>
+                    <label className="form-label">Teléfono Móvil <span className="text-muted">(uno de estos)</span></label>
                     <input
                       type="tel"
                       className="form-control"
@@ -2505,60 +2654,236 @@ const ModuloClientes = () => {
                       )}
                     </div>
                   ) : (
-                    <div className="table-responsive">
-                      <table className="table table-sm">
-                        <thead>
-                          <tr>
-                            <th>Producto</th>
-                            <th>Compañía</th>
-                            <th>Estado</th>
-                            <th>Prima</th>
-                            <th>Vigencia</th>
-                            <th>Póliza</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {expedientesDelCliente.map(expediente => (
-                            <tr key={expediente.id}>
-                              <td>{expediente.producto}</td>
-                              <td>{expediente.compania}</td>
-                              <td>
-                                <span className={`badge ${
-                                  expediente.etapaActiva === 'Pagado' ? 'bg-success' :
-                                  expediente.etapaActiva === 'Cancelado' ? 'bg-danger' :
-                                  'bg-warning'
-                                }`}>
-                                  {expediente.etapaActiva}
-                                </span>
-                              </td>
-                              <td>${expediente.total || '0'}</td>
-                              <td>
-                                {expediente.inicioVigencia && expediente.terminoVigencia ? 
-                                  `${expediente.inicioVigencia} - ${expediente.terminoVigencia}` : 
-                                  '-'
-                                }
-                              </td>
-                              <td>
-                                <button className="btn btn-sm btn-outline-primary">
-                                  <FileText size={12} className="me-1" />
-                                  Ver Póliza
-                                </button>
-                              </td>
-                              <td>
-                                <button
-                                  onClick={() => desrelacionarExpediente(expediente.id)}
-                                  className="btn btn-sm btn-outline-danger"
-                                  title="Desrelacionar"
-                                >
-                                  <X size={12} />
-                                </button>
-                              </td>
+                    <>
+                      {/* Sección: Vigentes */}
+                      <h6 className="mb-2">Vigentes <span className="badge bg-success ms-1">{polizasVigentesCliente.length}</span></h6>
+                      <div className="table-responsive mb-4">
+                        <table className="table table-sm">
+                          <thead>
+                            <tr>
+                              <th>No. Póliza</th>
+                              <th>Producto</th>
+                              <th>Compañía</th>
+                              <th>Prima</th>
+                              <th>Vigencia</th>
+                              <th>Estado</th>
+                              <th style={{minWidth: '200px'}}>Acciones</th>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                          </thead>
+                          <tbody>
+                            {polizasVigentesCliente.map(expediente => (
+                              <tr key={expediente.id}>
+                                <td>
+                                  <strong className="text-primary">{expediente.numero_poliza || expediente.no_poliza || '-'}</strong>
+                                </td>
+                                <td>
+                                  <div>
+                                    <div>{expediente.producto || expediente.tipo_producto || '-'}</div>
+                                    {(expediente.marca || expediente.modelo || expediente.anio) && (
+                                      <small className="text-muted">{expediente.marca} {expediente.modelo} {expediente.anio}</small>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>{expediente.compania || expediente.aseguradora || '-'}</td>
+                                <td>
+                                  {(() => {
+                                    const valor = parseFloat(expediente.prima_pagada ?? expediente.total);
+                                    return isNaN(valor) ? '-' : new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valor);
+                                  })()}
+                                </td>
+                                <td>
+                                  <small>
+                                    {(expediente.inicio_vigencia || expediente.inicioVigencia) ? new Date(expediente.inicio_vigencia || expediente.inicioVigencia).toLocaleDateString('es-MX') : '-'}
+                                    {' - '}
+                                    {(expediente.termino_vigencia || expediente.terminoVigencia) ? new Date(expediente.termino_vigencia || expediente.terminoVigencia).toLocaleDateString('es-MX') : '-'}
+                                  </small>
+                                </td>
+                                <td>
+                                  <div className="d-flex flex-column gap-1">
+                                    <span className={`badge ${
+                                      (expediente.etapa_activa || expediente.etapaActiva) === 'Pagado' ? 'bg-success' :
+                                      (expediente.etapa_activa || expediente.etapaActiva) === 'Emitida' ? 'bg-info' :
+                                      (expediente.etapa_activa || expediente.etapaActiva)?.toLowerCase().includes('cotizar renovacion') ? 'bg-warning text-dark' :
+                                      (expediente.etapa_activa || expediente.etapaActiva)?.toLowerCase().includes('cotización enviada') ? 'bg-primary' :
+                                      (expediente.etapa_activa || expediente.etapaActiva)?.toLowerCase().includes('cotización aceptada') ? 'bg-success' :
+                                      (expediente.etapa_activa || expediente.etapaActiva)?.toLowerCase().includes('cotización no aceptada') ? 'bg-secondary' :
+                                      'bg-secondary'
+                                    }`}>
+                                      {expediente.etapa_activa || expediente.etapaActiva || '-'}
+                                    </span>
+                                    {renovacionPendiente(expediente) && (
+                                      <span className="badge bg-warning text-dark">Renovación pendiente</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="btn-group" role="group">
+                                    <button
+                                      className="btn btn-sm btn-outline-primary"
+                                      onClick={() => {
+                                        setPolizaParaDetalle(expediente);
+                                        setMostrarDetallePoliza(true);
+                                      }}
+                                      title="Ver expediente completo"
+                                    >
+                                      <Eye size={14} />
+                                    </button>
+                                    <button
+                                      className="btn btn-sm btn-outline-success"
+                                      onClick={async () => {
+                                        try {
+                                          const { signed_url } = await pdfService.obtenerURLFirmadaPDF(expediente.id);
+                                          const nueva = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                                          if (nueva) nueva.opener = null;
+                                        } catch (error) {
+                                          alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
+                                        }
+                                      }}
+                                      title={'Abrir PDF en nueva pestaña'}
+                                    >
+                                      <Download size={14} />
+                                    </button>
+                                    {/* Subir PDF */}
+                                    <button
+                                      className="btn btn-sm btn-outline-secondary"
+                                      onClick={() => document.getElementById(`file-exped-${expediente.id}`)?.click()}
+                                      title="Subir/Actualizar PDF"
+                                    >
+                                      <Upload size={14} />
+                                    </button>
+                                    <input
+                                      id={`file-exped-${expediente.id}`}
+                                      type="file"
+                                      accept=".pdf,application/pdf"
+                                      style={{ display: 'none' }}
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) subirPDFDesdeClientes(expediente.id, file);
+                                        e.target.value = '';
+                                      }}
+                                    />
+                                    {(clienteSeleccionado?.expedientesRelacionados || []).includes(expediente.id) && (
+                                      <button
+                                        onClick={() => desrelacionarExpediente(expediente.id)}
+                                        className="btn btn-sm btn-outline-danger"
+                                        title="Desrelacionar"
+                                      >
+                                        <X size={12} />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Sección: Anteriores */}
+                      <h6 className="mb-2">Anteriores <span className="badge bg-secondary ms-1">{polizasAnterioresCliente.length}</span></h6>
+                      <div className="table-responsive">
+                        <table className="table table-sm">
+                          <thead>
+                            <tr>
+                              <th>No. Póliza</th>
+                              <th>Producto</th>
+                              <th>Compañía</th>
+                              <th>Prima</th>
+                              <th>Vigencia</th>
+                              <th>Estado</th>
+                              <th style={{minWidth: '200px'}}>Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {polizasAnterioresCliente.map(expediente => (
+                            <tr key={expediente.id}>
+                                <td>
+                                  <strong className="text-primary">{expediente.numero_poliza || expediente.no_poliza || '-'}</strong>
+                                </td>
+                                <td>
+                                  <div>
+                                    <div>{expediente.producto || expediente.tipo_producto || '-'}</div>
+                                    {(expediente.marca || expediente.modelo || expediente.anio) && (
+                                      <small className="text-muted">{expediente.marca} {expediente.modelo} {expediente.anio}</small>
+                                    )}
+                                  </div>
+                                </td>
+                                <td>{expediente.compania || expediente.aseguradora || '-'}</td>
+                                <td>
+                                  {(() => {
+                                    const valor = parseFloat(expediente.prima_pagada ?? expediente.total);
+                                    return isNaN(valor) ? '-' : new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(valor);
+                                  })()}
+                                </td>
+                                <td>
+                                  <small>
+                                    {(expediente.inicio_vigencia || expediente.inicioVigencia) ? new Date(expediente.inicio_vigencia || expediente.inicioVigencia).toLocaleDateString('es-MX') : '-'}
+                                    {' - '}
+                                    {(expediente.termino_vigencia || expediente.terminoVigencia) ? new Date(expediente.termino_vigencia || expediente.terminoVigencia).toLocaleDateString('es-MX') : '-'}
+                                  </small>
+                                </td>
+                                <td>
+                                  <span className={`badge ${
+                                    (expediente.etapa_activa || expediente.etapaActiva) === 'Cancelado' ? 'bg-danger' :
+                                    estaVencidaPorVigencia(expediente) ? 'bg-secondary' : 'bg-secondary'
+                                  }`}>
+                                    {expediente.etapa_activa || expediente.etapaActiva || (estaVencidaPorVigencia(expediente) ? 'Vencida' : '-')}
+                                  </span>
+                                </td>
+                                <td>
+                                  <div className="btn-group" role="group">
+                                    <button
+                                      className="btn btn-sm btn-outline-primary"
+                                      onClick={() => {
+                                        setPolizaParaDetalle(expediente);
+                                        setMostrarDetallePoliza(true);
+                                      }}
+                                      title="Ver expediente completo"
+                                    >
+                                      <Eye size={14} />
+                                    </button>
+                                    <button
+                                      className="btn btn-sm btn-outline-success"
+                                      onClick={async () => {
+                                        try {
+                                          const { signed_url } = await pdfService.obtenerURLFirmadaPDF(expediente.id);
+                                          const nueva = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                                          if (nueva) nueva.opener = null;
+                                        } catch (error) {
+                                          alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
+                                        }
+                                      }}
+                                      title="Abrir PDF en nueva pestaña"
+                                    >
+                                      <Download size={14} />
+                                    </button>
+                                    {/* Subir PDF */}
+                                    <button
+                                      className="btn btn-sm btn-outline-secondary"
+                                      onClick={() => document.getElementById(`file-exped-ant-${expediente.id}`)?.click()}
+                                      title="Subir/Actualizar PDF"
+                                    >
+                                      <Upload size={14} />
+                                    </button>
+                                    <input
+                                      id={`file-exped-ant-${expediente.id}`}
+                                      type="file"
+                                      accept=".pdf,application/pdf"
+                                      style={{ display: 'none' }}
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) subirPDFDesdeClientes(expediente.id, file);
+                                        e.target.value = '';
+                                      }}
+                                    />
+                                  </div>
+                                </td>
+                            </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
@@ -3208,7 +3533,7 @@ const ModuloClientes = () => {
                 ></button>
               </div>
               <div className="modal-body">
-                {polizasClienteSeleccionado.length === 0 ? (
+                {polizasClienteSeleccionado.filter(esVigente).length === 0 ? (
                   <div className="alert alert-info">
                     <AlertCircle size={16} className="me-2" />
                     Este cliente no tiene pólizas registradas.
@@ -3228,12 +3553,21 @@ const ModuloClientes = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {polizasClienteSeleccionado.map((poliza) => (
+                        {polizasClienteSeleccionado.filter(esVigente).map((poliza) => (
                           <tr key={poliza.id}>
                             <td>
                               <strong className="text-primary">{poliza.numero_poliza || '-'}</strong>
                             </td>
-                            <td>{poliza.producto || '-'}</td>
+                            <td>
+                              <div>
+                                <div>{poliza.producto || '-'}</div>
+                                {(poliza.marca || poliza.modelo || poliza.anio) && (
+                                  <small className="text-muted">
+                                    {poliza.marca} {poliza.modelo} {poliza.anio}
+                                  </small>
+                                )}
+                              </div>
+                            </td>
                             <td>{poliza.compania || '-'}</td>
                             <td>
                               {poliza.prima_pagada ? 
@@ -3252,27 +3586,70 @@ const ModuloClientes = () => {
                               </small>
                             </td>
                             <td>
-                              <span className={`badge ${
-                                poliza.etapa_activa === 'Pagado' ? 'bg-success' :
-                                poliza.etapa_activa === 'Emitida' ? 'bg-info' :
-                                poliza.etapa_activa === 'En cotización' ? 'bg-warning' :
-                                'bg-secondary'
-                              }`}>
-                                {poliza.etapa_activa || '-'}
-                              </span>
+                              <div className="d-flex flex-column gap-1">
+                                <span className={`badge ${
+                                  poliza.etapa_activa === 'Pagado' ? 'bg-success' :
+                                  poliza.etapa_activa === 'Emitida' ? 'bg-info' :
+                                  (poliza.etapa_activa || '').toLowerCase().includes('cotizar renovacion') ? 'bg-warning text-dark' :
+                                  (poliza.etapa_activa || '').toLowerCase().includes('cotización enviada') ? 'bg-primary' :
+                                  (poliza.etapa_activa || '').toLowerCase().includes('cotización aceptada') ? 'bg-success' :
+                                  (poliza.etapa_activa || '').toLowerCase().includes('cotización no aceptada') ? 'bg-secondary' :
+                                  'bg-secondary'
+                                }`}>
+                                  {poliza.etapa_activa || '-'}
+                                </span>
+                                {renovacionPendiente(poliza) && (
+                                  <span className="badge bg-warning text-dark">Renovación pendiente</span>
+                                )}
+                              </div>
                             </td>
                             <td>
-                              <button
-                                className="btn btn-sm btn-outline-primary"
-                                onClick={() => {
-                                  // Aquí podrías navegar al detalle del expediente
-                                  console.log('Ver detalle de póliza:', poliza.id);
-                                  alert(`Ver detalle de póliza ${poliza.numero_poliza || poliza.id}`);
-                                }}
-                                title="Ver detalles"
-                              >
-                                <Eye size={14} />
-                              </button>
+                              <div className="btn-group" role="group">
+                                <button
+                                  className="btn btn-sm btn-outline-primary"
+                                  onClick={() => {
+                                    setPolizaParaDetalle(poliza);
+                                    setMostrarDetallePoliza(true);
+                                  }}
+                                  title="Ver expediente completo"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-sm btn-outline-success"
+                                  onClick={async () => {
+                                    try {
+                                      const { signed_url } = await pdfService.obtenerURLFirmadaPDF(poliza.id);
+                                      const nueva = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                                      if (nueva) nueva.opener = null;
+                                    } catch (error) {
+                                      alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
+                                    }
+                                  }}
+                                  title="Abrir PDF en nueva pestaña"
+                                >
+                                  <Download size={14} />
+                                </button>
+                                {/* Subir PDF */}
+                                <button
+                                  className="btn btn-sm btn-outline-secondary"
+                                  onClick={() => document.getElementById(`file-poliza-${poliza.id}`)?.click()}
+                                  title="Subir/Actualizar PDF"
+                                >
+                                  <Upload size={14} />
+                                </button>
+                                <input
+                                  id={`file-poliza-${poliza.id}`}
+                                  type="file"
+                                  accept=".pdf,application/pdf"
+                                  style={{ display: 'none' }}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) subirPDFDesdeClientes(poliza.id, file);
+                                    e.target.value = '';
+                                  }}
+                                />
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -3289,6 +3666,116 @@ const ModuloClientes = () => {
                     setMostrarModalPolizas(false);
                     setPolizasClienteSeleccionado([]);
                     setClienteSeleccionado(null);
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Visor de PDF */}
+      {mostrarVisorPDF && pdfUrlActual && (
+        <div className="modal fade show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+          <div className="modal-dialog modal-xl modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Vista Previa de Póliza: {pdfNombreActual}
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => {
+                    setMostrarVisorPDF(false);
+                    setPdfUrlActual(null);
+                    setPdfNombreActual(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body p-0" style={{height: '80vh'}}>
+                <iframe
+                  src={pdfUrlActual}
+                  style={{width: '100%', height: '100%', border: 'none'}}
+                  title="Visor de Póliza"
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarVisorPDF(false);
+                    setPdfUrlActual(null);
+                    setPdfNombreActual(null);
+                  }}
+                >
+                  Cerrar
+                </button>
+                <a
+                  href={pdfUrlActual}
+                  download={pdfNombreActual}
+                  className="btn btn-primary"
+                >
+                  <Download size={16} className="me-2" />
+                  Descargar PDF
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detalle de Póliza */}
+      {mostrarDetallePoliza && polizaParaDetalle && (
+        <div className="modal fade show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
+          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Detalles del Expediente
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => {
+                    setMostrarDetallePoliza(false);
+                    setPolizaParaDetalle(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body">
+                {/* Vista unificada de detalles usando DetalleExpediente */}
+                <DetalleExpediente
+                  datos={polizaParaDetalle}
+                  modo="caratula"
+                  coberturas={(() => {
+                    try {
+                      if (!polizaParaDetalle.coberturas) return [];
+                      return typeof polizaParaDetalle.coberturas === 'string'
+                        ? JSON.parse(polizaParaDetalle.coberturas)
+                        : polizaParaDetalle.coberturas;
+                    } catch {
+                      return [];
+                    }
+                  })()}
+                  mensajes={polizaParaDetalle.mensajes || []}
+                  utils={{
+                    formatearMoneda: (valor) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(parseFloat(valor)),
+                  }}
+                />
+              </div>
+              <div className="modal-footer">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarDetallePoliza(false);
+                    setPolizaParaDetalle(null);
                   }}
                 >
                   Cerrar

@@ -17,6 +17,37 @@ const DashboardComponent = () => {
   const [cargando, setCargando] = useState(true);
   const [modalDesglose, setModalDesglose] = useState(null); // { tipo: 'emitidas|porVencer|vencidas|canceladas', datos: [] }
   
+  // Resolver de montos: usa importe_total, o cae a total, o prima_pagada; como último recurso suma subtotal+iva
+  const resolverMonto = (poliza) => {
+    if (!poliza) return 0;
+    const candidatos = [
+      poliza.importe_total,
+      poliza.total,
+      poliza.prima_pagada,
+      (poliza.subtotal != null && poliza.iva != null) ? (parseFloat(poliza.subtotal) + parseFloat(poliza.iva)) : null
+    ];
+    
+    // DEBUG: Log detallado de campos de monto
+    console.log(`💵 Resolviendo monto para póliza ${poliza.numero_poliza || poliza.id}:`, {
+      importe_total: poliza.importe_total,
+      total: poliza.total,
+      prima_pagada: poliza.prima_pagada,
+      subtotal: poliza.subtotal,
+      iva: poliza.iva,
+      candidatos
+    });
+    
+    for (const val of candidatos) {
+      const num = parseFloat(val);
+      if (!isNaN(num) && isFinite(num) && num > 0) {
+        console.log(`   ✅ Usando valor: ${num}`);
+        return num;
+      }
+    }
+    console.log(`   ❌ No se encontró monto válido, retornando 0`);
+    return 0;
+  };
+  
   // Tipos de trámite - diseño ejecutivo
   const tiposTramite = [
     { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#3B82F6' },
@@ -53,6 +84,17 @@ const DashboardComponent = () => {
           setExpedientes(data);
         } else {
           console.error('❌ Error al cargar expedientes:', response.statusText);
+        }
+
+        // Cargar trámites en paralelo después de expedientes
+        console.log('🔄 Cargando trámites desde:', `${API_URL}/api/tramites`);
+        const resTramites = await fetch(`${API_URL}/api/tramites`);
+        if (resTramites.ok) {
+          const dataTramites = await resTramites.json();
+          console.log('✅ Trámites cargados:', dataTramites.length);
+          setTramites(dataTramites);
+        } else {
+          console.warn('⚠️ No se pudieron cargar trámites:', resTramites.status, resTramites.statusText);
         }
       } catch (error) {
         console.error('❌ Error en la petición:', error);
@@ -100,6 +142,17 @@ const DashboardComponent = () => {
         color = '#3B82F6';
         break;
 
+      case 'pagadas':
+        polizasFiltradas = expedientes.filter(p => {
+          const estatusPagoNormalizado = (p.estatus_pago || '').toLowerCase().trim();
+          const esPagada = estatusPagoNormalizado === 'pagado' || estatusPagoNormalizado === 'pagada';
+          const noEsCancelada = p.etapa_activa !== 'Cancelada';
+          return esPagada && noEsCancelada;
+        });
+        titulo = 'Primas Pagadas - Acumulado';
+        color = '#10B981';
+        break;
+
       case 'porVencer':
         polizasFiltradas = expedientes.filter(p => 
           p.fecha_vencimiento_pago && 
@@ -140,7 +193,7 @@ const DashboardComponent = () => {
         };
       }
       acc[producto].polizas.push(poliza);
-      acc[producto].total += parseFloat(poliza.importe_total) || 0;
+      acc[producto].total += resolverMonto(poliza);
       acc[producto].cantidad += 1;
       return acc;
     }, {});
@@ -150,7 +203,7 @@ const DashboardComponent = () => {
       titulo,
       color,
       porProducto,
-      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + (parseFloat(p.importe_total) || 0), 0),
+      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + resolverMonto(p), 0),
       cantidadTotal: polizasFiltradas.length
     });
   };
@@ -176,132 +229,234 @@ const DashboardComponent = () => {
       return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
     };
     
-    // Filtrar solo pólizas del mes actual
-    const expedientesMesActual = expedientes.filter(exp => {
-      // Verificar si fue emitida en el mes actual
-      const emitidaMesActual = esMesActual(exp.fecha_emision);
-      // O si tiene movimiento de pago en el mes actual
-      const pagoMesActual = esMesActual(exp.fecha_vencimiento_pago);
-      
-      return emitidaMesActual || pagoMesActual;
+    // Función helper para verificar si una fecha está en el mes anterior
+    const esMesAnterior = (fecha) => {
+      if (!fecha) return false;
+      const fechaObj = new Date(fecha);
+      const mesAnterior = mesActual === 0 ? 11 : mesActual - 1; // Si es enero, mes anterior es diciembre
+      const añoMesAnterior = mesActual === 0 ? añoActual - 1 : añoActual;
+      return fechaObj.getMonth() === mesAnterior && fechaObj.getFullYear() === añoMesAnterior;
+    };
+    
+    console.log('✅ Total expedientes en BD:', expedientes.length);
+    
+    // DEBUG: Mostrar todas las pólizas con sus fechas
+    console.log('🔍 TODAS LAS PÓLIZAS:', expedientes.map(p => ({
+      id: p.id,
+      numero: p.numero_poliza,
+      etapa_activa: p.etapa_activa,
+      estatus_pago: p.estatus_pago,
+      fecha_emision: p.fecha_emision,
+      fecha_pago: p.fecha_pago,
+      monto: resolverMonto(p)
+    })));
+    
+    // PRIMAS EMITIDAS - Todas las pólizas EMITIDAS (sin importar estado de pago)
+    // Mostrar mes actual y mes anterior para comparar
+    // INCLUYE: Emitida, Renovada, Enviada al Cliente (todas son pólizas que ya fueron emitidas)
+    const etapasEmitidas = ['Emitida', 'Renovada', 'Enviada al Cliente'];
+    const polizasEmitidasTodas = expedientes.filter(exp => 
+      etapasEmitidas.includes(exp.etapa_activa) && exp.etapa_activa !== 'Cancelada'
+    );
+    
+    console.log('📋 Pólizas con etapa Emitida/Renovada/Enviada:', polizasEmitidasTodas.length);
+    
+    // DEBUG: Ver fechas de emisión de TODAS las emitidas
+    console.log('📅 Fechas de emisión:', polizasEmitidasTodas.map(p => ({
+      numero: p.numero_poliza,
+      fecha_emision: p.fecha_emision,
+      fecha_alta: p.fecha_alta,
+      created_at: p.created_at
+    })));
+    
+    // Separar por mes SOLO si tienen fecha_emision REAL
+    // Si NO tienen fecha_emision, NO se contabilizan como emitidas
+    const emitidasMesActual = polizasEmitidasTodas.filter(p => {
+      if (!p.fecha_emision) {
+        console.log(`⚠️ Póliza ${p.numero_poliza} SIN fecha_emision - NO se cuenta en emitidas`);
+        return false;
+      }
+      const esMesActualResultado = esMesActual(p.fecha_emision);
+      console.log(`📆 Póliza ${p.numero_poliza}: fecha_emision=${p.fecha_emision} → ¿Mes actual? ${esMesActualResultado}`);
+      return esMesActualResultado;
     });
     
-    console.log('✅ Expedientes del mes actual:', expedientesMesActual.length);
+    const emitidasMesAnterior = polizasEmitidasTodas.filter(p => {
+      if (!p.fecha_emision) return false; // Sin fecha no puede estar en mes anterior
+      return esMesAnterior(p.fecha_emision);
+    });
     
-    // PRIMAS EMITIDAS - Todas las pólizas EMITIDAS en el mes (sin importar estado de pago)
-    // Nota: etapa_activa describe el workflow operativo, no el estado de pago
-    const polizasEmitidas = expedientesMesActual.filter(exp => 
-      esMesActual(exp.fecha_emision) && 
-      exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas (no canceladas ni cotizadas)
-    );
+    const ventasNuevasMesActual = emitidasMesActual.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
+    const renovacionesMesActual = emitidasMesActual.filter(p => p.tipo_movimiento === 'renovacion' || p.tipo_movimiento === 'Renovación');
     
-    const ventasNuevas = polizasEmitidas.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
-    const renovaciones = polizasEmitidas.filter(p => p.tipo_movimiento === 'renovacion' || p.tipo_movimiento === 'Renovación');
+    const primasVentasNuevas = ventasNuevasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasRenovaciones = renovacionesMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     
-    const primasVentasNuevas = ventasNuevas.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
-    );
+    const primasEmitidasMesActual = emitidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasEmitidasMesAnterior = emitidasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
     
-    const primasRenovaciones = renovaciones.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
-    );
-    
-    const primasEmitidas = primasVentasNuevas + primasRenovaciones;
-    
-    console.log('💰 Ventas Nuevas:', ventasNuevas.length, '- $', primasVentasNuevas);
-    console.log('🔄 Renovaciones:', renovaciones.length, '- $', primasRenovaciones);
+    console.log('📄 Emitidas Mes Actual:', emitidasMesActual.length, '- $', primasEmitidasMesActual);
+    console.log('📄 Emitidas Mes Anterior:', emitidasMesAnterior.length, '- $', primasEmitidasMesAnterior);
+    console.log('💰 Ventas Nuevas:', ventasNuevasMesActual.length, '- $', primasVentasNuevas);
+    console.log('🔄 Renovaciones:', renovacionesMesActual.length, '- $', primasRenovaciones);
 
-    // PRIMAS POR VENCER - Pólizas con pago pendiente que aún no vencen
-    // Nota: estatus_pago describe la situación financiera
-    const polizasPorVencerTodas = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && 
-      p.estatus_pago === 'Por Vencer' &&
-      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
-    );
+    // PRIMAS PAGADAS - Basado SOLO en fecha_pago registrada (no en estatus)
+    console.log('🔍 DEBUG - Buscando pólizas pagadas...');
+    console.log('   Total expedientes:', expedientes.length);
     
-    const porVencerMesActual = polizasPorVencerTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
-    const porVencerAnteriores = polizasPorVencerTodas.filter(p => {
-      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
-      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
-      return fechaVencimiento <= ultimoDiaMesAnterior;
+    // Primero, veamos TODAS las pólizas con sus fechas clave
+    const expedientesConEstatus = expedientes.map(p => ({
+      id: p.id,
+      numero_poliza: p.numero_poliza,
+      estatus_pago: p.estatus_pago,
+      etapa_activa: p.etapa_activa,
+      fecha_pago: p.fecha_pago,
+      fecha_emision: p.fecha_emision
+    }));
+    console.log('   Todos los expedientes con estatus:', expedientesConEstatus);
+    
+    // Filtrar pólizas pagadas: requiere fecha_pago real y no cancelada
+    const polizasPagadasTodas = expedientes.filter(p => {
+      const pagadaPorFecha = !!p.fecha_pago;
+      const noEsCancelada = p.etapa_activa !== 'Cancelada';
+      if (pagadaPorFecha) {
+        console.log('   ✅ Póliza con fecha_pago registrada:', {
+          numero_poliza: p.numero_poliza,
+          fecha_pago: p.fecha_pago,
+          monto: resolverMonto(p)
+        });
+      }
+      return pagadaPorFecha && noEsCancelada;
     });
     
-    const primasPorVencerMesActual = porVencerMesActual.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
+    console.log('💰 Total pólizas PAGADAS encontradas:', polizasPagadasTodas.length);
+    
+    // DEBUG: Ver fechas de pago de TODAS las pagadas
+    console.log('📅 Fechas de pólizas PAGADAS:', polizasPagadasTodas.map(p => ({
+      numero: p.numero_poliza,
+      fecha_emision: p.fecha_emision,
+      fecha_pago: p.fecha_pago,
+      fecha_alta: p.fecha_alta,
+      monto: resolverMonto(p)
+    })));
+    
+    // Separar por mes actual vs mes anterior (exclusivamente por fecha_pago)
+    const pagadasMesActual = polizasPagadasTodas.filter(p => esMesActual(p.fecha_pago));
+    const pagadasMesAnterior = polizasPagadasTodas.filter(p => esMesAnterior(p.fecha_pago));
+    
+    const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => 
+      sum + resolverMonto(p), 0
     );
     
-    const primasPorVencerAnteriores = porVencerAnteriores.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
+    const primasPagadasMesAnterior = pagadasMesAnterior.reduce((sum, p) => 
+      sum + resolverMonto(p), 0
     );
     
-    const primasPorVencerTotal = primasPorVencerMesActual + primasPorVencerAnteriores;
+    const primasPagadasTotal = primasPagadasMesActual + primasPagadasMesAnterior;
     
-    console.log('⏰ Por Vencer Mes Actual:', porVencerMesActual.length, '- $', primasPorVencerMesActual);
-    console.log('⏰ Por Vencer Anteriores:', porVencerAnteriores.length, '- $', primasPorVencerAnteriores);
+    console.log('💵 Pagadas Mes Actual:', pagadasMesActual.length, '- $', primasPagadasMesActual);
+    console.log('💵 Pagadas Mes Anterior:', pagadasMesAnterior.length, '- $', primasPagadasMesAnterior);
+    console.log('💵 TOTAL PAGADAS:', polizasPagadasTodas.length, '- $', primasPagadasTotal);
 
-    // PRIMAS VENCIDAS - Pólizas con pago vencido que no han pagado
-    // Nota: estatus_pago = 'Vencido' significa que ya pasó fecha_vencimiento_pago y no pagó
-    const polizasVencidasTodas = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && 
-      p.estatus_pago === 'Vencido' &&
-      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
+    // PRIMAS POR VENCER - Basado SOLO en fechas (ignora estatus)
+    // Regla: fecha_vencimiento_pago (o proximo_pago) está en el mes actual y es futura o hoy
+    const polizasPorVencer = expedientes.filter(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      if (!ref) return false;
+      const fechaRef = new Date(ref);
+      return esMesActual(ref) && fechaRef >= hoy && p.etapa_activa !== 'Cancelada';
+    });
+    
+    const primasPorVencer = polizasPorVencer.reduce((sum, p) => 
+      sum + resolverMonto(p), 0
     );
     
-    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
-    const vencidasAnteriores = polizasVencidasTodas.filter(p => {
-      const fechaVencimiento = new Date(p.fecha_vencimiento_pago);
-      const ultimoDiaMesAnterior = new Date(añoActual, mesActual, 0);
-      return fechaVencimiento <= ultimoDiaMesAnterior;
+    console.log('⏰ Por Vencer Mes Actual:', polizasPorVencer.length, '- $', primasPorVencer);
+
+    // PRIMAS VENCIDAS - Basado SOLO en fechas (ignora estatus)
+    // Regla: hoy > fecha_vencimiento_pago + periodo_gracia
+    const polizasVencidasTodas = expedientes.filter(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      if (!ref) return false;
+      const venc = new Date(ref);
+      const gracia = Number(p.periodo_gracia || 0);
+      const limite = new Date(venc);
+      limite.setDate(limite.getDate() + gracia);
+      return hoy > limite && p.etapa_activa !== 'Cancelada';
     });
+    
+    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
+    const vencidasAnteriores = polizasVencidasTodas.filter(p => !esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
     
     const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
+      sum + resolverMonto(p), 0
     );
     
     const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
+      sum + resolverMonto(p), 0
     );
     
     const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
     
     console.log('🚨 Vencidas Mes Actual:', vencidasMesActual.length, '- $', primasVencidasMesActual);
     console.log('🚨 Vencidas Anteriores:', vencidasAnteriores.length, '- $', primasVencidasAnteriores);
+    console.log('🚨 Vencidas Total:', polizasVencidasTodas.length, '- $', primasVencidasTotal);
 
-    // PRIMAS CANCELADAS - Pólizas canceladas en el mes actual
+    // PRIMAS CANCELADAS - Pólizas canceladas (con o sin fecha de cancelación)
     // Nota: etapa_activa = 'Cancelada' describe el estado operativo
-    const polizasCanceladas = expedientesMesActual.filter(exp => {
-      const canceladaMesActual = esMesActual(exp.fecha_cancelacion);
-      return exp.etapa_activa === 'Cancelada' && canceladaMesActual;
+    const polizasCanceladas = expedientes.filter(exp => {
+      if (exp.etapa_activa !== 'Cancelada') return false;
+      
+      // Si tiene fecha de cancelación, verificar que sea del mes actual
+      if (exp.fecha_cancelacion) {
+        return esMesActual(exp.fecha_cancelacion);
+      }
+      
+      // Si NO tiene fecha de cancelación, incluir (son cancelaciones recientes)
+      return true;
     });
     
     const primasCanceladas = polizasCanceladas.reduce((sum, p) => 
-      sum + (parseFloat(p.importe_total) || 0), 0
+      sum + resolverMonto(p), 0
     );
 
     const stats = {
       primasEmitidas: {
-        monto: primasEmitidas,
-        cantidad: polizasEmitidas.length,
+        monto: primasEmitidasTotal,
+        cantidad: emitidasMesActual.length + emitidasMesAnterior.length,
+        mesActual: {
+          monto: primasEmitidasMesActual,
+          cantidad: emitidasMesActual.length
+        },
+        mesAnterior: {
+          monto: primasEmitidasMesAnterior,
+          cantidad: emitidasMesAnterior.length
+        },
         ventasNuevas: {
           monto: primasVentasNuevas,
-          cantidad: ventasNuevas.length
+          cantidad: ventasNuevasMesActual.length
         },
         renovaciones: {
           monto: primasRenovaciones,
-          cantidad: renovaciones.length
+          cantidad: renovacionesMesActual.length
+        }
+      },
+      primasPagadas: {
+        monto: primasPagadasTotal,
+        cantidad: pagadasMesActual.length + pagadasMesAnterior.length,
+        mesActual: {
+          monto: primasPagadasMesActual,
+          cantidad: pagadasMesActual.length
+        },
+        mesAnterior: {
+          monto: primasPagadasMesAnterior,
+          cantidad: pagadasMesAnterior.length
         }
       },
       primasPorVencer: {
-        monto: primasPorVencerTotal,
-        cantidad: porVencerMesActual.length + porVencerAnteriores.length,
-        mesActual: {
-          monto: primasPorVencerMesActual,
-          cantidad: porVencerMesActual.length
-        },
-        anteriores: {
-          monto: primasPorVencerAnteriores,
-          cantidad: porVencerAnteriores.length
-        }
+        monto: primasPorVencer,
+        cantidad: polizasPorVencer.length
       },
       primasVencidas: {
         monto: primasVencidasTotal,
@@ -377,6 +532,49 @@ const DashboardComponent = () => {
       montoTotal: pagos.reduce((sum, p) => sum + (p.monto || 0), 0)
     };
   }, [expedientes]);
+
+  // =====================
+  // Panel de Trámites
+  // =====================
+  const estadisticasTramites = useMemo(() => {
+    const hoy = new Date();
+    const parseDate = (d) => (d ? new Date(d) : null);
+    const esVencido = (t) => {
+      const f = parseDate(t.fechaLimite || t.fecha_limite);
+      if (!f) return false;
+      return f < hoy && !['Completado', 'Cancelado', 'Rechazado'].includes(t.estatus);
+    };
+
+    const pendientes = tramites.filter(t => t.estatus === 'Pendiente');
+    const enProceso = tramites.filter(t => t.estatus === 'En proceso');
+    const completados = tramites.filter(t => t.estatus === 'Completado');
+    const cancelados = tramites.filter(t => t.estatus === 'Cancelado');
+    const rechazados = tramites.filter(t => t.estatus === 'Rechazado');
+    const vencidos = tramites.filter(esVencido);
+
+    // Recientes
+    const recientes = [...tramites]
+      .sort((a, b) => new Date(b.fechaCreacion || b.created_at || 0) - new Date(a.fechaCreacion || a.created_at || 0))
+      .slice(0, 8);
+
+    return {
+      totales: {
+        pendientes: pendientes.length,
+        enProceso: enProceso.length,
+        completados: completados.length,
+        cancelados: cancelados.length,
+        rechazados: rechazados.length,
+        vencidos: vencidos.length,
+        total: tramites.length
+      },
+      recientes,
+    };
+  }, [tramites]);
+
+  const irATramites = () => {
+    try { window.history.pushState({}, '', '/tramites'); window.dispatchEvent(new PopStateEvent('popstate')); }
+    catch (_) { window.location.href = '/tramites'; }
+  };
 
   return (
     <div style={{ backgroundColor: '#f5f5f5', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
@@ -529,7 +727,7 @@ const DashboardComponent = () => {
 
           <div className="row g-3 mb-4">
             {/* Primas Emitidas */}
-            <div className="col-md-3">
+            <div className="col-md-6 col-lg-4 col-xl">
               <div 
                 className="executive-card p-3" 
                 style={{ cursor: 'pointer' }}
@@ -559,20 +757,71 @@ const DashboardComponent = () => {
                 <div className="pt-2 border-top">
                   <div className="d-flex justify-content-between mb-1">
                     <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#10B981' }}></span>
-                      Nuevas: {estadisticasFinancieras.primasEmitidas.ventasNuevas.cantidad}
+                      <span className="status-dot" style={{ background: '#3B82F6' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasEmitidas.mesActual.cantidad}
                     </span>
-                    <span style={{ fontSize: '11px', color: '#10B981', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasEmitidas.ventasNuevas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    <span style={{ fontSize: '11px', color: '#3B82F6', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
                   <div className="d-flex justify-content-between">
                     <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#06B6D4' }}></span>
-                      Renovaciones: {estadisticasFinancieras.primasEmitidas.renovaciones.cantidad}
+                      <span className="status-dot" style={{ background: '#2563EB' }}></span>
+                      Mes anterior: {estadisticasFinancieras.primasEmitidas.mesAnterior.cantidad}
                     </span>
-                    <span style={{ fontSize: '11px', color: '#06B6D4', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasEmitidas.renovaciones.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    <span style={{ fontSize: '11px', color: '#2563EB', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasEmitidas.mesAnterior.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Primas Pagadas */}
+            <div className="col-md-6 col-lg-4 col-xl">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer' }}
+                onClick={() => abrirDesglose('pagadas')}
+              >
+                <div className="d-flex align-items-center justify-content-between mb-3">
+                  <div style={{ 
+                    width: '48px', 
+                    height: '48px', 
+                    background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <CheckCircle size={24} style={{ color: 'white' }} />
+                  </div>
+                  <div className="text-end">
+                    <div className="text-muted" style={{ fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Primas Pagadas
+                    </div>
+                    <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#10B981' }}>
+                      ${estadisticasFinancieras.primasPagadas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </h3>
+                  </div>
+                </div>
+                <div className="pt-2 border-top">
+                  <div className="d-flex justify-content-between mb-1">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#10B981' }}></span>
+                      Mes actual: {estadisticasFinancieras.primasPagadas.mesActual.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#10B981', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPagadas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                  <div className="d-flex justify-content-between">
+                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
+                      <span className="status-dot" style={{ background: '#059669' }}></span>
+                      Mes anterior: {estadisticasFinancieras.primasPagadas.mesAnterior.cantidad}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#059669', fontWeight: '600' }}>
+                      ${estadisticasFinancieras.primasPagadas.mesAnterior.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
                 </div>
@@ -580,7 +829,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Por Vencer */}
-            <div className="col-md-3">
+            <div className="col-md-6 col-lg-4 col-xl">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer' }}
@@ -608,22 +857,13 @@ const DashboardComponent = () => {
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between mb-1">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#F59E0B' }}></span>
-                      Mes actual: {estadisticasFinancieras.primasPorVencer.mesActual.cantidad}
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasPorVencer.cantidad} pólizas este mes
                     </span>
-                    <span style={{ fontSize: '11px', color: '#F59E0B', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasPorVencer.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                  <div className="d-flex justify-content-between">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#D97706' }}></span>
-                      Anteriores: {estadisticasFinancieras.primasPorVencer.anteriores.cantidad}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#D97706', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasPorVencer.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                    <span className="metric-badge" style={{ background: '#FEF3C7', color: '#D97706' }}>
+                      <Clock size={10} className="me-1" />
+                      Mes en curso
                     </span>
                   </div>
                 </div>
@@ -631,7 +871,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Vencidas */}
-            <div className="col-md-3">
+            <div className="col-md-6 col-lg-6 col-xl">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer' }}
@@ -682,7 +922,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Canceladas */}
-            <div className="col-md-3">
+            <div className="col-md-6 col-lg-6 col-xl">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer' }}
@@ -741,17 +981,118 @@ const DashboardComponent = () => {
             </div>
           )}
 
-          {/* Próximamente: Más secciones del dashboard */}
-          <div className="row g-3">
-            <div className="col-12">
-              <div className="executive-card p-4 text-center">
-                <Activity size={48} className="text-muted mb-3" />
-                <h5 className="text-muted">Secciones adicionales en desarrollo</h5>
-                <p className="text-muted mb-0" style={{ fontSize: '13px' }}>
-                  Próximamente: Trámites, Pipeline de Ventas, y más métricas operativas
-                </p>
+          {/* Panel de Trámites */}
+          <div className="mb-3 mt-4 d-flex justify-content-between align-items-center">
+            <h5 className="fw-bold mb-0" style={{ color: '#111827' }}>Panel de Trámites</h5>
+            <button className="btn btn-sm btn-outline-primary" onClick={irATramites}>
+              Ver todos
+            </button>
+          </div>
+          <div className="row g-3 mb-3">
+            <div className="col-md-3">
+              <div className="executive-card p-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Pendientes</div>
+                  <Clock size={18} style={{ color: '#F59E0B' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#F59E0B' }}>{estadisticasTramites.totales.pendientes}</h3>
+                <small className="text-muted">en espera de atención</small>
               </div>
             </div>
+            <div className="col-md-3">
+              <div className="executive-card p-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>En Proceso</div>
+                  <Activity size={18} style={{ color: '#3B82F6' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#3B82F6' }}>{estadisticasTramites.totales.enProceso}</h3>
+                <small className="text-muted">gestión activa</small>
+              </div>
+            </div>
+            <div className="col-md-3">
+              <div className="executive-card p-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Vencidos</div>
+                  <AlertTriangle size={18} style={{ color: '#EF4444' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#EF4444' }}>{estadisticasTramites.totales.vencidos}</h3>
+                <small className="text-muted">superaron fecha límite</small>
+              </div>
+            </div>
+            <div className="col-md-3">
+              <div className="executive-card p-3">
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Completados</div>
+                  <CheckCircle2 size={18} style={{ color: '#10B981' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#10B981' }}>{estadisticasTramites.totales.completados}</h3>
+                <small className="text-muted">finalizados</small>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabla compacta de trámites recientes */}
+          <div className="executive-card p-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <div className="text-muted" style={{ fontSize: '12px' }}>Trámites recientes</div>
+              <small className="text-muted">Total: {estadisticasTramites.totales.total}</small>
+            </div>
+            {tramites.length === 0 ? (
+              <div className="text-center text-muted py-4">
+                <FileText size={24} className="mb-2" />
+                No hay trámites registrados
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-hover mb-0 compact-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Tipo</th>
+                      <th>Cliente</th>
+                      <th>Póliza</th>
+                      <th>Estatus</th>
+                      <th>Prioridad</th>
+                      <th>Fecha Límite</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {estadisticasTramites.recientes.map((t, idx) => (
+                      <tr key={idx}>
+                        <td className="fw-semibold" style={{ color: '#111827' }}>{t.codigo}</td>
+                        <td>{t.tipoTramite}</td>
+                        <td>{t.cliente || '-'}</td>
+                        <td><small className="text-muted">{t.expediente || '-'}</small></td>
+                        <td>
+                          <span className={`badge ${
+                            t.estatus === 'Completado' ? 'bg-success' :
+                            t.estatus === 'En proceso' ? 'bg-primary' :
+                            t.estatus === 'Pendiente' ? 'bg-warning' :
+                            t.estatus === 'Cancelado' ? 'bg-secondary' :
+                            t.estatus === 'Rechazado' ? 'bg-dark' : 'bg-info'
+                          }`} style={{ fontSize: '10px' }}>
+                            {t.estatus}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${
+                            t.prioridad === 'Alta' ? 'bg-danger' :
+                            t.prioridad === 'Media' ? 'bg-warning' : 'bg-success'
+                          }`} style={{ fontSize: '10px' }}>
+                            {t.prioridad}
+                          </span>
+                        </td>
+                        <td>
+                          <small className={`${t.fechaLimite && new Date(t.fechaLimite) < new Date() && !['Completado','Cancelado','Rechazado'].includes(t.estatus) ? 'text-danger' : ''}`}>
+                            {t.fechaLimite ? new Date(t.fechaLimite).toLocaleDateString('es-MX') : '-'}
+                          </small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -825,72 +1166,134 @@ const DashboardComponent = () => {
                             {data.polizas.map((poliza, pIdx) => (
                               <tr key={pIdx} className="data-row">
                                 <td>
-                                  <span className="fw-semibold" style={{ color: '#111827' }}>
-                                    {poliza.numero_poliza || 'Sin número'}
-                                  </span>
+                                  <div>
+                                    <div className="fw-semibold" style={{ color: '#111827', fontSize: '13px' }}>
+                                      {poliza.numero_poliza || 'Sin número'}
+                                    </div>
+                                    {poliza.endoso && poliza.endoso !== '000000' && (
+                                      <small className="text-muted d-block">Endoso: {poliza.endoso}</small>
+                                    )}
+                                  </div>
                                 </td>
                                 <td>
                                   <div>
                                     <div className="fw-medium" style={{ fontSize: '13px' }}>
-                                      {poliza.cliente_nombre || 'Sin nombre'}
+                                      {poliza.cliente_nombre || poliza.nombre || 'Sin nombre'}
                                     </div>
-                                    <small className="text-muted">
-                                      {poliza.cliente_id}
+                                    <small className="text-muted d-block">
+                                      {poliza.cliente_id || 'Sin código'}
                                     </small>
                                   </div>
                                 </td>
-                                <td>{poliza.aseguradora || '-'}</td>
+                                <td>
+                                  <div>
+                                    <div style={{ fontSize: '13px' }}>
+                                      {poliza.aseguradora || poliza.compania || 'Sin aseguradora'}
+                                    </div>
+                                    {poliza.agente && (
+                                      <small className="text-muted d-block">
+                                        Agente: {poliza.agente}
+                                      </small>
+                                    )}
+                                  </div>
+                                </td>
                                 <td>
                                   <small>
-                                    {poliza.fecha_emision 
-                                      ? new Date(poliza.fecha_emision).toLocaleDateString('es-MX')
-                                      : '-'
+                                    {poliza.fecha_emision
+                                      ? new Date(poliza.fecha_emision).toLocaleDateString('es-MX', {
+                                          day: '2-digit',
+                                          month: 'short',
+                                          year: 'numeric'
+                                        })
+                                      : (poliza.fecha_alta
+                                          ? new Date(poliza.fecha_alta).toLocaleDateString('es-MX', {
+                                              day: '2-digit',
+                                              month: 'short',
+                                              year: 'numeric'
+                                            })
+                                          : (poliza.inicio_vigencia
+                                              ? new Date(poliza.inicio_vigencia).toLocaleDateString('es-MX', {
+                                                  day: '2-digit',
+                                                  month: 'short',
+                                                  year: 'numeric'
+                                                })
+                                              : (poliza.created_at
+                                                  ? new Date(poliza.created_at).toLocaleDateString('es-MX', {
+                                                      day: '2-digit',
+                                                      month: 'short',
+                                                      year: 'numeric'
+                                                    })
+                                                  : 'Sin fecha')))
                                     }
                                   </small>
                                 </td>
                                 {modalDesglose.tipo !== 'emitidas' && (
                                   <td>
-                                    <small>
-                                      {poliza.fecha_vencimiento_pago 
-                                        ? new Date(poliza.fecha_vencimiento_pago).toLocaleDateString('es-MX')
-                                        : '-'
-                                      }
+                                    <small className={`${
+                                      poliza.fecha_vencimiento_pago &&
+                                      new Date(poliza.fecha_vencimiento_pago) < new Date() &&
+                                      poliza.estatus_pago === 'Vencido'
+                                        ? 'text-danger fw-bold'
+                                        : ''
+                                    }`}>
+                                      {(poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia)
+                                        ? new Date(
+                                            poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia
+                                          ).toLocaleDateString('es-MX', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric'
+                                          })
+                                        : 'Sin fecha'}
                                     </small>
                                   </td>
                                 )}
                                 <td>
-                                  <span className={`badge ${
-                                    poliza.etapa_activa === 'Emitida' ? 'bg-success' :
-                                    poliza.etapa_activa === 'Cancelada' ? 'bg-secondary' :
-                                    poliza.etapa_activa === 'Cotizada' ? 'bg-info' :
-                                    'bg-primary'
-                                  }`} style={{ fontSize: '10px' }}>
-                                    {poliza.etapa_activa || 'Sin etapa'}
-                                  </span>
-                                  {poliza.estatus_pago && (
-                                    <div className="mt-1">
-                                      <span className={`badge ${
-                                        poliza.estatus_pago === 'Pagado' ? 'bg-success' :
-                                        poliza.estatus_pago === 'Por Vencer' ? 'bg-warning' :
-                                        poliza.estatus_pago === 'Vencido' ? 'bg-danger' :
-                                        'bg-secondary'
-                                      }`} style={{ fontSize: '9px' }}>
-                                        💰 {poliza.estatus_pago}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {poliza.tipo_movimiento && (
-                                    <div>
-                                      <small className="text-muted" style={{ fontSize: '10px' }}>
-                                        {poliza.tipo_movimiento}
-                                      </small>
-                                    </div>
-                                  )}
+                                  <div>
+                                    <span className={`badge ${
+                                      poliza.etapa_activa === 'Emitida' ? 'bg-success' :
+                                      poliza.etapa_activa === 'Cancelada' ? 'bg-secondary' :
+                                      poliza.etapa_activa === 'Cotizada' ? 'bg-info' :
+                                      'bg-primary'
+                                    }`} style={{ fontSize: '10px' }}>
+                                      {poliza.etapa_activa || 'Sin etapa'}
+                                    </span>
+                                    {poliza.estatus_pago && poliza.estatus_pago !== 'Pendiente' && (
+                                      <div className="mt-1">
+                                        <span className={`badge ${
+                                          poliza.estatus_pago === 'Pagado' ? 'bg-success' :
+                                          poliza.estatus_pago === 'Por Vencer' ? 'bg-warning text-dark' :
+                                          poliza.estatus_pago === 'Vencido' ? 'bg-danger' :
+                                          'bg-secondary'
+                                        }`} style={{ fontSize: '9px' }}>
+                                          💰 {poliza.estatus_pago}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {poliza.tipo_movimiento && (
+                                      <div className="mt-1">
+                                        <span className={`badge ${
+                                          poliza.tipo_movimiento === 'nueva' || poliza.tipo_movimiento === 'Nueva' 
+                                            ? 'bg-info' 
+                                            : 'bg-warning text-dark'
+                                        }`} style={{ fontSize: '9px' }}>
+                                          {poliza.tipo_movimiento === 'nueva' || poliza.tipo_movimiento === 'Nueva' 
+                                            ? '🆕 Nueva' 
+                                            : '🔄 Renovación'}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="text-end">
-                                  <span className="fw-bold" style={{ color: modalDesglose.color }}>
-                                    ${parseFloat(poliza.importe_total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                                  </span>
+                                  <div className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
+                                    ${resolverMonto(poliza).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                  </div>
+                                  {(poliza.prima_pagada || poliza.total) && (
+                                    <small className="text-muted d-block" style={{ fontSize: '10px' }}>
+                                      Prima: ${(poliza.prima_pagada || poliza.total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                    </small>
+                                  )}
                                 </td>
                               </tr>
                             ))}

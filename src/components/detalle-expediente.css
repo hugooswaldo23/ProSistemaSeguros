@@ -1,0 +1,35 @@
+:root {
+  --seccion-bg: #ffffff;
+  --seccion-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+  --seccion-border: rgba(0, 0, 0, .06);
+}
+
+.seccion-bloque {
+  background: var(--seccion-bg);
+  border: 1px solid var(--seccion-border);
+  border-radius: .5rem;
+  box-shadow: var(--seccion-shadow);
+  padding: .75rem 1rem;
+  margin-bottom: .75rem;
+}
+
+.seccion-bloque h6 {
+  margin-bottom: .5rem;
+}
+
+/* Acentos por tipo de sección */
+.seccion-asegurado { border-left: 4px solid var(--bs-primary); background: var(--bs-body-bg); }
+.seccion-poliza    { border-left: 4px solid var(--bs-primary); }
+.seccion-vigencia  { border-left: 4px solid var(--bs-success); }
+.seccion-vehiculo  { border-left: 4px solid var(--bs-info); }
+.seccion-financiera{ border-left: 4px solid var(--bs-secondary); }
+.seccion-coberturas{ border-left: 4px solid var(--bs-warning); }
+.seccion-historial{ border-left: 4px solid var(--bs-info); }
+
+/* Ajustes responsivos y tipografía compacta */
+.seccion-bloque small { font-size: .72rem; }
+.seccion-bloque strong, .seccion-bloque span { font-size: .82rem; }
+
+@media (max-width: 576px) {
+  .seccion-bloque { padding: .65rem .75rem; }
+}

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Probar Endpoint PDF</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .resultado {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .exito {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            margin: 10px 0;
+        }
+        input[type="number"] {
+            padding: 5px;
+            margin: 10px 0;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Probar Endpoint de PDFs</h1>
+    <p>Esta página te ayudará a verificar si el endpoint de PDFs está funcionando correctamente.</p>
+    
+    <div>
+        <label for="expedienteId">ID del Expediente:</label><br>
+        <input type="number" id="expedienteId" placeholder="Ej: 141" value="141">
+    </div>
+    
+    <div>
+        <label for="pdfFile">Seleccionar PDF:</label><br>
+        <input type="file" id="pdfFile" accept=".pdf">
+    </div>
+    
+    <button onclick="probarSubirPDF()">📤 Probar Subir PDF</button>
+    <button onclick="probarObtenerURL()">🔗 Probar Obtener URL</button>
+    <button onclick="probarEliminarPDF()">🗑️ Probar Eliminar PDF</button>
+    
+    <div id="resultado"></div>
+
+    <script>
+        const API_URL = 'https://apiseguros.proordersistem.com.mx';
+
+        async function probarSubirPDF() {
+            const resultado = document.getElementById('resultado');
+            resultado.innerHTML = '⏳ Probando subida de PDF...';
+            resultado.className = 'resultado';
+
+            const expedienteId = document.getElementById('expedienteId').value;
+            const fileInput = document.getElementById('pdfFile');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                resultado.innerHTML = '❌ Por favor selecciona un archivo PDF';
+                resultado.className = 'resultado error';
+                return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                console.log('📤 Subiendo PDF...', {
+                    url: `${API_URL}/api/expedientes/${expedienteId}/pdf`,
+                    fileName: file.name,
+                    fileSize: file.size
+                });
+
+                const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                console.log('📨 Respuesta:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    ok: response.ok
+                });
+
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+
+                if (response.ok) {
+                    resultado.innerHTML = `✅ PDF subido correctamente!\n\nStatus: ${response.status}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado exito';
+                } else {
+                    resultado.innerHTML = `❌ Error al subir PDF\n\nStatus: ${response.status}\nStatus Text: ${response.statusText}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado error';
+                }
+
+                console.log('Respuesta completa:', responseData);
+            } catch (error) {
+                console.error('Error:', error);
+                resultado.innerHTML = `❌ Error de red:\n${error.message}\n\nPosibles causas:\n- El endpoint no existe (404)\n- CORS no configurado\n- Servidor no responde`;
+                resultado.className = 'resultado error';
+            }
+        }
+
+        async function probarObtenerURL() {
+            const resultado = document.getElementById('resultado');
+            resultado.innerHTML = '⏳ Obteniendo URL firmada...';
+            resultado.className = 'resultado';
+
+            const expedienteId = document.getElementById('expedienteId').value;
+
+            try {
+                const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf-url?expiration=3600`);
+                
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+
+                if (response.ok) {
+                    resultado.innerHTML = `✅ URL obtenida correctamente!\n\nStatus: ${response.status}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado exito';
+                } else {
+                    resultado.innerHTML = `❌ Error al obtener URL\n\nStatus: ${response.status}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado error';
+                }
+            } catch (error) {
+                resultado.innerHTML = `❌ Error de red:\n${error.message}`;
+                resultado.className = 'resultado error';
+            }
+        }
+
+        async function probarEliminarPDF() {
+            const resultado = document.getElementById('resultado');
+            
+            if (!confirm('¿Estás seguro de eliminar el PDF?')) {
+                return;
+            }
+
+            resultado.innerHTML = '⏳ Eliminando PDF...';
+            resultado.className = 'resultado';
+
+            const expedienteId = document.getElementById('expedienteId').value;
+
+            try {
+                const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf`, {
+                    method: 'DELETE'
+                });
+                
+                const responseText = await response.text();
+                let responseData;
+                
+                try {
+                    responseData = JSON.parse(responseText);
+                } catch (e) {
+                    responseData = responseText;
+                }
+
+                if (response.ok) {
+                    resultado.innerHTML = `✅ PDF eliminado correctamente!\n\nStatus: ${response.status}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado exito';
+                } else {
+                    resultado.innerHTML = `❌ Error al eliminar PDF\n\nStatus: ${response.status}\n\nRespuesta:\n${JSON.stringify(responseData, null, 2)}`;
+                    resultado.className = 'resultado error';
+                }
+            } catch (error) {
+                resultado.innerHTML = `❌ Error de red:\n${error.message}`;
+                resultado.className = 'resultado error';
+            }
+        }
+    </script>
+</body>
+</html>
