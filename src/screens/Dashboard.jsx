@@ -269,15 +269,15 @@ const DashboardComponent = () => {
       created_at: p.created_at
     })));
     
-    // Separar por mes SOLO si tienen fecha_emision
-    // Si NO tienen fecha_emision, las incluimos en mes actual por defecto
+    // Separar por mes SOLO si tienen fecha_emision REAL
+    // Si NO tienen fecha_emision, NO se contabilizan como emitidas
     const emitidasMesActual = polizasEmitidasTodas.filter(p => {
       if (!p.fecha_emision) {
-        console.log(`⚠️ Póliza ${p.numero_poliza} SIN fecha_emision - incluida en mes actual por defecto`);
-        return true; // Sin fecha = incluir en mes actual
+        console.log(`⚠️ Póliza ${p.numero_poliza} SIN fecha_emision - NO se cuenta en emitidas`);
+        return false;
       }
       const esMesActualResultado = esMesActual(p.fecha_emision);
-      console.log(`📆 Póliza ${p.numero_poliza}: fecha=${p.fecha_emision} → ¿Mes actual? ${esMesActualResultado}`);
+      console.log(`📆 Póliza ${p.numero_poliza}: fecha_emision=${p.fecha_emision} → ¿Mes actual? ${esMesActualResultado}`);
       return esMesActualResultado;
     });
     
@@ -301,12 +301,11 @@ const DashboardComponent = () => {
     console.log('💰 Ventas Nuevas:', ventasNuevasMesActual.length, '- $', primasVentasNuevas);
     console.log('🔄 Renovaciones:', renovacionesMesActual.length, '- $', primasRenovaciones);
 
-    // PRIMAS PAGADAS - Pólizas que ya tienen el pago registrado
-    // Nota: estatus_pago = 'Pagado' significa que el cliente ya realizó el pago
+    // PRIMAS PAGADAS - Basado SOLO en fecha_pago registrada (no en estatus)
     console.log('🔍 DEBUG - Buscando pólizas pagadas...');
     console.log('   Total expedientes:', expedientes.length);
     
-    // Primero, veamos TODAS las pólizas con su estatus de pago
+    // Primero, veamos TODAS las pólizas con sus fechas clave
     const expedientesConEstatus = expedientes.map(p => ({
       id: p.id,
       numero_poliza: p.numero_poliza,
@@ -317,23 +316,18 @@ const DashboardComponent = () => {
     }));
     console.log('   Todos los expedientes con estatus:', expedientesConEstatus);
     
-    // Filtrar pólizas pagadas (acepta "Pagado", "Pagada", "pagado", "pagada")
+    // Filtrar pólizas pagadas: requiere fecha_pago real y no cancelada
     const polizasPagadasTodas = expedientes.filter(p => {
-      const estatusPagoNormalizado = (p.estatus_pago || '').toLowerCase().trim();
-      const esPagada = estatusPagoNormalizado === 'pagado' || estatusPagoNormalizado === 'pagada';
+      const pagadaPorFecha = !!p.fecha_pago;
       const noEsCancelada = p.etapa_activa !== 'Cancelada';
-      
-      if (esPagada) {
-        console.log('   ✅ Póliza PAGADA encontrada:', {
+      if (pagadaPorFecha) {
+        console.log('   ✅ Póliza con fecha_pago registrada:', {
           numero_poliza: p.numero_poliza,
-          estatus_pago: p.estatus_pago,
-          etapa_activa: p.etapa_activa,
           fecha_pago: p.fecha_pago,
           monto: resolverMonto(p)
         });
       }
-      
-      return esPagada && noEsCancelada;
+      return pagadaPorFecha && noEsCancelada;
     });
     
     console.log('💰 Total pólizas PAGADAS encontradas:', polizasPagadasTodas.length);
@@ -347,32 +341,9 @@ const DashboardComponent = () => {
       monto: resolverMonto(p)
     })));
     
-    // Separar por mes actual vs mes anterior (para comparar)
-    // IMPORTANTE: Si no hay fecha_pago, incluir todas las pagadas en el mes actual por defecto
-    const pagadasMesActual = polizasPagadasTodas.filter(p => {
-      // Si tiene fecha de pago, usarla
-      if (p.fecha_pago) {
-        const resultado = esMesActual(p.fecha_pago);
-        console.log(`💵 Póliza PAGADA ${p.numero_poliza}: fecha_pago=${p.fecha_pago} → ¿Mes actual? ${resultado}`);
-        return resultado;
-      }
-      // Si tiene fecha de emisión, usarla
-      if (p.fecha_emision) {
-        const resultado = esMesActual(p.fecha_emision);
-        console.log(`💵 Póliza PAGADA ${p.numero_poliza}: SIN fecha_pago, usando fecha_emision=${p.fecha_emision} → ¿Mes actual? ${resultado}`);
-        return resultado;
-      }
-      // Si no tiene ninguna fecha, incluir en mes actual por defecto
-      console.log(`⚠️ Póliza PAGADA ${p.numero_poliza}: SIN fechas - incluida en mes actual por defecto`);
-      return true;
-    });
-    
-    const pagadasMesAnterior = polizasPagadasTodas.filter(p => {
-      // Solo considerar mes anterior si hay fecha explícita
-      const fechaPagoEnMesAnterior = p.fecha_pago && esMesAnterior(p.fecha_pago);
-      const emitidaYPagadaMesAnterior = p.fecha_emision && esMesAnterior(p.fecha_emision);
-      return fechaPagoEnMesAnterior || emitidaYPagadaMesAnterior;
-    });
+    // Separar por mes actual vs mes anterior (exclusivamente por fecha_pago)
+    const pagadasMesActual = polizasPagadasTodas.filter(p => esMesActual(p.fecha_pago));
+    const pagadasMesAnterior = polizasPagadasTodas.filter(p => esMesAnterior(p.fecha_pago));
     
     const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => 
       sum + resolverMonto(p), 0
@@ -388,14 +359,14 @@ const DashboardComponent = () => {
     console.log('💵 Pagadas Mes Anterior:', pagadasMesAnterior.length, '- $', primasPagadasMesAnterior);
     console.log('💵 TOTAL PAGADAS:', polizasPagadasTodas.length, '- $', primasPagadasTotal);
 
-    // PRIMAS POR VENCER - Pólizas con pago pendiente que aún no vencen
-    // Solo mostrar mes en curso (las que pasan de fecha se van a vencidas)
-    const polizasPorVencer = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && 
-      esMesActual(p.fecha_vencimiento_pago) &&
-      p.estatus_pago === 'Por Vencer' &&
-      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
-    );
+    // PRIMAS POR VENCER - Basado SOLO en fechas (ignora estatus)
+    // Regla: fecha_vencimiento_pago (o proximo_pago) está en el mes actual y es futura o hoy
+    const polizasPorVencer = expedientes.filter(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      if (!ref) return false;
+      const fechaRef = new Date(ref);
+      return esMesActual(ref) && fechaRef >= hoy && p.etapa_activa !== 'Cancelada';
+    });
     
     const primasPorVencer = polizasPorVencer.reduce((sum, p) => 
       sum + resolverMonto(p), 0
@@ -403,15 +374,20 @@ const DashboardComponent = () => {
     
     console.log('⏰ Por Vencer Mes Actual:', polizasPorVencer.length, '- $', primasPorVencer);
 
-    // PRIMAS VENCIDAS - Separar mes actual y anteriores (para no perder de vista las que hay que presionar pago o cancelar)
-    const polizasVencidasTodas = expedientes.filter(p => 
-      p.fecha_vencimiento_pago && 
-      p.estatus_pago === 'Vencido' &&
-      p.etapa_activa !== 'Cancelada'  // Excluir canceladas
-    );
+    // PRIMAS VENCIDAS - Basado SOLO en fechas (ignora estatus)
+    // Regla: hoy > fecha_vencimiento_pago + periodo_gracia
+    const polizasVencidasTodas = expedientes.filter(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      if (!ref) return false;
+      const venc = new Date(ref);
+      const gracia = Number(p.periodo_gracia || 0);
+      const limite = new Date(venc);
+      limite.setDate(limite.getDate() + gracia);
+      return hoy > limite && p.etapa_activa !== 'Cancelada';
+    });
     
-    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago));
-    const vencidasAnteriores = polizasVencidasTodas.filter(p => !esMesActual(p.fecha_vencimiento_pago));
+    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
+    const vencidasAnteriores = polizasVencidasTodas.filter(p => !esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
     
     const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => 
       sum + resolverMonto(p), 0
