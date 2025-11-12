@@ -1,6 +1,9 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Edit, Trash2, Eye, FileText, X, Save, ChevronLeft, ChevronRight, Search, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+// Nuevos imports para habilitar selección de cliente y ejecutivo
+import BuscadorCliente from '../components/BuscadorCliente';
+import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
 // Hook personalizado para paginación
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -204,7 +207,7 @@ const ListaTramitesComponent = ({
                 <FileText className="me-2" size={20} />
                 <div>
                   <strong>Gestión de Trámites:</strong> Aquí puedes administrar todos los trámites, 
-                  documentos y procesos administrativos relacionados con las pólizas de seguros.
+                  documentos y procesos administrativos relacionados con los expedientes de seguros.
                 </div>
               </div>
             </div>
@@ -346,13 +349,38 @@ const FormularioTramite = ({
   generarCodigoTramite, 
   setVistaActual, 
   guardarTramite,
-  clientes,
-  polizasCliente,
-  cargandoPolizas,
-  cargarPolizasCliente,
-  setPolizasCliente
+  clienteSeleccionado,
+  setClienteSeleccionado,
+  expedientesCliente,
+  cargandoExpedientesCliente,
+  ejecutivoAsignado,
+  setEjecutivoAsignado,
+  ejecutivos
 }) => {
   const siguienteCodigo = !modoEdicionTramite ? generarCodigoTramite() : formularioTramite.codigo;
+  
+  // Helper para etiquetar pólizas con detalles del vehículo
+  const etiquetaPoliza = useCallback((exp) => {
+    const numero = exp.numero_poliza || `EXP-${exp.id}`;
+    const producto = exp.producto || exp.plan || '';
+    const modelo = exp.modelo || '';
+    const anio = exp.anio || exp.año || '';
+    const vin = exp.numero_serie || exp.vin || '';
+    const placas = exp.placas || '';
+    const partes = [numero];
+    if (producto) partes.push(producto);
+    // Datos de auto si existen
+    const autoPartes = [];
+    if (modelo) autoPartes.push(modelo);
+    if (anio) autoPartes.push(`(${anio})`);
+    if (placas) autoPartes.push(`Placas ${placas}`);
+    if (vin) {
+      const suf = String(vin).slice(-8); // Mostrar últimos 8 caracteres del VIN
+      autoPartes.push(`VIN …${suf}`);
+    }
+    if (autoPartes.length > 0) partes.push(autoPartes.join(' '));
+    return partes.join(' • ');
+  }, []);
   
   // Obtener tipos de trámite del localStorage (catálogo de configuración)
   const tiposTramiteGuardados = JSON.parse(localStorage.getItem('sistemaseguros_tiposTramite') || '[]');
@@ -474,127 +502,131 @@ const FormularioTramite = ({
               </div>
             </div>
 
-            {/* Información del Cliente/Expediente */}
+            {/* Selección de Cliente y Póliza (Expediente) */}
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Cliente y Póliza</h5>
-              
-              {/* Selector de Cliente */}
-              <div className="row g-3 mb-3">
-                <div className="col-12">
-                  <label className="form-label">Cliente <span className="text-danger">*</span></label>
-                  <select
-                    className="form-select"
-                    value={formularioTramite.clienteId || ''}
-                    onChange={(e) => {
-                      const clienteId = e.target.value;
-                      setFormularioTramite({
-                        ...formularioTramite, 
-                        clienteId: clienteId,
-                        cliente: clienteId ? clientes.find(c => c.id === parseInt(clienteId))?.nombre : '',
-                        polizaId: '',
-                        expediente: ''
-                      });
-                      // Cargar pólizas del cliente
-                      if (clienteId) {
-                        cargarPolizasCliente(clienteId);
+              <div className="row g-3">
+                <div className="col-md-6">
+                  <label className="form-label">Seleccionar Cliente <span className="text-danger">*</span></label>
+                  <BuscadorCliente 
+                    onClienteSeleccionado={(cliente) => {
+                      if (cliente && cliente !== 'CREAR_NUEVO') {
+                        setClienteSeleccionado(cliente);
+                        setFormularioTramite(prev => ({
+                          ...prev,
+                          cliente: cliente.tipoPersona === 'Persona Moral' ? (cliente.razonSocial || cliente.razon_social || '') : `${cliente.nombre || ''} ${cliente.apellidoPaterno || ''}`.trim(),
+                          cliente_id: cliente.id
+                        }));
+                      } else if (cliente === 'CREAR_NUEVO') {
+                        alert('Funcionalidad para crear cliente no implementada en este módulo.');
                       } else {
-                        setPolizasCliente([]);
+                        setClienteSeleccionado(null);
+                        setFormularioTramite(prev => ({ ...prev, cliente: '', cliente_id: null }));
                       }
                     }}
-                    required
+                    clienteSeleccionado={clienteSeleccionado}
+                  />
+                  {clienteSeleccionado && (
+                    <small className="text-success">Cliente seleccionado: {formularioTramite.cliente}</small>
+                  )}
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Seleccionar Póliza (Expediente) <span className="text-danger">*</span></label>
+                  <select
+                    className="form-select"
+                    value={formularioTramite.expediente_id || ''}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      if (!valor) {
+                        setFormularioTramite(prev => ({ ...prev, expediente: '', expediente_id: null }));
+                        return;
+                      }
+                      const exp = expedientesCliente.find(ex => String(ex.id) === valor);
+                      setFormularioTramite(prev => ({
+                        ...prev,
+                        expediente: exp ? (exp.numero_poliza || `EXP-${exp.id}`) : '',
+                        expediente_id: exp ? exp.id : null
+                      }));
+                    }}
+                    disabled={!clienteSeleccionado || cargandoExpedientesCliente}
                   >
-                    <option value="">Seleccionar cliente...</option>
-                    {clientes.map(cliente => (
-                      <option key={cliente.id} value={cliente.id}>
-                        {cliente.codigo} - {cliente.nombre} {cliente.apellido_paterno}
+                    <option value="">{!clienteSeleccionado ? 'Seleccione un cliente primero' : (cargandoExpedientesCliente ? 'Cargando pólizas...' : 'Seleccionar póliza')}</option>
+                    {expedientesCliente.map(exp => (
+                      <option key={exp.id} value={exp.id}>
+                        {etiquetaPoliza(exp)}
                       </option>
                     ))}
                   </select>
-                  <small className="text-muted">Seleccione el cliente para ver sus pólizas vigentes</small>
+                  {clienteSeleccionado && expedientesCliente.length === 0 && !cargandoExpedientesCliente && (
+                    <small className="text-warning">Este cliente no tiene pólizas registradas.</small>
+                  )}
+                  {formularioTramite.expediente_id && (
+                    <small className="text-success d-block mt-1">Póliza seleccionada: {formularioTramite.expediente}</small>
+                  )}
                 </div>
               </div>
-
-              {/* Lista de Pólizas del Cliente */}
-              {formularioTramite.clienteId && (
-                <div className="row g-3">
-                  <div className="col-12">
-                    <label className="form-label">Póliza Vigente <span className="text-danger">*</span></label>
-                    {cargandoPolizas ? (
-                      <div className="alert alert-info">
-                        <Clock size={16} className="me-2" />
-                        Cargando pólizas...
+              {formularioTramite.expediente_id && (
+                <div className="mt-3 p-3 border rounded bg-light">
+                  <strong className="d-block mb-1">Resumen de Póliza:</strong>
+                  {(() => {
+                    const exp = expedientesCliente.find(ex => ex.id === formularioTramite.expediente_id);
+                    if (!exp) return null;
+                    return (
+                      <div className="small text-muted">
+                        <div><strong>Número:</strong> {exp.numero_poliza || 'N/A'}</div>
+                        <div><strong>Producto:</strong> {exp.producto || exp.plan || 'N/A'}</div>
+                        <div><strong>Aseguradora:</strong> {exp.compania || exp.aseguradora || 'N/A'}</div>
+                        <div><strong>Vigencia:</strong> {exp.inicio_vigencia || exp.fecha_emision || '¿?'} - {exp.termino_vigencia || exp.fecha_vencimiento_pago || '¿?'}</div>
+                        {(exp.modelo || exp.anio || exp.numero_serie || exp.placas) && (
+                          <div>
+                            <strong>Vehículo:</strong> {exp.modelo || '-'} {exp.anio ? `(${exp.anio})` : ''} {exp.placas ? `• Placas ${exp.placas}` : ''} {exp.numero_serie ? `• VIN …${String(exp.numero_serie).slice(-8)}` : ''}
+                          </div>
+                        )}
+                        {exp.estatus_pago && <div><strong>Estatus Pago:</strong> {exp.estatus_pago}</div>}
                       </div>
-                    ) : polizasCliente.length === 0 ? (
-                      <div className="alert alert-warning">
-                        <AlertCircle size={16} className="me-2" />
-                        Este cliente no tiene pólizas vigentes
-                      </div>
-                    ) : (
-                      <div className="list-group">
-                        {polizasCliente.map(poliza => (
-                          <label 
-                            key={poliza.id}
-                            className={`list-group-item list-group-item-action ${formularioTramite.polizaId === poliza.id ? 'active' : ''}`}
-                            style={{ cursor: 'pointer' }}
-                          >
-                            <div className="d-flex align-items-start">
-                              <input
-                                type="radio"
-                                className="form-check-input me-3 mt-1"
-                                name="polizaSeleccionada"
-                                checked={formularioTramite.polizaId === poliza.id}
-                                onChange={() => {
-                                  setFormularioTramite({
-                                    ...formularioTramite,
-                                    polizaId: poliza.id,
-                                    expediente: poliza.numero_poliza || poliza.codigo,
-                                    aseguradoraId: poliza.aseguradora_id,
-                                    productoId: poliza.producto_id,
-                                    agenteId: poliza.agente_id
-                                  });
-                                }}
-                              />
-                              <div className="flex-grow-1">
-                                <div className="d-flex justify-content-between align-items-start mb-2">
-                                  <div>
-                                    <h6 className="mb-1">
-                                      <span className="badge bg-primary me-2">{poliza.numero_poliza || poliza.codigo}</span>
-                                      {poliza.compania || poliza.aseguradora}
-                                    </h6>
-                                    <p className="mb-1 text-muted small">
-                                      <strong>Producto:</strong> {poliza.producto}
-                                    </p>
-                                  </div>
-                                  <span className={`badge ${poliza.etapa_activa === 'Emitida' ? 'bg-success' : 'bg-info'}`}>
-                                    {poliza.etapa_activa}
-                                  </span>
-                                </div>
-                                <div className="row g-2 small">
-                                  <div className="col-md-4">
-                                    <strong>Vigencia:</strong><br/>
-                                    {poliza.inicio_vigencia ? new Date(poliza.inicio_vigencia).toLocaleDateString() : 'N/A'} - {poliza.termino_vigencia ? new Date(poliza.termino_vigencia).toLocaleDateString() : 'N/A'}
-                                  </div>
-                                  <div className="col-md-4">
-                                    <strong>Prima:</strong> ${parseFloat(poliza.prima_pagada || 0).toLocaleString('es-MX', {minimumFractionDigits: 2})}
-                                  </div>
-                                  <div className="col-md-4">
-                                    <strong>Agente:</strong> {poliza.agente || 'No asignado'}
-                                  </div>
-                                </div>
-                                {poliza.producto === 'Autos' && poliza.marca && (
-                                  <div className="mt-2 small text-muted">
-                                    <strong>Vehículo:</strong> {poliza.marca} {poliza.modelo} {poliza.anio} - {poliza.placas || 'Sin placas'}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
+            </div>
+
+            {/* Asignación de Ejecutivo */}
+            <div className="mb-4">
+              <h5 className="card-title border-bottom pb-2">Asignación</h5>
+              <div className="row g-3">
+                <div className="col-md-6">
+                  <label className="form-label">Ejecutivo Asignado</label>
+                  <select
+                    className="form-select"
+                    value={ejecutivoAsignado || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEjecutivoAsignado(val);
+                      setFormularioTramite(prev => ({ ...prev, ejecutivoAsignado: val }));
+                    }}
+                  >
+                    <option value="">Seleccionar ejecutivo</option>
+                    {ejecutivos.map(ej => (
+                      <option key={ej.id} value={ej.nombre}>{ej.nombre} {ej.apellidoPaterno || ''}</option>
+                    ))}
+                  </select>
+                  {ejecutivos.length === 0 && (
+                    <small className="text-muted">No hay ejecutivos registrados en el equipo de trabajo.</small>
+                  )}
+                </div>
+                <div className="col-md-6">
+                  <label className="form-label">Prioridad</label>
+                  <select
+                    className="form-select"
+                    value={formularioTramite.prioridad}
+                    onChange={(e) => setFormularioTramite({...formularioTramite, prioridad: e.target.value})}
+                  >
+                    {prioridades.map(prioridad => (
+                      <option key={prioridad} value={prioridad}>{prioridad}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
 
             {/* Fechas y Prioridad */}
@@ -893,24 +925,13 @@ export const Tramites = () => {
   const [vistaActual, setVistaActual] = useState('tramites');
   const [modoEdicionTramite, setModoEdicionTramite] = useState(false);
 
-  // Estados para clientes y pólizas
-  const [clientes, setClientes] = useState([]);
-  const [polizasCliente, setPolizasCliente] = useState([]);
-  const [cargandoPolizas, setCargandoPolizas] = useState(false);
-
   // Estado del formulario de trámite
   const [formularioTramite, setFormularioTramite] = useState({
     codigo: '',
     tipoTramite: '',
     descripcion: '',
-    clienteId: '',
     cliente: '',
-    polizaId: '',
     expediente: '',
-    aseguradoraId: '',
-    productoId: '',
-    agenteId: '',
-    ejecutivoId: '',
     estatus: 'Pendiente',
     prioridad: 'Media',
     fechaInicio: new Date().toISOString().split('T')[0],
@@ -922,59 +943,44 @@ export const Tramites = () => {
     id: null
   });
 
+  // Estado para cliente seleccionado y expedientes asociados
+  const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+  const [expedientesCliente, setExpedientesCliente] = useState([]);
+  const [cargandoExpedientesCliente, setCargandoExpedientesCliente] = useState(false);
+  const [ejecutivoAsignado, setEjecutivoAsignado] = useState('');
+  // Equipo de trabajo para listar ejecutivos
+  const { equipoDeTrabajo } = useEquipoDeTrabajo();
+  const ejecutivos = useMemo(() => (equipoDeTrabajo || []).filter(m => (m.perfil || '').toLowerCase().includes('ejecut')) , [equipoDeTrabajo]);
+
+  // Cargar expedientes del cliente seleccionado
+  useEffect(() => {
+    const cargarExpedientesCliente = async () => {
+      if (!clienteSeleccionado) {
+        setExpedientesCliente([]);
+        return;
+      }
+      setCargandoExpedientesCliente(true);
+      try {
+        const res = await fetch(`${API_URL}/api/expedientes`);
+        const data = await res.json();
+        const filtrados = data.filter(exp => String(exp.cliente_id) === String(clienteSeleccionado.id));
+        setExpedientesCliente(filtrados);
+      } catch (e) {
+        console.error('Error cargando expedientes del cliente:', e);
+        setExpedientesCliente([]);
+      } finally {
+        setCargandoExpedientesCliente(false);
+      }
+    };
+    cargarExpedientesCliente();
+  }, [clienteSeleccionado]);
+
   // Cargar trámites desde el backend al montar el componente
   useEffect(() => {
   fetch(`${API_URL}/api/tramites`)
       .then(res => res.json())
       .then(data => setTramites(data))
       .catch(err => console.error('Error al cargar trámites:', err));
-  }, []);
-
-  // Cargar clientes al montar el componente
-  useEffect(() => {
-    fetch(`${API_URL}/api/clientes`)
-      .then(res => res.json())
-      .then(data => setClientes(data))
-      .catch(err => console.error('Error al cargar clientes:', err));
-  }, []);
-
-  // Función para cargar pólizas vigentes de un cliente
-  const cargarPolizasCliente = useCallback(async (clienteId) => {
-    setCargandoPolizas(true);
-    try {
-      // TODO: Cuando Hugo implemente el endpoint, usar:
-      // const response = await fetch(`${API_URL}/api/expedientes/vigentes/${clienteId}`);
-      
-      // Por ahora, simulamos con todas las pólizas filtradas en frontend
-      const response = await fetch(`${API_URL}/api/expedientes`);
-      const data = await response.json();
-      
-      // Filtrar pólizas del cliente y que estén vigentes
-      const hoy = new Date();
-      const polizasVigentes = data.filter(exp => {
-        // Buscar por cliente_id si existe, sino por nombre
-        const esDelCliente = exp.cliente_id 
-          ? exp.cliente_id === parseInt(clienteId)
-          : false; // Por ahora solo si tiene cliente_id
-        
-        // Verificar que esté emitida y vigente
-        const estaEmitida = exp.etapa_activa === 'Emitida' || exp.etapa_activa === 'Autorizado';
-        
-        // Verificar vigencia por fechas
-        const vigente = exp.termino_vigencia 
-          ? new Date(exp.termino_vigencia) > hoy
-          : true;
-        
-        return esDelCliente && estaEmitida && vigente;
-      });
-      
-      setPolizasCliente(polizasVigentes);
-    } catch (err) {
-      console.error('Error al cargar pólizas:', err);
-      setPolizasCliente([]);
-    } finally {
-      setCargandoPolizas(false);
-    }
   }, []);
 
   // Refrescar trámites tras operaciones CRUD
@@ -1007,14 +1013,8 @@ export const Tramites = () => {
       codigo: '',
       tipoTramite: '',
       descripcion: '',
-      clienteId: '',
       cliente: '',
-      polizaId: '',
       expediente: '',
-      aseguradoraId: '',
-      productoId: '',
-      agenteId: '',
-      ejecutivoId: '',
       estatus: 'Pendiente',
       prioridad: 'Media',
       fechaInicio: new Date().toISOString().split('T')[0],
@@ -1027,7 +1027,9 @@ export const Tramites = () => {
     });
     setModoEdicionTramite(false);
     setTramiteSeleccionado(null);
-    setPolizasCliente([]);
+    setClienteSeleccionado(null);
+    setExpedientesCliente([]);
+    setEjecutivoAsignado('');
   }, []);
 
   // Crear o actualizar trámite en el backend
@@ -1036,41 +1038,82 @@ export const Tramites = () => {
       alert('Por favor complete los campos obligatorios: Tipo de Trámite y Descripción');
       return;
     }
+    if (!clienteSeleccionado) {
+      alert('Seleccione un cliente para el trámite.');
+      return;
+    }
+    if (!formularioTramite.expediente) {
+      alert('Seleccione la póliza (expediente) del cliente para asociar el trámite.');
+      return;
+    }
     const codigoTramite = formularioTramite.codigo || generarCodigoTramite();
-    const tramitePayload = {
-      ...formularioTramite,
-      codigo: codigoTramite
+    
+    // Payload compatible con API (snake_case) - campos que la tabla tramites SÍ tiene
+    const payloadAPI = {
+      codigo: codigoTramite,
+      tipo_tramite: formularioTramite.tipoTramite,
+      tipoTramite: formularioTramite.tipoTramite, // Ambos formatos por compatibilidad
+      descripcion: formularioTramite.descripcion,
+      estatus: formularioTramite.estatus || 'Pendiente',
+      prioridad: formularioTramite.prioridad || 'Media',
+      fecha_inicio: formularioTramite.fechaInicio,
+      fechaInicio: formularioTramite.fechaInicio,
+      fecha_limite: formularioTramite.fechaLimite,
+      fechaLimite: formularioTramite.fechaLimite,
+      fecha_creacion: formularioTramite.fechaCreacion || new Date().toISOString().split('T')[0],
+      fechaCreacion: formularioTramite.fechaCreacion || new Date().toISOString().split('T')[0],
+      ejecutivo_asignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
+      ejecutivoAsignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
+      // Guardar referencias como strings en campos cliente y expediente
+      cliente: clienteSeleccionado.codigo || clienteSeleccionado.id || '',
+      expediente: formularioTramite.expediente || '',
+      observaciones: formularioTramite.observaciones || ''
     };
+    console.log('📝 Guardando trámite. Payload:', payloadAPI);
     if (modoEdicionTramite) {
       // Actualizar
   fetch(`${API_URL}/api/tramites/${formularioTramite.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tramitePayload)
+        body: JSON.stringify(payloadAPI)
       })
-        .then(res => res.json())
+        .then(async (res) => {
+          const text = await res.text();
+          if (!res.ok) {
+            console.error('❌ Error al actualizar trámite:', res.status, text);
+            throw new Error(text || 'Error al actualizar trámite');
+          }
+          try { return JSON.parse(text); } catch { return {}; }
+        })
         .then(() => {
           cargarTramites();
           limpiarFormularioTramite();
           setVistaActual('tramites');
         })
-        .catch(err => alert('Error al actualizar trámite'));
+        .catch(err => alert('Error al actualizar trámite: ' + (err?.message || '')));
     } else {
       // Crear
   fetch(`${API_URL}/api/tramites`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tramitePayload)
+        body: JSON.stringify(payloadAPI)
       })
-        .then(res => res.json())
+        .then(async (res) => {
+          const text = await res.text();
+          if (!res.ok) {
+            console.error('❌ Error al crear trámite:', res.status, text);
+            throw new Error(text || 'Error al crear trámite');
+          }
+          try { return JSON.parse(text); } catch { return {}; }
+        })
         .then(() => {
           cargarTramites();
           limpiarFormularioTramite();
           setVistaActual('tramites');
         })
-        .catch(err => alert('Error al crear trámite'));
+        .catch(err => alert('Error al crear trámite: ' + (err?.message || '')));
     }
-  }, [formularioTramite, modoEdicionTramite, generarCodigoTramite, limpiarFormularioTramite, cargarTramites]);
+  }, [formularioTramite, modoEdicionTramite, generarCodigoTramite, limpiarFormularioTramite, cargarTramites, clienteSeleccionado, ejecutivoAsignado]);
 
   // Editar trámite (solo cambia la vista y el formulario)
   const editarTramite = useCallback((tramite) => {
@@ -1117,11 +1160,13 @@ export const Tramites = () => {
           generarCodigoTramite={generarCodigoTramite}
           setVistaActual={setVistaActual}
           guardarTramite={guardarTramite}
-          clientes={clientes}
-          polizasCliente={polizasCliente}
-          cargandoPolizas={cargandoPolizas}
-          cargarPolizasCliente={cargarPolizasCliente}
-          setPolizasCliente={setPolizasCliente}
+          clienteSeleccionado={clienteSeleccionado}
+          setClienteSeleccionado={setClienteSeleccionado}
+          expedientesCliente={expedientesCliente}
+          cargandoExpedientesCliente={cargandoExpedientesCliente}
+          ejecutivoAsignado={ejecutivoAsignado}
+          setEjecutivoAsignado={setEjecutivoAsignado}
+          ejecutivos={ejecutivos}
         />
       )}
       {vistaActual === 'detalles-tramite' && tramiteSeleccionado && (

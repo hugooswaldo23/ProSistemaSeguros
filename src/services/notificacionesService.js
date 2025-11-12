@@ -298,7 +298,7 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null) {
 
   // Agregar enlace al PDF si existe
   if (pdfUrl) {
-    mensaje += `\n\n📄 *Descargar póliza:* ${pdfUrl}`;
+    mensaje += `\n\n📄 *Descarga tu póliza aquí:*\n${pdfUrl}\n\n_(Haz clic en el enlace para descargar)_`;
   }
 
   mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales.`;
@@ -410,7 +410,7 @@ Vigencia: ${inicioVig} al ${finVig}`;
   }
 
   if (pdfUrl) {
-    cuerpo += `\n\nPuede descargar su póliza desde el siguiente enlace:\n${pdfUrl}`;
+    cuerpo += `\n\nDescargue su póliza aquí:\n${pdfUrl}`;
   }
 
   cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales.`;
