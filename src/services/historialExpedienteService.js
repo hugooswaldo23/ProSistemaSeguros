@@ -244,6 +244,15 @@ export const obtenerEventosPorTipo = async (expedienteId, tipoEvento) => {
 
 /**
  * Helper: Registrar cambio de etapa automáticamente
+ * MAPEO COMPLETO DEL FLUJO:
+ * 1. En cotización → COTIZACION_CREADA
+ * 2. Cotización enviada → COTIZACION_ENVIADA
+ * 3. Autorizado → COTIZACION_AUTORIZADA
+ * 4. En proceso emisión → EMISION_INICIADA
+ * 5. Emitida → POLIZA_EMITIDA
+ * 6. Enviada al Cliente → (se registra con registrarEnvioDocumento en WhatsApp/Email)
+ * 7. Renovada → POLIZA_RENOVADA
+ * 8. Cancelada → POLIZA_CANCELADA
  */
 export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterior, etapaNueva, usuarioNombre, descripcionAdicional = '') => {
   let tipoEvento = TIPOS_EVENTO.DATOS_ACTUALIZADOS;
@@ -265,7 +274,15 @@ export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterio
   } else if (etapaNueva === 'Emitida') {
     tipoEvento = TIPOS_EVENTO.POLIZA_EMITIDA;
     descripcion = 'Póliza emitida exitosamente';
-  } else if (etapaNueva === 'Cancelado') {
+  } else if (etapaNueva === 'Enviada al Cliente') {
+    // Nota: Este cambio normalmente se registra con registrarEnvioDocumento,
+    // pero si se cambia manualmente la etapa, lo registramos aquí
+    tipoEvento = TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL; // Por defecto email
+    descripcion = 'Póliza marcada como enviada al cliente';
+  } else if (etapaNueva === 'Renovada') {
+    tipoEvento = TIPOS_EVENTO.POLIZA_RENOVADA;
+    descripcion = 'Póliza renovada exitosamente';
+  } else if (etapaNueva === 'Cancelada' || etapaNueva === 'Cancelado') {
     tipoEvento = TIPOS_EVENTO.POLIZA_CANCELADA;
     descripcion = 'Póliza cancelada';
   }

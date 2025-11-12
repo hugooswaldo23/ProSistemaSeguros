@@ -1,28 +1,22 @@
 /**
  * ====================================================================
  * COMPONENTE: Timeline de Expediente
- * PROPÓSITO: Mostrar la trazabilidad completa del ciclo de vida
- * FECHA: 2025-11-10
+ * PROPÓSITO: Mostrar la trazabilidad completa usando tabla notificaciones
+ * FECHA: 2025-11-12
  * ====================================================================
  */
 
 import React, { useState, useEffect } from 'react';
 import { 
   Clock, 
-  Filter, 
   Download,
   ChevronDown,
   ChevronUp,
   ExternalLink
 } from 'lucide-react';
-import {
-  obtenerHistorialExpediente,
-  obtenerEstiloEvento,
-  obtenerTituloEvento,
-  TIPOS_EVENTO
-} from '../services/historialExpedienteService';
+import { obtenerNotificacionesPorExpediente } from '../services/notificacionesService';
 
-const TimelineExpediente = ({ expedienteId }) => {
+const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const [historial, setHistorial] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
@@ -38,8 +32,96 @@ const TimelineExpediente = ({ expedienteId }) => {
     try {
       setCargando(true);
       setError(null);
-      const datos = await obtenerHistorialExpediente(expedienteId);
-      setHistorial(datos);
+      
+      // Cargar notificaciones desde el backend (YA EXISTE)
+      const notificaciones = await obtenerNotificacionesPorExpediente(expedienteId);
+      console.log('📋 Notificaciones cargadas:', notificaciones);
+      
+      // Convertir notificaciones a formato timeline
+      const eventosTimeline = notificaciones.map(notif => ({
+        id: notif.id,
+        expediente_id: notif.expediente_id,
+        cliente_id: notif.cliente_id,
+        tipo_evento: mapearTipoNotificacionAEvento(notif.tipo_notificacion, notif.tipo_mensaje),
+        fecha_evento: notif.fecha_envio || notif.created_at,
+        usuario_nombre: notif.enviado_por_nombre || 'Sistema',
+        descripcion: notif.mensaje || notif.asunto || '',
+        metodo_contacto: mapearTipoNotificacion(notif.tipo_notificacion),
+        destinatario_nombre: notif.destinatario_nombre,
+        destinatario_contacto: notif.destinatario_contacto,
+        documento_url: notif.pdf_url,
+        datos_adicionales: {
+          numero_poliza: notif.numero_poliza,
+          compania: notif.compania,
+          producto: notif.producto,
+          estatus_pago: notif.estatus_pago,
+          estado_envio: notif.estado_envio
+        }
+      }));
+      
+      // Agregar eventos sintéticos basados en fechas del expediente
+      if (expedienteData) {
+        console.log('📅 Fechas del expediente:', {
+          fecha_creacion: expedienteData.fecha_creacion,
+          created_at: expedienteData.created_at,
+          fecha_emision: expedienteData.fecha_emision,
+          fecha_pago: expedienteData.fecha_pago,
+          estatusPago: expedienteData.estatusPago,
+          inicio_vigencia: expedienteData.inicio_vigencia
+        });
+
+        // 1. Fecha de CAPTURA (cuando se registró en el sistema)
+        // Usar created_at o fecha_creacion (son lo mismo)
+        const fechaCaptura = expedienteData.created_at || expedienteData.fecha_creacion;
+        if (fechaCaptura) {
+          eventosTimeline.push({
+            id: 'captura-sintetico',
+            expediente_id: expedienteData.id,
+            cliente_id: expedienteData.cliente_id,
+            tipo_evento: 'poliza_emitida',
+            fecha_evento: fechaCaptura,
+            usuario_nombre: expedienteData.usuario_nombre || 'Sistema',
+            descripcion: `📝 Póliza capturada en el sistema`,
+            datos_adicionales: {
+              numero_poliza: expedienteData.numero_poliza,
+              compania: expedienteData.compania,
+              producto: expedienteData.producto,
+              _es_sintetico: true,
+              _tipo: 'captura'
+            }
+          });
+        }
+        
+        // 2. Fecha de PAGO - Solo si realmente se aplicó el pago
+        // Verificar que estatusPago sea "Pagado" o "Completado" y que fecha_pago exista
+        const pagoAplicado = expedienteData.estatusPago === 'Pagado' || 
+                             expedienteData.estatusPago === 'Completado' ||
+                             expedienteData.estatusPago === 'pagado';
+        
+        if (expedienteData.fecha_pago && pagoAplicado) {
+          eventosTimeline.push({
+            id: 'pago-sintetico',
+            expediente_id: expedienteData.id,
+            cliente_id: expedienteData.cliente_id,
+            tipo_evento: 'pago_registrado',
+            fecha_evento: expedienteData.fecha_pago,
+            usuario_nombre: 'Sistema',
+            descripcion: `💰 Pago registrado${expedienteData.total ? ': $' + expedienteData.total.toLocaleString('es-MX') : ''}`,
+            datos_adicionales: {
+              numero_poliza: expedienteData.numero_poliza,
+              monto: expedienteData.total,
+              tipo_pago: expedienteData.tipo_pago,
+              _es_sintetico: true,
+              _tipo: 'pago'
+            }
+          });
+        }
+      }
+      
+      // Ordenar por fecha descendente (más reciente primero)
+      eventosTimeline.sort((a, b) => new Date(b.fecha_evento) - new Date(a.fecha_evento));
+      
+      setHistorial(eventosTimeline);
     } catch (err) {
       console.error('Error al cargar historial:', err);
       setError('No se pudo cargar el historial del expediente');
@@ -48,50 +130,90 @@ const TimelineExpediente = ({ expedienteId }) => {
     }
   };
 
-  // Agrupar eventos por categoría
-  const categoriasEventos = {
-    'Cotización': [
-      TIPOS_EVENTO.COTIZACION_CREADA,
-      TIPOS_EVENTO.COTIZACION_ENVIADA,
-      TIPOS_EVENTO.COTIZACION_AUTORIZADA,
-      TIPOS_EVENTO.COTIZACION_RECHAZADA
-    ],
-    'Emisión': [
-      TIPOS_EVENTO.EMISION_INICIADA,
-      TIPOS_EVENTO.POLIZA_EMITIDA,
-      TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL,
-      TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP
-    ],
-    'Pagos': [
-      TIPOS_EVENTO.PAGO_REGISTRADO,
-      TIPOS_EVENTO.PAGO_VENCIDO,
-      TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO
-    ],
-    'Renovaciones': [
-      TIPOS_EVENTO.RENOVACION_INICIADA,
-      TIPOS_EVENTO.POLIZA_RENOVADA,
-      TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO
-    ],
-    'Cancelaciones': [
-      TIPOS_EVENTO.POLIZA_CANCELADA,
-      TIPOS_EVENTO.SOLICITUD_CANCELACION
-    ],
-    'Comunicaciones': [
-      TIPOS_EVENTO.DOCUMENTO_ENVIADO,
-      TIPOS_EVENTO.NOTA_AGREGADA,
-      TIPOS_EVENTO.LLAMADA_REGISTRADA,
-      TIPOS_EVENTO.REUNION_REGISTRADA
-    ]
+  // Mapear tipo_notificacion a nombre legible
+  const mapearTipoNotificacion = (tipo) => {
+    const mapa = {
+      'whatsapp': 'WhatsApp',
+      'email': 'Email',
+      'sms': 'SMS'
+    };
+    return mapa[tipo] || tipo;
+  };
+
+  // Mapear tipo_notificacion + tipo_mensaje a tipo_evento
+  const mapearTipoNotificacionAEvento = (tipoNotif, tipoMensaje) => {
+    // Mapeo basado en tipo_mensaje
+    const mapaMensajes = {
+      'emision': tipoNotif === 'whatsapp' ? 'poliza_enviada_whatsapp' : 'poliza_enviada_email',
+      'recordatorio_pago': 'recordatorio_pago_enviado',
+      'pago_vencido': 'pago_vencido',
+      'pago_recibido': 'pago_registrado',
+      'renovacion': 'poliza_renovada',
+      'cancelacion': 'poliza_cancelada',
+      'modificacion': 'endoso_aplicado',
+      'otro': 'nota_agregada'
+    };
+    
+    return mapaMensajes[tipoMensaje] || 'documento_enviado';
+  };
+
+  // Obtener estilo (icono y color) para cada tipo de evento
+  const obtenerEstiloEvento = (tipoEvento) => {
+    const estilos = {
+      'cotizacion_creada': { icon: '📝', color: '#17a2b8', bgColor: '#d1ecf1' },
+      'cotizacion_enviada': { icon: '📧', color: '#ffc107', bgColor: '#fff3cd' },
+      'poliza_emitida': { icon: '📄', color: '#007bff', bgColor: '#cce5ff' },
+      'poliza_enviada_email': { icon: '📨', color: '#28a745', bgColor: '#d4edda' },
+      'poliza_enviada_whatsapp': { icon: '💬', color: '#25d366', bgColor: '#d4f4dd' },
+      'pago_registrado': { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
+      'pago_vencido': { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
+      'recordatorio_pago_enviado': { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+      'poliza_renovada': { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
+      'poliza_cancelada': { icon: '🚫', color: '#dc3545', bgColor: '#f8d7da' },
+      'endoso_aplicado': { icon: '📝', color: '#007bff', bgColor: '#cce5ff' },
+      'documento_enviado': { icon: '📤', color: '#28a745', bgColor: '#d4edda' },
+      'nota_agregada': { icon: '📌', color: '#6c757d', bgColor: '#e2e3e5' }
+    };
+    
+    return estilos[tipoEvento] || { icon: '📋', color: '#6c757d', bgColor: '#e2e3e5' };
+  };
+
+  // Obtener título legible para cada tipo de evento
+  const obtenerTituloEvento = (tipoEvento) => {
+    const titulos = {
+      'cotizacion_creada': 'Cotización Creada',
+      'cotizacion_enviada': 'Cotización Enviada al Cliente',
+      'poliza_emitida': 'Póliza Emitida',
+      'poliza_enviada_email': 'Póliza Enviada por Email',
+      'poliza_enviada_whatsapp': 'Póliza Enviada por WhatsApp',
+      'pago_registrado': 'Pago Registrado',
+      'pago_vencido': 'Pago Vencido',
+      'recordatorio_pago_enviado': 'Recordatorio de Pago Enviado',
+      'poliza_renovada': 'Póliza Renovada',
+      'poliza_cancelada': 'Póliza Cancelada',
+      'endoso_aplicado': 'Endoso Aplicado',
+      'documento_enviado': 'Documento Enviado',
+      'nota_agregada': 'Nota Agregada'
+    };
+    
+    return titulos[tipoEvento] || tipoEvento.replace(/_/g, ' ').toUpperCase();
   };
 
   // Filtrar historial
   const historialFiltrado = filtroTipo === 'todos' 
     ? historial
     : historial.filter(evento => {
-        const categoria = Object.entries(categoriasEventos).find(([cat, tipos]) => 
-          tipos.includes(evento.tipo_evento)
-        );
-        return categoria && categoria[0].toLowerCase() === filtroTipo.toLowerCase();
+        const tipo = evento.tipo_evento || '';
+        if (filtroTipo === 'Emisión') {
+          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion');
+        }
+        if (filtroTipo === 'Pagos') {
+          return tipo.includes('pago');
+        }
+        if (filtroTipo === 'Comunicaciones') {
+          return tipo.includes('enviada') || tipo.includes('documento');
+        }
+        return false;
       });
 
   // Formatear fecha
@@ -173,73 +295,55 @@ const TimelineExpediente = ({ expedienteId }) => {
 
   if (historial.length === 0) {
     return (
-      <div className="text-center py-5">
-        <Clock size={48} className="text-muted mb-3" />
-        <h6 className="text-muted">No hay eventos registrados</h6>
-        <p className="text-muted small">
-          Los eventos del ciclo de vida del expediente aparecerán aquí
-        </p>
+      <div className="text-center py-4">
+        <Clock size={40} className="text-muted mb-2" />
+        <p className="text-muted mb-0">No hay eventos registrados</p>
+        <small className="text-muted">Los eventos del ciclo de vida aparecerán aquí</small>
       </div>
     );
   }
 
   return (
     <div className="timeline-expediente">
-      {/* Header con filtros */}
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h6 className="mb-0">
-          <Clock size={20} className="me-2" />
-          Historial del Expediente
-          <span className="badge bg-primary ms-2">{historialFiltrado.length}</span>
-        </h6>
+      {/* Header compacto con info y filtros */}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <small className="text-muted">
+            {historialFiltrado.length} {historialFiltrado.length === 1 ? 'evento' : 'eventos'}
+            {filtroTipo !== 'todos' && ` • Filtro: ${filtroTipo}`}
+          </small>
+        </div>
         
         <div className="d-flex gap-2">
           {/* Filtro por categoría */}
-          <div className="dropdown">
-            <button 
-              className="btn btn-sm btn-outline-secondary dropdown-toggle"
-              type="button"
-              data-bs-toggle="dropdown"
-            >
-              <Filter size={16} className="me-1" />
-              {filtroTipo === 'todos' ? 'Todos' : filtroTipo}
-            </button>
-            <ul className="dropdown-menu">
-              <li>
-                <button 
-                  className="dropdown-item" 
-                  onClick={() => setFiltroTipo('todos')}
-                >
-                  Todos los eventos
-                </button>
-              </li>
-              <li><hr className="dropdown-divider" /></li>
-              {Object.keys(categoriasEventos).map(categoria => (
-                <li key={categoria}>
-                  <button 
-                    className="dropdown-item"
-                    onClick={() => setFiltroTipo(categoria)}
-                  >
-                    {categoria}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <select 
+            className="form-select form-select-sm"
+            value={filtroTipo}
+            onChange={(e) => setFiltroTipo(e.target.value)}
+            style={{ width: 'auto', fontSize: '0.85rem' }}
+          >
+            <option value="todos">📋 Todos</option>
+            <option value="Cotización">📝 Cotización</option>
+            <option value="Emisión">📄 Emisión</option>
+            <option value="Pagos">💰 Pagos</option>
+            <option value="Renovaciones">🔄 Renovaciones</option>
+            <option value="Cancelaciones">🚫 Cancelaciones</option>
+            <option value="Comunicaciones">📨 Comunicaciones</option>
+          </select>
 
           {/* Botón exportar */}
           <button 
             className="btn btn-sm btn-outline-primary"
             onClick={exportarHistorial}
+            title="Exportar a CSV"
           >
-            <Download size={16} className="me-1" />
-            Exportar
+            <Download size={14} />
           </button>
         </div>
       </div>
 
-      {/* Timeline */}
-      <div className="timeline">
+      {/* Timeline compacto - ORDEN CRONOLÓGICO INVERSO (más reciente primero) */}
+      <div className="timeline" style={{ position: 'relative' }}>
         {historialFiltrado.map((evento, index) => {
           const estilo = obtenerEstiloEvento(evento.tipo_evento);
           const titulo = obtenerTituloEvento(evento.tipo_evento);
@@ -248,138 +352,118 @@ const TimelineExpediente = ({ expedienteId }) => {
           return (
             <div 
               key={evento.id} 
-              className="timeline-item"
-              style={{ marginBottom: '1.5rem' }}
+              className="timeline-item position-relative"
+              style={{ 
+                paddingLeft: '48px',
+                paddingBottom: index < historialFiltrado.length - 1 ? '1rem' : '0',
+                borderLeft: index < historialFiltrado.length - 1 ? '2px solid #e9ecef' : 'none',
+                marginLeft: '18px'
+              }}
             >
-              {/* Línea conectora */}
-              {index < historialFiltrado.length - 1 && (
-                <div 
-                  className="timeline-line"
-                  style={{
-                    position: 'absolute',
-                    left: '20px',
-                    top: '40px',
-                    width: '2px',
-                    height: 'calc(100% + 1rem)',
-                    backgroundColor: '#dee2e6'
-                  }}
-                />
-              )}
+              {/* Icono del evento - posicionado sobre la línea */}
+              <div 
+                className="position-absolute"
+                style={{
+                  left: '-20px',
+                  top: '0',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '50%',
+                  backgroundColor: estilo.bgColor,
+                  border: `3px solid ${estilo.color}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                  zIndex: 1
+                }}
+                title={titulo}
+              >
+                {estilo.icon}
+              </div>
 
-              <div className="d-flex align-items-start">
-                {/* Icono del evento */}
-                <div 
-                  className="timeline-icon flex-shrink-0"
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    backgroundColor: estilo.bgColor,
-                    border: `2px solid ${estilo.color}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '20px',
-                    zIndex: 1,
-                    position: 'relative'
-                  }}
-                  title={titulo}
-                >
-                  {estilo.icon}
-                </div>
-
-                {/* Contenido del evento */}
-                <div className="timeline-content flex-grow-1 ms-3">
-                  <div 
-                    className="card border-0 shadow-sm"
-                    style={{ borderLeft: `4px solid ${estilo.color}` }}
-                  >
-                    <div className="card-body">
-                      {/* Header del evento */}
-                      <div className="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                          <h6 className="mb-1" style={{ color: estilo.color }}>
-                            {titulo}
-                          </h6>
-                          <p className="text-muted small mb-0">
-                            <Clock size={14} className="me-1" />
-                            {formatearFecha(evento.fecha_evento)}
-                            {evento.usuario_nombre && (
-                              <span className="ms-2">
-                                • Por: <strong>{evento.usuario_nombre}</strong>
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                        
-                        {/* Botón expandir/colapsar */}
-                        {(evento.datos_adicionales || evento.documento_url) && (
-                          <button
-                            className="btn btn-sm btn-link text-secondary p-0"
-                            onClick={() => setEventoExpandido(expandido ? null : evento.id)}
-                          >
-                            {expandido ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                          </button>
+              {/* Contenido compacto del evento */}
+              <div className="card border-0 shadow-sm mb-2" style={{ borderLeft: `3px solid ${estilo.color}` }}>
+                <div className="card-body py-2 px-3">
+                  <div className="d-flex justify-content-between align-items-start">
+                    <div className="flex-grow-1">
+                      <div className="d-flex align-items-center gap-2 mb-1">
+                        <strong style={{ color: estilo.color, fontSize: '0.9rem' }}>
+                          {titulo}
+                        </strong>
+                        <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                          {formatearFecha(evento.fecha_evento)}
+                        </span>
+                      </div>
+                      
+                      {evento.descripcion && (
+                        <p className="text-muted mb-1" style={{ fontSize: '0.85rem' }}>
+                          {evento.descripcion}
+                        </p>
+                      )}
+                      
+                      {/* Información adicional compacta */}
+                      <div style={{ fontSize: '0.75rem' }}>
+                        {evento.etapa_anterior && evento.etapa_nueva && (
+                          <span className="text-muted me-2">
+                            📊 {evento.etapa_anterior} → {evento.etapa_nueva}
+                          </span>
+                        )}
+                        {evento.destinatario_nombre && (
+                          <span className="text-muted me-2">
+                            👤 {evento.destinatario_nombre}
+                          </span>
+                        )}
+                        {evento.metodo_contacto && (
+                          <span className="badge bg-secondary bg-opacity-10 text-secondary me-2" style={{ fontSize: '0.7rem' }}>
+                            {evento.metodo_contacto}
+                          </span>
+                        )}
+                        {evento.usuario_nombre && (
+                          <span className="text-muted">
+                            ✍️ {evento.usuario_nombre}
+                          </span>
                         )}
                       </div>
-
-                      {/* Descripción */}
-                      {evento.descripcion && (
-                        <p className="mb-2">{evento.descripcion}</p>
-                      )}
-
-                      {/* Cambio de etapa */}
-                      {evento.etapa_anterior && evento.etapa_nueva && (
-                        <div className="d-flex align-items-center gap-2 mb-2">
-                          <span className="badge bg-secondary">{evento.etapa_anterior}</span>
-                          <span>→</span>
-                          <span className="badge bg-primary">{evento.etapa_nueva}</span>
-                        </div>
-                      )}
-
-                      {/* Información de contacto */}
-                      {evento.destinatario_nombre && (
-                        <div className="small text-muted">
-                          <strong>Destinatario:</strong> {evento.destinatario_nombre}
-                          {evento.destinatario_contacto && (
-                            <span> ({evento.destinatario_contacto})</span>
-                          )}
-                          {evento.metodo_contacto && (
-                            <span className="ms-2">
-                              <span className="badge bg-light text-dark">
-                                {evento.metodo_contacto}
-                              </span>
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Documento asociado */}
-                      {evento.documento_url && (
-                        <div className="mt-2">
-                          <a 
-                            href={evento.documento_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="btn btn-sm btn-outline-primary"
-                          >
-                            <ExternalLink size={14} className="me-1" />
-                            Ver documento
-                          </a>
-                        </div>
-                      )}
-
-                      {/* Detalles expandibles */}
-                      {expandido && evento.datos_adicionales && (
-                        <div className="mt-3 pt-3 border-top">
-                          <h6 className="small text-muted mb-2">Detalles adicionales:</h6>
-                          <pre className="bg-light p-2 rounded small mb-0" style={{ fontSize: '0.8rem' }}>
-                            {JSON.stringify(evento.datos_adicionales, null, 2)}
-                          </pre>
-                        </div>
-                      )}
                     </div>
+                    
+                    {/* Botón expandir solo si hay datos adicionales */}
+                    {(evento.datos_adicionales || evento.documento_url) && (
+                      <button
+                        className="btn btn-sm btn-link text-secondary p-0 ms-2"
+                        onClick={() => setEventoExpandido(expandido ? null : evento.id)}
+                        style={{ lineHeight: 1 }}
+                      >
+                        {expandido ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                    )}
                   </div>
+
+                  {/* Detalles expandibles */}
+                  {expandido && evento.datos_adicionales && (
+                    <div className="mt-2 pt-2 border-top">
+                      <small className="text-muted d-block mb-1"><strong>Datos adicionales:</strong></small>
+                      <pre className="bg-light p-2 rounded mb-0" style={{ fontSize: '0.7rem', maxHeight: '150px', overflow: 'auto' }}>
+                        {JSON.stringify(evento.datos_adicionales, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+
+                  {/* Documento asociado */}
+                  {expandido && evento.documento_url && (
+                    <div className="mt-2">
+                      <a 
+                        href={evento.documento_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-sm btn-outline-primary"
+                        style={{ fontSize: '0.75rem' }}
+                      >
+                        <ExternalLink size={12} className="me-1" />
+                        Ver documento
+                      </a>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -391,33 +475,25 @@ const TimelineExpediente = ({ expedienteId }) => {
       <div className="card bg-light border-0 mt-4">
         <div className="card-body">
           <div className="row text-center">
-            <div className="col-md-3">
+            <div className="col-md-4">
               <h3 className="mb-0">{historial.length}</h3>
               <p className="text-muted small mb-0">Eventos totales</p>
             </div>
-            <div className="col-md-3">
+            <div className="col-md-4">
               <h3 className="mb-0">
                 {historial.filter(e => 
-                  categoriasEventos['Cotización'].includes(e.tipo_evento)
-                ).length}
-              </h3>
-              <p className="text-muted small mb-0">Cotizaciones</p>
-            </div>
-            <div className="col-md-3">
-              <h3 className="mb-0">
-                {historial.filter(e => 
-                  [TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL, TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP].includes(e.tipo_evento)
+                  e.tipo_evento?.includes('enviada') || e.tipo_evento?.includes('envio')
                 ).length}
               </h3>
               <p className="text-muted small mb-0">Envíos</p>
             </div>
-            <div className="col-md-3">
+            <div className="col-md-4">
               <h3 className="mb-0">
                 {historial.filter(e => 
-                  categoriasEventos['Comunicaciones'].includes(e.tipo_evento)
+                  e.tipo_evento?.includes('pago') || e.tipo_evento?.includes('recordatorio')
                 ).length}
               </h3>
-              <p className="text-muted small mb-0">Comunicaciones</p>
+              <p className="text-muted small mb-0">Pagos</p>
             </div>
           </div>
         </div>
