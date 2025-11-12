@@ -73,6 +73,11 @@ const DetalleExpediente = ({
     return { proximo, dias, estatus, clase };
   }, [datos?.estatusPago, datos?.fecha_vencimiento_pago, datos?.proximoPago, datos?.fecha_pago, highlightPago]);
 
+  // Normalizar alias para Uso / Servicio / Movimiento provenientes del backend o del extractor
+  const usoMostrar = datos?.uso || datos?.uso_poliza || datos?.Uso || datos?.usoVehiculo || datos?.uso_vehiculo || '';
+  const servicioMostrar = datos?.servicio || datos?.servicio_poliza || datos?.Servicio || datos?.servicioVehiculo || datos?.servicio_vehiculo || '';
+  const movimientoMostrar = datos?.movimiento || datos?.movimiento_poliza || datos?.Movimiento || datos?.movimientoVehiculo || datos?.movimiento_vehiculo || '';
+
   // Determinar tipo de pago mostrado (prioriza forma_pago del PDF sobre tipo_pago calculado)
   const tipoPagoMostrar = useMemo(() => {
     const forma = (datos?.forma_pago || '').trim().toUpperCase();
@@ -138,9 +143,9 @@ const DetalleExpediente = ({
             {renderCampo('Producto', datos?.producto)}
             {renderCampo('Tipo de Pago', tipoPagoMostrar || datos?.tipo_pago)}
             {renderCampo('Agente', datos?.agente)}
-            {datos?.uso && renderCampo('Uso', datos.uso)}
-            {datos?.servicio && renderCampo('Servicio', datos.servicio)}
-            {datos?.movimiento && renderCampo('Movimiento', datos.movimiento)}
+            {usoMostrar && renderCampo('Uso', usoMostrar)}
+            {servicioMostrar && renderCampo('Servicio', servicioMostrar)}
+            {movimientoMostrar && renderCampo('Movimiento', movimientoMostrar)}
           </div>
         </div>
 
@@ -282,24 +287,24 @@ const DetalleExpediente = ({
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.agente || '-'}</strong></div>
                   </div>
                 </div>
-                {(datos.uso || datos.servicio || datos.movimiento) && (
+                {(usoMostrar || servicioMostrar || movimientoMostrar) && (
                   <div className="row g-1 mt-1">
-                    {datos.uso && (
+                    {usoMostrar && (
                       <div className="col-md-4">
                         <small className="text-muted" style={{ fontSize: '0.7rem' }}>Uso:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.uso}</strong></div>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{usoMostrar}</strong></div>
                       </div>
                     )}
-                    {datos.servicio && (
+                    {servicioMostrar && (
                       <div className="col-md-4">
                         <small className="text-muted" style={{ fontSize: '0.7rem' }}>Servicio:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.servicio}</strong></div>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{servicioMostrar}</strong></div>
                       </div>
                     )}
-                    {datos.movimiento && (
+                    {movimientoMostrar && (
                       <div className="col-md-4">
                         <small className="text-muted" style={{ fontSize: '0.7rem' }}>Movimiento:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.movimiento}</strong></div>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{movimientoMostrar}</strong></div>
                       </div>
                     )}
                   </div>
@@ -470,7 +475,7 @@ const DetalleExpediente = ({
         </div>
       </div>
 
-      {/* HISTORIAL DE COMUNICACIONES CON EL CLIENTE - Acordeón independiente */}
+      {/* HISTORIAL COMPLETO DEL EXPEDIENTE - Acordeón independiente */}
       <div className="accordion mb-3" id="accordionHistorialComunicacion">
         <div className="accordion-item">
           <h2 className="accordion-header" id="headingHistorialComunicacion">
@@ -481,7 +486,7 @@ const DetalleExpediente = ({
               aria-controls="collapseHistorialComunicacion"
               onClick={() => setOpenHistorial(v => !v)}
             >
-              Historial de Comunicaciones con el Cliente
+              📋 Historial y Trazabilidad del Expediente
             </button>
           </h2>
           <div 
@@ -489,22 +494,22 @@ const DetalleExpediente = ({
             className={`accordion-collapse collapse ${openHistorial ? 'show' : ''}`}
             aria-labelledby="headingHistorialComunicacion"
           >
-            <div className="accordion-body">
-              <div className="seccion-bloque seccion-historial">
-                {historialSlot ? (
-                  historialSlot
-                ) : mensajes && mensajes.length > 0 ? (
-                  <ul className="list-group">
-                    {mensajes.map((msg, idx) => (
-                      <li key={idx} className="list-group-item">
-                        <strong>{msg.fecha}:</strong> {msg.texto}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <div className="text-muted">No hay mensajes registrados.</div>
-                )}
-              </div>
+            <div className="accordion-body p-2">
+              {historialSlot ? (
+                historialSlot
+              ) : mensajes && mensajes.length > 0 ? (
+                <ul className="list-group">
+                  {mensajes.map((msg, idx) => (
+                    <li key={idx} className="list-group-item">
+                      <strong>{msg.fecha}:</strong> {msg.texto}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="text-muted text-center py-3">
+                  <small>No hay eventos registrados.</small>
+                </div>
+              )}
             </div>
           </div>
         </div>

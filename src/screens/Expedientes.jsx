@@ -1,9 +1,61 @@
+/**
+ * ====================================================================
+ * COMPONENTE: Gestión de Expedientes (Pólizas)
+ * TRAZABILIDAD COMPLETA DEL CICLO DE VIDA
+ * ====================================================================
+ * 
+ * FLUJO DE EVENTOS REGISTRADOS EN HISTORIAL:
+ * 
+ * 1️⃣ COTIZACIÓN CREADA (COTIZACION_CREADA)
+ *    - Al crear nuevo expediente vía POST /api/expedientes
+ *    - Línea ~6309: registrarEvento con tipo COTIZACION_CREADA
+ * 
+ * 2️⃣ CAMBIOS DE ETAPA (vía registrarCambioEtapa automático)
+ *    - 'En cotización' → COTIZACION_CREADA
+ *    - 'Cotización enviada' → COTIZACION_ENVIADA
+ *    - 'Autorizado' → COTIZACION_AUTORIZADA
+ *    - 'En proceso emisión' → EMISION_INICIADA
+ *    - 'Emitida' → POLIZA_EMITIDA
+ *    - 'Enviada al Cliente' → POLIZA_ENVIADA_EMAIL (si manual)
+ *    - 'Renovada' → POLIZA_RENOVADA
+ *    - 'Cancelada' → POLIZA_CANCELADA
+ *    - Línea ~5151: función cambiarEstadoExpediente llama registrarCambioEtapa
+ *    - Línea ~6260: al editar expediente detecta cambio de etapa
+ * 
+ * 3️⃣ ENVÍO AL CLIENTE (POLIZA_ENVIADA_EMAIL / POLIZA_ENVIADA_WHATSAPP)
+ *    - Al compartir póliza por Email: línea ~5466
+ *    - Al compartir póliza por WhatsApp: línea ~5365
+ *    - Ambos llaman registrarEnvioDocumento con destinatario y mensaje
+ * 
+ * 4️⃣ PAGOS REGISTRADOS (PAGO_REGISTRADO)
+ *    - Al aplicar pago con comprobante: línea ~5730
+ *    - Incluye monto, siguiente vencimiento, nombre archivo, nuevo estatus
+ * 
+ * 5️⃣ ACTUALIZACIONES DE DATOS (DATOS_ACTUALIZADOS)
+ *    - Al editar expediente SIN cambio de etapa: línea ~6260
+ *    - Incluye número de póliza y marcador de campos modificados
+ * 
+ * SERVICIOS UTILIZADOS:
+ * - historialExpedienteService.js: 26 tipos de eventos, helpers para etapas y envíos
+ * - TimelineExpediente.jsx: Visualización del historial con filtros y exportación
+ * - DetalleExpediente.jsx: Integra TimelineExpediente en acordeón de historial
+ * 
+ * BASE DE DATOS:
+ * - Tabla: historial_expedientes (expediente_id, tipo_evento, etapa_anterior, 
+ *   etapa_nueva, usuario_id, descripcion, datos_adicionales JSON, metodo_contacto,
+ *   destinatario, documento_url, fecha_evento)
+ * 
+ * PENDIENTES:
+ * - TODO: Reemplazar usuario_nombre 'Sistema' por usuario autenticado actual
+ * - TODO: Capturar diferencias exactas de campos en DATOS_ACTUALIZADOS
+ * ====================================================================
+ */
+
 const API_URL = import.meta.env.VITE_API_URL;
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
-import HistorialNotificaciones from '../components/HistorialNotificaciones';
 import BuscadorCliente from '../components/BuscadorCliente';
 import ModalCapturarContacto from '../components/ModalCapturarContacto';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
@@ -52,6 +104,7 @@ const utils = {
     
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
+      cortaY: { day: '2-digit', month: 'short', year: 'numeric' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
       larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     };
@@ -242,7 +295,7 @@ const EstadoPago = React.memo(({ expediente }) => (
       <div>
         <small className={`${
           expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
-          expediente.estatusPago === 'Pago por vencer' ? 'text-warning' :
+          expediente.estatusPago === 'Por Vencer' ? 'text-warning' :
           'text-muted'
         }`}>
           Pago: {utils.formatearFecha(expediente.proximoPago)}
@@ -258,7 +311,8 @@ const CalendarioPagos = React.memo(({
   mostrarResumen = true,
   compacto = false 
 }) => {
-  if (!expediente.tipo_pago === 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicio_vigencia) {
+  // Mostrar solo para tipo de pago Fraccionado y con datos básicos
+  if (expediente.tipo_pago !== 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicio_vigencia) {
     return null;
   }
 
@@ -1732,15 +1786,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     if (opcion === 'fisica') {
       rfcFinal = 'XAXX010101000'; // 13 caracteres
       tipoPersonaFinal = 'Fisica';
-      console.log('✅ RFC Genérico Persona Física:', rfcFinal);
     } else if (opcion === 'moral') {
       rfcFinal = 'XAXX010101'; // 12 caracteres
       tipoPersonaFinal = 'Moral';
-      console.log('✅ RFC Genérico Persona Moral:', rfcFinal);
     } else if (opcion === 'capturar' && rfcManual) {
       rfcFinal = rfcManual.toUpperCase().trim();
       tipoPersonaFinal = rfcFinal.length === 13 ? 'Fisica' : 'Moral';
-      console.log('✅ RFC Manual capturado:', rfcFinal, '- Tipo:', tipoPersonaFinal);
     }
     
     if (!rfcFinal) {
@@ -2879,15 +2930,15 @@ const ListaExpedientes = React.memo(({
                         </td>
                         <td style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
                           <div>
-                            {expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                            {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
                           </div>
                           <div>
-                            {expediente.termino_vigencia ? new Date(expediente.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                            {expediente.termino_vigencia ? utils.formatearFecha(expediente.termino_vigencia, 'cortaY') : '-'}
                           </div>
                           <div className="fw-semibold" style={{ marginTop: '2px', color: '#f59e0b' }}>
-                            {expediente.fecha_vencimiento_pago ? new Date(expediente.fecha_vencimiento_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : 
-                             expediente.proximoPago ? new Date(expediente.proximoPago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') :
-                             expediente.fecha_pago ? new Date(expediente.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).replace('.', '') : '-'}
+                            {expediente.fecha_vencimiento_pago ? utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY') : 
+                             expediente.proximoPago ? utils.formatearFecha(expediente.proximoPago, 'cortaY') :
+                             expediente.fecha_pago ? utils.formatearFecha(expediente.fecha_pago, 'cortaY') : '-'}
                           </div>
                         </td>
                         <td>
@@ -3486,7 +3537,7 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control bg-light"
-                        value={formulario.nombre}
+                        value={formulario.nombre ?? ''}
                         readOnly
                       />
                     </div>
@@ -3495,7 +3546,7 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control bg-light"
-                        value={formulario.apellido_paterno}
+                        value={formulario.apellido_paterno ?? ''}
                         readOnly
                       />
                     </div>
@@ -3504,7 +3555,7 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control bg-light"
-                        value={formulario.apellido_materno}
+                        value={formulario.apellido_materno ?? ''}
                         readOnly
                       />
                     </div>
@@ -3513,7 +3564,7 @@ const Formulario = React.memo(({
                       <input
                         type="text"
                         className="form-control bg-light"
-                        value={formulario.rfc}
+                        value={formulario.rfc ?? ''}
                         readOnly
                       />
                     </div>
@@ -3802,8 +3853,8 @@ const Formulario = React.memo(({
             </div>
           )}
 
-          {/* Datos de la Póliza - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
+          {/* Datos de la Póliza - Visible para Autos o si ya existen valores (edición) */}
+          {(formulario.producto === 'Autos Individual' || formulario.uso || formulario.servicio || formulario.movimiento) && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
               <div className="row g-3">
@@ -3812,7 +3863,7 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.numero_poliza}
+                    value={formulario.numero_poliza ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, numero_poliza: e.target.value }))}
                     placeholder="Número asignado por la aseguradora"
                   />
@@ -3836,7 +3887,7 @@ const Formulario = React.memo(({
                     <input
                       type="number"
                       className="form-control"
-                      value={formulario.deducible}
+                      value={formulario.deducible ?? ''}
                       onChange={(e) => setFormulario(prev => ({ ...prev, deducible: e.target.value }))}
                       placeholder="Porcentaje o monto"
                       step="0.01"
@@ -3851,7 +3902,7 @@ const Formulario = React.memo(({
                     <input
                       type="number"
                       className="form-control"
-                      value={formulario.suma_asegurada}
+                      value={formulario.suma_asegurada ?? ''}
                       onChange={(e) => setFormulario(prev => ({ ...prev, suma_asegurada: e.target.value }))}
                       placeholder="Valor del vehículo"
                       step="0.01"
@@ -3864,7 +3915,12 @@ const Formulario = React.memo(({
                     type="text"
                     className="form-control"
                     value={formulario.uso || ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, uso: e.target.value }))}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      uso: e.target.value, 
+                      // Mantener alias para backend si lo utiliza
+                      uso_poliza: e.target.value 
+                    }))}
                     placeholder="Ej: PARTICULAR"
                   />
                   <small className="form-text text-muted">Uso del vehículo según póliza</small>
@@ -3875,7 +3931,11 @@ const Formulario = React.memo(({
                     type="text"
                     className="form-control"
                     value={formulario.servicio || ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, servicio: e.target.value }))}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      servicio: e.target.value,
+                      servicio_poliza: e.target.value
+                    }))}
                     placeholder="Ej: PRIVADO"
                   />
                   <small className="form-text text-muted">Servicio del vehículo</small>
@@ -3886,7 +3946,11 @@ const Formulario = React.memo(({
                     type="text"
                     className="form-control"
                     value={formulario.movimiento || ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, movimiento: e.target.value }))}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      movimiento: e.target.value,
+                      movimiento_poliza: e.target.value
+                    }))}
                     placeholder="Ej: NACIONAL"
                   />
                   <small className="form-text text-muted">Movimiento permitido</small>
@@ -3905,7 +3969,7 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.conductor_habitual}
+                    value={formulario.conductor_habitual ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, conductor_habitual: e.target.value }))}
                     placeholder="Nombre completo"
                   />
@@ -3915,7 +3979,7 @@ const Formulario = React.memo(({
                   <input
                     type="number"
                     className="form-control"
-                    value={formulario.edad_conductor}
+                    value={formulario.edad_conductor ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, edad_conductor: e.target.value }))}
                     placeholder="Años"
                     min="18"
@@ -3927,7 +3991,7 @@ const Formulario = React.memo(({
                   <input
                     type="text"
                     className="form-control"
-                    value={formulario.licencia_conducir}
+                    value={formulario.licencia_conducir ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, licencia_conducir: e.target.value.toUpperCase() }))}
                     placeholder="Número de licencia"
                   />
@@ -3944,7 +4008,7 @@ const Formulario = React.memo(({
                 <label className="form-label">Agente</label>
                 <select
                   className="form-select"
-                  value={formulario.agente}
+                  value={formulario.agente ?? ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, agente: e.target.value }))}
                 >
                   <option value="">Seleccionar agente</option>
@@ -3960,7 +4024,7 @@ const Formulario = React.memo(({
                 <input
                   type="text"
                   className="form-control"
-                  value={formulario.sub_agente}
+                  value={formulario.sub_agente ?? ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, sub_agente: e.target.value }))}
                   placeholder="Código o nombre del sub agente"
                 />
@@ -3973,7 +4037,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.prima_pagada}
+                    value={formulario.prima_pagada ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, prima_pagada: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -3987,7 +4051,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.cargo_pago_fraccionado || ''}
+                    value={formulario.cargo_pago_fraccionado ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, cargo_pago_fraccionado: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -4002,7 +4066,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.gastos_expedicion || ''}
+                    value={formulario.gastos_expedicion ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, gastos_expedicion: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -4016,7 +4080,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.iva}
+                    value={formulario.iva ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, iva: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -4030,7 +4094,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.subtotal || ''}
+                    value={formulario.subtotal ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, subtotal: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -4044,7 +4108,7 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.total || ''}
+                    value={formulario.total ?? ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, total: e.target.value }))}
                     placeholder="0.00"
                   />
@@ -4074,7 +4138,7 @@ const Formulario = React.memo(({
                 <input
                   type="date"
                   className="form-control"
-                  value={formulario.inicio_vigencia}
+                  value={formulario.inicio_vigencia ?? ''}
                   onChange={(e) => {
                     const nuevoFormulario = { ...formulario, inicio_vigencia: e.target.value };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
@@ -4088,8 +4152,8 @@ const Formulario = React.memo(({
                   value={formulario.termino_vigencia}
                   onChange={(valor) => setFormulario(prev => ({ ...prev, termino_vigencia: valor }))}
                   onCalculate={() => {
-                    const terminoCalculado = calculartermino_vigencia(formulario.inicio_vigencia);
-                    setFormulario(prev => ({ ...prev, termino_vigencia: terminoCalculado }));
+                    const formularioActualizado = actualizarCalculosAutomaticos(formulario);
+                    setFormulario(formularioActualizado);
                   }}
                   disabled={!formulario.inicio_vigencia}
                   helpText="La vigencia siempre es de 1 año"
@@ -4106,7 +4170,7 @@ const Formulario = React.memo(({
                 <label className="form-label">Tipo de Pago</label>
                 <select
                   className="form-select"
-                  value={formulario.tipo_pago}
+                  value={formulario.tipo_pago ?? ''}
                   onChange={(e) => {
                     const nuevoFormulario = {
                       ...formulario, 
@@ -4148,9 +4212,16 @@ const Formulario = React.memo(({
                 <div className="input-group">
                   <input
                     type="number"
-                    className="form-control bg-light"
-                    value={formulario.periodo_gracia || ''}
-                    readOnly
+                    className="form-control"
+                    value={formulario.periodo_gracia ?? ''}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      const numero = valor === '' ? '' : Math.max(0, parseInt(valor, 10) || 0);
+                      const nuevoFormulario = { ...formulario, periodo_gracia: numero };
+                      const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
+                      setFormulario(formularioActualizado);
+                    }}
+                    min={0}
                   />
                   <span className="input-group-text">
                     días naturales
@@ -4158,9 +4229,9 @@ const Formulario = React.memo(({
                 </div>
                 <small className="text-muted">
                   {formulario.compania?.toLowerCase().includes('qualitas') 
-                    ? '📌 Qualitas: 14 días' 
+                    ? 'Sugerido Qualitas: 14 días' 
                     : formulario.compania 
-                      ? '📌 Otras aseguradoras: 30 días'
+                      ? 'Sugerido otras aseguradoras: 30 días'
                       : 'Seleccione una compañía'}
                 </small>
               </div>
@@ -4190,7 +4261,7 @@ const Formulario = React.memo(({
                 <label className="form-label">Estatus del Pago</label>
                 <select
                   className="form-select"
-                  value={formulario.estatusPago}
+                  value={formulario.estatusPago ?? ''}
                   onChange={(e) => {
                     setFormulario(prev => ({ ...prev, estatusPago: e.target.value }));
                   }}
@@ -4533,25 +4604,11 @@ const DetallesExpediente = React.memo(({
                 modo="caratula"
                 historialSlot={(
                   <>
-                    {/* NUEVA SECCIÓN: Timeline de Trazabilidad */}
-                    <div className="mb-4">
-                      <h6 className="mb-3">
-                        <Clock size={18} className="me-2" />
-                        Trazabilidad del Expediente
-                      </h6>
-                      <TimelineExpediente expedienteId={expedienteSeleccionado.id} />
-                    </div>
-
-                    {/* Historial de Comunicaciones (mantener existente) */}
-                    <div>
-                      <h6 className="mb-3">
-                        <Bell size={18} className="me-2" />
-                        Historial de Comunicaciones
-                      </h6>
-                      <HistorialNotificaciones 
+                    {/* SECCIÓN ÚNICA: Timeline Unificado (Trazabilidad + Comunicaciones) */}
+                    <div className="mb-3">
+                      <TimelineExpediente 
                         expedienteId={expedienteSeleccionado.id}
-                        clienteId={expedienteSeleccionado.cliente_id}
-                        modo="expediente"
+                        expedienteData={expedienteSeleccionado}
                       />
                     </div>
                   </>
@@ -4586,7 +4643,6 @@ const ModuloExpedientes = () => {
   useEffect(() => {
     const fetchAgentes = async () => {
       const resultado = await obtenerAgentesEquipo();
-      console.log('Agentes cargados:', resultado.data);
       if (resultado.success) {
         // Ordenar agentes alfabéticamente por nombre
         const agentesOrdenados = resultado.data.sort((a, b) => {
@@ -4604,24 +4660,19 @@ const ModuloExpedientes = () => {
   useEffect(() => {
     const cargarDatos = async () => {
       try {
-        console.log('🔄 Iniciando carga de datos...');
-        
         // 1. Obtener expedientes
         const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
         const expedientesData = await resExpedientes.json();
-        console.log('📋 Expedientes cargados:', expedientesData.length);
         
         // 2. Obtener todos los clientes
         const resClientes = await fetch(`${API_URL}/api/clientes`);
         const clientesData = await resClientes.json();
-        console.log('👥 Clientes cargados:', clientesData.length);
         
         // 3. Crear un mapa de clientes por ID para búsqueda rápida
         const mapa = {};
         clientesData.forEach(cliente => {
           mapa[cliente.id] = cliente;
         });
-        console.log('🗺️ Mapa de clientes creado con', Object.keys(mapa).length, 'clientes');
         
         setClientes(clientesData);
         setClientesMap(mapa);
@@ -4664,44 +4715,6 @@ const ModuloExpedientes = () => {
             estatusPago: estatusPagoCalculado
           };
         });
-        
-        console.log('✅ Expedientes procesados:', expedientesProcesados.length);
-        
-        // Debug: Resumen de estatutos de pago
-        const resumenEstatus = expedientesProcesados.reduce((acc, exp) => {
-          const estatus = exp.estatusPago || 'Sin definir';
-          acc[estatus] = (acc[estatus] || 0) + 1;
-          return acc;
-        }, {});
-        console.log('📊 Resumen de estatus de pago:', resumenEstatus);
-        
-        // Debug: Pólizas que deberían mostrar botón de pago
-        console.log('🔍 DEBUG: Revisando todas las pólizas para botón de pago...');
-        const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-        expedientesProcesados.forEach(exp => {
-          const etapaValida = etapasValidasParaPago.includes(exp.etapa_activa);
-          const estatusNorm = (exp.estatusPago || '').toLowerCase().trim();
-          const noPagado = estatusNorm !== 'pagado' && estatusNorm !== 'pagada';
-          
-          console.log(`  📋 ${exp.numero_poliza}:`, {
-            etapa_activa: exp.etapa_activa,
-            etapaValida,
-            estatusPago: exp.estatusPago,
-            estatusNorm,
-            noPagado,
-            mostrarBoton: etapaValida && noPagado
-          });
-        });
-        
-        const polizasConBotonPago = expedientesProcesados.filter(exp => {
-          const etapaValida = etapasValidasParaPago.includes(exp.etapa_activa);
-          const estatusNorm = (exp.estatusPago || '').toLowerCase().trim();
-          const noPagado = estatusNorm !== 'pagado' && estatusNorm !== 'pagada';
-          return etapaValida && noPagado;
-        });
-        console.log(`💵 ${polizasConBotonPago.length} pólizas deberían mostrar botón "Aplicar Pago":`, 
-          polizasConBotonPago.map(p => ({ numero: p.numero_poliza, estatus: p.estatusPago, etapa: p.etapa_activa }))
-        );
         
         setExpedientes(expedientesProcesados);
         
@@ -4784,7 +4797,6 @@ const ModuloExpedientes = () => {
       .then(data => {
         // Filtrar solo aseguradoras activas
         const aseguradorasActivas = Array.isArray(data) ? data.filter(a => a.activo === 1 || a.activo === true) : [];
-        console.log('Aseguradoras activas cargadas:', aseguradorasActivas);
         setAseguradoras(aseguradorasActivas);
       })
       .catch(err => console.error('Error al cargar aseguradoras:', err));
@@ -4832,9 +4844,8 @@ const ModuloExpedientes = () => {
       const clientesData = await resClientes.json();
       const mapa = {};
       clientesData.forEach(c => { mapa[c.id] = c; });
-      setClientes(clientesData);
-      setClientesMap(mapa);
-      console.log('🔁 Clientes recargados por evento externo. Total:', clientesData.length);
+  setClientes(clientesData);
+  setClientesMap(mapa);
     } catch (error) {
       console.error('❌ Error recargando clientes tras evento:', error);
     }
@@ -4868,6 +4879,7 @@ const ModuloExpedientes = () => {
     'Renovada',
     'Cancelada'
   ], []);
+
 
   const tiposPago = useMemo(() => ['Anual', 'Fraccionado'], []);
   const frecuenciasPago = useMemo(() => Object.keys(CONSTANTS.PAGOS_POR_FRECUENCIA).sort(), []);
@@ -4975,6 +4987,95 @@ const estadoInicialFormulario = {
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
+  const debugLogOnceRef = useRef(false);
+
+  // Debug solicitado: imprimir TODOS los campos visibles del editor con su valor actual
+  useEffect(() => {
+    if (vistaActual === 'formulario' && modoEdicion && !debugLogOnceRef.current) {
+      const f = formulario || {};
+      const resumen = {
+        // Identificación cliente
+        cliente_id: f.cliente_id ?? '',
+        tipoPersona: clienteSeleccionado?.tipoPersona ?? '',
+        // Datos del cliente
+        nombre: f.nombre ?? '',
+        apellido_paterno: f.apellido_paterno ?? '',
+        apellido_materno: f.apellido_materno ?? '',
+        razon_social: f.razon_social ?? '',
+        nombre_comercial: f.nombre_comercial ?? '',
+        email: f.email ?? '',
+        telefono_fijo: f.telefono_fijo ?? '',
+        telefono_movil: f.telefono_movil ?? '',
+        rfc: f.rfc ?? '',
+        // Contacto / Gestor
+        contacto_nombre: f.contacto_nombre ?? '',
+        contacto_apellido_paterno: f.contacto_apellido_paterno ?? '',
+        contacto_apellido_materno: f.contacto_apellido_materno ?? '',
+        contacto_email: f.contacto_email ?? '',
+        contacto_telefono_fijo: f.contacto_telefono_fijo ?? '',
+        contacto_telefono_movil: f.contacto_telefono_movil ?? '',
+        // Seguro
+        compania: f.compania ?? '',
+        producto: f.producto ?? '',
+        etapa_activa: f.etapa_activa ?? '',
+        // Vehículo
+        marca: f.marca ?? '',
+        modelo: f.modelo ?? '',
+        anio: f.anio ?? '',
+        numero_serie: f.numero_serie ?? '',
+        placas: f.placas ?? '',
+        color: f.color ?? '',
+        tipo_vehiculo: f.tipo_vehiculo ?? '',
+        // Póliza
+        numero_poliza: f.numero_poliza ?? '',
+        tipo_cobertura: f.tipo_cobertura ?? '',
+        deducible: f.deducible ?? '',
+        suma_asegurada: f.suma_asegurada ?? '',
+        uso: f.uso ?? f.uso_poliza ?? '',
+        servicio: f.servicio ?? f.servicio_poliza ?? '',
+        movimiento: f.movimiento ?? f.movimiento_poliza ?? '',
+        // Fechas
+        fecha_emision: f.fecha_emision ?? '',
+        inicio_vigencia: f.inicio_vigencia ?? '',
+        termino_vigencia: f.termino_vigencia ?? '',
+        // Pago
+        tipo_pago: f.tipo_pago ?? '',
+        frecuenciaPago: f.frecuenciaPago ?? '',
+        periodo_gracia: f.periodo_gracia ?? '',
+        fecha_vencimiento_pago: f.fecha_vencimiento_pago ?? f.fecha_pago ?? '',
+        estatusPago: f.estatusPago ?? '',
+        // Montos
+        prima_pagada: f.prima_pagada ?? '',
+        cargo_pago_fraccionado: f.cargo_pago_fraccionado ?? '',
+        gastos_expedicion: f.gastos_expedicion ?? '',
+        subtotal: f.subtotal ?? '',
+        iva: f.iva ?? '',
+        total: f.total ?? '',
+        // Conductor
+        conductor_habitual: f.conductor_habitual ?? '',
+        edad_conductor: f.edad_conductor ?? '',
+        licencia_conducir: f.licencia_conducir ?? '',
+        // Agentes
+        agente: f.agente ?? '',
+        sub_agente: f.sub_agente ?? ''
+      };
+
+      const tabla = Object.entries(resumen).map(([campo, valor]) => ({ campo, valor }));
+      console.groupCollapsed('🧾 Formulario (Editar) — Campos y valores');
+      console.table(tabla);
+      const vacios = Object.keys(resumen).filter(k => resumen[k] === '' || resumen[k] === null || resumen[k] === undefined);
+      if (vacios.length) console.info('Campos vacíos:', vacios);
+      console.groupEnd();
+      debugLogOnceRef.current = true;
+    }
+  }, [vistaActual, modoEdicion, formulario, clienteSeleccionado]);
+
+  // Resetear el flag cuando salgamos de la vista de formulario o del modo edición
+  useEffect(() => {
+    if (!(vistaActual === 'formulario' && modoEdicion)) {
+      debugLogOnceRef.current = false;
+    }
+  }, [vistaActual, modoEdicion]);
 
   const calculartermino_vigencia = useCallback((inicio_vigencia) => {
     if (!inicio_vigencia) return '';
@@ -5051,7 +5152,8 @@ const estadoInicialFormulario = {
   }, []);
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
-    const termino_vigencia = formularioActual.termino_vigencia || calculartermino_vigencia(formularioActual.inicio_vigencia);
+    // Siempre recalcular el término de vigencia a partir del inicio
+    const termino_vigencia = calculartermino_vigencia(formularioActual.inicio_vigencia);
     
     // 🔧 Calcular periodo de gracia: usar valor extraído del PDF si existe (convertir a número), sino aplicar regla de negocio
     const periodoGracia = formularioActual.periodo_gracia 
@@ -5064,18 +5166,25 @@ const estadoInicialFormulario = {
     let proximoPago = '';
     
     if (formularioActual.tipo_pago === 'Fraccionado') {
-      // ✅ Para fraccionado: calcular el próximo pago basado en frecuencia usando el periodo de gracia correcto
+      // ✅ Fraccionado: primer pago = inicio + periodo de gracia
       proximoPago = calcularProximoPago(
         formularioActual.inicio_vigencia,
         formularioActual.tipo_pago,
         formularioActual.frecuenciaPago,
         formularioActual.compania,
         1,
-        periodoGracia  // 🔥 Pasar el periodo de gracia extraído del PDF
+        periodoGracia
       );
     } else if (formularioActual.tipo_pago === 'Anual') {
-      // Para anual: usar fecha_vencimiento_pago si existe, sino usar inicio_vigencia
-      proximoPago = formularioActual.fecha_vencimiento_pago || formularioActual.fecha_pago || formularioActual.inicio_vigencia;
+      // ✅ Anual: aplicar periodo de gracia para el primer pago siempre que cambie inicio
+      proximoPago = calcularProximoPago(
+        formularioActual.inicio_vigencia,
+        'Anual',
+        null,
+        formularioActual.compania,
+        1,
+        periodoGracia
+      );
     }
     
     // Calcular estatusPago basado en la fecha de vencimiento
@@ -5725,12 +5834,28 @@ const estadoInicialFormulario = {
           ? `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`
           : `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Póliza completamente pagada`;
 
-        await historialService.agregarComentario(
-          expedienteParaPago.id,
-          comentario,
-          'pago_aplicado'
-        );
-        console.log('✅ Comentario agregado al historial');
+        // Registrar evento estructurado de pago en historial trazabilidad
+        try {
+          await historialService.registrarEvento({
+            expediente_id: expedienteParaPago.id,
+            cliente_id: expedienteParaPago.cliente_id,
+            tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
+            usuario_nombre: 'Sistema', // TODO: reemplazar por usuario autenticado
+            descripcion: comentario,
+            datos_adicionales: {
+              numero_poliza: expedienteParaPago.numero_poliza,
+              compania: expedienteParaPago.compania,
+              producto: expedienteParaPago.producto,
+              monto_total: expedienteParaPago.total || null,
+              comprobante_nombre: comprobantePago.name,
+              siguiente_vencimiento: proximoPago || null,
+              estatus_pago_nuevo: nuevoEstatusPago
+            }
+          });
+          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad');
+        } catch (errorRegistroPago) {
+          console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
+        }
       } catch (errorHistorial) {
         console.error('⚠️ Error al agregar comentario al historial:', errorHistorial);
         // No bloquear el proceso si falla el historial
@@ -5778,18 +5903,6 @@ const estadoInicialFormulario = {
     }
 
     if (cliente) {
-      console.log('🔍 Cliente seleccionado:', {
-        id: cliente.id,
-        tipoPersona: cliente.tipoPersona,
-        razonSocial: cliente.razonSocial,
-        razon_social: cliente.razon_social,
-        nombreComercial: cliente.nombreComercial,
-        nombre_comercial: cliente.nombre_comercial,
-        nombre: cliente.nombre,
-        apellidoPaterno: cliente.apellidoPaterno,
-        apellidoMaterno: cliente.apellidoMaterno
-      });
-
       setClienteSeleccionado(cliente);
       
       // Auto-llenar datos del cliente en el formulario
@@ -5814,8 +5927,6 @@ const estadoInicialFormulario = {
         contacto_telefono_fijo: cliente.contacto_telefono_fijo || cliente.contactoTelefonoFijo || '',
         contacto_telefono_movil: cliente.contacto_telefono_movil || cliente.contactoTelefonoMovil || ''
       };
-
-      console.log('📝 Datos que se aplicarán al formulario:', datosFormulario);
 
       setFormulario(prev => ({
         ...prev,
@@ -5866,12 +5977,6 @@ const estadoInicialFormulario = {
 
     // Validar póliza duplicada (solo si NO estamos editando)
     if (!modoEdicion && formulario.numero_poliza) {
-      console.log('🔍 Validando duplicados:', {
-        numero_poliza: formulario.numero_poliza,
-        compania: formulario.compania,
-        inicio_vigencia: formulario.inicio_vigencia,
-        total_expedientes: expedientes.length
-      });
       
       const polizaDuplicada = expedientes.find(exp => {
         // Normalizar fechas para comparación (solo YYYY-MM-DD)
@@ -5883,13 +5988,7 @@ const estadoInicialFormulario = {
                         fechaExpediente === fechaFormulario;
         
         if (coincide) {
-          console.log('✅ Duplicado encontrado:', {
-            id: exp.id,
-            numero_poliza: exp.numero_poliza,
-            compania: exp.compania,
-            inicio_vigencia: exp.inicio_vigencia,
-            cliente: `${exp.nombre} ${exp.apellido_paterno}`
-          });
+          // duplicado encontrado
         }
         return coincide;
       });
@@ -5913,11 +6012,9 @@ const estadoInicialFormulario = {
         if (!confirmar) {
           toast('Operación cancelada. La póliza no fue guardada');
           return false;
-        } else {
-          console.log('✅ Usuario confirmó guardar póliza duplicada');
         }
       } else {
-        console.log('✅ No se encontraron duplicados');
+        // no duplicados
       }
     }
 
@@ -6024,7 +6121,6 @@ const estadoInicialFormulario = {
             contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
             contacto_telefono_movil: formulario.contacto_telefono_movil || null
           };
-          console.log('📝 Actualizando CONTACTO PRINCIPAL de Persona Moral:', datosActualizados);
         } else {
           // Persona Física: actualizar campos principales DEL CLIENTE + contacto_* del gestor
           datosActualizados = {
@@ -6040,7 +6136,6 @@ const estadoInicialFormulario = {
             contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
             contacto_telefono_movil: formulario.contacto_telefono_movil || null
           };
-          console.log('📝 Actualizando datos de CLIENTE + GESTOR de Persona Física:', datosActualizados);
         }
         
         const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
@@ -6051,7 +6146,6 @@ const estadoInicialFormulario = {
 
         if (response.ok) {
           const resultado = await response.json();
-          console.log('✅ Datos de contacto del cliente actualizados correctamente:', resultado);
           
           // ⚠️ IMPORTANTE: Actualizar clientesMap inmediatamente para que InfoCliente vea los cambios
           const clienteActualizado = resultado.data || resultado;
@@ -6087,24 +6181,7 @@ const estadoInicialFormulario = {
       }
     }
 
-    // LOG DE DIAGNÓSTICO: Verificar datos de Persona Moral ANTES de guardar
-    console.log('🔍 DIAGNÓSTICO - DATOS DE FORMULARIO ANTES DE GUARDAR:', {
-      formulario_razon_social: formulario.razon_social,
-      formulario_rfc: formulario.rfc,
-      formulario_nombre_comercial: formulario.nombre_comercial,
-      formulario_numero_identificacion: formulario.numero_identificacion,
-      formulario_cliente_id: formulario.cliente_id,
-      formulario_nombre: formulario.nombre
-    });
-
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
-    
-    console.log('🔍 DIAGNÓSTICO - DATOS DESPUÉS DE actualizarCalculosAutomaticos:', {
-      fc_razon_social: formularioConCalculos.razon_social,
-      fc_rfc: formularioConCalculos.rfc,
-      fc_nombre_comercial: formularioConCalculos.nombre_comercial,
-      fc_numero_identificacion: formularioConCalculos.numero_identificacion
-    });
     
     // Normalizar apellidos para backend
     const expedientePayload = {
@@ -6125,7 +6202,30 @@ const estadoInicialFormulario = {
     if ('contacto_telefono_fijo' in expedientePayload) delete expedientePayload.contacto_telefono_fijo;
     if ('contacto_telefono_movil' in expedientePayload) delete expedientePayload.contacto_telefono_movil;
     
-    console.log('🔒 Campos contacto_* removidos del payload (solo van a tabla clientes)');
+    // Compatibilidad de nombres de campos esperados por backend (alias)
+    // Uso/Servicio/Movimiento
+    if (expedientePayload.uso && !expedientePayload.uso_poliza) expedientePayload.uso_poliza = expedientePayload.uso;
+    if (expedientePayload.servicio && !expedientePayload.servicio_poliza) expedientePayload.servicio_poliza = expedientePayload.servicio;
+    if (expedientePayload.movimiento && !expedientePayload.movimiento_poliza) expedientePayload.movimiento_poliza = expedientePayload.movimiento;
+
+    // Montos: duplicar a posibles alias que pueda consumir el backend
+    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.cargoPagoFraccionado === undefined) {
+      expedientePayload.cargoPagoFraccionado = expedientePayload.cargo_pago_fraccionado;
+    }
+    // Alias comunes para backend que usa "tasa_financiamiento"
+    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.tasa_financiamiento === undefined) {
+      expedientePayload.tasa_financiamiento = expedientePayload.cargo_pago_fraccionado;
+    }
+    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.tasaFinanciamiento === undefined) {
+      expedientePayload.tasaFinanciamiento = expedientePayload.cargo_pago_fraccionado;
+    }
+    if (expedientePayload.gastos_expedicion !== undefined && expedientePayload.gastosExpedicion === undefined) {
+      expedientePayload.gastosExpedicion = expedientePayload.gastos_expedicion;
+    }
+    if (expedientePayload.subtotal !== undefined && expedientePayload.sub_total === undefined) {
+      expedientePayload.sub_total = expedientePayload.subtotal;
+    }
+
     
     // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
     // El backend los necesita para enriquecer el expediente
@@ -6134,109 +6234,79 @@ const estadoInicialFormulario = {
     // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
     if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
       expedientePayload.coberturas = JSON.stringify(expedientePayload.coberturas);
-      console.log('🔄 Coberturas convertidas a JSON string para el backend');
     }
-    
-    // LOG COMPLETO DE TODOS LOS CAMPOS
-    console.log('💾 ============ GUARDANDO EXPEDIENTE ============');
-    console.log('📋 TODOS LOS CAMPOS DEL PAYLOAD:', {
-      // Identificación
-      id: expedientePayload.id,
-      numero_poliza: expedientePayload.numero_poliza,
-      endoso: expedientePayload.endoso,
-      inciso: expedientePayload.inciso,
-      
-      // Cliente
-      cliente_id: expedientePayload.cliente_id,
-      nombre: expedientePayload.nombre,
-      apellido_paterno: expedientePayload.apellido_paterno,
-      apellido_materno: expedientePayload.apellido_materno,
-      razon_social: expedientePayload.razon_social,
-      nombre_comercial: expedientePayload.nombre_comercial,
-      rfc: expedientePayload.rfc,
-      numero_identificacion: expedientePayload.numero_identificacion,
-      email: expedientePayload.email,
-      telefono_movil: expedientePayload.telefono_movil,
-      
-      // Producto y Compañía
-      compania: expedientePayload.compania,
-      producto: expedientePayload.producto,
-      plan: expedientePayload.plan,
-      tipo_cobertura: expedientePayload.tipo_cobertura,
-      
-      // Agente y Equipo
-      agente: expedientePayload.agente,
-      sub_agente: expedientePayload.sub_agente,
-      
-      // Vigencia
-      inicio_vigencia: expedientePayload.inicio_vigencia,
-      termino_vigencia: expedientePayload.termino_vigencia,
-      fecha_pago: expedientePayload.fecha_pago,
-      fecha_vencimiento_pago: expedientePayload.fecha_vencimiento_pago,
-      periodo_gracia: expedientePayload.periodo_gracia,
-      
-      // Pagos
-      tipo_pago: expedientePayload.tipo_pago,
-      frecuenciaPago: expedientePayload.frecuenciaPago,
-      estatusPago: expedientePayload.estatusPago,
-      proximoPago: expedientePayload.proximoPago,
-      
-      // Financiero
-      prima_pagada: expedientePayload.prima_pagada,
-      cargoPagoFraccionado: expedientePayload.cargoPagoFraccionado,
-      cargo_pago_fraccionado: expedientePayload.cargo_pago_fraccionado,
-      gastosExpedicion: expedientePayload.gastosExpedicion,
-      gastos_expedicion: expedientePayload.gastos_expedicion,
-      subtotal: expedientePayload.subtotal,
-      iva: expedientePayload.iva,
-      total: expedientePayload.total,
-      
-      // Coberturas
-      coberturas: expedientePayload.coberturas,
-      coberturas_tipo: typeof expedientePayload.coberturas,
-      coberturas_es_string: typeof expedientePayload.coberturas === 'string',
-      suma_asegurada: expedientePayload.suma_asegurada,
-      deducible: expedientePayload.deducible,
-      
-      // Vehículo (si aplica)
-      marca: expedientePayload.marca,
-      modelo: expedientePayload.modelo,
-      anio: expedientePayload.anio,
-      numero_serie: expedientePayload.numero_serie,
-      motor: expedientePayload.motor,
-      placas: expedientePayload.placas,
-      color: expedientePayload.color,
-      tipo_vehiculo: expedientePayload.tipo_vehiculo,
-      conductor_habitual: expedientePayload.conductor_habitual,
-      
-      // Estado
-      etapa_activa: expedientePayload.etapa_activa,
-      motivoCancelacion: expedientePayload.motivoCancelacion,
-      fecha_creacion: expedientePayload.fecha_creacion,
-      
-      // Otros
-      notas: expedientePayload.notas
-    });
-    
-    console.log('📦 PAYLOAD COMPLETO (JSON):', JSON.stringify(expedientePayload, null, 2));
+
+    // DEBUG: Verificar los 6 campos solicitados al momento de GUARDAR
+    try {
+      const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
+      console.groupCollapsed('🧪 DEBUG Guardar Expediente — Campos clave');
+      console.table([
+        { campo: 'uso', valor: k(expedientePayload.uso) },
+        { campo: 'servicio', valor: k(expedientePayload.servicio) },
+        { campo: 'movimiento', valor: k(expedientePayload.movimiento) },
+        { campo: 'cargo_pago_fraccionado', valor: k(expedientePayload.cargo_pago_fraccionado) },
+        { campo: 'gastos_expedicion', valor: k(expedientePayload.gastos_expedicion) },
+        { campo: 'subtotal', valor: k(expedientePayload.subtotal) }
+      ]);
+      console.groupEnd();
+    } catch (_) { /* noop */ }
 
     if (modoEdicion) {
-      console.log(`🔄 ACTUALIZANDO expediente ID: ${formularioConCalculos.id}`);
   fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(expedientePayload)
       })
-        .then(response => {
-          console.log('📡 Respuesta servidor (UPDATE):', {
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok
-          });
-          return response.json();
-        })
-        .then(data => {
-          console.log('✅ Expediente actualizado, respuesta del servidor:', data);
+        .then(response => response.json())
+        .then(async (data) => {
+          // DEBUG: Verificar respuesta del backend tras UPDATE
+          try {
+            const registro = data?.data || data;
+            const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
+            console.groupCollapsed('🧪 DEBUG Respuesta PUT — Campos clave en registro devuelto');
+            console.table([
+              { campo: 'uso | variantes', valor: k(registro?.uso || registro?.uso_poliza || registro?.Uso || registro?.usoVehiculo) },
+              { campo: 'servicio | variantes', valor: k(registro?.servicio || registro?.servicio_poliza || registro?.Servicio || registro?.servicioVehiculo) },
+              { campo: 'movimiento | variantes', valor: k(registro?.movimiento || registro?.movimiento_poliza || registro?.Movimiento) },
+              { campo: 'cargo_pago_fraccionado | camel', valor: k(registro?.cargo_pago_fraccionado ?? registro?.cargoPagoFraccionado) },
+              { campo: 'gastos_expedicion | camel', valor: k(registro?.gastos_expedicion ?? registro?.gastosExpedicion) },
+              { campo: 'subtotal | variantes', valor: k(registro?.subtotal ?? registro?.sub_total ?? registro?.subTotal) }
+            ]);
+            console.groupEnd();
+          } catch (_) { /* noop */ }
+          // ✨ Registrar actualización de datos en historial (trazabilidad)
+          try {
+            const expedienteId = formularioConCalculos.id;
+            const expedienteAnterior = expedientes.find(exp => exp.id === expedienteId);
+            
+            // Verificar si hubo cambio de etapa para registrar evento específico
+            if (expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa) {
+              await historialService.registrarCambioEtapa(
+                expedienteId,
+                formularioConCalculos.cliente_id,
+                expedienteAnterior.etapa_activa,
+                formularioConCalculos.etapa_activa,
+                'Sistema', // TODO: usuario actual
+                'Cambio manual desde formulario de edición'
+              );
+            } else {
+              // Si NO hubo cambio de etapa, registrar actualización genérica
+              await historialService.registrarEvento({
+                expediente_id: expedienteId,
+                cliente_id: formularioConCalculos.cliente_id,
+                tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
+                usuario_nombre: 'Sistema', // TODO: usuario actual
+                descripcion: `Expediente actualizado: ${formularioConCalculos.compania} - ${formularioConCalculos.producto}`,
+                datos_adicionales: {
+                  numero_poliza: formularioConCalculos.numero_poliza,
+                  campos_modificados: true // marcador simple; idealmente diferencias
+                }
+              });
+            }
+          } catch (e) {
+            console.warn('⚠️ No se pudo registrar evento de actualización:', e);
+          }
+
           limpiarFormulario();
           recargarExpedientes();
           setVistaActual('lista');
@@ -6246,7 +6316,6 @@ const estadoInicialFormulario = {
           toast.error('Error al actualizar expediente: ' + err.message);
         });
     } else {
-      console.log('🆕 CREANDO nuevo expediente');
   fetch(`${API_URL}/api/expedientes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -6255,38 +6324,63 @@ const estadoInicialFormulario = {
           fecha_creacion: new Date().toISOString().split('T')[0]
         })
       })
-        .then(response => {
-          console.log('📡 Respuesta servidor (CREATE):', {
-            status: response.status,
-            statusText: response.statusText,
-            ok: response.ok
-          });
-          return response.json();
-        })
+        .then(response => response.json())
         .then(async (data) => {
-          console.log('✅ Expediente creado, respuesta del servidor:', data);
-
-          // ✨ NUEVO: Registrar creación en historial de trazabilidad
+          // DEBUG: Verificar respuesta del backend tras CREATE
+          try {
+            const registro = data?.data || data;
+            const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
+            console.groupCollapsed('🧪 DEBUG Respuesta POST — Campos clave en registro devuelto');
+            console.table([
+              { campo: 'uso | variantes', valor: k(registro?.uso || registro?.uso_poliza || registro?.Uso || registro?.usoVehiculo) },
+              { campo: 'servicio | variantes', valor: k(registro?.servicio || registro?.servicio_poliza || registro?.Servicio || registro?.servicioVehiculo) },
+              { campo: 'movimiento | variantes', valor: k(registro?.movimiento || registro?.movimiento_poliza || registro?.Movimiento) },
+              { campo: 'cargo_pago_fraccionado | camel', valor: k(registro?.cargo_pago_fraccionado ?? registro?.cargoPagoFraccionado) },
+              { campo: 'gastos_expedicion | camel', valor: k(registro?.gastos_expedicion ?? registro?.gastosExpedicion) },
+              { campo: 'subtotal | variantes', valor: k(registro?.subtotal ?? registro?.sub_total ?? registro?.subTotal) }
+            ]);
+            console.groupEnd();
+          } catch (_) { /* noop */ }
+          // ✨ Registrar creación en historial de trazabilidad
           try {
             const nuevoId = data?.id || data?.data?.id;
             if (nuevoId) {
+              // Determinar tipo de evento según la etapa actual
+              const etapaActual = expedientePayload.etapa_activa || 'En cotización';
+              let tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_CREADA;
+              let descripcionEvento = `Cotización creada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+              
+              // Si se crea directo en etapa "Emitida", registrar como póliza emitida
+              if (etapaActual === 'Emitida') {
+                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
+                descripcionEvento = `Póliza emitida y capturada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+              } else if (etapaActual === 'Enviada al Cliente') {
+                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL;
+                descripcionEvento = `Póliza capturada como enviada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+              }
+              
               await historialService.registrarEvento({
                 expediente_id: nuevoId,
                 cliente_id: expedientePayload.cliente_id,
-                tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_CREADA,
-                etapa_nueva: expedientePayload.etapa_activa || 'En cotización',
+                tipo_evento: tipoEvento,
+                etapa_nueva: etapaActual,
                 usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
-                descripcion: `Expediente creado: ${expedientePayload.compania} - ${expedientePayload.producto}`,
+                descripcion: descripcionEvento,
                 datos_adicionales: {
                   numero_poliza: expedientePayload.numero_poliza,
                   compania: expedientePayload.compania,
-                  producto: expedientePayload.producto
+                  producto: expedientePayload.producto,
+                  origen: 'captura_manual'
                 }
               });
-              console.log('✅ Evento de creación registrado en historial');
+              console.log(`✅ Evento ${tipoEvento} registrado en historial`);
             }
           } catch (error) {
-            console.warn('⚠️ Historial no disponible (endpoint pendiente):', error.message);
+            console.warn('⚠️ Historial no disponible (backend endpoint pendiente):', error.message);
+            toast('⚠️ Expediente creado correctamente. Historial temporal no disponible hasta que se implemente el backend.', {
+              duration: 4000,
+              icon: 'ℹ️'
+            });
           }
 
           try {
@@ -6322,58 +6416,25 @@ const estadoInicialFormulario = {
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario, clienteSeleccionado]);
   const recargarExpedientes = useCallback(async () => {
     try {
-      console.log('🔄 ============ RECARGANDO EXPEDIENTES DESDE API ============');
-      
       // Obtener expedientes frescos SIN cache
       const resExpedientes = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
       const expedientes = await resExpedientes.json();
-      console.log(`📊 ${expedientes.length} expedientes obtenidos del backend`);
-      
-      // Log del PRIMER expediente completo para ver estructura
-      if (expedientes.length > 0) {
-        console.log('🔍 EJEMPLO - Primer expediente recibido:', {
-          ...expedientes[0],
-          _todos_los_campos: Object.keys(expedientes[0])
-        });
-      }
-      
-      // Debug: verificar coberturas en expedientes
-      let expedientesConCoberturas = 0;
-      expedientes.forEach((exp, index) => {
-        if (exp.coberturas) {
-          expedientesConCoberturas++;
-          if (index < 3) { // Solo los primeros 3 para no saturar
-            console.log(`🛡️ Expediente ${exp.numero_poliza} tiene coberturas:`, {
-              tipo: typeof exp.coberturas,
-              es_array: Array.isArray(exp.coberturas),
-              es_string: typeof exp.coberturas === 'string',
-              cantidad: Array.isArray(exp.coberturas) ? exp.coberturas.length : 'N/A',
-              longitud_string: typeof exp.coberturas === 'string' ? exp.coberturas.length : 'N/A',
-              preview: typeof exp.coberturas === 'string' ? exp.coberturas.substring(0, 100) + '...' : exp.coberturas
-            });
-          }
-        }
-      });
-      console.log(`📈 Total de expedientes con coberturas: ${expedientesConCoberturas} de ${expedientes.length}`);
       
       // 2. Obtener todos los clientes
       const resClientes = await fetch(`${API_URL}/api/clientes`);
       const clientesData = await resClientes.json();
-      console.log('👥 Clientes obtenidos:', clientesData.length);
       
       // 3. Crear un mapa de clientes por ID para búsqueda rápida
       const mapa = {};
       clientesData.forEach(cliente => {
         mapa[cliente.id] = cliente;
       });
-      console.log('🗺️ Mapa de clientes creado con', Object.keys(mapa).length, 'entradas');
       
       // 4. Actualizar estados de clientes
       setClientes(clientesData);
       setClientesMap(mapa);
-      console.log('✅ Estados de clientes actualizados');
       
-      // 5. Parsear coberturas si vienen como string JSON
+      // 5. Parsear coberturas si vienen como string JSON y normalizar alias (uso/servicio/movimiento)
       const expedientesConCoberturasParsadas = expedientes.map(exp => {
         if (exp.coberturas && typeof exp.coberturas === 'string') {
           try {
@@ -6383,68 +6444,171 @@ const estadoInicialFormulario = {
             exp.coberturas = null;
           }
         }
+        // Normalizar alias para que edición y detalle los tengan listos
+        exp.uso = exp.uso || exp.uso_poliza || exp.Uso || exp.usoVehiculo || '';
+        exp.servicio = exp.servicio || exp.servicio_poliza || exp.Servicio || exp.servicioVehiculo || '';
+        exp.movimiento = exp.movimiento || exp.movimiento_poliza || exp.Movimiento || '';
+        // Montos y financieros: cubrir alias comunes del backend
+        exp.cargo_pago_fraccionado =
+          exp.cargo_pago_fraccionado ?? exp.cargoPagoFraccionado ?? exp.tasa_financiamiento ?? exp.tasaFinanciamiento ?? 0;
+        exp.gastos_expedicion =
+          exp.gastos_expedicion ?? exp.gastosExpedicion ?? exp.gastos ?? 0;
+        exp.subtotal = exp.subtotal ?? exp.sub_total ?? exp.subTotal ?? 0;
         return exp;
       });
       
-      // ✅ El backend YA devuelve expedientes enriquecidos con datos del cliente
-      // No es necesario hacer enriquecimiento aquí. Solo confiar en la API.
-      console.log('✅ Expedientes cargados desde API (ya enriquecidos con datos del cliente):', expedientesConCoberturasParsadas.length);
       setExpedientes(expedientesConCoberturasParsadas);
     } catch (err) {
       console.error('Error al recargar expedientes:', err);
     }
   }, []);
   const editarExpediente = useCallback(async (expediente) => {
-    // Aplicar datos del expediente al formulario PRIMERO
-    setFormulario({
-      ...expediente,
-      // Si no tiene fecha_emision, usar created_at como valor inicial
-      fecha_emision: expediente.fecha_emision || expediente.created_at || new Date().toISOString().split('T')[0]
-    });
+    // Traer el expediente completo por ID para garantizar que vengan todos los campos (incluye uso y cargo_pago_fraccionado)
+    let expedienteCompleto = expediente;
+    try {
+      const resp = await fetch(`${API_URL}/api/expedientes/${expediente.id}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        const desdeApi = data?.data ?? data;
+        if (desdeApi && typeof desdeApi === 'object') {
+          // Merge no destructivo: los campos del detalle tienen prioridad
+          expedienteCompleto = { ...expediente, ...desdeApi };
+        }
+        try {
+          console.groupCollapsed('🌐 API GET /api/expedientes/:id — payload crudo');
+          console.log(desdeApi);
+          console.groupEnd();
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('⚠️ No se pudo obtener el expediente por ID, se usará el de la lista:', e);
+    }
+
+    // DEBUG: Verificar los 6 campos al ENTRAR A EDITAR (ya con datos del GET si estuvo disponible)
+    try {
+      const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
+      console.groupCollapsed('🧪 DEBUG Editar Expediente — Datos desde BD');
+      console.table([
+        { campo: 'uso | variantes', valor: k(expedienteCompleto.uso || expedienteCompleto.uso_poliza || expedienteCompleto.Uso || expedienteCompleto.usoVehiculo) },
+        { campo: 'servicio | variantes', valor: k(expedienteCompleto.servicio || expedienteCompleto.servicio_poliza || expedienteCompleto.Servicio || expedienteCompleto.servicioVehiculo) },
+        { campo: 'movimiento | variantes', valor: k(expedienteCompleto.movimiento || expedienteCompleto.movimiento_poliza || expedienteCompleto.Movimiento) },
+        { campo: 'cargo_pago_fraccionado | camel', valor: k(expedienteCompleto.cargo_pago_fraccionado ?? expedienteCompleto.cargoPagoFraccionado) },
+        { campo: 'gastos_expedicion | camel', valor: k(expedienteCompleto.gastos_expedicion ?? expedienteCompleto.gastosExpedicion) },
+        { campo: 'subtotal | variantes', valor: k(expedienteCompleto.subtotal ?? expedienteCompleto.sub_total ?? expedienteCompleto.subTotal) }
+      ]);
+      console.groupEnd();
+    } catch (_) { /* noop */ }
+
+    // Helper para convertir fechas ISO a formato YYYY-MM-DD
+    const formatearFechaParaInput = (fecha) => {
+      if (!fecha) return '';
+      try {
+        // Si viene en formato ISO (2025-11-12T00:00:00.000Z), extraer solo la fecha
+        return fecha.split('T')[0];
+      } catch {
+        return fecha;
+      }
+    };
+    
+    // Construir formulario base normalizado
+    const formularioBase = {
+      ...expedienteCompleto,
+      // Normalizar fechas que vienen en formato ISO a YYYY-MM-DD
+  fecha_emision: formatearFechaParaInput(expedienteCompleto.fecha_emision) || formatearFechaParaInput(expedienteCompleto.created_at) || new Date().toISOString().split('T')[0],
+  inicio_vigencia: formatearFechaParaInput(expedienteCompleto.inicio_vigencia) || '',
+  termino_vigencia: formatearFechaParaInput(expedienteCompleto.termino_vigencia) || '',
+      // NOTA: fecha_pago y fecha_vencimiento_pago se recalcularán automáticamente según inicio_vigencia + periodo_gracia.
+      // Se cargan temporalmente por si el backend trae valores; luego se sincronizan.
+  fecha_pago: formatearFechaParaInput(expedienteCompleto.fecha_pago) || '',
+  fecha_vencimiento_pago: formatearFechaParaInput(expedienteCompleto.fecha_vencimiento_pago) || '',
+      // Unificar nombre de campo: backend puede enviar proximo_pago; el estado interno usa proximoPago
+  proximoPago: formatearFechaParaInput(expedienteCompleto.proximo_pago || expedienteCompleto.proximoPago) || '',
+  fecha_cancelacion: formatearFechaParaInput(expedienteCompleto.fecha_cancelacion) || '',
+  // Asegurar que campos numéricos no sean undefined (aceptar snake_case y camelCase del backend)
+  prima_pagada: (expedienteCompleto.prima_pagada ?? expedienteCompleto.primaPagada ?? 0),
+  cargo_pago_fraccionado: (expedienteCompleto.cargo_pago_fraccionado ?? expedienteCompleto.cargoPagoFraccionado ?? expedienteCompleto.tasa_financiamiento ?? expedienteCompleto.tasaFinanciamiento ?? 0),
+  gastos_expedicion: (expedienteCompleto.gastos_expedicion ?? expedienteCompleto.gastosExpedicion ?? expedienteCompleto.gastos ?? 0),
+  subtotal: (expedienteCompleto.subtotal ?? expedienteCompleto.sub_total ?? expedienteCompleto.subTotal ?? 0),
+    iva: (expedienteCompleto.iva ?? expedienteCompleto.IVA ?? 0),
+    total: (expedienteCompleto.total ?? expedienteCompleto.importe_total ?? expedienteCompleto.importeTotal ?? 0),
+      // Normalizar alias de campos USO / SERVICIO / MOVIMIENTO que pueden venir con distintos nombres
+  uso: expedienteCompleto.uso || expedienteCompleto.uso_poliza || expedienteCompleto.Uso || expedienteCompleto.usoVehiculo || '',
+  servicio: expedienteCompleto.servicio || expedienteCompleto.servicio_poliza || expedienteCompleto.Servicio || expedienteCompleto.servicioVehiculo || '',
+  movimiento: expedienteCompleto.movimiento || expedienteCompleto.movimiento_poliza || expedienteCompleto.Movimiento || '',
+      // Sincronizar también los alias *_poliza para que el formulario los tenga disponibles
+      uso_poliza: expedienteCompleto.uso || expedienteCompleto.uso_poliza || expedienteCompleto.Uso || expedienteCompleto.usoVehiculo || '',
+      servicio_poliza: expedienteCompleto.servicio || expedienteCompleto.servicio_poliza || expedienteCompleto.Servicio || expedienteCompleto.servicioVehiculo || '',
+      movimiento_poliza: expedienteCompleto.movimiento || expedienteCompleto.movimiento_poliza || expedienteCompleto.Movimiento || ''
+    };
+
+    // Si hay inicio de vigencia, recalcular automáticamente proximoPago/fecha_pago/estatus
+    const formularioConCalculos = formularioBase.inicio_vigencia
+      ? actualizarCalculosAutomaticos(formularioBase)
+      : formularioBase;
+
+    // Aplicar al estado en un solo set para evitar inconsistencias por batching
+    setFormulario(formularioConCalculos);
     
     // Restaurar cliente seleccionado si el expediente tiene cliente_id
     if (expediente.cliente_id) {
       try {
-        // Buscar el cliente completo desde clientesMap o cargar desde API
-        let clienteCompleto = clientesMap[expediente.cliente_id];
-        
-        if (!clienteCompleto) {
-          console.log('🔍 Cliente no está en el mapa, obteniendo desde API...');
+        // Obtener cliente completo (cache o API) y normalizar a camelCase para evitar duplicados
+        let cliente = clientesMap[expediente.cliente_id];
+
+        if (!cliente) {
           const response = await fetch(`${API_URL}/api/clientes/${expediente.cliente_id}`);
           if (response.ok) {
             const data = await response.json();
-            clienteCompleto = data.data || data;
+            cliente = data.data || data;
           }
         }
-        
-        if (clienteCompleto) {
-          console.log('✅ Cliente recuperado para edición:', clienteCompleto);
-          
-          // Aplicar solo los campos del cliente que no sobrescriban datos del expediente
-          // Esto permite que si el expediente tiene contacto_*, se respeten, pero si no, se tomen del cliente
-          setFormulario(prevFormulario => ({
-            ...prevFormulario,
-            // Datos principales del cliente (solo si no vienen del expediente)
-            nombre: prevFormulario.nombre || clienteCompleto.nombre || '',
-            apellido_paterno: prevFormulario.apellido_paterno || clienteCompleto.apellido_paterno || clienteCompleto.apellidoPaterno || '',
-            apellido_materno: prevFormulario.apellido_materno || clienteCompleto.apellido_materno || clienteCompleto.apellidoMaterno || '',
-            razon_social: prevFormulario.razon_social || clienteCompleto.razon_social || clienteCompleto.razonSocial || '',
-            nombre_comercial: prevFormulario.nombre_comercial || clienteCompleto.nombre_comercial || clienteCompleto.nombreComercial || '',
-            email: prevFormulario.email || clienteCompleto.email || '',
-            telefono_fijo: prevFormulario.telefono_fijo || clienteCompleto.telefono_fijo || clienteCompleto.telefonoFijo || '',
-            telefono_movil: prevFormulario.telefono_movil || clienteCompleto.telefono_movil || clienteCompleto.telefonoMovil || '',
-            rfc: prevFormulario.rfc || clienteCompleto.rfc || '',
-            // Datos de contacto adicional/gestor (tomar del cliente si no vienen del expediente)
-            contacto_nombre: prevFormulario.contacto_nombre || clienteCompleto.contacto_nombre || clienteCompleto.contactoNombre || '',
-            contacto_apellido_paterno: prevFormulario.contacto_apellido_paterno || clienteCompleto.contacto_apellido_paterno || clienteCompleto.contactoApellidoPaterno || '',
-            contacto_apellido_materno: prevFormulario.contacto_apellido_materno || clienteCompleto.contacto_apellido_materno || clienteCompleto.contactoApellidoMaterno || '',
-            contacto_email: prevFormulario.contacto_email || clienteCompleto.contacto_email || clienteCompleto.contactoEmail || '',
-            contacto_telefono_fijo: prevFormulario.contacto_telefono_fijo || clienteCompleto.contacto_telefono_fijo || clienteCompleto.contactoTelefonoFijo || '',
-            contacto_telefono_movil: prevFormulario.contacto_telefono_movil || clienteCompleto.contacto_telefono_movil || clienteCompleto.contactoTelefonoMovil || ''
+
+        if (cliente) {
+          // Normalización única: elegir camelCase como representación interna
+          const normalizarCliente = (c) => ({
+            id: c.id,
+            tipoPersona: c.tipoPersona || c.tipo_persona || '',
+            nombre: c.nombre || '',
+            apellidoPaterno: c.apellidoPaterno || c.apellido_paterno || '',
+            apellidoMaterno: c.apellidoMaterno || c.apellido_materno || '',
+            razonSocial: c.razonSocial || c.razon_social || '',
+            nombreComercial: c.nombreComercial || c.nombre_comercial || '',
+            email: c.email || '',
+            telefonoFijo: c.telefonoFijo || c.telefono_fijo || '',
+            telefonoMovil: c.telefonoMovil || c.telefono_movil || '',
+            rfc: c.rfc || '',
+            contactoNombre: c.contactoNombre || c.contacto_nombre || '',
+            contactoApellidoPaterno: c.contactoApellidoPaterno || c.contacto_apellido_paterno || '',
+            contactoApellidoMaterno: c.contactoApellidoMaterno || c.contacto_apellido_materno || '',
+            contactoEmail: c.contactoEmail || c.contacto_email || '',
+            contactoTelefonoFijo: c.contactoTelefonoFijo || c.contacto_telefono_fijo || '',
+            contactoTelefonoMovil: c.contactoTelefonoMovil || c.contacto_telefono_movil || ''
+          });
+
+          const clienteNormalizado = normalizarCliente(cliente);
+
+          // Merge no destructivo: solo rellenar si el formulario aún no tenía esos datos
+          setFormulario(prev => ({
+            ...prev,
+            nombre: prev.nombre || clienteNormalizado.nombre,
+            apellido_paterno: prev.apellido_paterno || clienteNormalizado.apellidoPaterno,
+            apellido_materno: prev.apellido_materno || clienteNormalizado.apellidoMaterno,
+            razon_social: prev.razon_social || clienteNormalizado.razonSocial,
+            nombre_comercial: prev.nombre_comercial || clienteNormalizado.nombreComercial,
+            email: prev.email || clienteNormalizado.email,
+            telefono_fijo: prev.telefono_fijo || clienteNormalizado.telefonoFijo,
+            telefono_movil: prev.telefono_movil || clienteNormalizado.telefonoMovil,
+            rfc: prev.rfc || clienteNormalizado.rfc,
+            contacto_nombre: prev.contacto_nombre || clienteNormalizado.contactoNombre,
+            contacto_apellido_paterno: prev.contacto_apellido_paterno || clienteNormalizado.contactoApellidoPaterno,
+            contacto_apellido_materno: prev.contacto_apellido_materno || clienteNormalizado.contactoApellidoMaterno,
+            contacto_email: prev.contacto_email || clienteNormalizado.contactoEmail,
+            contacto_telefono_fijo: prev.contacto_telefono_fijo || clienteNormalizado.contactoTelefonoFijo,
+            contacto_telefono_movil: prev.contacto_telefono_movil || clienteNormalizado.contactoTelefonoMovil
           }));
-          
-          // Guardar referencia al cliente seleccionado
-          setClienteSeleccionado(clienteCompleto);
+
+          // Guardar referencia simplificada
+          setClienteSeleccionado(clienteNormalizado);
         }
       } catch (error) {
         console.error('⚠️ Error al recuperar cliente completo:', error);
@@ -6453,7 +6617,7 @@ const estadoInicialFormulario = {
     
     setModoEdicion(true);
     setVistaActual('formulario');
-  }, [clientesMap]);
+  }, [clientesMap, actualizarCalculosAutomaticos]);
 
 const eliminarExpediente = useCallback((id) => {
   if (confirm('¿Está seguro de eliminar este expediente?')) {

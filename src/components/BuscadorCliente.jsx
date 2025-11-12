@@ -36,44 +36,40 @@ const BuscadorCliente = ({
     try {
       const resultado = await obtenerClientes();
       if (resultado.success) {
-        // Normalizar datos del backend (convertir snake_case a camelCase)
-        const clientesParseados = resultado.data.map(cliente => ({
-          ...cliente,
-          // Normalizar campos - manejar tanto snake_case como camelCase
-          razonSocial: cliente.razonSocial || cliente.razon_social || '',
-          nombreComercial: cliente.nombreComercial || cliente.nombre_comercial || '',
-          apellidoPaterno: cliente.apellidoPaterno || cliente.apellido_paterno || '',
-          apellidoMaterno: cliente.apellidoMaterno || cliente.apellido_materno || '',
-          telefonoFijo: cliente.telefonoFijo || cliente.telefono_fijo || '',
-          telefonoMovil: cliente.telefonoMovil || cliente.telefono_movil || '',
-          contactos: (() => {
-            if (!cliente.contactos) return [];
-            if (Array.isArray(cliente.contactos)) return cliente.contactos;
-            if (typeof cliente.contactos === 'string') {
-              try {
-                return JSON.parse(cliente.contactos);
-              } catch (error) {
-                return [];
-              }
+        // Normalizar a un shape único (camelCase) para evitar duplicados con snake_case
+        const clientesParseados = resultado.data.map(c => {
+          const contactos = (() => {
+            if (!c.contactos) return [];
+            if (Array.isArray(c.contactos)) return c.contactos;
+            if (typeof c.contactos === 'string') {
+              try { return JSON.parse(c.contactos); } catch { return []; }
             }
             return [];
-          })()
-        }));
-        
-        // Log para debugging - mostrar primeros 3 clientes
-        console.log('📋 BuscadorCliente - Clientes cargados:', clientesParseados.length);
-        clientesParseados.slice(0, 3).forEach((c, i) => {
-          console.log(`  ${i + 1}. ${c.tipoPersona}:`, {
+          })();
+
+          return {
             id: c.id,
-            razonSocial: c.razonSocial,
-            razon_social: c.razon_social,
-            nombreComercial: c.nombreComercial,
-            nombre: c.nombre,
-            apellidoPaterno: c.apellidoPaterno,
-            email: c.email
-          });
+            codigo: c.codigo || '',
+            tipoPersona: c.tipoPersona || c.tipo_persona || '',
+            nombre: c.nombre || '',
+            apellidoPaterno: c.apellidoPaterno || c.apellido_paterno || '',
+            apellidoMaterno: c.apellidoMaterno || c.apellido_materno || '',
+            razonSocial: c.razonSocial || c.razon_social || '',
+            nombreComercial: c.nombreComercial || c.nombre_comercial || '',
+            rfc: c.rfc || '',
+            email: c.email || '',
+            telefonoFijo: c.telefonoFijo || c.telefono_fijo || '',
+            telefonoMovil: c.telefonoMovil || c.telefono_movil || '',
+            contactoNombre: c.contactoNombre || c.contacto_nombre || '',
+            contactoApellidoPaterno: c.contactoApellidoPaterno || c.contacto_apellido_paterno || '',
+            contactoApellidoMaterno: c.contactoApellidoMaterno || c.contacto_apellido_materno || '',
+            contactoEmail: c.contactoEmail || c.contacto_email || '',
+            contactoTelefonoFijo: c.contactoTelefonoFijo || c.contacto_telefono_fijo || '',
+            contactoTelefonoMovil: c.contactoTelefonoMovil || c.contacto_telefono_movil || '',
+            contactos
+          };
         });
-        
+
         setClientes(clientesParseados);
       }
     } catch (error) {
@@ -101,15 +97,6 @@ const BuscadorCliente = ({
   });
 
   const seleccionarCliente = (cliente) => {
-    console.log('✅ BuscadorCliente - Cliente seleccionado:', {
-      id: cliente.id,
-      tipoPersona: cliente.tipoPersona,
-      razonSocial: cliente.razonSocial,
-      nombreComercial: cliente.nombreComercial,
-      nombre: cliente.nombre,
-      apellidoPaterno: cliente.apellidoPaterno
-    });
-    
     onClienteSeleccionado(cliente);
     setTerminoBusqueda('');
     setMostrarResultados(false);
