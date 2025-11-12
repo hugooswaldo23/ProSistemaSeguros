@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+const API_URL = import.meta.env.VITE_API_URL;
 import { 
   Plus, FileText, DollarSign, AlertCircle, 
   RefreshCw, Send, CheckCircle, Clock, Edit,
@@ -8,190 +9,105 @@ import {
   XCircle, Eye, UserCheck, Users, BarChart2, 
   Building2, Briefcase, FileCheck, Filter, Download
 } from 'lucide-react';
-import { API_URL } from '../constants/apiUrl';
-
 const DashboardComponent = () => {
-  // Estados
-  const [modalDetalle, setModalDetalle] = useState(null);
-  const [filtroTramites, setFiltroTramites] = useState('todos');
-  const [cargando, setCargando] = useState(true);
-  const [modalDesglose, setModalDesglose] = useState(null); // { tipo: 'emitidas|porVencer|vencidas|canceladas', datos: [] }
-  
-  // Resolver de montos: usa importe_total, o cae a total, o prima_pagada; como último recurso suma subtotal+iva
-  const resolverMonto = (poliza) => {
-    if (!poliza) return 0;
-    const candidatos = [
-      poliza.importe_total,
-      poliza.total,
-      poliza.prima_pagada,
-      (poliza.subtotal != null && poliza.iva != null) ? (parseFloat(poliza.subtotal) + parseFloat(poliza.iva)) : null
-    ];
-    
-    // DEBUG: Log detallado de campos de monto
-    console.log(`💵 Resolviendo monto para póliza ${poliza.numero_poliza || poliza.id}:`, {
-      importe_total: poliza.importe_total,
-      total: poliza.total,
-      prima_pagada: poliza.prima_pagada,
-      subtotal: poliza.subtotal,
-      iva: poliza.iva,
-      candidatos
-    });
-    
-    for (const val of candidatos) {
-      const num = parseFloat(val);
-      if (!isNaN(num) && isFinite(num) && num > 0) {
-        console.log(`   ✅ Usando valor: ${num}`);
-        return num;
-      }
-    }
-    console.log(`   ❌ No se encontró monto válido, retornando 0`);
-    return 0;
-  };
-  
-  // Tipos de trámite - diseño ejecutivo
-  const tiposTramite = [
-    { nombre: 'Cambio de beneficiario', codigo: 'CB', color: '#3B82F6' },
-    { nombre: 'Actualización de datos', codigo: 'AD', color: '#06B6D4' },
-    { nombre: 'Cambio de forma de pago', codigo: 'FP', color: '#8B5CF6' },
-    { nombre: 'Solicitud de cancelación', codigo: 'SC', color: '#EF4444' },
-    { nombre: 'Reexpedición de póliza', codigo: 'RP', color: '#EC4899' },
-    { nombre: 'Cambio de cobertura', codigo: 'CC', color: '#10B981' },
-    { nombre: 'Inclusión/Exclusión', codigo: 'IE', color: '#F59E0B' },
-    { nombre: 'Cambio suma asegurada', codigo: 'SA', color: '#F97316' },
-    { nombre: 'Rehabilitación', codigo: 'RH', color: '#6366F1' },
-    { nombre: 'Endoso', codigo: 'EN', color: '#14B8A6' }
-  ];
-
-  // Estados - Listos para conectar con la base de datos
   const [expedientes, setExpedientes] = useState([]);
   const [tramites, setTramites] = useState([]);
-  const [pagos, setPagos] = useState([]);
-  const [nuevasPolizas, setNuevasPolizas] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [modalDesglose, setModalDesglose] = useState(null);
+  const [modalDetalle, setModalDetalle] = useState(null);
 
-  // Cargar expedientes desde el backend
-  useEffect(() => {
-    const cargarExpedientes = async () => {
-      try {
-        setCargando(true);
-        console.log('🔄 Cargando expedientes desde:', `${API_URL}/api/expedientes`);
-        const response = await fetch(`${API_URL}/api/expedientes`);
-        console.log('📡 Response status:', response.status, response.statusText);
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('✅ Expedientes cargados:', data.length, 'registros');
-          console.log('📊 Datos:', data);
-          setExpedientes(data);
-        } else {
-          console.error('❌ Error al cargar expedientes:', response.statusText);
-        }
+  const resolverMonto = (p) => {
+    const n = Number(p?.prima_pagada ?? p?.prima ?? p?.total ?? p?.monto ?? 0);
+    return isNaN(n) ? 0 : n;
+  };
 
-        // Cargar trámites en paralelo después de expedientes
-        console.log('🔄 Cargando trámites desde:', `${API_URL}/api/tramites`);
-        const resTramites = await fetch(`${API_URL}/api/tramites`);
-        if (resTramites.ok) {
-          const dataTramites = await resTramites.json();
-          console.log('✅ Trámites cargados:', dataTramites.length);
-          setTramites(dataTramites);
-        } else {
-          console.warn('⚠️ No se pudieron cargar trámites:', resTramites.status, resTramites.statusText);
-        }
-      } catch (error) {
-        console.error('❌ Error en la petición:', error);
-      } finally {
-        setCargando(false);
+  const cargarDatos = async () => {
+    setCargando(true);
+    try {
+      const res = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
+      if (!res.ok) {
+        console.error('Error al cargar expedientes:', res.status, res.statusText);
+        setExpedientes([]);
+      } else {
+        const data = await res.json();
+        setExpedientes(Array.isArray(data) ? data : []);
       }
-    };
+    } catch (e) {
+      console.error('Fallo de red al cargar expedientes:', e);
+      setExpedientes([]);
+    } finally {
+      setCargando(false);
+    }
+  };
 
-    cargarExpedientes();
+  const recargarDatos = () => cargarDatos();
+
+  useEffect(() => {
+    cargarDatos();
   }, []);
 
-  // Función para recargar datos
-  const recargarDatos = () => {
-    window.location.reload();
-  };
-
-  // Función para abrir modal con detalles
-  const abrirDetalleTramite = (tramite) => {
-    setModalDetalle(tramite);
-  };
-
-  // Función para abrir modal de desglose
   const abrirDesglose = (tipo) => {
-    let polizasFiltradas = [];
-    let titulo = '';
-    let color = '';
-
     const hoy = new Date();
-    const mesActual = hoy.getMonth();
-    const añoActual = hoy.getFullYear();
-
     const esMesActual = (fecha) => {
       if (!fecha) return false;
-      const fechaObj = new Date(fecha);
-      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
+      const f = new Date(fecha);
+      return f.getMonth() === hoy.getMonth() && f.getFullYear() === hoy.getFullYear();
     };
 
-    switch(tipo) {
+    let polizasFiltradas = [];
+    let titulo = '';
+    let color = '#3B82F6';
+
+    switch (tipo) {
       case 'emitidas':
-        polizasFiltradas = expedientes.filter(exp => 
-          esMesActual(exp.fecha_emision) && 
-          exp.etapa_activa === 'Emitida'  // Solo pólizas emitidas
+        polizasFiltradas = expedientes.filter(p =>
+          ['Emitida','Renovada','Enviada al Cliente'].includes(p.etapa_activa) &&
+          p.etapa_activa !== 'Cancelada' &&
+          p.fecha_emision
         );
-        titulo = 'Primas Emitidas - Mes Actual';
+        titulo = 'Primas Emitidas - Mes Actual y Anterior';
         color = '#3B82F6';
         break;
-
       case 'pagadas':
-        polizasFiltradas = expedientes.filter(p => {
-          const estatusPagoNormalizado = (p.estatus_pago || '').toLowerCase().trim();
-          const esPagada = estatusPagoNormalizado === 'pagado' || estatusPagoNormalizado === 'pagada';
-          const noEsCancelada = p.etapa_activa !== 'Cancelada';
-          return esPagada && noEsCancelada;
-        });
-        titulo = 'Primas Pagadas - Acumulado';
+        polizasFiltradas = expedientes.filter(p => p.fecha_pago && p.etapa_activa !== 'Cancelada');
+        titulo = 'Primas Pagadas - Mes Actual y Anterior';
         color = '#10B981';
         break;
-
       case 'porVencer':
-        polizasFiltradas = expedientes.filter(p => 
-          p.fecha_vencimiento_pago && 
-          p.estatus_pago === 'Por Vencer' &&
-          p.etapa_activa !== 'Cancelada'
-        );
+        polizasFiltradas = expedientes.filter(p => {
+          const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+          if (!ref) return false;
+          const f = new Date(ref);
+          return esMesActual(ref) && f >= hoy && p.etapa_activa !== 'Cancelada';
+        });
         titulo = 'Primas Por Vencer - Acumulado';
         color = '#F59E0B';
         break;
-
       case 'vencidas':
-        polizasFiltradas = expedientes.filter(p => 
-          p.fecha_vencimiento_pago && 
-          p.estatus_pago === 'Vencido' &&
-          p.etapa_activa !== 'Cancelada'
-        );
+        polizasFiltradas = expedientes.filter(p => {
+          const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+          if (!ref) return false;
+          const venc = new Date(ref);
+          const gracia = Number(p.periodo_gracia || 0);
+          const limite = new Date(venc);
+          limite.setDate(limite.getDate() + gracia);
+          return new Date() > limite && p.etapa_activa !== 'Cancelada';
+        });
         titulo = 'Primas Vencidas - Acumulado';
         color = '#EF4444';
         break;
-
       case 'canceladas':
-        polizasFiltradas = expedientes.filter(exp => 
-          exp.etapa_activa === 'Cancelada' && esMesActual(exp.fecha_cancelacion)
-        );
+        polizasFiltradas = expedientes.filter(exp => exp.etapa_activa === 'Cancelada' && esMesActual(exp.fecha_cancelacion));
         titulo = 'Primas Canceladas - Mes Actual';
         color = '#6B7280';
         break;
+      default:
+        break;
     }
 
-    // Agrupar por producto
     const porProducto = polizasFiltradas.reduce((acc, poliza) => {
       const producto = poliza.producto || 'Sin producto';
-      if (!acc[producto]) {
-        acc[producto] = {
-          polizas: [],
-          total: 0,
-          cantidad: 0
-        };
-      }
+      if (!acc[producto]) acc[producto] = { polizas: [], total: 0, cantidad: 0 };
       acc[producto].polizas.push(poliza);
       acc[producto].total += resolverMonto(poliza);
       acc[producto].cantidad += 1;
@@ -857,7 +773,7 @@ const DashboardComponent = () => {
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between align-items-center">
+                  <div className="d-flex justify-content-between mb-1">
                     <span style={{ fontSize: '12px', color: '#6B7280' }}>
                       {estadisticasFinancieras.primasPorVencer.cantidad} pólizas este mes
                     </span>
@@ -866,6 +782,8 @@ const DashboardComponent = () => {
                       Mes en curso
                     </span>
                   </div>
+                  {/* Línea invisible para mantener altura consistente */}
+                  <div style={{ height: '16px' }}>&nbsp;</div>
                 </div>
               </div>
             </div>
@@ -949,14 +867,18 @@ const DashboardComponent = () => {
                     </h3>
                   </div>
                 </div>
-                <div className="d-flex align-items-center justify-content-between pt-2 border-top">
-                  <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                    {estadisticasFinancieras.primasCanceladas.cantidad} pólizas
-                  </span>
-                  <span className="metric-badge" style={{ background: '#F3F4F6', color: '#6B7280' }}>
-                    <X size={10} className="me-1" />
-                    Perdidas
-                  </span>
+                <div className="pt-2 border-top">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <span style={{ fontSize: '12px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasCanceladas.cantidad} pólizas
+                    </span>
+                    <span className="metric-badge" style={{ background: '#F3F4F6', color: '#6B7280' }}>
+                      <X size={10} className="me-1" />
+                      Perdidas
+                    </span>
+                  </div>
+                  {/* Línea invisible para mantener altura consistente */}
+                  <div style={{ height: '16px' }}>&nbsp;</div>
                 </div>
               </div>
             </div>
@@ -1127,7 +1049,6 @@ const DashboardComponent = () => {
                 ) : (
                   Object.entries(modalDesglose.porProducto).map(([producto, data], idx) => (
                     <div key={idx} className="border-bottom">
-                      {/* Header por producto */}
                       <div className="p-3" style={{ background: '#F9FAFB' }}>
                         <div className="d-flex justify-content-between align-items-center">
                           <div>
@@ -1147,8 +1068,6 @@ const DashboardComponent = () => {
                           </div>
                         </div>
                       </div>
-
-                      {/* Tabla de pólizas */}
                       <div className="table-responsive">
                         <table className="table table-hover mb-0 compact-table">
                           <thead>
@@ -1156,9 +1075,10 @@ const DashboardComponent = () => {
                               <th>Póliza</th>
                               <th>Cliente</th>
                               <th>Aseguradora</th>
-                              <th>Fecha Emisión</th>
-                              {modalDesglose.tipo !== 'emitidas' && <th>Fecha Vencimiento</th>}
                               <th>Estado</th>
+                              {modalDesglose.tipo === 'pagadas' ? (
+                                <th>Pago</th>
+                              ) : (modalDesglose.tipo !== 'emitidas' && <th>Fecha Vencimiento</th>)}
                               <th className="text-end">Importe</th>
                             </tr>
                           </thead>
@@ -1198,57 +1118,6 @@ const DashboardComponent = () => {
                                   </div>
                                 </td>
                                 <td>
-                                  <small>
-                                    {poliza.fecha_emision
-                                      ? new Date(poliza.fecha_emision).toLocaleDateString('es-MX', {
-                                          day: '2-digit',
-                                          month: 'short',
-                                          year: 'numeric'
-                                        })
-                                      : (poliza.fecha_alta
-                                          ? new Date(poliza.fecha_alta).toLocaleDateString('es-MX', {
-                                              day: '2-digit',
-                                              month: 'short',
-                                              year: 'numeric'
-                                            })
-                                          : (poliza.inicio_vigencia
-                                              ? new Date(poliza.inicio_vigencia).toLocaleDateString('es-MX', {
-                                                  day: '2-digit',
-                                                  month: 'short',
-                                                  year: 'numeric'
-                                                })
-                                              : (poliza.created_at
-                                                  ? new Date(poliza.created_at).toLocaleDateString('es-MX', {
-                                                      day: '2-digit',
-                                                      month: 'short',
-                                                      year: 'numeric'
-                                                    })
-                                                  : 'Sin fecha')))
-                                    }
-                                  </small>
-                                </td>
-                                {modalDesglose.tipo !== 'emitidas' && (
-                                  <td>
-                                    <small className={`${
-                                      poliza.fecha_vencimiento_pago &&
-                                      new Date(poliza.fecha_vencimiento_pago) < new Date() &&
-                                      poliza.estatus_pago === 'Vencido'
-                                        ? 'text-danger fw-bold'
-                                        : ''
-                                    }`}>
-                                      {(poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia)
-                                        ? new Date(
-                                            poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia
-                                          ).toLocaleDateString('es-MX', {
-                                            day: '2-digit',
-                                            month: 'short',
-                                            year: 'numeric'
-                                          })
-                                        : 'Sin fecha'}
-                                    </small>
-                                  </td>
-                                )}
-                                <td>
                                   <div>
                                     <span className={`badge ${
                                       poliza.etapa_activa === 'Emitida' ? 'bg-success' :
@@ -1285,13 +1154,49 @@ const DashboardComponent = () => {
                                     )}
                                   </div>
                                 </td>
+                                {modalDesglose.tipo === 'pagadas' ? (
+                                  <td>
+                                    <small className="d-block">
+                                      <strong>Vencimiento:</strong> {poliza.fecha_vencimiento_pago
+                                        ? new Date(poliza.fecha_vencimiento_pago).toLocaleDateString('es-MX', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric'
+                                          })
+                                        : 'Sin fecha'}
+                                    </small>
+                                    <small className="d-block">
+                                      <strong>Pago:</strong> {poliza.fecha_pago
+                                        ? new Date(poliza.fecha_pago).toLocaleDateString('es-MX', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric'
+                                          })
+                                        : 'Sin fecha'}
+                                    </small>
+                                  </td>
+                                ) : (modalDesglose.tipo !== 'emitidas' ? (
+                                  <td>
+                                    <small className={`${poliza.fecha_vencimiento_pago && new Date(poliza.fecha_vencimiento_pago) < new Date() && poliza.estatus_pago === 'Vencido' ? 'text-danger fw-bold' : ''}`}>
+                                      {(poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia)
+                                        ? new Date(
+                                            poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia
+                                          ).toLocaleDateString('es-MX', {
+                                            day: '2-digit',
+                                            month: 'short',
+                                            year: 'numeric'
+                                          })
+                                        : 'Sin fecha'}
+                                    </small>
+                                  </td>
+                                ) : null)}
                                 <td className="text-end">
-                                  <div className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
+                                  <span className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
                                     ${resolverMonto(poliza).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                                  </div>
+                                  </span>
                                   {(poliza.prima_pagada || poliza.total) && (
                                     <small className="text-muted d-block" style={{ fontSize: '10px' }}>
-                                      Prima: ${(poliza.prima_pagada || poliza.total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                      Prima: {(poliza.prima_pagada || poliza.total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                                     </small>
                                   )}
                                 </td>
@@ -1300,7 +1205,7 @@ const DashboardComponent = () => {
                           </tbody>
                           <tfoot style={{ background: '#F9FAFB' }}>
                             <tr>
-                              <td colSpan={modalDesglose.tipo !== 'emitidas' ? 6 : 5} className="text-end fw-bold">
+                              <td colSpan={modalDesglose.tipo === 'pagadas' ? 6 : (modalDesglose.tipo !== 'emitidas' ? 6 : 5)} className="text-end fw-bold">
                                 Subtotal {producto}:
                               </td>
                               <td className="text-end fw-bold" style={{ color: modalDesglose.color }}>

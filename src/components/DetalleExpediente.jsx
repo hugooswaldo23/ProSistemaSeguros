@@ -73,6 +73,22 @@ const DetalleExpediente = ({
     return { proximo, dias, estatus, clase };
   }, [datos?.estatusPago, datos?.fecha_vencimiento_pago, datos?.proximoPago, datos?.fecha_pago, highlightPago]);
 
+  // Determinar tipo de pago mostrado (prioriza forma_pago del PDF sobre tipo_pago calculado)
+  const tipoPagoMostrar = useMemo(() => {
+    const forma = (datos?.forma_pago || '').trim().toUpperCase();
+    const tipo = (datos?.tipo_pago || '').trim();
+    const normalizar = (v) => v ? v.charAt(0) + v.slice(1).toLowerCase() : '';
+    
+    // PRIORIDAD 1: Si existe forma_pago extraída del PDF, usarla SIEMPRE
+    if (forma) return normalizar(forma);
+    
+    // PRIORIDAD 2: Si no hay forma_pago, usar tipo_pago normalizado
+    if (tipo && !['FRACCIONADO',''].includes(tipo.toUpperCase())) return normalizar(tipo);
+    
+    // FALLBACK: Devolver lo que haya
+    return tipo || forma || 'No especificado';
+  }, [datos?.forma_pago, datos?.tipo_pago]);
+
   const Caratula = () => (
     <div className="card border-0 shadow-sm mb-3">
       <div className="card-header bg-light">
@@ -120,8 +136,11 @@ const DetalleExpediente = ({
             {renderCampo('Inciso', datos?.inciso)}
             {renderCampo('Plan', datos?.plan?.toUpperCase?.() || datos?.plan)}
             {renderCampo('Producto', datos?.producto)}
-            {renderCampo('Tipo de Pago', datos?.tipo_pago)}
+            {renderCampo('Tipo de Pago', tipoPagoMostrar || datos?.tipo_pago)}
             {renderCampo('Agente', datos?.agente)}
+            {datos?.uso && renderCampo('Uso', datos.uso)}
+            {datos?.servicio && renderCampo('Servicio', datos.servicio)}
+            {datos?.movimiento && renderCampo('Movimiento', datos.movimiento)}
           </div>
         </div>
 
@@ -145,7 +164,7 @@ const DetalleExpediente = ({
             {renderCampo('Subtotal', datos?.subtotal ? utils.formatearMoneda?.(datos.subtotal) : '-')}
             {renderCampo('IVA 16%', datos?.iva ? utils.formatearMoneda?.(datos.iva) : '-')}
             {renderCampo('Importe Total', datos?.total ? utils.formatearMoneda?.(datos.total) : '-')}
-            {renderCampo('Forma de Pago', datos?.tipo_pago?.toUpperCase?.() || datos?.tipo_pago)}
+            {renderCampo('Forma de Pago', (tipoPagoMostrar || datos?.tipo_pago)?.toUpperCase?.())}
             {datos?.fecha_pago && renderCampo('Pago Único', datos?.pago_unico ? utils.formatearMoneda?.(datos.pago_unico) : '-')}
           </div>
         </div>
@@ -253,13 +272,38 @@ const DetalleExpediente = ({
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.tipo_pago}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{tipoPagoMostrar || datos.tipo_pago}</strong></div>
+                    {datos?.tipo_pago && datos?.tipo_pago.toUpperCase() === 'FRACCIONADO' && tipoPagoMostrar && tipoPagoMostrar.toUpperCase() !== 'ANUAL' && (
+                      <small className="text-muted" style={{ fontSize: '0.6rem' }}>Fraccionado ({tipoPagoMostrar})</small>
+                    )}
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.agente || '-'}</strong></div>
                   </div>
                 </div>
+                {(datos.uso || datos.servicio || datos.movimiento) && (
+                  <div className="row g-1 mt-1">
+                    {datos.uso && (
+                      <div className="col-md-4">
+                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Uso:</small>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.uso}</strong></div>
+                      </div>
+                    )}
+                    {datos.servicio && (
+                      <div className="col-md-4">
+                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Servicio:</small>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.servicio}</strong></div>
+                      </div>
+                    )}
+                    {datos.movimiento && (
+                      <div className="col-md-4">
+                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Movimiento:</small>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{datos.movimiento}</strong></div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               {/* VIGENCIA */}
               <div className="p-2 bg-success bg-opacity-10 rounded mb-2">

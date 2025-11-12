@@ -1,13 +1,19 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import toast from 'react-hot-toast';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import HistorialNotificaciones from '../components/HistorialNotificaciones';
 import BuscadorCliente from '../components/BuscadorCliente';
+import ModalCapturarContacto from '../components/ModalCapturarContacto';
 import { obtenerAgentesEquipo } from '../services/equipoDeTrabajoService';
 import { obtenerTiposProductosActivos } from '../services/tiposProductosService';
 import * as pdfjsLib from 'pdfjs-dist';
 import * as pdfService from '../services/pdfService';
+import * as notificacionesService from '../services/notificacionesService';
+import * as clientesService from '../services/clientesService';
+import * as historialService from '../services/historialExpedienteService';
+import TimelineExpediente from '../components/TimelineExpediente';
 
 // Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
@@ -34,12 +40,22 @@ const CONSTANTS = {
 const utils = {
   formatearFecha: (fecha, formato = 'corta') => {
     if (!fecha) return '-';
+    
+    // 🔥 Crear fecha en hora local para evitar problemas de timezone
+    let fechaObj;
+    if (typeof fecha === 'string' && fecha.includes('-')) {
+      const [year, month, day] = fecha.split('-');
+      fechaObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    } else {
+      fechaObj = new Date(fecha);
+    }
+    
     const opciones = {
       corta: { day: '2-digit', month: 'short' },
       media: { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' },
       larga: { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }
     };
-    return new Date(fecha).toLocaleDateString('es-MX', opciones[formato]);
+    return fechaObj.toLocaleDateString('es-MX', opciones[formato]);
   },
 
   formatearMoneda: (monto) => {
@@ -77,8 +93,20 @@ const utils = {
 
   calcularDiasRestantes: (fecha) => {
     if (!fecha) return null;
+    
+    // 🔥 Crear fechas en hora local para evitar problemas de timezone
     const hoy = new Date();
-    const fechaObjetivo = new Date(fecha);
+    hoy.setHours(0, 0, 0, 0);
+    
+    let fechaObjetivo;
+    if (typeof fecha === 'string' && fecha.includes('-')) {
+      const [year, month, day] = fecha.split('-');
+      fechaObjetivo = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    } else {
+      fechaObjetivo = new Date(fecha);
+    }
+    fechaObjetivo.setHours(0, 0, 0, 0);
+    
     return Math.ceil((fechaObjetivo - hoy) / (1000 * 60 * 60 * 24));
   }
 };
@@ -210,7 +238,7 @@ const EstadoPago = React.memo(({ expediente }) => (
       <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
     )}
     <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
-    {expediente.proximoPago && expediente.estatusPago !== 'Pagado' && (
+    {expediente.proximoPago && ((expediente.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expediente.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
       <div>
         <small className={`${
           expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
@@ -237,20 +265,40 @@ const CalendarioPagos = React.memo(({
   const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[expediente.frecuenciaPago] || 0;
   const pagos = [];
   
+  // 🔧 Obtener periodo de gracia del expediente o calcular según compañía (convertir a número)
+  const periodoGracia = expediente.periodo_gracia 
+    ? parseInt(expediente.periodo_gracia, 10)
+    : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+  
+  console.log('📅 CALENDARIO - Periodo de gracia usado:', periodoGracia, '| Del expediente:', expediente.periodo_gracia, '| Tipo:', typeof expediente.periodo_gracia);
+  
+  // Determinar montos: usar primer_pago y pagos_subsecuentes si están disponibles, sino dividir el total
+  const usarMontosExactos = expediente.primer_pago && expediente.pagos_subsecuentes;
+  const primerPagoMonto = usarMontosExactos ? parseFloat(expediente.primer_pago) : null;
+  const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(expediente.pagos_subsecuentes) : null;
+  const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+  
   for (let i = 1; i <= numeroPagos; i++) {
     const fechaPago = calcularProximoPago(
       expediente.inicio_vigencia,
       expediente.tipo_pago,
       expediente.frecuenciaPago,
       expediente.compania,
-      i
+      i,
+      periodoGracia  // 🔥 Pasar periodo de gracia del expediente
     );
     
     if (fechaPago) {
+      // Calcular monto según si es primer pago o subsecuente
+      let monto = montoPorDefecto;
+      if (usarMontosExactos) {
+        monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
+      }
+      
       pagos.push({
         numero: i,
         fecha: fechaPago,
-        monto: expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---'
+        monto: monto
       });
     }
   }
@@ -261,7 +309,9 @@ const CalendarioPagos = React.memo(({
   let pagosRealizados = 0;
 
   const pagosProcesados = pagos.map((pago) => {
-    const fechaPago = new Date(pago.fecha);
+    // 🔥 Crear fecha en hora local para evitar problemas de timezone
+    const [year, month, day] = pago.fecha.split('-');
+    const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
     
     let pagado = false;
@@ -530,7 +580,7 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 
 // ============= COMPONENTE EXTRACTOR PDF =============
 const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {
-  const [estado, setEstado] = useState('esperando'); // esperando, procesando, validando-cliente, validando-agente, preview-datos, error
+  const [estado, setEstado] = useState('esperando'); // esperando, procesando, validando-cliente, validando-agente, preview-datos, error, capturando-rfc
   const [archivo, setArchivo] = useState(null);
   const [datosExtraidos, setDatosExtraidos] = useState(null);
   const [errores, setErrores] = useState([]);
@@ -541,6 +591,10 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   const [agenteEncontrado, setAgenteEncontrado] = useState(null);
   const [decisionCliente, setDecisionCliente] = useState(null); // 'usar-existente', 'crear-nuevo'
   const [decisionAgente, setDecisionAgente] = useState(null); // 'usar-existente', 'crear-nuevo', 'omitir'
+  
+  // Estados para captura de RFC
+  const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
+  const [rfcCapturado, setRfcCapturado] = useState('');
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -605,9 +659,32 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             .join(' ');
         })
         .join('\n');
+      
+      // TAMBIÉN extraer TODO el texto sin ordenar por posición (captura mejor texto en cuadros)
+      const textoCompletoSinOrdenar = textContent.items.map(item => item.str).join(' ');
 
       console.log('📄 Texto página 1 (primeras 20 líneas):\n', textoPagina1.split('\n').slice(0, 20).join('\n'));
-      console.log('📄 Texto página 2 (primeras 20 líneas):\n', textoCompleto.split('\n').slice(0, 20).join('\n'));
+      console.log('📄 Texto página 2 (primeras 50 líneas):\n', textoCompleto.split('\n').slice(0, 50).join('\n'));
+      console.log('📄 Texto página 2 (ÚLTIMAS 50 líneas):\n', textoCompleto.split('\n').slice(-50).join('\n'));
+      
+      // DEBUG: Buscar si "TRIMESTRAL" aparece en alguna página
+      console.log('🔍 BUSCAR TRIMESTRAL en pág 1:', textoPagina1.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
+      console.log('🔍 BUSCAR TRIMESTRAL en pág 2:', textoCompleto.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
+      console.log('🔍 BUSCAR TRIMESTRAL en texto sin ordenar:', textoCompletoSinOrdenar.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
+      
+      // Si existe, mostrar contexto
+      if (textoCompleto.includes('TRIMESTRAL')) {
+        const idx = textoCompleto.indexOf('TRIMESTRAL');
+        console.log('📍 Contexto de TRIMESTRAL (ordenado):', textoCompleto.substring(Math.max(0, idx - 100), idx + 100));
+      }
+      if (textoCompletoSinOrdenar.includes('TRIMESTRAL')) {
+        const idx = textoCompletoSinOrdenar.indexOf('TRIMESTRAL');
+        console.log('📍 Contexto de TRIMESTRAL (sin ordenar):', textoCompletoSinOrdenar.substring(Math.max(0, idx - 100), idx + 100));
+      }
+      if (textoPagina1.includes('TRIMESTRAL')) {
+        const idx = textoPagina1.indexOf('TRIMESTRAL');
+        console.log('📍 Contexto de TRIMESTRAL (pág 1):', textoPagina1.substring(Math.max(0, idx - 100), idx + 100));
+      }
 
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
@@ -733,9 +810,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         // ==================== RFC (PRIMERO - para determinar tipo de persona) ====================
         // RFC puede ser:
         // - Persona Física: 4 letras + 6 dígitos + 3 caracteres (AAAA######XXX) - 13 caracteres
-        // - Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
+        // Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
         const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
-        const rfcExtraido = rfcMatch ? rfcMatch[1] : '';
+        let rfcExtraido = rfcMatch ? rfcMatch[1] : '';
+        
+        // ✅ Si no se encuentra RFC, continuar de todos modos (lo pediremos después si es necesario)
+        if (!rfcExtraido || rfcExtraido.trim() === '') {
+          console.warn('⚠️ RFC no encontrado en el PDF. Se solicitará después si es necesario.');
+          rfcExtraido = ''; // Dejar vacío, se manejará después
+        }
+        
         const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
         
         console.log('🔍 RFC extraído:', rfcExtraido, '- Longitud:', rfcExtraido.length, '- Tipo:', tipoPersona);
@@ -849,11 +933,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         // ==================== CURP (solo para Persona Física) ====================
         const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
         
-        // ==================== VEHÍCULO ====================
-        const descripcionMatch = textoCompleto.match(/(\d{5})\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z\s0-9\.]+?)(?=Tipo:|$)/i);
-        const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-        const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9]{5,})(?=\s|$)/i);
-        const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
+  // ==================== VEHÍCULO ====================
+  // Algunos códigos de vehículo vienen con 3, 4, 5 o 6 dígitos. El patrón anterior esperaba exactamente 5.
+  // Ejemplos observados: "394 HONDA CIVIC ...", "0971462991 PORSCHE CAYENNE ..." (en otras pólizas el código puede ser largo).
+  // Ampliamos el rango y permitimos puntos y guiones en el modelo.
+  const descripcionMatch = textoCompleto.match(/(\d{3,6})\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=Tipo:|Serie:|Motor:|Modelo:|$)/i);
+  const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
+  const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9\-]{3,})(?=\s|$)/i);
+  const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
         
         // MEJORAR EXTRACCIÓN DE PLACAS - Excluir palabras como VIGENCIA
         // Las placas en México suelen tener formato: 3 letras + 3 números (ABC123) o 3 letras + 2 números + 1 letra (ABC12D)
@@ -881,19 +968,38 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         
         const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
         
-        // Extracción alternativa más específica para marca y modelo
+        // =============== EXTRACCIÓN MARCA / MODELO ===============
+        // Estrategia escalonada: patrón principal -> alternativo -> fallback por marcas conocidas.
         let marca = '';
         let modeloCompleto = '';
-        
+
         if (descripcionMatch) {
           marca = descripcionMatch[2];
           modeloCompleto = descripcionMatch[3].trim();
+          console.log('🚗 Extracción vehículo (principal) OK:', { marca, modeloCompleto });
         } else {
-          // Buscar patrón alternativo: después del código y (I) viene MARCA MODELO
-          const altMatch = textoCompleto.match(/\d{4,5}\s*\(?\w*\)?\s*([A-Z]+)\s+([A-Z0-9\s\.]+?)(?=\s*Tipo:|\s*Serie:|\n)/i);
+          const altMatch = textoCompleto.match(/\d{3,6}\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=\s*Tipo:|\s*Serie:|Motor:|Modelo:|\n)/i);
           if (altMatch) {
             marca = altMatch[1];
             modeloCompleto = altMatch[2].trim();
+            console.log('🚗 Extracción vehículo (alternativa) OK:', { marca, modeloCompleto });
+          } else {
+            // Fallback: buscar línea que contenga una marca conocida seguida de más texto antes de "Tipo:" o "Serie:".
+            const marcasFallback = [
+              'AUDI','BMW','CHEVROLET','CHRYSLER','DODGE','FIAT','FORD','HONDA','HYUNDAI','JEEP','KIA','MAZDA','MERCEDES','MERCEDES-BENZ','MITSUBISHI','NISSAN','PEUGEOT','PORSCHE','RENAULT','SEAT','SUZUKI','TOYOTA','VOLKSWAGEN','VOLVO'
+            ];
+            const marcasRegex = new RegExp(`\\b(${marcasFallback.join('|')})\\b\\s+([A-Z0-9][A-Z0-9\\s\-\.]{3,})`, 'i');
+            const fallbackMatch = textoCompleto.match(marcasRegex);
+            if (fallbackMatch) {
+              marca = fallbackMatch[1];
+              // Cortar el modelo antes de palabras clave si aparecen
+              modeloCompleto = fallbackMatch[2]
+                .split(/\s+(?:Tipo:|Serie:|Motor:|Modelo:)/i)[0]
+                .trim();
+              console.log('🚗 Extracción vehículo (fallback) OK:', { marca, modeloCompleto });
+            } else {
+              console.log('⚠️ No se pudo extraer marca/modelo con ninguno de los patrones');
+            }
           }
         }
         
@@ -902,26 +1008,99 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.log('🚗 Placas extraídas:', placasExtraidas);
         
         // ==================== VIGENCIA ====================
-        const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        const hastaMatch = textoCompleto.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
+  const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
+  const hastaMatch = textoCompleto.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
         
-        // Para fecha de pago: extraer la fecha directamente O calcular desde plazo
-        let fechaPagoFinal = '';
-        const fechaPagoDirecta = textoCompleto.match(/Fecha\s+Vencimiento\s+del\s+pago[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
+        // ==================== PERIODO DE GRACIA ====================
+        // Extraer solo el periodo de gracia, el formulario calculará las fechas de pago
         const plazoMatch = textoCompleto.match(/Plazo\s+de\s+pago:\s*(\d+)\s*d[ií]as/i);
+        const periodoGraciaExtraido = plazoMatch ? plazoMatch[1] : '14'; // Default 14 si no se encuentra
         
-        if (fechaPagoDirecta) {
-          fechaPagoFinal = `${fechaPagoDirecta[3]}-${meses[fechaPagoDirecta[2]]}-${fechaPagoDirecta[1]}`;
-          console.log('✅ Fecha pago extraída directamente:', fechaPagoFinal);
-        } else if (desdeMatch && plazoMatch) {
-          // Calcular fecha de pago: fecha inicio + plazo días
-          const fechaInicio = new Date(`${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}`);
-          fechaInicio.setDate(fechaInicio.getDate() + parseInt(plazoMatch[1]));
-          fechaPagoFinal = fechaInicio.toISOString().split('T')[0];
-          console.log('✅ Fecha pago calculada (inicio + plazo):', fechaPagoFinal);
+        console.log('📅 Periodo de gracia extraído:', plazoMatch ? `${plazoMatch[1]} días` : 'NO ENCONTRADO (usando 14 por defecto)');
+
+        // ==================== FORMA DE PAGO Y PARCIALES ====================
+        // En Qualitas, la forma de pago aparece DESPUÉS de "Gastos por Expedición" y ANTES de "Pago:"
+        // Puede ser: TRIMESTRAL, MENSUAL, SEMESTRAL, ANUAL, CONTADO, etc.
+        
+        console.log('🔍 DEBUG - Buscando forma de pago entre "Gastos" y "Pago:"...');
+        
+        // Buscar en textoCompleto (que YA sabemos que contiene TRIMESTRAL según los logs)
+        const seccionGastosAPago = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+[\d,]+\.?\d*\s+([\s\S]{0,100}?)Pago:/i);
+        
+        let formaPagoEncontrada = null;
+        
+        if (seccionGastosAPago) {
+          const textoEntreGastosYPago = seccionGastosAPago[1].trim();
+          console.log('🔍 DEBUG - Texto entre "Gastos Expedición" y "Pago:":', textoEntreGastosYPago);
+          
+          // Buscar palabras clave de periodicidad o forma de pago
+          const match = textoEntreGastosYPago.match(/(TRIMESTRAL|MENSUAL|SEMESTRAL|ANUAL|BIMESTRAL|CUATRIMESTRAL|CONTADO)/i);
+          
+          if (match) {
+            formaPagoEncontrada = match[1].toUpperCase();
+            console.log('✅ Forma de pago encontrada:', formaPagoEncontrada);
+          } else {
+            console.log('⚠️ No se encontró forma de pago en esa sección. Texto:', textoEntreGastosYPago);
+          }
         } else {
-          console.log('⚠️ No se pudo extraer ni calcular fecha de pago');
+          console.log('⚠️ No se encontró la sección entre "Gastos Expedición" y "Pago:"');
         }
+        
+        const formaPagoMatch = formaPagoEncontrada ? [null, formaPagoEncontrada] : null;
+        
+        const primerPagoMatch = textoCompleto.match(/Primer\s+pago\s+([\d,]+\.?\d*)/i);
+        const pagosSubMatch =
+          textoCompleto.match(/Pago\(s\)\s*Subsecuente\(s\)\s+([\d,]+\.?\d*)/i) ||
+          textoCompleto.match(/Pagos?\s+subsecuentes?\s+([\d,]+\.?\d*)/i);
+
+        const formaPagoDetectada = formaPagoMatch ? formaPagoMatch[1].trim().toUpperCase() : '';
+        const primerPago = primerPagoMatch ? primerPagoMatch[1].replace(/,/g, '') : '';
+        const pagosSubsecuentes = pagosSubMatch ? pagosSubMatch[1].replace(/,/g, '') : '';
+
+        console.log('💰 Datos de pago extraídos del PDF:');
+        console.log('   - Forma de pago (texto PDF):', formaPagoDetectada);
+        console.log('   - Primer pago:', primerPago);
+        console.log('   - Pagos subsecuentes:', pagosSubsecuentes);
+
+        // Normalizar tipo_pago a partir de la forma de pago extraída
+        let tipoPagoDetectado = '';
+        
+        if (formaPagoDetectada) {
+          const f = formaPagoDetectada.toLowerCase();
+          
+          // Mapear palabras clave a tipos de pago
+          if (f.includes('tri')) {
+            tipoPagoDetectado = 'Trimestral';
+          } else if (f.includes('men')) {
+            tipoPagoDetectado = 'Mensual';
+          } else if (f.includes('sem')) {
+            tipoPagoDetectado = 'Semestral';
+          } else if (f.includes('anu')) {
+            tipoPagoDetectado = 'Anual';
+          } else if (f.includes('contado')) {
+            tipoPagoDetectado = 'Anual'; // CONTADO = pago único = Anual
+          } else if (f.includes('bim')) {
+            tipoPagoDetectado = 'Bimestral';
+          } else if (f.includes('cuat')) {
+            tipoPagoDetectado = 'Cuatrimestral';
+          } else {
+            // Si no coincide con ningún patrón, usar el texto tal cual
+            tipoPagoDetectado = formaPagoDetectada;
+          }
+          
+          console.log('✅ Tipo de pago normalizado:', tipoPagoDetectado);
+        } else {
+          // No se encontró forma de pago, dejar vacío
+          console.warn('⚠️ No se encontró forma de pago en PDF');
+          tipoPagoDetectado = '';
+        }
+        
+        console.log('   - Tipo de pago final:', tipoPagoDetectado || '(VACÍO - usuario debe completar)');
+
+        // ==================== USO / SERVICIO / MOVIMIENTO ====================
+        const usoMatch = textoCompleto.match(/Uso:\s*([A-ZÁÉÍÓÚÑ]+)/i);
+        const servicioMatch = textoCompleto.match(/Servicio:\s*([A-ZÁÉÍÓÚÑ]+)/i);
+        const movimientoMatch = textoCompleto.match(/Movimiento:\s*([A-ZÁÉÍÓÚÑ]+)/i);
         
         // ==================== COBERTURAS ====================
         console.log('🛡️ Extrayendo coberturas...');
@@ -1054,9 +1233,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           // VIGENCIA
           inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
           termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
-          fecha_pago: fechaPagoFinal,
-          fecha_vencimiento_pago: fechaPagoFinal,
-          plazo_pago_dias: plazoMatch ? plazoMatch[1] : '14',
+          // ✅ NO extraer fecha_pago - será calculada por el formulario usando inicio_vigencia + periodo_gracia
           
           // MONTOS
           prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
@@ -1066,8 +1243,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           iva: ivaMatch ? ivaMatch[1].replace(/,/g, '') : '',
           total: totalMatch ? totalMatch[1].replace(/,/g, '') : '',
           pago_unico: pagoUnicoMatch ? pagoUnicoMatch[1].replace(/,/g, '') : '',
-          tipo_pago: 'Anual',
-          periodo_gracia: plazoMatch ? plazoMatch[1] : '14',
+          // FORMA Y TIPO DE PAGO
+          tipo_pago: tipoPagoDetectado,
+          forma_pago: formaPagoDetectada || '',
+          primer_pago: primerPago,
+          pagos_subsecuentes: pagosSubsecuentes,
+          periodo_gracia: periodoGraciaExtraido, // ✅ Del PDF
           suma_asegurada: sumaMatch ? sumaMatch[1].replace(/,/g, '') : '',
           deducible: deducibleMatch ? deducibleMatch[1] : '5',
           
@@ -1086,6 +1267,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           // COBERTURAS DETALLADAS
           coberturas: coberturasExtraidas,
           
+          // CAMPOS ADICIONALES QUALITAS
+          uso: usoMatch ? usoMatch[1].trim() : '',
+          servicio: servicioMatch ? servicioMatch[1].trim() : '',
+          movimiento: movimientoMatch ? movimientoMatch[1].trim() : '',
+
           // CONDUCTOR
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
         };
@@ -1120,27 +1306,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('✅ Tipo de cobertura normalizado:', datosExtraidos.tipo_cobertura);
         }
         
-        // Calcular estatusPago basado en fecha_vencimiento_pago
-        if (fechaPagoFinal) {
-          const fechaVencimiento = new Date(fechaPagoFinal);
-          const hoy = new Date();
-          hoy.setHours(0, 0, 0, 0);
-          fechaVencimiento.setHours(0, 0, 0, 0);
-          
-          const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
-          
-          if (diasRestantes < 0) {
-            datosExtraidos.estatusPago = 'Vencido';
-          } else if (diasRestantes <= 15) {
-            datosExtraidos.estatusPago = 'Por Vencer';
-          } else {
-            datosExtraidos.estatusPago = 'Pendiente';
-          }
-          console.log('✅ Estatus de pago calculado:', datosExtraidos.estatusPago, '(Vencimiento:', fechaPagoFinal, 'Días restantes:', diasRestantes, ')');
-        } else {
-          datosExtraidos.estatusPago = 'Pendiente';
-          console.log('⚠️ Sin fecha de vencimiento, estatus por defecto: Pendiente');
-        }
+        // ✅ estatusPago será calculado por actualizarCalculosAutomaticos() después
+        // No lo calculamos aquí porque no tenemos fecha_pago en la extracción
         
         console.log('📊 Datos extraídos completos:', datosExtraidos);
         console.log('🚗 DEBUG - Datos del vehículo después de extracción:', {
@@ -1248,6 +1415,91 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         cliente_id: clienteExistente?.id || null
       };
 
+      // ==================== VALIDACIÓN DE PAGOS FRACCIONADOS ====================
+      // Regla del negocio: En pagos fraccionados, el primer pago suele diferir de los subsecuentes.
+      // Además, se valida que la suma: primer_pago + (n-1)*pagos_subsecuentes ≈ total
+      try {
+        const toNumber = (v) => {
+          if (v === undefined || v === null) return null;
+          const n = parseFloat(String(v).replace(/,/g, ''));
+          return Number.isFinite(n) ? n : null;
+        };
+
+        const primer = toNumber(resultado.primer_pago);
+        const subsecuentes = toNumber(resultado.pagos_subsecuentes);
+        const totalPoliza = toNumber(resultado.total);
+
+        // Inferir número de pagos por la forma/tipo de pago
+        const base = `${resultado.forma_pago || resultado.tipo_pago || ''}`.toLowerCase();
+        let numeroPagos = 1;
+        if (base.includes('men')) numeroPagos = 12;
+        else if (base.includes('tri')) numeroPagos = 4;
+        else if (base.includes('sem')) numeroPagos = 2;
+        else if (base.includes('anu')) numeroPagos = 1;
+
+        const alertas_financieras = [];
+        const validacion_pagos = {
+          numero_pagos_inferido: numeroPagos,
+          primer_pago: primer,
+          pagos_subsecuentes: subsecuentes,
+          total_pdf: totalPoliza,
+          primer_vs_subsecuentes_diferentes: null,
+          total_consistente: null,
+          total_calculado: null,
+          tolerancia: null
+        };
+
+        // Validar que primer pago y subsecuentes NO sean iguales (práctica común: difieren)
+        if (numeroPagos > 1 && primer !== null && subsecuentes !== null) {
+          const iguales = Math.abs(primer - subsecuentes) < 0.005; // tolerancia pequeña por redondeo
+          validacion_pagos.primer_vs_subsecuentes_diferentes = !iguales;
+          if (iguales) {
+            alertas_financieras.push({
+              tipo: 'advertencia',
+              codigo: 'PAGOS_IGUALES',
+              mensaje: 'El primer pago y los pagos subsecuentes son iguales; normalmente deben diferir (primer pago incluye gastos iniciales).',
+              detalle: { primer, subsecuentes }
+            });
+            console.warn('⚠️ Validación pagos: primer pago y subsecuentes son iguales.', { primer, subsecuentes });
+          }
+        }
+
+        // Validar consistencia contra el total
+        if (numeroPagos > 1 && primer !== null && subsecuentes !== null && totalPoliza !== null) {
+          const totalCalculado = primer + (numeroPagos - 1) * subsecuentes;
+          const tolerancia = Math.max(1, totalPoliza * 0.002); // ±0.2% o $1 mínimo
+          const diferencia = Math.abs(totalCalculado - totalPoliza);
+          validacion_pagos.total_calculado = Number(totalCalculado.toFixed(2));
+          validacion_pagos.tolerancia = tolerancia;
+          validacion_pagos.total_consistente = diferencia <= tolerancia;
+          if (!validacion_pagos.total_consistente) {
+            alertas_financieras.push({
+              tipo: 'advertencia',
+              codigo: 'TOTAL_NO_COINCIDE',
+              mensaje: 'La suma de pagos fraccionados no coincide con el importe total de la póliza.',
+              detalle: {
+                numeroPagos,
+                primer,
+                subsecuentes,
+                total_pdf: totalPoliza,
+                total_calculado: Number(totalCalculado.toFixed(2)),
+                diferencia: Number((totalCalculado - totalPoliza).toFixed(2)),
+                tolerancia
+              }
+            });
+            console.warn('⚠️ Validación pagos: total no coincide con suma de fraccionados.', validacion_pagos);
+          } else {
+            console.log('✅ Validación pagos: total consistente con fraccionados.', validacion_pagos);
+          }
+        }
+
+        // Adjuntar resultados al objeto
+        resultado.alertas_financieras = alertas_financieras;
+        resultado.validacion_pagos = validacion_pagos;
+      } catch (e) {
+        console.warn('⚠️ Error durante validación de pagos fraccionados:', e);
+      }
+
       setDatosExtraidos(resultado);
       
       // Guardar información del cliente encontrado (o null si no existe)
@@ -1320,7 +1572,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     setDecisionCliente(decision);
     
     if (decision === 'crear-nuevo') {
-      // Crear cliente automáticamente
+      // ✅ VALIDAR RFC ANTES DE CREAR CLIENTE
+      if (!datosExtraidos.rfc || datosExtraidos.rfc.trim() === '') {
+        console.log('⚠️ RFC no encontrado - Abriendo modal de captura');
+        setMostrarModalRFC(true);
+        setEstado('capturando-rfc');
+        return; // Detener hasta que se capture el RFC
+      }
+      
+      // Si hay RFC, continuar con la creación normal
       console.log('🔄 Creando nuevo cliente...');
       
       // Usar tipo de persona ya detectado en la extracción
@@ -1442,6 +1702,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       } else {
         console.error('❌ Error al crear cliente:', resultado.error);
+        
+        // ✅ CASO ESPECIAL: Si el error es por RFC faltante, mostrar modal de captura
+        if (resultado.error && resultado.error.includes('RFC')) {
+          console.log('⚠️ RFC no encontrado en PDF - Abriendo modal de captura');
+          setMostrarModalRFC(true);
+          setEstado('capturando-rfc');
+          return;
+        }
+        
+        // Si no es error de RFC, mostrar error normal
         setErrores(['❌ Error al crear cliente: ' + resultado.error]);
         setEstado('error');
         return;
@@ -1450,6 +1720,124 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     
     // Pasar al PASO 2: Validación de Agente
     setEstado('validando-agente');
+  }, [datosExtraidos]);
+
+  // ✅ FUNCIÓN SIMPLIFICADA: Asignar RFC y continuar con creación de cliente
+  const handleSeleccionRFC = useCallback(async (opcion, rfcManual = '') => {
+    console.log(`✅ Usuario seleccionó: ${opcion}`, rfcManual ? `RFC manual: ${rfcManual}` : '');
+    
+    let rfcFinal = '';
+    let tipoPersonaFinal = '';
+    
+    if (opcion === 'fisica') {
+      rfcFinal = 'XAXX010101000'; // 13 caracteres
+      tipoPersonaFinal = 'Fisica';
+      console.log('✅ RFC Genérico Persona Física:', rfcFinal);
+    } else if (opcion === 'moral') {
+      rfcFinal = 'XAXX010101'; // 12 caracteres
+      tipoPersonaFinal = 'Moral';
+      console.log('✅ RFC Genérico Persona Moral:', rfcFinal);
+    } else if (opcion === 'capturar' && rfcManual) {
+      rfcFinal = rfcManual.toUpperCase().trim();
+      tipoPersonaFinal = rfcFinal.length === 13 ? 'Fisica' : 'Moral';
+      console.log('✅ RFC Manual capturado:', rfcFinal, '- Tipo:', tipoPersonaFinal);
+    }
+    
+    if (!rfcFinal) {
+      toast.error('⚠️ RFC inválido');
+      return;
+    }
+    
+    console.log(`✅ RFC FINAL asignado: ${rfcFinal} (${tipoPersonaFinal})`);
+    
+    // Cerrar modal
+    setMostrarModalRFC(false);
+    setRfcCapturado('');
+    
+    // ✅ Actualizar datosExtraidos con el RFC asignado
+    const datosActualizados = {
+      ...datosExtraidos,
+      rfc: rfcFinal,
+      tipo_persona: tipoPersonaFinal
+    };
+    setDatosExtraidos(datosActualizados);
+    
+    // ✅ CONTINUAR con la creación del cliente (copiar lógica de handleDecisionCliente)
+    console.log('🔄 Creando nuevo cliente con RFC asignado...');
+    
+    const tipoPersonaDetectado = tipoPersonaFinal === 'Moral' ? 'Persona Moral' : 'Persona Física';
+    
+    // Preparar datos según tipo de persona
+    let nuevoCliente = {};
+    
+    if (tipoPersonaDetectado === 'Persona Moral') {
+      nuevoCliente = {
+        tipoPersona: tipoPersonaDetectado,
+        razonSocial: datosActualizados.razonSocial || 'Empresa',
+        rfc: rfcFinal,
+        direccion: datosActualizados.domicilio || '',
+        municipio: datosActualizados.municipio || '',
+        colonia: datosActualizados.colonia || '',
+        estado: datosActualizados.estado || '',
+        codigoPostal: datosActualizados.codigo_postal || '',
+        pais: datosActualizados.pais || 'MEXICO',
+        email: datosActualizados.email || '',
+        activo: true
+      };
+    } else {
+      nuevoCliente = {
+        tipoPersona: tipoPersonaDetectado,
+        nombre: datosActualizados.nombre || '',
+        apellidoPaterno: datosActualizados.apellido_paterno || '',
+        apellidoMaterno: datosActualizados.apellido_materno || '',
+        rfc: rfcFinal,
+        direccion: datosActualizados.domicilio || '',
+        municipio: datosActualizados.municipio || '',
+        colonia: datosActualizados.colonia || '',
+        estado: datosActualizados.estado || '',
+        codigoPostal: datosActualizados.codigo_postal || '',
+        pais: datosActualizados.pais || 'MEXICO',
+        email: datosActualizados.email || '',
+        activo: true
+      };
+    }
+    
+    console.log('📋 Datos del cliente a crear:', nuevoCliente);
+    
+    try {
+      const { crearCliente } = await import('../services/clientesService');
+      const resultado = await crearCliente(nuevoCliente);
+      
+      console.log('� Respuesta de crearCliente:', resultado);
+      
+      if (resultado.success && resultado.data) {
+        const clienteNormalizado = {
+          ...resultado.data,
+          razonSocial: resultado.data.razonSocial || resultado.data.razon_social || '',
+          nombreComercial: resultado.data.nombreComercial || resultado.data.nombre_comercial || '',
+          apellidoPaterno: resultado.data.apellidoPaterno || resultado.data.apellido_paterno || '',
+          apellidoMaterno: resultado.data.apellidoMaterno || resultado.data.apellido_materno || '',
+          telefonoFijo: resultado.data.telefonoFijo || resultado.data.telefono_fijo || '',
+          telefonoMovil: resultado.data.telefonoMovil || resultado.data.telefono_movil || ''
+        };
+        
+        setClienteEncontrado(clienteNormalizado);
+        const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
+        console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', clienteNormalizado.id);
+        toast.success('✅ Cliente creado correctamente');
+        
+        // Pasar a validación de agente
+        setEstado('validando-agente');
+      } else {
+        console.error('❌ Error al crear cliente:', resultado.error);
+        toast.error('❌ Error al crear cliente: ' + resultado.error);
+        setEstado('error');
+      }
+    } catch (error) {
+      console.error('❌ Error en creación de cliente:', error);
+      toast.error('❌ Error al crear cliente');
+      setEstado('error');
+    }
   }, [datosExtraidos]);
 
   // PASO 2: Manejar decisión sobre el agente
@@ -1466,7 +1854,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       
       if (!codigoMatch || !nombreCompletoMatch) {
         console.error('❌ No se pudo extraer información del agente');
-        alert('No se pudo extraer la información del agente del PDF. Deberás crear el agente manualmente desde el módulo de Equipo de Trabajo.');
+  toast('⚠️ No se pudo extraer la información del agente del PDF. Crea el agente manualmente en Equipo de Trabajo.');
         // Continuar sin crear el agente
         setEstado('preview-datos');
         return;
@@ -1508,13 +1896,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         if (resultado.success) {
           setAgenteEncontrado(resultado.data);
           console.log('✅ Agente creado:', resultado.data.nombre);
-          alert(`✅ Agente creado exitosamente: ${nombre} ${apellidoPaterno}`);
+          toast.success(`Agente creado: ${nombre} ${apellidoPaterno}`);
         } else {
           throw new Error(resultado.error);
         }
       } catch (error) {
         console.error('❌ Error al crear agente:', error);
-        alert(`⚠️ No se pudo crear el agente automáticamente.\n\nDeberás agregarlo manualmente desde el módulo "Equipo de Trabajo".\n\nDatos del agente:\n- Código: ${codigo}\n- Nombre: ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
+  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
         // Continuar sin el agente
       }
     }
@@ -1568,6 +1956,52 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.warn('No se pudo adjuntar el archivo PDF al payload de datos extraídos:', e);
         }
       }
+
+      // ================== AJUSTES DE PAGO FRACCIONADO ==================
+      // Si la extracción detectó forma_pago y no se ha definido en el formulario, mapear:
+      // tipo_pago: 'Fraccionado' si la frecuencia no es anual
+      if (datosConCliente.forma_pago) {
+        const forma = datosConCliente.forma_pago.toLowerCase();
+        console.log('💳 Detectada forma de pago:', datosConCliente.forma_pago);
+        // Determinar frecuenciaPago según forma
+        if (forma.includes('tri')) datosConCliente.frecuenciaPago = 'Trimestral';
+        else if (forma.includes('men')) datosConCliente.frecuenciaPago = 'Mensual';
+        else if (forma.includes('sem')) datosConCliente.frecuenciaPago = 'Semestral';
+        // Si hay frecuencia asignada distinta de anual, marcar tipo_pago Fraccionado
+        if (datosConCliente.frecuenciaPago) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          console.log('✅ Asignado tipo_pago=Fraccionado, frecuenciaPago=', datosConCliente.frecuenciaPago);
+        }
+      }
+
+      // Calendario sugerido de pagos basado en primer_pago y pagos_subsecuentes (solo si fraccionado y hay monto)
+      if (datosConCliente.tipo_pago === 'Fraccionado' && datosConCliente.frecuenciaPago && datosConCliente.inicio_vigencia) {
+        try {
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
+          const mesesSalto = CONSTANTS.MESES_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
+          const inicio = new Date(datosConCliente.inicio_vigencia);
+          const pagos = [];
+          for (let i = 0; i < numeroPagos; i++) {
+            const fechaPago = new Date(inicio);
+            fechaPago.setMonth(fechaPago.getMonth() + i * mesesSalto);
+            pagos.push({
+              numero: i + 1,
+              fecha: fechaPago.toISOString().split('T')[0],
+              monto: i === 0 ? datosConCliente.primer_pago || '' : datosConCliente.pagos_subsecuentes || datosConCliente.primer_pago || '',
+              estado: '' // Se calculará después en interfaz
+            });
+          }
+          datosConCliente.calendario_pagos_sugerido = pagos;
+        } catch (e) {
+          console.warn('No se pudo generar calendario de pagos sugerido:', e);
+        }
+      }
+
+      // ================== CAMPOS ADICIONALES POLIZA (Uso/Servicio/Movimiento) ==================
+      // Si existen y el formulario espera camelCase, mantenerlos así.
+      if (datosConCliente.uso) datosConCliente.uso_poliza = datosConCliente.uso;
+      if (datosConCliente.servicio) datosConCliente.servicio_poliza = datosConCliente.servicio;
+      if (datosConCliente.movimiento) datosConCliente.movimiento_poliza = datosConCliente.movimiento;
       
       console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
@@ -1968,194 +2402,163 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                     <h6 className="mb-0">🎯 Datos Extraídos del PDF</h6>
                   </div>
                   <div className="card-body" style={{ padding: '0.5rem' }}>
-                    <div className="row g-1">
-                      {/* DATOS GENERALES DE PÓLIZA (AGRUPADO) */}
-                      <div className="col-12">
-                        <div className="accordion mb-3" id="accordionDatosGeneralesPoliza">
-                          <div className="accordion-item">
-                            <h2 className="accordion-header" id="headingDatosGeneralesPoliza">
-                              <button className="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDatosGeneralesPoliza" aria-expanded="true" aria-controls="collapseDatosGeneralesPoliza">
-                                Datos Generales de Póliza
-                              </button>
-                            </h2>
-                            <div id="collapseDatosGeneralesPoliza" className="accordion-collapse collapse show" aria-labelledby="headingDatosGeneralesPoliza" data-bs-parent="#accordionDatosGeneralesPoliza">
-                              <div className="accordion-body">
-                                {/* INFORMACIÓN DEL ASEGURADO */}
-                                <div className="p-2 bg-light rounded mb-2">
-                                  <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>👤 INFORMACIÓN DEL ASEGURADO</h6>
-                                  <div className="row g-1">
-                                    <div className="col-md-6">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.nombre} {datosExtraidos.apellido_paterno} {datosExtraidos.apellido_materno}</strong></div>
-                                    </div>
-                                    <div className="col-md-6">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* DATOS DE LA PÓLIZA */}
-                                <div className="p-2 bg-primary bg-opacity-10 rounded mb-2">
-                                  <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📋 DATOS DE LA PÓLIZA</h6>
-                                  <div className="row g-1">
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Compañía:</small>
-                                      <div><strong className="text-primary" style={{ fontSize: '0.8rem' }}>{datosExtraidos.compania}</strong></div>
-                                    </div>
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Número de Póliza:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.numero_poliza || '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Endoso:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.endoso || '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Inciso:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inciso || '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Plan:</small>
-                                      <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.plan || '-'}</strong></div>
-                                    </div>
-                                  </div>
-                                  <div className="row g-1 mt-1">
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Producto:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.producto}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.agente || '-'}</strong></div>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* VIGENCIA */}
-                                <div className="p-2 bg-success bg-opacity-10 rounded mb-2">
-                                  <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
-                                  <div className="row g-1">
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.inicio_vigencia ? new Date(datosExtraidos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.termino_vigencia ? new Date(datosExtraidos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha Vencimiento del pago:</small>
-                                      <div><strong className="text-warning-emphasis" style={{ fontSize: '0.8rem' }}>
-                                        {datosExtraidos.fecha_pago ? new Date(datosExtraidos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
-                                        {datosExtraidos.plazo_pago_dias && ` (${datosExtraidos.plazo_pago_dias} días)`}
-                                      </strong></div>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* DESCRIPCIÓN DEL VEHÍCULO ASEGURADO */}
-                                <div className="p-2 bg-info bg-opacity-10 rounded mb-2">
-                                  <h6 className="text-info mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>🚗 DESCRIPCIÓN DEL VEHÍCULO ASEGURADO</h6>
-                                  <div className="row g-1">
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Marca:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.marca}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Modelo:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.modelo}</strong></div>
-                                    </div>
-                                    <div className="col-md-1">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Año:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.anio}</strong></div>
-                                    </div>
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Placas:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.placas}</strong></div>
-                                    </div>
-                                    <div className="col-md-2">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Color:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.color || '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-1">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_vehiculo}</strong></div>
-                                    </div>
-                                  </div>
-                                  <div className="row g-1 mt-1">
-                                    <div className="col-md-6">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Serie (VIN):</small>
-                                      <div><strong className="font-monospace" style={{ fontSize: '0.75rem' }}>{datosExtraidos.numero_serie}</strong></div>
-                                    </div>
-                                    <div className="col-md-6">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Motor:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.motor || '-'}</strong></div>
-                                    </div>
-                                  </div>
-                                </div>
-                                {/* INFORMACIÓN FINANCIERA */}
-                                <div className="p-2 bg-secondary bg-opacity-10 rounded mb-2">
-                                  <h6 className="text-secondary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
-                                  <div className="row g-1">
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.prima_pagada ? utils.formatearMoneda(datosExtraidos.prima_pagada) : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tasa Financiamiento:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.cargo_pago_fraccionado ? utils.formatearMoneda(datosExtraidos.cargo_pago_fraccionado) : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-4">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos por Expedición:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.gastos_expedicion ? utils.formatearMoneda(datosExtraidos.gastos_expedicion) : '-'}</strong></div>
-                                    </div>
-                                  </div>
-                                  <div className="row g-1 mt-1">
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subtotal:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.subtotal ? utils.formatearMoneda(datosExtraidos.subtotal) : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A. 16%:</small>
-                                      <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.iva ? utils.formatearMoneda(datosExtraidos.iva) : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>IMPORTE TOTAL:</small>
-                                      <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datosExtraidos.total ? utils.formatearMoneda(datosExtraidos.total) : '-'}</strong></div>
-                                    </div>
-                                    <div className="col-md-3">
-                                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
-                                      <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datosExtraidos.tipo_pago || '-'}</strong></div>
-                                    </div>
-                                  </div>
-                                  {datosExtraidos.fecha_pago && (
-                                    <div className="row g-1 mt-1">
-                                      <div className="col-md-6">
-                                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Pago Único:</small>
-                                        <div><strong style={{ fontSize: '0.8rem' }}>{datosExtraidos.pago_unico ? utils.formatearMoneda(datosExtraidos.pago_unico) : '-'}</strong></div>
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                    {/* DEBUG: Verificar datos antes de renderizar */}
+                    {console.log('🔍 DEBUG - datosExtraidos antes de DetalleExpediente:', {
+                      marca: datosExtraidos?.marca,
+                      modelo: datosExtraidos?.modelo,
+                      anio: datosExtraidos?.anio,
+                      numero_serie: datosExtraidos?.numero_serie,
+                      placas: datosExtraidos?.placas,
+                      color: datosExtraidos?.color,
+                      producto: datosExtraidos?.producto
+                    })}
+                    {/* Usar únicamente el componente DetalleExpediente unificado */}
+                    <DetalleExpediente
+                      datos={datosExtraidos}
+                      coberturas={datosExtraidos.coberturas || []}
+                      mensajes={datosExtraidos.mensajes || []}
+                      utils={utils}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
-                      {/* Detalle de expediente unificado */}
-                      <div className="col-12">
-                        <DetalleExpediente
-                          datos={datosExtraidos}
-                          coberturas={datosExtraidos.coberturas || []}
-                          mensajes={datosExtraidos.mensajes || []}
-                          utils={utils}
-                        />
+            {/* MODAL DE CAPTURA RFC */}
+            {estado === 'capturando-rfc' && (
+              <div className="py-4">
+                <div className="text-center mb-4">
+                  <div className="bg-warning text-dark rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '60px', height: '60px', fontSize: '28px' }}>
+                    ⚠️
+                  </div>
+                  <h5 className="mt-3 mb-2">RFC no encontrado en el PDF</h5>
+                  <p className="text-muted">Seleccione el tipo de persona o capture el RFC manualmente</p>
+                </div>
+
+                <div className="row g-3 mb-4">
+                  {/* Opción Persona Física */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-primary text-center p-4" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        setMostrarModalRFC(false);
+                        handleSeleccionRFC('fisica');
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(13,110,253,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          👤
+                        </div>
+                        <h5 className="card-title text-primary mb-2">Persona Física</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Se asignará un RFC genérico de 13 caracteres
+                        </p>
+                        <button 
+                          className="btn btn-primary w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarModalRFC(false);
+                            handleSeleccionRFC('fisica');
+                          }}
+                        >
+                          Seleccionar
+                        </button>
                       </div>
                     </div>
                   </div>
+
+                  {/* Opción Persona Moral */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-success text-center p-4" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        setMostrarModalRFC(false);
+                        handleSeleccionRFC('moral');
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,135,84,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          🏢
+                        </div>
+                        <h5 className="card-title text-success mb-2">Persona Moral</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Se asignará un RFC genérico de 12 caracteres
+                        </p>
+                        <button 
+                          className="btn btn-success w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarModalRFC(false);
+                            handleSeleccionRFC('moral');
+                          }}
+                        >
+                          Seleccionar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Opción Captura Manual */}
+                <div className="card border-info">
+                  <div className="card-header bg-info bg-opacity-10 text-center">
+                    <h6 className="mb-0 text-info">
+                      ✍️ O capture el RFC manualmente si lo conoce
+                    </h6>
+                  </div>
+                  <div className="card-body">
+                    <div className="row g-3 align-items-end">
+                      <div className="col-md-8">
+                        <label className="form-label small text-muted">RFC (12 o 13 caracteres)</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-lg text-uppercase"
+                          placeholder="Ejemplo: XAXX010101000"
+                          value={rfcCapturado}
+                          onChange={(e) => setRfcCapturado(e.target.value.toUpperCase())}
+                          maxLength={13}
+                          style={{ fontFamily: 'monospace', letterSpacing: '1px' }}
+                        />
+                        <small className="form-text text-muted">
+                          {rfcCapturado.length > 0 && (
+                            <span>
+                              Longitud actual: <strong>{rfcCapturado.length}</strong> caracteres
+                              {rfcCapturado.length === 12 && <span className="text-success ms-2">✓ Persona Moral</span>}
+                              {rfcCapturado.length === 13 && <span className="text-primary ms-2">✓ Persona Física</span>}
+                              {rfcCapturado.length > 0 && rfcCapturado.length !== 12 && rfcCapturado.length !== 13 && (
+                                <span className="text-warning ms-2">⚠ Debe ser 12 o 13 caracteres</span>
+                              )}
+                            </span>
+                          )}
+                        </small>
+                      </div>
+                      <div className="col-md-4">
+                        <button
+                          className="btn btn-info w-100 btn-lg"
+                          disabled={!rfcCapturado || (rfcCapturado.length !== 12 && rfcCapturado.length !== 13)}
+                          onClick={() => {
+                            setMostrarModalRFC(false);
+                            handleSeleccionRFC('capturar', rfcCapturado);
+                          }}
+                        >
+                          Continuar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="alert alert-info mt-4 mb-0">
+                  <small>
+                    <strong>ℹ️ Nota:</strong> Los RFC genéricos son identificadores temporales válidos. 
+                    Podrá editar el RFC correcto después de crear el expediente.
+                  </small>
                 </div>
               </div>
             )}
@@ -2500,17 +2903,24 @@ const ListaExpedientes = React.memo(({
                               </button>
                             )}
 
-                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Renovada') && 
-                             expediente.estatusPago !== 'Pagado' && (
-                              <button
-                                onClick={() => aplicarPago(expediente.id)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Aplicar Pago"
-                              >
-                                <DollarSign size={12} />
-                              </button>
-                            )}
+                            {(() => {
+                              // Permitir aplicar pago en estas etapas
+                              const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
+                              const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
+                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                              const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
+                              
+                              return etapaValida && noPagado ? (
+                                <button
+                                  onClick={() => aplicarPago(expediente.id)}
+                                  className="btn btn-success btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                  title="Aplicar Pago"
+                                >
+                                  <DollarSign size={12} />
+                                </button>
+                              ) : null;
+                            })()}
 
                             
                             {expediente.etapa_activa !== 'Cancelada' && (
@@ -2601,6 +3011,9 @@ const Formulario = React.memo(({
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
+  const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
+  const [rfcCapturado, setRfcCapturado] = useState('');
+  const [datosTemporales, setDatosTemporales] = useState(null);
 
   const handleDataExtracted = useCallback(async (datosExtraidos) => {
     try {
@@ -2682,6 +3095,16 @@ const Formulario = React.memo(({
         ...datosPoliza 
       } = datosExtraidos;
       
+      // DEBUG: Verificar datos del vehículo
+      console.log('🚗 DEBUG - Datos del vehículo en datosPoliza:', {
+        marca: datosPoliza.marca,
+        modelo: datosPoliza.modelo,
+        anio: datosPoliza.anio,
+        numero_serie: datosPoliza.numero_serie,
+        placas: datosPoliza.placas,
+        color: datosPoliza.color
+      });
+      
       // Usar setFormulario con callback para hacer UPDATE PARCIAL
       setFormulario(prev => {
         const nuevoFormulario = {
@@ -2689,12 +3112,22 @@ const Formulario = React.memo(({
           ...datosPoliza, // Aplicar SOLO datos de la póliza (sin campos del cliente)
           // Mantener cliente_id
           cliente_id: datosExtraidos.cliente_id || prev.cliente_id,
+          // Si no tiene fecha_emision, usar fecha actual como valor inicial
+          fecha_emision: datosPoliza.fecha_emision || prev.fecha_emision || new Date().toISOString().split('T')[0],
           // Forzar valores de la póliza
           agente: agenteCodigo || '',
           sub_agente: '',
           etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
           compania: datosExtraidos.compania,
           producto: datosExtraidos.producto,
+          // ====== CONFIGURACIÓN DE PAGOS FRACCIONADOS ======
+          // Mapear tipo_pago y frecuenciaPago desde forma_pago si existe
+          tipo_pago: datosExtraidos.tipo_pago || prev.tipo_pago,
+          frecuenciaPago: datosExtraidos.frecuenciaPago || prev.frecuenciaPago,
+          forma_pago: datosExtraidos.forma_pago || prev.forma_pago,
+          primer_pago: datosExtraidos.primer_pago || prev.primer_pago,
+          pagos_subsecuentes: datosExtraidos.pagos_subsecuentes || prev.pagos_subsecuentes,
+          periodo_gracia: datosExtraidos.periodo_gracia || datosExtraidos.plazo_pago_dias || prev.periodo_gracia,
           // Guardar temporalmente el archivo PDF traído desde el extractor (no se envía al backend)
           __pdfFile: datosExtraidos.__pdfFile || prev.__pdfFile,
           __pdfNombre: datosExtraidos.__pdfNombre || prev.__pdfNombre,
@@ -2716,11 +3149,20 @@ const Formulario = React.memo(({
           inicio_vigencia: nuevoFormulario.inicio_vigencia
         });
         
+        console.log('🚗 DEBUG - Datos del vehículo en nuevoFormulario:', {
+          marca: nuevoFormulario.marca,
+          modelo: nuevoFormulario.modelo,
+          anio: nuevoFormulario.anio,
+          numero_serie: nuevoFormulario.numero_serie,
+          placas: nuevoFormulario.placas,
+          color: nuevoFormulario.color
+        });
+        
         return nuevoFormulario;
       });
       
       // 5. RECALCULAR FECHAS Y MONTOS AUTOMÁTICOS (incluye estatusPago)
-      if (datosExtraidos.inicio_vigencia || datosExtraidos.fecha_pago) {
+      if (datosExtraidos.inicio_vigencia) {
         setTimeout(() => {
           setFormulario(prev => {
             const formularioConCalculos = actualizarCalculosAutomaticos(prev);
@@ -2741,7 +3183,16 @@ const Formulario = React.memo(({
             color: datosExtraidos.color,
             tipo_vehiculo: datosExtraidos.tipo_vehiculo,
             tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo
+            codigo_vehiculo: datosExtraidos.codigo_vehiculo,
+            // Preservar campos adicionales de pago y póliza
+            tipo_pago: datosExtraidos.tipo_pago,
+            frecuenciaPago: datosExtraidos.frecuenciaPago,
+            primer_pago: datosExtraidos.primer_pago,
+            pagos_subsecuentes: datosExtraidos.pagos_subsecuentes,
+            forma_pago: datosExtraidos.forma_pago,
+            uso: datosExtraidos.uso,
+            servicio: datosExtraidos.servicio,
+            movimiento: datosExtraidos.movimiento
           };
           });
           console.log('✅ Cálculos automáticos aplicados');
@@ -2764,7 +3215,16 @@ const Formulario = React.memo(({
             color: datosExtraidos.color,
             tipo_vehiculo: datosExtraidos.tipo_vehiculo,
             tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo
+            codigo_vehiculo: datosExtraidos.codigo_vehiculo,
+            // Preservar campos adicionales de pago y póliza
+            tipo_pago: datosExtraidos.tipo_pago,
+            frecuenciaPago: datosExtraidos.frecuenciaPago,
+            primer_pago: datosExtraidos.primer_pago,
+            pagos_subsecuentes: datosExtraidos.pagos_subsecuentes,
+            forma_pago: datosExtraidos.forma_pago,
+            uso: datosExtraidos.uso,
+            servicio: datosExtraidos.servicio,
+            movimiento: datosExtraidos.movimiento
           }));
           console.log('✅ Valores forzados después del render (incluyendo vehículo)');
         }, 100);
@@ -3398,6 +3858,39 @@ const Formulario = React.memo(({
                     />
                   </div>
                 </div>
+                <div className="col-md-4">
+                  <label className="form-label">Uso</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.uso || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, uso: e.target.value }))}
+                    placeholder="Ej: PARTICULAR"
+                  />
+                  <small className="form-text text-muted">Uso del vehículo según póliza</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Servicio</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.servicio || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, servicio: e.target.value }))}
+                    placeholder="Ej: PRIVADO"
+                  />
+                  <small className="form-text text-muted">Servicio del vehículo</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Movimiento</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.movimiento || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, movimiento: e.target.value }))}
+                    placeholder="Ej: NACIONAL"
+                  />
+                  <small className="form-text text-muted">Movimiento permitido</small>
+                </div>
               </div>
             </div>
           )}
@@ -3487,15 +3980,30 @@ const Formulario = React.memo(({
                 </div>
               </div>
               <div className="col-md-6">
-                <label className="form-label">Cargo Pago Fraccionado</label>
+                <label className="form-label">Tasa / Cargo Pago Fraccionado</label>
                 <div className="input-group">
                   <span className="input-group-text">$</span>
                   <input
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.cargoPagoFraccionado}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, cargoPagoFraccionado: e.target.value }))}
+                    value={formulario.cargo_pago_fraccionado || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, cargo_pago_fraccionado: e.target.value }))}
+                    placeholder="0.00"
+                  />
+                </div>
+                <small className="text-muted">Importe adicional por fraccionar el pago (si aplica)</small>
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">Gastos por Expedición</label>
+                <div className="input-group">
+                  <span className="input-group-text">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={formulario.gastos_expedicion || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, gastos_expedicion: e.target.value }))}
                     placeholder="0.00"
                   />
                 </div>
@@ -3515,20 +4023,53 @@ const Formulario = React.memo(({
                 </div>
               </div>
               <div className="col-md-6">
-                <label className="form-label">Total</label>
+                <label className="form-label">Subtotal</label>
                 <div className="input-group">
                   <span className="input-group-text">$</span>
                   <input
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.total}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, total: e.target.value }))}
+                    value={formulario.subtotal || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, subtotal: e.target.value }))}
                     placeholder="0.00"
                   />
                 </div>
               </div>
               <div className="col-md-6">
+                <label className="form-label">Importe Total</label>
+                <div className="input-group">
+                  <span className="input-group-text">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="form-control"
+                    value={formulario.total || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, total: e.target.value }))}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Fechas y Vigencia - SIEMPRE VISIBLE */}
+          <div className="mb-4">
+            <h5 className="card-title border-bottom pb-2">Fechas y Vigencia</h5>
+            <div className="row g-3">
+              <div className="col-md-4">
+                <label className="form-label">Fecha de Emisión</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={formulario.fecha_emision || new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, fecha_emision: e.target.value }))}
+                />
+                <small className="form-text text-muted">
+                  Fecha en que se emitió la póliza
+                </small>
+              </div>
+              <div className="col-md-4">
                 <label className="form-label">Inicio de Vigencia</label>
                 <input
                   type="date"
@@ -3541,7 +4082,7 @@ const Formulario = React.memo(({
                   }}
                 />
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <CampoFechaCalculada
                   label="Término de Vigencia"
                   value={formulario.termino_vigencia}
@@ -3709,7 +4250,7 @@ const Formulario = React.memo(({
                                 const pdfData = await pdfService.obtenerURLFirmadaPDF(formulario.id);
                                 window.open(pdfData.signed_url, '_blank');
                               } catch (error) {
-                                alert('Error al abrir PDF: ' + error.message);
+                                toast.error('Error al abrir PDF: ' + error.message);
                               }
                             }}
                             className="btn btn-sm btn-outline-primary"
@@ -3914,9 +4455,8 @@ const DetallesExpediente = React.memo(({
       <h3 className="mb-0">Detalles del Expediente</h3>
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
-         (expedienteSeleccionado.etapa_activa === 'Emitida' || 
-          expedienteSeleccionado.etapa_activa === 'Renovada') && 
-         expedienteSeleccionado.estatusPago !== 'Pagado' && (
+         ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(expedienteSeleccionado.etapa_activa) && 
+         ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
           <button
             onClick={() => {
               aplicarPago(expedienteSeleccionado.id);
@@ -3931,9 +4471,9 @@ const DetallesExpediente = React.memo(({
               });
               
               if (proximoPagoNuevo) {
-                alert(`Pago aplicado. Próximo pago: ${new Date(proximoPagoNuevo).toLocaleDateString('es-MX')}`);
+                toast.success(`Pago aplicado. Próximo pago: ${new Date(proximoPagoNuevo).toLocaleDateString('es-MX')}`);
               } else {
-                alert('Pago aplicado. No hay más pagos pendientes.');
+                toast.success('Pago aplicado. No hay más pagos pendientes');
               }
             }}
             className="btn btn-success d-flex align-items-center"
@@ -3992,11 +4532,29 @@ const DetallesExpediente = React.memo(({
                 utils={utils}
                 modo="caratula"
                 historialSlot={(
-                  <HistorialNotificaciones 
-                    expedienteId={expedienteSeleccionado.id}
-                    clienteId={expedienteSeleccionado.cliente_id}
-                    modo="expediente"
-                  />
+                  <>
+                    {/* NUEVA SECCIÓN: Timeline de Trazabilidad */}
+                    <div className="mb-4">
+                      <h6 className="mb-3">
+                        <Clock size={18} className="me-2" />
+                        Trazabilidad del Expediente
+                      </h6>
+                      <TimelineExpediente expedienteId={expedienteSeleccionado.id} />
+                    </div>
+
+                    {/* Historial de Comunicaciones (mantener existente) */}
+                    <div>
+                      <h6 className="mb-3">
+                        <Bell size={18} className="me-2" />
+                        Historial de Comunicaciones
+                      </h6>
+                      <HistorialNotificaciones 
+                        expedienteId={expedienteSeleccionado.id}
+                        clienteId={expedienteSeleccionado.cliente_id}
+                        modo="expediente"
+                      />
+                    </div>
+                  </>
                 )}
               />
             </div>
@@ -4072,11 +4630,15 @@ const ModuloExpedientes = () => {
         const expedientesProcesados = expedientesData.map(exp => {
           let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
           
-          // Si el estatus es 'Pagado', mantenerlo
-          if (estatusPagoCalculado === 'Pagado') {
+          // Normalizar para comparación (case-insensitive)
+          const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
+          
+          // Si el estatus es 'Pagado' (cualquier variación), mantenerlo
+          if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
+            console.log('✅ Póliza pagada encontrada:', exp.numero_poliza, '- Manteniendo estatus:', estatusPagoCalculado);
             return {
               ...exp,
-              estatusPago: 'Pagado'
+              estatusPago: 'Pagado'  // Normalizar a "Pagado" con mayúscula
             };
           }
           
@@ -4104,6 +4666,42 @@ const ModuloExpedientes = () => {
         });
         
         console.log('✅ Expedientes procesados:', expedientesProcesados.length);
+        
+        // Debug: Resumen de estatutos de pago
+        const resumenEstatus = expedientesProcesados.reduce((acc, exp) => {
+          const estatus = exp.estatusPago || 'Sin definir';
+          acc[estatus] = (acc[estatus] || 0) + 1;
+          return acc;
+        }, {});
+        console.log('📊 Resumen de estatus de pago:', resumenEstatus);
+        
+        // Debug: Pólizas que deberían mostrar botón de pago
+        console.log('🔍 DEBUG: Revisando todas las pólizas para botón de pago...');
+        const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
+        expedientesProcesados.forEach(exp => {
+          const etapaValida = etapasValidasParaPago.includes(exp.etapa_activa);
+          const estatusNorm = (exp.estatusPago || '').toLowerCase().trim();
+          const noPagado = estatusNorm !== 'pagado' && estatusNorm !== 'pagada';
+          
+          console.log(`  📋 ${exp.numero_poliza}:`, {
+            etapa_activa: exp.etapa_activa,
+            etapaValida,
+            estatusPago: exp.estatusPago,
+            estatusNorm,
+            noPagado,
+            mostrarBoton: etapaValida && noPagado
+          });
+        });
+        
+        const polizasConBotonPago = expedientesProcesados.filter(exp => {
+          const etapaValida = etapasValidasParaPago.includes(exp.etapa_activa);
+          const estatusNorm = (exp.estatusPago || '').toLowerCase().trim();
+          const noPagado = estatusNorm !== 'pagado' && estatusNorm !== 'pagada';
+          return etapaValida && noPagado;
+        });
+        console.log(`💵 ${polizasConBotonPago.length} pólizas deberían mostrar botón "Aplicar Pago":`, 
+          polizasConBotonPago.map(p => ({ numero: p.numero_poliza, estatus: p.estatusPago, etapa: p.etapa_activa }))
+        );
         
         setExpedientes(expedientesProcesados);
         
@@ -4164,8 +4762,21 @@ const ModuloExpedientes = () => {
     setExpedienteParaCompartir(null);
   }, []);
 
+  // ✨ NUEVO: Modal para capturar contacto faltante
+  const [mostrarModalContacto, setMostrarModalContacto] = useState(false);
+  const [clienteParaActualizar, setClienteParaActualizar] = useState(null);
+  const [tipoDatoFaltante, setTipoDatoFaltante] = useState(null); // 'email' o 'telefono_movil'
+  const [canalEnvio, setCanalEnvio] = useState(null); // 'Email' o 'WhatsApp'
+  const [expedienteEnEspera, setExpedienteEnEspera] = useState(null); // Expediente que está esperando el dato
+
   const [aseguradoras, setAseguradoras] = useState([]);
   const [tiposProductos, setTiposProductos] = useState([]);
+  
+  // Estados para modal de aplicar pago
+  const [mostrarModalPago, setMostrarModalPago] = useState(false);
+  const [expedienteParaPago, setExpedienteParaPago] = useState(null);
+  const [comprobantePago, setComprobantePago] = useState(null);
+  const [procesandoPago, setProcesandoPago] = useState(false);
   
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
@@ -4302,6 +4913,7 @@ const estadoInicialFormulario = {
   etapa_activa: 'Emitida',
   agente: '',
   sub_agente: '',
+  fecha_emision: new Date().toISOString().split('T')[0],
   inicio_vigencia: '',
   termino_vigencia: '',
   prima_pagada: '',
@@ -4351,7 +4963,14 @@ const estadoInicialFormulario = {
   curp: '',
   domicilio: '',
   fecha_creacion: new Date().toISOString().split('T')[0],
-  id: null
+  id: null,
+  // Campos adicionales para pagos fraccionados y datos de póliza
+  primer_pago: '',
+  pagos_subsecuentes: '',
+  forma_pago: '',
+  uso: '',
+  servicio: '',
+  movimiento: ''
 };
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
@@ -4367,33 +4986,40 @@ const estadoInicialFormulario = {
     return fechaTermino.toISOString().split('T')[0];
   }, []);
 
-  const calcularProximoPago = useCallback((inicio_vigencia, tipo_pago, frecuenciaPago, compania, numeroPago = 1) => {
+  const calcularProximoPago = useCallback((inicio_vigencia, tipo_pago, frecuenciaPago, compania, numeroPago = 1, periodoGraciaCustom = null) => {
     if (!inicio_vigencia) return '';
     
-    // Calcular periodo de gracia automáticamente según la compañía
-    const periodoGracia = compania?.toLowerCase().includes('qualitas') ? 14 : 30;
+    // 🔧 Usar periodo de gracia personalizado (del PDF) o calcular según la compañía
+    const periodoGracia = periodoGraciaCustom !== null 
+      ? periodoGraciaCustom 
+      : (compania?.toLowerCase().includes('qualitas') ? 14 : 30);
     
-    const fechaInicio = new Date(inicio_vigencia);
-    let fechaPago = new Date(fechaInicio);
+    // 🔥 Crear fecha en hora local para evitar problemas de timezone
+    const [year, month, day] = inicio_vigencia.split('-');
+    const fechaInicio = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     
     if (numeroPago === 1) {
-      // Primer pago: fecha inicio + periodo de gracia
+      // ✅ Primer pago: fecha inicio + periodo de gracia (DÍAS)
+      const fechaPago = new Date(fechaInicio);
       fechaPago.setDate(fechaPago.getDate() + periodoGracia);
-      return fechaPago.toISOString().split('T')[0];
+      const resultado = fechaPago.toISOString().split('T')[0];
+      console.log(`📅 Pago #1: ${inicio_vigencia} + ${periodoGracia} días = ${resultado}`);
+      return resultado;
     }
     
     if (tipo_pago === 'Anual') return '';
     
     if (tipo_pago === 'Fraccionado' && frecuenciaPago) {
-      // CORRECCIÓN: Los pagos subsecuentes se calculan desde la fecha de inicio SIN período de gracia
-      // Pago 2: inicio + 1 mes
-      // Pago 3: inicio + 2 meses
-      // etc.
+      // ✅ Pagos subsecuentes: fecha inicio + N meses (SIN periodo de gracia)
+      // Trimestral: Pago #2 = inicio + 3 meses, Pago #3 = inicio + 6 meses, etc.
       const fechaPagoSubsecuente = new Date(fechaInicio);
       const mesesAAgregar = (numeroPago - 1) * CONSTANTS.MESES_POR_FRECUENCIA[frecuenciaPago];
       fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
       
-      return fechaPagoSubsecuente.toISOString().split('T')[0];
+      const resultado = fechaPagoSubsecuente.toISOString().split('T')[0];
+      console.log(`📅 Pago #${numeroPago}: ${inicio_vigencia} + ${mesesAAgregar} meses = ${resultado}`);
+      
+      return resultado;
     }
     
     return '';
@@ -4427,17 +5053,25 @@ const estadoInicialFormulario = {
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
     const termino_vigencia = formularioActual.termino_vigencia || calculartermino_vigencia(formularioActual.inicio_vigencia);
     
+    // 🔧 Calcular periodo de gracia: usar valor extraído del PDF si existe (convertir a número), sino aplicar regla de negocio
+    const periodoGracia = formularioActual.periodo_gracia 
+      ? parseInt(formularioActual.periodo_gracia, 10)
+      : (formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+    
+    console.log('🔧 actualizarCalculosAutomaticos - Periodo de gracia:', periodoGracia, '| Del formulario:', formularioActual.periodo_gracia, '| Tipo:', typeof formularioActual.periodo_gracia);
+    
     // Calcular proximoPago según el tipo de pago
     let proximoPago = '';
     
     if (formularioActual.tipo_pago === 'Fraccionado') {
-      // Para fraccionado: calcular el próximo pago basado en frecuencia
+      // ✅ Para fraccionado: calcular el próximo pago basado en frecuencia usando el periodo de gracia correcto
       proximoPago = calcularProximoPago(
         formularioActual.inicio_vigencia,
         formularioActual.tipo_pago,
         formularioActual.frecuenciaPago,
         formularioActual.compania,
-        1
+        1,
+        periodoGracia  // 🔥 Pasar el periodo de gracia extraído del PDF
       );
     } else if (formularioActual.tipo_pago === 'Anual') {
       // Para anual: usar fecha_vencimiento_pago si existe, sino usar inicio_vigencia
@@ -4447,9 +5081,6 @@ const estadoInicialFormulario = {
     // Calcular estatusPago basado en la fecha de vencimiento
     const fechaParaCalculo = formularioActual.fecha_vencimiento_pago || proximoPago;
     const estatusPago = calcularEstatusPago(fechaParaCalculo, formularioActual.estatusPago);
-    
-    // Calcular periodo de gracia automáticamente
-    const periodoGracia = formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30;
     
     // Retornar con todos los campos sincronizados
     return { 
@@ -4485,6 +5116,10 @@ const estadoInicialFormulario = {
 
   const cambiarEstadoExpediente = useCallback(async (expedienteId, nuevoEstado, motivo = '') => {
     try {
+      // Obtener expediente actual para conocer la etapa anterior
+      const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
+      const etapaAnterior = expedienteActual?.etapa_activa;
+
       // Solo campos de gestión que cambian
       const datosActualizacion = {
         etapa_activa: nuevoEstado,
@@ -4495,7 +5130,7 @@ const estadoInicialFormulario = {
         datosActualizacion.motivoCancelacion = motivo;
       }
 
-      console.log('🔄 Cambiando etapa:', { expedienteId, nuevoEstado });
+      console.log('🔄 Cambiando etapa:', { expedienteId, etapaAnterior, nuevoEstado });
 
       // Actualizar en BD (solo enviar los campos que cambian)
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
@@ -4510,6 +5145,22 @@ const estadoInicialFormulario = {
 
       console.log('✅ Etapa actualizada en BD');
 
+      // ✨ NUEVO: Registrar cambio de etapa en historial de trazabilidad
+      try {
+        let descripcion = motivo ? `Cambio de etapa. Motivo: ${motivo}` : undefined;
+        await historialService.registrarCambioEtapa(
+          expedienteId,
+          expedienteActual?.cliente_id,
+          etapaAnterior,
+          nuevoEstado,
+          'Sistema', // TODO: Obtener nombre del usuario actual
+          descripcion
+        );
+        console.log('✅ Cambio de etapa registrado en historial de trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar cambio de etapa en historial:', error);
+      }
+
       // Actualizar localmente
       setExpedientes(prev => prev.map(exp => 
         exp.id === expedienteId 
@@ -4518,9 +5169,9 @@ const estadoInicialFormulario = {
       ));
     } catch (error) {
       console.error('❌ Error al cambiar etapa:', error);
-      alert('Error al actualizar: ' + error.message);
+  toast.error('Error al actualizar: ' + error.message);
     }
-  }, []);
+  }, [expedientes]);
 
   const avanzarEstado = useCallback((expediente) => {
     const siguienteEstado = obtenerSiguienteEstado(expediente.etapa_activa);
@@ -4543,21 +5194,110 @@ const estadoInicialFormulario = {
     }
   }, [motivoCancelacion, expedienteACancelar, cambiarEstadoExpediente]);
 
+  // ✨ NUEVO: Manejar guardado de contacto faltante
+  const handleGuardarContactoFaltante = useCallback(async (valorContacto) => {
+    try {
+      if (!clienteParaActualizar || !tipoDatoFaltante) {
+        throw new Error('Datos incompletos para actualizar cliente');
+      }
+
+      console.log('💾 Actualizando cliente con contacto faltante:', {
+        cliente_id: clienteParaActualizar.id,
+        campo: tipoDatoFaltante,
+        valor: valorContacto
+      });
+
+      // Preparar datos según tipo de persona
+      const datosActualizacion = {};
+      
+      if (clienteParaActualizar.tipoPersona === 'Persona Moral') {
+        // Persona Moral: actualizar contacto_* (contacto principal)
+        if (tipoDatoFaltante === 'email') {
+          datosActualizacion.contacto_email = valorContacto;
+        } else if (tipoDatoFaltante === 'telefono_movil') {
+          datosActualizacion.contacto_telefono_movil = valorContacto;
+        }
+      } else {
+        // Persona Física: actualizar campos principales del cliente
+        if (tipoDatoFaltante === 'email') {
+          datosActualizacion.email = valorContacto;
+        } else if (tipoDatoFaltante === 'telefono_movil') {
+          datosActualizacion.telefonoMovil = valorContacto;
+        }
+      }
+
+      // Actualizar en BD
+      const response = await fetch(`${API_URL}/api/clientes/${clienteParaActualizar.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(datosActualizacion)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error al actualizar cliente: ${response.status}`);
+      }
+
+      const resultado = await response.json();
+      console.log('✅ Cliente actualizado exitosamente:', resultado);
+
+      // Actualizar clientesMap local
+      const clienteActualizado = resultado.data || resultado;
+      setClientesMap(prevMap => ({
+        ...prevMap,
+        [clienteParaActualizar.id]: {
+          ...prevMap[clienteParaActualizar.id],
+          ...clienteActualizado,
+          // Normalizar campos
+          email: clienteActualizado.email,
+          telefono_movil: clienteActualizado.telefono_movil || clienteActualizado.telefonoMovil,
+          contacto_email: clienteActualizado.contacto_email,
+          contacto_telefono_movil: clienteActualizado.contacto_telefono_movil
+        }
+      }));
+
+  // Cerrar modal
+  setMostrarModalContacto(false);
+
+  // Notificar éxito (si hay canalEnvio y expedienteEnEspera, se hará reintento automático vía onGuardarYContinuar)
+  const tipoContacto = tipoDatoFaltante === 'email' ? 'Correo electrónico' : 'Teléfono de contacto';
+  toast.success(`${tipoContacto} actualizado correctamente${canalEnvio ? '. Reintentando envío…' : '. Puedes continuar con el envío.'}`);
+
+  // Limpiar parcialmente (dejamos canalEnvio y expedienteEnEspera para el reintento automático)
+  setClienteParaActualizar(null);
+  setTipoDatoFaltante(null);
+
+      // ⚠️ NO reintentar automáticamente aquí para evitar referencia circular
+      // El usuario deberá hacer clic nuevamente en compartir
+      // (El dato ya está actualizado, así que ahora funcionará)
+
+    } catch (error) {
+      console.error('❌ Error al guardar contacto:', error);
+      throw error; // Propagar error para que el modal lo muestre
+    }
+  }, [clienteParaActualizar, tipoDatoFaltante, canalEnvio, expedienteEnEspera]);
+
   const compartirPorWhatsApp = useCallback(async (expediente) => {
     try {
       // Obtener datos del cliente
       const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
       if (!respCliente?.success) {
-        alert('No se pudo obtener la información del cliente');
+  toast.error('No se pudo obtener la información del cliente');
         return;
       }
       const cliente = respCliente.data;
       
       // Verificar que el cliente tenga teléfono móvil
-      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil;
+      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+      
+      // ✨ NUEVO: Si no tiene teléfono, abrir modal para capturarlo
       if (!telefono) {
-        alert('El cliente no tiene un número de teléfono móvil registrado');
-        return;
+        console.log('⚠️ Cliente sin teléfono móvil, abriendo modal de captura');
+        setClienteParaActualizar(cliente);
+        setTipoDatoFaltante('telefono_movil');
+        setCanalEnvio('WhatsApp');
+        setExpedienteEnEspera(expediente);
+        setMostrarModalContacto(true);
+        return; // Detener ejecución hasta que se capture el dato
       }
 
       // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
@@ -4619,6 +5359,21 @@ const estadoInicialFormulario = {
         console.error('⚠️ Error al registrar notificación (no crítico):', error);
         // No interrumpir el flujo si falla el registro
       }
+
+      // ✨ NUEVO: Registrar evento en el historial de trazabilidad
+      try {
+        await historialService.registrarEnvioDocumento(
+          expediente.id,
+          expediente.cliente_id,
+          'WhatsApp',
+          { nombre: nombreCliente, contacto: telefono },
+          mensaje,
+          pdfUrl
+        );
+        console.log('✅ Evento registrado en historial de trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+      }
       
       // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
       if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
@@ -4627,7 +5382,7 @@ const estadoInicialFormulario = {
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
-      alert('Error al compartir por WhatsApp. Por favor intente nuevamente.');
+  toast.error('Error al compartir por WhatsApp. Intenta nuevamente.');
     }
   }, [cambiarEstadoExpediente]);
 
@@ -4637,16 +5392,23 @@ const estadoInicialFormulario = {
         // Obtener datos del cliente
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         if (!respCliente?.success) {
-          alert('No se pudo obtener la información del cliente');
+          toast.error('No se pudo obtener la información del cliente');
           return;
         }
         const cliente = respCliente.data;
       
         // Verificar que el cliente tenga email
         const email = cliente?.contacto_email || cliente?.email;
+        
+        // ✨ NUEVO: Si no tiene email, abrir modal para capturarlo
         if (!email) {
-          alert('El cliente no tiene un correo electrónico registrado');
-          return;
+          console.log('⚠️ Cliente sin email, abriendo modal de captura');
+          setClienteParaActualizar(cliente);
+          setTipoDatoFaltante('email');
+          setCanalEnvio('Email');
+          setExpedienteEnEspera(expediente);
+          setMostrarModalContacto(true);
+          return; // Detener ejecución hasta que se capture el dato
         }
 
         // Obtener URL firmada del PDF si existe
@@ -4698,6 +5460,21 @@ const estadoInicialFormulario = {
         } catch (error) {
           console.error('⚠️ Error al registrar notificación (no crítico):', error);
         }
+
+        // ✨ NUEVO: Registrar evento en el historial de trazabilidad
+        try {
+          await historialService.registrarEnvioDocumento(
+            expediente.id,
+            expediente.cliente_id,
+            'Email',
+            { nombre: nombreCliente, contacto: email },
+            cuerpo,
+            pdfUrl
+          );
+          console.log('✅ Evento registrado en historial de trazabilidad');
+        } catch (error) {
+          console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+        }
       
         // TODO: Implementar envío real mediante backend (SendGrid, Mailgun, etc.)
         // const response = await fetch(`${API_URL}/expedientes/${expediente.id}/enviar-email`, {
@@ -4713,7 +5490,7 @@ const estadoInicialFormulario = {
       
       } catch (error) {
         console.error('Error al compartir por Email:', error);
-        alert('Error al compartir por Email. Por favor intente nuevamente.');
+  toast.error('Error al compartir por Email. Intenta nuevamente.');
       }
     }, [cambiarEstadoExpediente]);
 
@@ -4724,7 +5501,7 @@ const estadoInicialFormulario = {
 
       const validacion = pdfService.validarArchivoPDF(file);
       if (!validacion.valid) {
-        alert(validacion.error);
+  toast.error(validacion.error);
         event.target.value = '';
         return;
       }
@@ -4735,7 +5512,7 @@ const estadoInicialFormulario = {
     // Subir PDF de póliza
     const subirPDFPoliza = useCallback(async (expedienteId) => {
       if (!archivoSeleccionado) {
-        alert('Por favor seleccione un archivo PDF');
+  toast('⚠️ Por favor seleccione un archivo PDF');
         return;
       }
 
@@ -4772,10 +5549,10 @@ const estadoInicialFormulario = {
         }
 
         setArchivoSeleccionado(null);
-        alert('PDF subido correctamente');
+  toast.success('PDF subido correctamente');
       } catch (error) {
         console.error('Error al subir PDF:', error);
-        alert('Error al subir el PDF: ' + error.message);
+  toast.error('Error al subir el PDF: ' + error.message);
       } finally {
         setSubiendoPDF(false);
       }
@@ -4818,10 +5595,10 @@ const estadoInicialFormulario = {
           }));
         }
 
-        alert('PDF eliminado correctamente');
+  toast.success('PDF eliminado correctamente');
       } catch (error) {
         console.error('Error al eliminar PDF:', error);
-        alert('Error al eliminar el PDF: ' + error.message);
+  toast.error('Error al eliminar el PDF: ' + error.message);
       }
     }, [expedienteSeleccionado]);
 
@@ -4829,13 +5606,25 @@ const estadoInicialFormulario = {
     if (!expediente.inicio_vigencia || expediente.tipo_pago === 'Anual') return '';
     
     if (expediente.tipo_pago === 'Fraccionado' && expediente.frecuenciaPago) {
+      // 🔧 Usar periodo de gracia del expediente (convertir a número) o calcular según compañía
+      const periodoGracia = expediente.periodo_gracia 
+        ? parseInt(expediente.periodo_gracia, 10)
+        : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+      
       const fechaInicio = new Date(expediente.inicio_vigencia);
-      const periodoGracia = expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30;
       const fechaPrimerPago = new Date(fechaInicio);
       fechaPrimerPago.setDate(fechaPrimerPago.getDate() + periodoGracia);
       
       if (!expediente.fechaUltimoPago) {
-        return calcularProximoPago(expediente.inicio_vigencia, expediente.tipo_pago, expediente.frecuenciaPago, expediente.compania, 2);
+        // ✅ Si no hay último pago registrado, calcular el pago #2 (el primero después del inicial)
+        return calcularProximoPago(
+          expediente.inicio_vigencia, 
+          expediente.tipo_pago, 
+          expediente.frecuenciaPago, 
+          expediente.compania, 
+          2,
+          periodoGracia  // 🔥 Pasar periodo de gracia
+        );
       }
       
       const fechaUltimoPago = new Date(expediente.fechaUltimoPago);
@@ -4850,20 +5639,37 @@ const estadoInicialFormulario = {
         expediente.tipo_pago,
         expediente.frecuenciaPago,
         expediente.compania,
-        numeroPagoActual + 1
+        numeroPagoActual + 1,
+        periodoGracia  // 🔥 Pasar periodo de gracia
       );
     }
     
     return '';
   }, [calcularProximoPago]);
 
-  const aplicarPago = useCallback(async (expedienteId) => {
-    try {
-      const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
-      if (!expedienteActual) return;
+  // Función para abrir modal de pago
+  const aplicarPago = useCallback((expedienteId) => {
+    const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
+    if (!expedienteActual) return;
+    
+    setExpedienteParaPago(expedienteActual);
+    setComprobantePago(null);
+    setMostrarModalPago(true);
+  }, [expedientes]);
 
+  // Función para procesar el pago con comprobante
+  const procesarPagoConComprobante = useCallback(async () => {
+    if (!expedienteParaPago) return;
+    if (!comprobantePago) {
+      toast.error('Debe seleccionar un comprobante de pago');
+      return;
+    }
+
+    setProcesandoPago(true);
+
+    try {
       const fechaActual = new Date().toISOString().split('T')[0];
-      const proximoPago = calcularSiguientePago(expedienteActual);
+      const proximoPago = calcularSiguientePago(expedienteParaPago);
 
       // Determinar el nuevo estatus basado en si hay o no próximo pago
       let nuevoEstatusPago = 'Pagado';
@@ -4881,40 +5687,58 @@ const estadoInicialFormulario = {
         console.log('✅ Pago aplicado. Póliza completamente pagada.');
       }
 
-      // Campos que cambian al aplicar pago
+      // 1. Actualizar el expediente con el nuevo estatus
       const datosActualizacion = {
-        estatusPago: nuevoEstatusPago,
+        estatus_pago: nuevoEstatusPago,
         fecha_vencimiento_pago: nuevaFechaVencimiento,
-        fecha_pago: nuevaFechaVencimiento, // Mantener compatibilidad
-        fechaUltimoPago: fechaActual,
-        proximoPago: proximoPago
+        fecha_pago: fechaActual,
+        fecha_ultimo_pago: fechaActual,
+        proximo_pago: proximoPago
       };
 
       console.log('💰 Aplicando pago:', { 
-        expedienteId, 
+        expedienteId: expedienteParaPago.id, 
         fechaActual, 
         proximoPago,
         nuevoEstatusPago,
-        nuevaFechaVencimiento
+        nuevaFechaVencimiento,
+        datos: datosActualizacion
       });
 
-      // Actualizar en BD
-      const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
+      const updateResponse = await fetch(`${API_URL}/api/expedientes/${expedienteParaPago.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(datosActualizacion)
       });
 
-      if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      if (!updateResponse.ok) {
+        const errorText = await updateResponse.text();
+        console.error('Error en actualización:', errorText);
+        throw new Error(`Error al actualizar el expediente`);
       }
 
       console.log('✅ Pago registrado en BD');
 
-      // Actualizar el expediente en el estado local INMEDIATAMENTE
-      // Esto hace el cambio visible al usuario sin esperar a recargar
+      // 2. Agregar comentario al historial con información del comprobante
+      try {
+        const comentario = proximoPago && proximoPago.trim() !== ''
+          ? `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`
+          : `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Póliza completamente pagada`;
+
+        await historialService.agregarComentario(
+          expedienteParaPago.id,
+          comentario,
+          'pago_aplicado'
+        );
+        console.log('✅ Comentario agregado al historial');
+      } catch (errorHistorial) {
+        console.error('⚠️ Error al agregar comentario al historial:', errorHistorial);
+        // No bloquear el proceso si falla el historial
+      }
+
+      // 3. Actualizar el expediente en el estado local
       setExpedientes(prev => prev.map(exp => {
-        if (exp.id === expedienteId) {
+        if (exp.id === expedienteParaPago.id) {
           return {
             ...exp,
             estatusPago: nuevoEstatusPago,
@@ -4923,24 +5747,33 @@ const estadoInicialFormulario = {
             proximoPago: proximoPago,
             proximo_pago: proximoPago,
             fechaUltimoPago: fechaActual,
-            fecha_ultimo_pago: fechaActual
+            fecha_ultimo_pago: fechaActual,
+            fecha_pago: fechaActual
           };
         }
         return exp;
       }));
+
+      toast.success('✅ Pago aplicado correctamente');
+      
+      setMostrarModalPago(false);
+      setExpedienteParaPago(null);
+      setComprobantePago(null);
       
       console.log('✅ Lista actualizada localmente de forma inmediata');
     } catch (error) {
       console.error('❌ Error al aplicar pago:', error);
-      alert('Error al aplicar el pago: ' + error.message);
+      toast.error('Error al aplicar el pago: ' + error.message);
+    } finally {
+      setProcesandoPago(false);
     }
-  }, [calcularSiguientePago, expedientes]);
+  }, [expedienteParaPago, comprobantePago, calcularSiguientePago]);
 
   // Función para manejar selección de cliente
   const handleClienteSeleccionado = useCallback((cliente) => {
     if (cliente === 'CREAR_NUEVO') {
       // TODO: Abrir modal para crear nuevo cliente
-      alert('Funcionalidad de crear nuevo cliente en desarrollo');
+  toast('⚠️ Funcionalidad de crear nuevo cliente en desarrollo');
       return;
     }
 
@@ -5022,12 +5855,12 @@ const estadoInicialFormulario = {
   const validarFormulario = useCallback(() => {
     // Validar que haya cliente seleccionado
     if (!formulario.cliente_id && !clienteSeleccionado) {
-      alert('Por favor seleccione un cliente');
+  toast('⚠️ Por favor seleccione un cliente');
       return false;
     }
 
     if (!formulario.compania || !formulario.producto) {
-      alert('Por favor complete los campos obligatorios: Compañía y Producto');
+  toast('⚠️ Complete: Compañía y Producto');
       return false;
     }
 
@@ -5078,7 +5911,7 @@ const estadoInicialFormulario = {
         const confirmar = window.confirm(mensaje);
         
         if (!confirmar) {
-          alert('❌ Operación cancelada.\n\nLa póliza NO fue guardada.\nPuede revisar los datos y volver a intentar.');
+          toast('Operación cancelada. La póliza no fue guardada');
           return false;
         } else {
           console.log('✅ Usuario confirmó guardar póliza duplicada');
@@ -5090,18 +5923,18 @@ const estadoInicialFormulario = {
 
     if (formulario.producto === 'Autos Individual') {
       if (!formulario.marca || !formulario.modelo || !formulario.anio) {
-        alert('Para seguros de Autos, complete: Marca, Modelo y Año');
+  toast('⚠️ Para Autos: complete Marca, Modelo y Año');
         return false;
       }
       
       const anioVehiculo = parseInt(formulario.anio);
       if (anioVehiculo < CONSTANTS.MIN_YEAR || anioVehiculo > CONSTANTS.MAX_YEAR) {
-        alert('Ingrese un año válido para el vehículo');
+  toast('⚠️ Ingrese un año válido para el vehículo');
         return false;
       }
       
       if (formulario.numero_serie && formulario.numero_serie.length !== CONSTANTS.VIN_LENGTH) {
-        alert(`El VIN debe tener ${CONSTANTS.VIN_LENGTH} caracteres`);
+  toast(`⚠️ El VIN debe tener ${CONSTANTS.VIN_LENGTH} caracteres`);
         return false;
       }
     }
@@ -5114,7 +5947,28 @@ const estadoInicialFormulario = {
         (formulario.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_movil || '').trim()
       );
       if (!nombreContacto || !tieneEmailOMovil) {
-        alert('Para Persona Moral es obligatorio capturar Contacto Principal con nombre y al menos Email o Teléfono Móvil para poder guardar la póliza.');
+  toast('⚠️ Persona Moral: capture Contacto Principal con nombre y al menos Email o Teléfono Móvil');
+        return false;
+      }
+    }
+
+    // Regla de negocio: En Persona Física debe tener al menos Email o Teléfono Móvil (propio o del contacto principal)
+    if (clienteSeleccionado?.tipoPersona === 'Persona Física') {
+      // Verificar datos propios del cliente
+      const tieneEmailPropio = !!(formulario.email || clienteSeleccionado.email || '').trim();
+      const tieneMovilPropio = !!(formulario.telefono_movil || clienteSeleccionado.telefono_movil || clienteSeleccionado.telefonoMovil || '').trim();
+      
+      // Verificar datos del contacto principal (si existe)
+      const tieneContactoPrincipal = !!(formulario.contacto_nombre || clienteSeleccionado.contacto_nombre || '').trim();
+      const tieneEmailContacto = !!(formulario.contacto_email || clienteSeleccionado.contacto_email || '').trim();
+      const tieneMovilContacto = !!(formulario.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_movil || '').trim();
+      
+      // Debe tener al menos un email o móvil (propio o del contacto)
+      const tieneContactoValido = tieneEmailPropio || tieneMovilPropio || 
+                                  (tieneContactoPrincipal && (tieneEmailContacto || tieneMovilContacto));
+      
+      if (!tieneContactoValido) {
+  toast('⚠️ Persona Física: se requiere Email o Teléfono Móvil (cliente o contacto)');
         return false;
       }
     }
@@ -5124,6 +5978,27 @@ const estadoInicialFormulario = {
 
   const guardarExpediente = useCallback(async () => {
     if (!validarFormulario()) return;
+
+    // ✅ VALIDAR FECHA DE EMISIÓN - Preguntar al usuario si desea usar fecha actual
+    if (!modoEdicion && (!formulario.fecha_emision || formulario.fecha_emision === new Date().toISOString().split('T')[0])) {
+      const usarFechaActual = window.confirm(
+        '¿Desea utilizar la fecha actual como fecha de emisión?\n\n' +
+        `Fecha actual: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}\n\n` +
+        'Presione "Aceptar" para continuar con esta fecha\n' +
+        'Presione "Cancelar" para poder editarla'
+      );
+      
+      if (!usarFechaActual) {
+        toast.info('📅 Por favor, edite la Fecha de Emisión en el formulario antes de guardar');
+        // Hacer scroll hacia el campo de fecha_emision
+        const campoFechaEmision = document.querySelector('input[type="date"][value*="' + formulario.fecha_emision + '"]');
+        if (campoFechaEmision) {
+          campoFechaEmision.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          campoFechaEmision.focus();
+        }
+        return; // Detener el guardado
+      }
+    }
 
     // Si hay un cliente seleccionado, actualizar sus datos de contacto según su tipo
     if (clienteSeleccionado && formulario.cliente_id) {
@@ -5368,7 +6243,7 @@ const estadoInicialFormulario = {
         })
         .catch(err => {
           console.error('❌ Error al actualizar expediente:', err);
-          alert('Error al actualizar expediente: ' + err.message);
+          toast.error('Error al actualizar expediente: ' + err.message);
         });
     } else {
       console.log('🆕 CREANDO nuevo expediente');
@@ -5390,6 +6265,30 @@ const estadoInicialFormulario = {
         })
         .then(async (data) => {
           console.log('✅ Expediente creado, respuesta del servidor:', data);
+
+          // ✨ NUEVO: Registrar creación en historial de trazabilidad
+          try {
+            const nuevoId = data?.id || data?.data?.id;
+            if (nuevoId) {
+              await historialService.registrarEvento({
+                expediente_id: nuevoId,
+                cliente_id: expedientePayload.cliente_id,
+                tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_CREADA,
+                etapa_nueva: expedientePayload.etapa_activa || 'En cotización',
+                usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
+                descripcion: `Expediente creado: ${expedientePayload.compania} - ${expedientePayload.producto}`,
+                datos_adicionales: {
+                  numero_poliza: expedientePayload.numero_poliza,
+                  compania: expedientePayload.compania,
+                  producto: expedientePayload.producto
+                }
+              });
+              console.log('✅ Evento de creación registrado en historial');
+            }
+          } catch (error) {
+            console.warn('⚠️ Historial no disponible (endpoint pendiente):', error.message);
+          }
+
           try {
             // Obtener ID del expediente creado (compatibilidad con posibles estructuras)
             const nuevoId = data?.id || data?.data?.id;
@@ -5403,7 +6302,7 @@ const estadoInicialFormulario = {
                 console.log('✅ PDF subido automáticamente:', pdfData?.pdf_nombre || formulario.__pdfNombre || 'PDF');
               } catch (error) {
                 console.error('⚠️ Error al subir automáticamente el PDF:', error);
-                alert('El expediente se creó, pero no se pudo subir el PDF automáticamente: ' + error.message);
+                toast('⚠️ Expediente creado, pero no se pudo subir el PDF automáticamente: ' + error.message);
               } finally {
                 setSubiendoPDF(false);
               }
@@ -5417,7 +6316,7 @@ const estadoInicialFormulario = {
         })
         .catch(err => {
           console.error('❌ Error al crear expediente:', err);
-          alert('Error al crear expediente: ' + err.message);
+          toast.error('Error al crear expediente: ' + err.message);
         });
     }
   }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario, clienteSeleccionado]);
@@ -5498,7 +6397,9 @@ const estadoInicialFormulario = {
   const editarExpediente = useCallback(async (expediente) => {
     // Aplicar datos del expediente al formulario PRIMERO
     setFormulario({
-      ...expediente
+      ...expediente,
+      // Si no tiene fecha_emision, usar created_at como valor inicial
+      fecha_emision: expediente.fecha_emision || expediente.created_at || new Date().toISOString().split('T')[0]
     });
     
     // Restaurar cliente seleccionado si el expediente tiene cliente_id
@@ -5563,10 +6464,10 @@ const eliminarExpediente = useCallback((id) => {
         if (res.ok) {
           setExpedientes(prev => prev.filter(exp => exp.id !== id));
         } else {
-          alert('Error al eliminar expediente en la base de datos');
+          toast.error('Error al eliminar expediente en la base de datos');
         }
       })
-      .catch(() => alert('Error de conexión al eliminar expediente'));
+  .catch(() => toast.error('Error de conexión al eliminar expediente'));
   }
 }, []);
 
@@ -5696,6 +6597,42 @@ const eliminarExpediente = useCallback((id) => {
         </div>
       )}
 
+      {/* ✨ NUEVO: Modal para capturar contacto faltante */}
+      <ModalCapturarContacto
+        show={mostrarModalContacto}
+        onClose={() => {
+          setMostrarModalContacto(false);
+          setClienteParaActualizar(null);
+          setTipoDatoFaltante(null);
+          setCanalEnvio(null);
+          setExpedienteEnEspera(null);
+        }}
+        onGuardar={handleGuardarContactoFaltante}
+        onGuardarYContinuar={() => {
+          // Después de guardar, reintentar el envío conservando estado necesario
+          if (expedienteEnEspera && canalEnvio) {
+            const loadingId = toast.loading(`Abriendo ${canalEnvio}…`);
+            setTimeout(() => {
+              console.log('🔄 Reintentando envío por', canalEnvio);
+              if (canalEnvio === 'WhatsApp') {
+                compartirPorWhatsApp(expedienteEnEspera);
+              } else if (canalEnvio === 'Email') {
+                compartirPorEmail(expedienteEnEspera);
+              }
+              // Limpieza diferida tras el reintento
+              setTimeout(() => {
+                toast.dismiss(loadingId);
+                setCanalEnvio(null);
+                setExpedienteEnEspera(null);
+              }, 300);
+            }, 500);
+          }
+        }}
+        cliente={clienteParaActualizar}
+        tipoDatoFaltante={tipoDatoFaltante}
+        canalEnvio={canalEnvio}
+      />
+
       <ModalCancelacion 
         mostrarModalCancelacion={mostrarModalCancelacion}
         setMostrarModalCancelacion={setMostrarModalCancelacion}
@@ -5705,6 +6642,142 @@ const eliminarExpediente = useCallback((id) => {
         motivosCancelacion={motivosCancelacion}
         confirmarCancelacion={confirmarCancelacion}
       />
+
+      {/* Modal Aplicar Pago con Comprobante */}
+      {mostrarModalPago && expedienteParaPago && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">
+                  <DollarSign size={20} className="me-2" />
+                  Aplicar Pago
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalPago(false);
+                    setExpedienteParaPago(null);
+                    setComprobantePago(null);
+                  }}
+                  disabled={procesandoPago}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                {/* Información del expediente */}
+                <div className="alert alert-info mb-3">
+                  <h6 className="mb-2">
+                    <strong>Póliza:</strong> {expedienteParaPago.numero_poliza || 'Sin número'}
+                  </h6>
+                  <div className="small">
+                    <div><strong>Cliente:</strong> {expedienteParaPago.cliente_nombre || 'Sin nombre'}</div>
+                    <div><strong>Aseguradora:</strong> {expedienteParaPago.compania || 'N/A'}</div>
+                    <div><strong>Producto:</strong> {expedienteParaPago.producto || 'N/A'}</div>
+                    {expedienteParaPago.importe_total && (
+                      <div className="mt-2">
+                        <strong>Monto a pagar:</strong> <span className="badge bg-success">${parseFloat(expedienteParaPago.importe_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Campo para subir comprobante */}
+                <div className="mb-3">
+                  <label className="form-label fw-bold">
+                    <Upload size={16} className="me-2" />
+                    Comprobante de Pago *
+                  </label>
+                  <input
+                    type="file"
+                    className="form-control"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp"
+                    onChange={(e) => {
+                      const archivo = e.target.files[0];
+                      if (archivo) {
+                        // Validar tamaño (máximo 10MB)
+                        if (archivo.size > 10 * 1024 * 1024) {
+                          toast.error('El archivo no debe superar 10MB');
+                          e.target.value = '';
+                          return;
+                        }
+                        setComprobantePago(archivo);
+                      }
+                    }}
+                    disabled={procesandoPago}
+                  />
+                  <small className="text-muted d-block mt-1">
+                    Formatos permitidos: PDF, JPG, PNG, WEBP (máximo 10MB)
+                  </small>
+                  
+                  {comprobantePago && (
+                    <div className="alert alert-success mt-2 mb-0 d-flex align-items-center justify-content-between">
+                      <div>
+                        <CheckCircle size={16} className="me-2" />
+                        <strong>{comprobantePago.name}</strong>
+                        <small className="d-block ms-4 text-muted">
+                          {(comprobantePago.size / 1024).toFixed(2)} KB
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => setComprobantePago(null)}
+                        disabled={procesandoPago}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Información adicional */}
+                <div className="alert alert-warning mb-0">
+                  <small>
+                    <AlertCircle size={14} className="me-1" />
+                    <strong>Importante:</strong> El comprobante de pago se guardará en el expediente 
+                    y se agregará un comentario automático en el historial.
+                  </small>
+                </div>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary" 
+                  onClick={() => {
+                    setMostrarModalPago(false);
+                    setExpedienteParaPago(null);
+                    setComprobantePago(null);
+                  }}
+                  disabled={procesandoPago}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-success" 
+                  onClick={procesarPagoConComprobante}
+                  disabled={!comprobantePago || procesandoPago}
+                >
+                  {procesandoPago ? (
+                    <>
+                      <Loader size={16} className="me-2 spinner-border spinner-border-sm" />
+                      Procesando...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle size={16} className="me-2" />
+                      Confirmar Pago
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
