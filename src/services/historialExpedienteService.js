@@ -150,8 +150,9 @@ export const registrarEvento = async (datos) => {
         tipo_evento: datos.tipo_evento,
         etapa_anterior: datos.etapa_anterior || null,
         etapa_nueva: datos.etapa_nueva || null,
-        usuario_id: datos.usuario_id || null,
-        usuario_nombre: datos.usuario_nombre || 'Sistema',
+  // Usuario que ejecuta la acción (soporta id/nombre). Fallback 'Sistema'.
+  usuario_id: datos.usuario_id || obtenerUsuarioActual().id || null,
+  usuario_nombre: datos.usuario_nombre || obtenerUsuarioActual().nombre || 'Sistema',
         descripcion: datos.descripcion || '',
         datos_adicionales: datos.datos_adicionales || null,
         metodo_contacto: datos.metodo_contacto || null,
@@ -174,6 +175,24 @@ export const registrarEvento = async (datos) => {
   } catch (error) {
     console.error('❌ Error al registrar evento:', error);
     throw error;
+  }
+};
+
+/**
+ * Obtener usuario actual desde almacenamiento local (placeholder simple).
+ * Convención: localStorage.setItem('usuarioActual', JSON.stringify({ id, nombre }))
+ */
+export const obtenerUsuarioActual = () => {
+  try {
+    const raw = localStorage.getItem('usuarioActual');
+    if (!raw) return { id: null, nombre: 'Sistema' };
+    const parsed = JSON.parse(raw);
+    return {
+      id: parsed.id || null,
+      nombre: parsed.nombre || parsed.username || 'Sistema'
+    };
+  } catch (_) {
+    return { id: null, nombre: 'Sistema' };
   }
 };
 
@@ -291,13 +310,15 @@ export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterio
     descripcion += `. ${descripcionAdicional}`;
   }
   
+  const usuario = obtenerUsuarioActual();
   return await registrarEvento({
     expediente_id: expedienteId,
     cliente_id: clienteId,
     tipo_evento: tipoEvento,
     etapa_anterior: etapaAnterior,
     etapa_nueva: etapaNueva,
-    usuario_nombre: usuarioNombre,
+    usuario_id: usuario.usuario_id || usuario.id || null,
+    usuario_nombre: usuarioNombre || usuario.nombre,
     descripcion: descripcion
   });
 };
@@ -310,11 +331,13 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     ? TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL 
     : TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP;
   
+  const usuario = obtenerUsuarioActual();
   return await registrarEvento({
     expediente_id: expedienteId,
     cliente_id: clienteId,
     tipo_evento: tipoEvento,
-    usuario_nombre: 'Sistema',
+    usuario_id: usuario.id || null,
+    usuario_nombre: usuario.nombre || 'Sistema',
     descripcion: `Documento enviado por ${canal}`,
     metodo_contacto: canal,
     destinatario_nombre: destinatario.nombre,

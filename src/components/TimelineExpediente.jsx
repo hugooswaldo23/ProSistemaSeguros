@@ -218,32 +218,20 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
 
   // Formatear fecha
   const formatearFecha = (fechaISO) => {
+    if (!fechaISO) return 'Sin fecha';
     const fecha = new Date(fechaISO);
+    if (isNaN(fecha.getTime())) return fechaISO; // Fallback si formato raro
     const hoy = new Date();
-    const ayer = new Date(hoy);
-    ayer.setDate(ayer.getDate() - 1);
-    
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
     const esMismoDia = fecha.toDateString() === hoy.toDateString();
     const esAyer = fecha.toDateString() === ayer.toDateString();
-    
-    const hora = fecha.toLocaleTimeString('es-MX', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-    
-    if (esMismoDia) {
-      return `Hoy ${hora}`;
-    } else if (esAyer) {
-      return `Ayer ${hora}`;
-    } else {
-      return fecha.toLocaleString('es-MX', { 
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
+    const hora = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    const segundos = fecha.getSeconds();
+    // Mostrar minutos siempre y segundos si no son 0 para diagnósticos
+    const horaDetallada = segundos ? fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : hora;
+    if (esMismoDia) return `Hoy ${horaDetallada}`;
+    if (esAyer) return `Ayer ${horaDetallada}`;
+    return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + horaDetallada;
   };
 
   // Exportar historial
