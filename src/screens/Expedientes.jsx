@@ -2034,6 +2034,36 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // ================== AJUSTES DE PAGO FRACCIONADO ==================
       // Si la extracción detectó forma_pago y no se ha definido en el formulario, mapear:
       // tipo_pago: 'Fraccionado' si la frecuencia no es anual
+      // ✅ Normalización DEFENSIVA adicional: si tipo_pago o frecuenciaPago vienen vacíos pero tenemos forma_pago
+      if (!datosConCliente.tipo_pago || !datosConCliente.frecuenciaPago) {
+        const fp = (datosConCliente.forma_pago || '').toLowerCase();
+        if (fp) {
+          if (fp.includes('tri')) {
+            datosConCliente.tipo_pago = 'Fraccionado';
+            datosConCliente.frecuenciaPago = 'Trimestral';
+          } else if (fp.includes('men')) {
+            datosConCliente.tipo_pago = 'Fraccionado';
+            datosConCliente.frecuenciaPago = 'Mensual';
+          } else if (fp.includes('sem')) {
+            datosConCliente.tipo_pago = 'Fraccionado';
+            datosConCliente.frecuenciaPago = 'Semestral';
+          } else if (fp.includes('bim')) {
+            datosConCliente.tipo_pago = 'Fraccionado';
+            datosConCliente.frecuenciaPago = 'Bimestral';
+          } else if (fp.includes('cuat')) {
+            datosConCliente.tipo_pago = 'Fraccionado';
+            datosConCliente.frecuenciaPago = 'Cuatrimestral';
+          } else if (fp.includes('anu') || fp.includes('contado') || fp.includes('unico') || fp.includes('único')) {
+            datosConCliente.tipo_pago = 'Anual';
+            datosConCliente.frecuenciaPago = 'Anual';
+          }
+          console.log('🛠 Normalización defensiva aplicada (faltaban tipo_pago / frecuenciaPago):', {
+            forma_pago: datosConCliente.forma_pago,
+            tipo_pago: datosConCliente.tipo_pago,
+            frecuenciaPago: datosConCliente.frecuenciaPago
+          });
+        }
+      }
       if (datosConCliente.forma_pago) {
         const forma = datosConCliente.forma_pago.toLowerCase();
         console.log('💳 Detectada forma de pago:', datosConCliente.forma_pago);
@@ -2041,10 +2071,17 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         if (forma.includes('tri')) datosConCliente.frecuenciaPago = 'Trimestral';
         else if (forma.includes('men')) datosConCliente.frecuenciaPago = 'Mensual';
         else if (forma.includes('sem')) datosConCliente.frecuenciaPago = 'Semestral';
-        // Si hay frecuencia asignada distinta de anual, marcar tipo_pago Fraccionado
-        if (datosConCliente.frecuenciaPago) {
+        else if (forma.includes('bim')) datosConCliente.frecuenciaPago = 'Bimestral';
+        else if (forma.includes('cuat')) datosConCliente.frecuenciaPago = 'Cuatrimestral';
+        else if (forma.includes('anu') || forma.includes('contado') || forma.includes('unico') || forma.includes('único')) datosConCliente.frecuenciaPago = 'Anual';
+
+        // Solo marcar Fraccionado si la frecuencia NO es anual
+        if (datosConCliente.frecuenciaPago && datosConCliente.frecuenciaPago !== 'Anual') {
           datosConCliente.tipo_pago = 'Fraccionado';
           console.log('✅ Asignado tipo_pago=Fraccionado, frecuenciaPago=', datosConCliente.frecuenciaPago);
+        } else if (datosConCliente.frecuenciaPago === 'Anual' && !datosConCliente.tipo_pago) {
+          datosConCliente.tipo_pago = 'Anual';
+          console.log('✅ Confirmado tipo_pago=Anual (no fraccionado)');
         }
       }
 
