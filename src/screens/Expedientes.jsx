@@ -1116,37 +1116,46 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.log('   - Primer pago:', primerPago);
         console.log('   - Pagos subsecuentes:', pagosSubsecuentes);
 
-        // Normalizar tipo_pago a partir de la forma de pago extraída
+        // Normalizar tipo_pago y frecuenciaPago a partir de la forma de pago extraída
         let tipoPagoDetectado = '';
+        let frecuenciaPagoDetectada = '';
         
         if (formaPagoDetectada) {
           const f = formaPagoDetectada.toLowerCase();
           
-          // Mapear palabras clave a tipos de pago
+          // Mapear palabras clave a tipos de pago y frecuencia
           if (f.includes('tri')) {
-            tipoPagoDetectado = 'Trimestral';
+            tipoPagoDetectado = 'Fraccionado';
+            frecuenciaPagoDetectada = 'Trimestral';
           } else if (f.includes('men')) {
-            tipoPagoDetectado = 'Mensual';
+            tipoPagoDetectado = 'Fraccionado';
+            frecuenciaPagoDetectada = 'Mensual';
           } else if (f.includes('sem')) {
-            tipoPagoDetectado = 'Semestral';
-          } else if (f.includes('anu')) {
-            tipoPagoDetectado = 'Anual';
-          } else if (f.includes('contado')) {
-            tipoPagoDetectado = 'Anual'; // CONTADO = pago único = Anual
+            tipoPagoDetectado = 'Fraccionado';
+            frecuenciaPagoDetectada = 'Semestral';
           } else if (f.includes('bim')) {
-            tipoPagoDetectado = 'Bimestral';
+            tipoPagoDetectado = 'Fraccionado';
+            frecuenciaPagoDetectada = 'Bimestral';
           } else if (f.includes('cuat')) {
-            tipoPagoDetectado = 'Cuatrimestral';
+            tipoPagoDetectado = 'Fraccionado';
+            frecuenciaPagoDetectada = 'Cuatrimestral';
+          } else if (f.includes('anu') || f.includes('contado')) {
+            // CONTADO o ANUAL = pago único
+            tipoPagoDetectado = 'Anual';
+            frecuenciaPagoDetectada = 'Anual';
           } else {
-            // Si no coincide con ningún patrón, usar el texto tal cual
-            tipoPagoDetectado = formaPagoDetectada;
+            // Si no coincide con ningún patrón, asumir Anual
+            tipoPagoDetectado = 'Anual';
+            frecuenciaPagoDetectada = 'Anual';
           }
           
           console.log('✅ Tipo de pago normalizado:', tipoPagoDetectado);
+          console.log('✅ Frecuencia de pago normalizada:', frecuenciaPagoDetectada);
         } else {
           // No se encontró forma de pago, dejar vacío
           console.warn('⚠️ No se encontró forma de pago en PDF');
           tipoPagoDetectado = '';
+          frecuenciaPagoDetectada = '';
         }
         
         console.log('   - Tipo de pago final:', tipoPagoDetectado || '(VACÍO - usuario debe completar)');
@@ -1299,6 +1308,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           pago_unico: pagoUnicoMatch ? pagoUnicoMatch[1].replace(/,/g, '') : '',
           // FORMA Y TIPO DE PAGO
           tipo_pago: tipoPagoDetectado,
+          frecuenciaPago: frecuenciaPagoDetectada, // ✅ Normalizada desde el PDF
           forma_pago: formaPagoDetectada || '',
           primer_pago: primerPago,
           pagos_subsecuentes: pagosSubsecuentes,
@@ -1329,11 +1339,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           // CONDUCTOR
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
         };
-
-        // 🔄 Normalizar frecuenciaPago para pólizas ANUAL / PAGO ÚNICO
-        if (datosExtraidos.tipo_pago && (datosExtraidos.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO/i.test(datosExtraidos.tipo_pago))) {
-          datosExtraidos.frecuenciaPago = 'Anual';
-        }
         
         // ==================== NORMALIZACIÓN DE VALORES ====================
         // Normalizar marca para que coincida con las opciones disponibles
