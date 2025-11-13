@@ -3158,11 +3158,33 @@ const Formulario = React.memo(({
       
       // Usar setFormulario con callback para hacer UPDATE PARCIAL
       setFormulario(prev => {
+        // ✅ LÓGICA MEJORADA: Solo aplicar datos del PDF si el campo actual está vacío o es null
+        const aplicarSiVacio = (valorPDF, valorActual) => {
+          // Si el valor actual tiene contenido válido, mantenerlo
+          if (valorActual && valorActual !== '' && valorActual !== null) {
+            return valorActual;
+          }
+          // Si el valor del PDF está vacío o es string vacío, usar null
+          if (!valorPDF || valorPDF === '') {
+            return null;
+          }
+          // Usar valor del PDF
+          return valorPDF;
+        };
+
         const nuevoFormulario = {
           ...prev, // Mantener TODO (incluye datos del cliente que ya están bien)
-          ...datosPoliza, // Aplicar SOLO datos de la póliza (sin campos del cliente)
+          ...datosPoliza, // Aplicar datos de la póliza base
           // Mantener cliente_id
           cliente_id: datosExtraidos.cliente_id || prev.cliente_id,
+          
+          // ✅ PROTEGER campos críticos que el usuario pudo haber llenado manualmente
+          cargo_pago_fraccionado: aplicarSiVacio(datosPoliza.cargo_pago_fraccionado, prev.cargo_pago_fraccionado),
+          gastos_expedicion: aplicarSiVacio(datosPoliza.gastos_expedicion, prev.gastos_expedicion),
+          subtotal: aplicarSiVacio(datosPoliza.subtotal, prev.subtotal),
+          uso: aplicarSiVacio(datosPoliza.uso, prev.uso),
+          servicio: aplicarSiVacio(datosPoliza.servicio, prev.servicio),
+          movimiento: aplicarSiVacio(datosPoliza.movimiento, prev.movimiento),
           // Si no tiene fecha_emision, usar fecha actual como valor inicial
           fecha_emision: datosPoliza.fecha_emision || prev.fecha_emision || new Date().toISOString().split('T')[0],
           // Forzar valores de la póliza
@@ -4051,8 +4073,18 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.cargo_pago_fraccionado ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, cargo_pago_fraccionado: e.target.value }))}
+                    value={formulario.cargo_pago_fraccionado || ''}
+                    onChange={(e) => {
+                      console.log('🔍 DEBUG cargo_pago_fraccionado onChange:', e.target.value);
+                      setFormulario(prev => {
+                        const nuevo = { 
+                          ...prev, 
+                          cargo_pago_fraccionado: e.target.value || ''
+                        };
+                        console.log('🔍 DEBUG estado actualizado:', nuevo.cargo_pago_fraccionado);
+                        return nuevo;
+                      });
+                    }}
                     placeholder="0.00"
                   />
                 </div>
@@ -4066,8 +4098,18 @@ const Formulario = React.memo(({
                     type="number"
                     step="0.01"
                     className="form-control"
-                    value={formulario.gastos_expedicion ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, gastos_expedicion: e.target.value }))}
+                    value={formulario.gastos_expedicion || ''}
+                    onChange={(e) => {
+                      console.log('🔍 DEBUG gastos_expedicion onChange:', e.target.value);
+                      setFormulario(prev => {
+                        const nuevo = { 
+                          ...prev, 
+                          gastos_expedicion: e.target.value || ''
+                        };
+                        console.log('🔍 DEBUG estado actualizado:', nuevo.gastos_expedicion);
+                        return nuevo;
+                      });
+                    }}
                     placeholder="0.00"
                   />
                 </div>
@@ -4924,7 +4966,7 @@ const estadoInicialFormulario = {
   producto: '',
   etapa_activa: 'Emitida',
   agente: '',
-  sub_agente: '',
+  sub_agente: null,
   fecha_emision: new Date().toISOString().split('T')[0],
   inicio_vigencia: '',
   termino_vigencia: '',
@@ -4933,14 +4975,14 @@ const estadoInicialFormulario = {
   cargoPagoFraccionado: '',
   iva: '',
   total: '',
-  motivo_cancelacion: '',
-  motivoCancelacion: '',
+  motivo_cancelacion: null,
+  motivoCancelacion: null,
   tipo_pago: 'Anual',
-  frecuencia_pago: '',
-  frecuenciaPago: '',
+  frecuencia_pago: null,
+  frecuenciaPago: null,
   periodo_gracia: 14,
-  proximo_pago: '',
-  proximoPago: '',
+  proximo_pago: null,
+  proximoPago: null,
   estatus_pago: 'Pendiente',
   estatusPago: 'Pendiente',
   fecha_ultimo_pago: '',
@@ -4948,7 +4990,7 @@ const estadoInicialFormulario = {
   plazo_pago_dias: '',
   gastos_expedicion: '',
   gastosExpedicion: '',
-  subtotal: '',
+  subtotal: null,
   pago_unico: '',
   marca: '',
   modelo: '',
@@ -4980,9 +5022,9 @@ const estadoInicialFormulario = {
   primer_pago: '',
   pagos_subsecuentes: '',
   forma_pago: '',
-  uso: '',
-  servicio: '',
-  movimiento: ''
+  uso: null,
+  servicio: null,
+  movimiento: null
 };
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
@@ -5152,6 +5194,11 @@ const estadoInicialFormulario = {
   }, []);
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
+    // 🚨 DEBUG: Verificar campos problemáticos al ENTRAR a actualizarCalculosAutomaticos
+    console.log('🔧 DEBUG actualizarCalculosAutomaticos ENTRADA:');
+    console.log('🔧   cargo_pago_fraccionado:', formularioActual.cargo_pago_fraccionado);
+    console.log('🔧   gastos_expedicion:', formularioActual.gastos_expedicion);
+    
     // Siempre recalcular el término de vigencia a partir del inicio
     const termino_vigencia = calculartermino_vigencia(formularioActual.inicio_vigencia);
     
@@ -5192,7 +5239,7 @@ const estadoInicialFormulario = {
     const estatusPago = calcularEstatusPago(fechaParaCalculo, formularioActual.estatusPago);
     
     // Retornar con todos los campos sincronizados
-    return { 
+    const resultado = { 
       ...formularioActual, 
       termino_vigencia, 
       proximoPago, 
@@ -5201,6 +5248,13 @@ const estadoInicialFormulario = {
       estatusPago, 
       periodo_gracia: periodoGracia 
     };
+    
+    // 🚨 DEBUG: Verificar campos problemáticos al SALIR de actualizarCalculosAutomaticos
+    console.log('🔧 DEBUG actualizarCalculosAutomaticos SALIDA:');
+    console.log('🔧   cargo_pago_fraccionado:', resultado.cargo_pago_fraccionado);
+    console.log('🔧   gastos_expedicion:', resultado.gastos_expedicion);
+    
+    return resultado;
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
 
   const obtenerSiguienteEstado = useCallback((estadoActual) => {
@@ -6074,6 +6128,12 @@ const estadoInicialFormulario = {
   }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
 
   const guardarExpediente = useCallback(async () => {
+    // 🚨 DEBUG: Estado del formulario al hacer click en guardar
+    console.log('🚀 [GUARDAR EXPEDIENTE] Iniciando proceso de guardado');
+    console.log('🚀 [GUARDAR EXPEDIENTE] Estado actual del formulario:', formulario);
+    console.log('🚀 [GUARDAR EXPEDIENTE] cargo_pago_fraccionado:', formulario.cargo_pago_fraccionado);
+    console.log('🚀 [GUARDAR EXPEDIENTE] gastos_expedicion:', formulario.gastos_expedicion);
+    
     if (!validarFormulario()) return;
 
     // ✅ VALIDAR FECHA DE EMISIÓN - Preguntar al usuario si desea usar fecha actual
@@ -6183,48 +6243,158 @@ const estadoInicialFormulario = {
 
     const formularioConCalculos = actualizarCalculosAutomaticos(formulario);
     
-    // Normalizar apellidos para backend
-    const expedientePayload = {
-      ...formularioConCalculos
+    // ✅ FUNCIÓN para convertir camelCase a snake_case
+    const camelToSnake = (str) => {
+      return str.replace(/([A-Z])/g, '_$1').toLowerCase();
     };
-    // No enviar referencias a archivos temporales en el payload
-    if ('__pdfFile' in expedientePayload) delete expedientePayload.__pdfFile;
-    if ('__pdfNombre' in expedientePayload) delete expedientePayload.__pdfNombre;
-    if ('__pdfSize' in expedientePayload) delete expedientePayload.__pdfSize;
-    
-    // ⚠️ IMPORTANTE: NO enviar campos contacto_* al backend de expedientes
-    // Estos campos solo existen en la tabla de clientes, NO en expedientes
-    // El backend de expedientes no tiene columnas para contacto_nombre, contacto_email, etc.
-    if ('contacto_nombre' in expedientePayload) delete expedientePayload.contacto_nombre;
-    if ('contacto_apellido_paterno' in expedientePayload) delete expedientePayload.contacto_apellido_paterno;
-    if ('contacto_apellido_materno' in expedientePayload) delete expedientePayload.contacto_apellido_materno;
-    if ('contacto_email' in expedientePayload) delete expedientePayload.contacto_email;
-    if ('contacto_telefono_fijo' in expedientePayload) delete expedientePayload.contacto_telefono_fijo;
-    if ('contacto_telefono_movil' in expedientePayload) delete expedientePayload.contacto_telefono_movil;
-    
-    // Compatibilidad de nombres de campos esperados por backend (alias)
-    // Uso/Servicio/Movimiento
-    if (expedientePayload.uso && !expedientePayload.uso_poliza) expedientePayload.uso_poliza = expedientePayload.uso;
-    if (expedientePayload.servicio && !expedientePayload.servicio_poliza) expedientePayload.servicio_poliza = expedientePayload.servicio;
-    if (expedientePayload.movimiento && !expedientePayload.movimiento_poliza) expedientePayload.movimiento_poliza = expedientePayload.movimiento;
 
-    // Montos: duplicar a posibles alias que pueda consumir el backend
-    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.cargoPagoFraccionado === undefined) {
-      expedientePayload.cargoPagoFraccionado = expedientePayload.cargo_pago_fraccionado;
-    }
-    // Alias comunes para backend que usa "tasa_financiamiento"
-    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.tasa_financiamiento === undefined) {
-      expedientePayload.tasa_financiamiento = expedientePayload.cargo_pago_fraccionado;
-    }
-    if (expedientePayload.cargo_pago_fraccionado !== undefined && expedientePayload.tasaFinanciamiento === undefined) {
-      expedientePayload.tasaFinanciamiento = expedientePayload.cargo_pago_fraccionado;
-    }
-    if (expedientePayload.gastos_expedicion !== undefined && expedientePayload.gastosExpedicion === undefined) {
-      expedientePayload.gastosExpedicion = expedientePayload.gastos_expedicion;
-    }
-    if (expedientePayload.subtotal !== undefined && expedientePayload.sub_total === undefined) {
-      expedientePayload.sub_total = expedientePayload.subtotal;
-    }
+    // ✅ CONVERSIÓN COMPLETA a snake_case para el backend
+    const convertirASnakeCase = (obj) => {
+      const resultado = {};
+      
+        // Mapeo específico de campos conocidos
+        const mapeoEspecifico = {
+          // Identificación
+          numeroPoliza: 'numero_poliza',
+          clienteId: 'cliente_id',
+          agenteId: 'agente_id',
+          vendedorId: 'vendedor_id',
+          claveAseguradora: 'clave_aseguradora',
+          
+          // Datos Cliente
+          apellidoPaterno: 'apellido_paterno',
+          apellidoMaterno: 'apellido_materno',
+          razonSocial: 'razon_social',
+          nombreComercial: 'nombre_comercial',
+          numeroIdentificacion: 'numero_identificacion',
+          telefonoFijo: 'telefono_fijo',
+          telefonoMovil: 'telefono_movil',
+          
+          // Póliza
+          cargoPagoFraccionado: 'cargo_pago_fraccionado',
+          motivoCancelacion: 'motivo_cancelacion',
+          frecuenciaPago: 'frecuencia_pago',
+          proximoPago: 'proximo_pago',
+          estatusPago: 'estatus_pago',
+          gastosExpedicion: 'gastos_expedicion',
+          subAgente: 'sub_agente',
+          
+          // Vehículo
+          numeroSerie: 'numero_serie',
+          tipoVehiculo: 'tipo_vehiculo',
+          tipoCobertura: 'tipo_cobertura',
+          sumaAsegurada: 'suma_asegurada',
+          conductorHabitual: 'conductor_habitual',
+          edadConductor: 'edad_conductor',
+          licenciaConducir: 'licencia_conducir',
+          
+          // Financiero
+          primaPagada: 'prima_pagada',
+          periodoGracia: 'periodo_gracia',
+          fechaUltimoPago: 'fecha_ultimo_pago',
+          fechaVencimientoPago: 'fecha_vencimiento_pago',
+          
+          // Vigencia
+          inicioVigencia: 'inicio_vigencia',
+          terminoVigencia: 'termino_vigencia',
+          
+          // Estado
+          etapaActiva: 'etapa_activa',
+          tipoPago: 'tipo_pago',
+          fechaCreacion: 'fecha_creacion'
+        };
+
+        Object.keys(obj).forEach(key => {
+          // Usar mapeo específico si existe, sino conversión automática
+          const snakeKey = mapeoEspecifico[key] || camelToSnake(key);
+          
+          // ✅ CORRECCIÓN CRÍTICA: Solo aplicar si el campo snake_case no existe ya o está vacío
+          // Esto evita que campos camelCase vacíos sobrescriban campos snake_case con valores
+          const existeEnSnake = resultado.hasOwnProperty(snakeKey);
+          const valorActualSnake = resultado[snakeKey];
+          const valorNuevo = obj[key];
+          
+          if (!existeEnSnake || 
+              (valorActualSnake === '' || valorActualSnake === null || valorActualSnake === undefined) ||
+              (valorNuevo !== '' && valorNuevo !== null && valorNuevo !== undefined)) {
+            resultado[snakeKey] = valorNuevo;
+          }
+          
+          // Debug específico para campos problemáticos
+          if (key.includes('cargo_pago_fraccionado') || key.includes('gastos_expedicion') || snakeKey.includes('cargo_pago_fraccionado') || snakeKey.includes('gastos_expedicion')) {
+            console.log(`🔍 DEBUG convertirASnakeCase: ${key} = "${obj[key]}" → ${snakeKey} = "${resultado[snakeKey]}" (existía: ${existeEnSnake})`);
+          }
+        });      return resultado;
+    };
+
+    // 🚨 DEBUG: Verificar formulario ANTES de conversión
+    console.log('🚨 [FORMULARIO ANTES] cargo_pago_fraccionado:', formularioConCalculos.cargo_pago_fraccionado);
+    console.log('🚨 [FORMULARIO ANTES] gastos_expedicion:', formularioConCalculos.gastos_expedicion);
+    console.log('🚨 [FORMULARIO ANTES] tipo valor cargo_pago_fraccionado:', typeof formularioConCalculos.cargo_pago_fraccionado);
+    console.log('🚨 [FORMULARIO ANTES] tipo valor gastos_expedicion:', typeof formularioConCalculos.gastos_expedicion);
+    
+    // ✅ SOLUCIÓN DIRECTA: Crear payload básico y forzar los campos problemáticos
+    let expedientePayload = {
+      ...formularioConCalculos,
+      // Forzar estos campos específicos sin conversión compleja
+      cargo_pago_fraccionado: formularioConCalculos.cargo_pago_fraccionado || '',
+      gastos_expedicion: formularioConCalculos.gastos_expedicion || '',
+    };
+    
+    // Solo hacer conversión básica de campos que no sean problemáticos
+    const convertirSoloNecesario = (obj) => {
+      const resultado = { ...obj };
+      
+      // Solo campos esenciales que necesitan conversión
+      if (resultado.clienteId) {
+        resultado.cliente_id = resultado.clienteId;
+        delete resultado.clienteId;
+      }
+      if (resultado.numeroPoliza) {
+        resultado.numero_poliza = resultado.numeroPoliza;
+        delete resultado.numeroPoliza;
+      }
+      if (resultado.inicioVigencia) {
+        resultado.inicio_vigencia = resultado.inicioVigencia;
+        delete resultado.inicioVigencia;
+      }
+      if (resultado.terminoVigencia) {
+        resultado.termino_vigencia = resultado.terminoVigencia;
+        delete resultado.terminoVigencia;
+      }
+      
+      return resultado;
+    };
+    
+    expedientePayload = convertirSoloNecesario(expedientePayload);
+    
+    // ✅ GARANTIZAR que estos campos problemáticos estén presentes
+    expedientePayload.cargo_pago_fraccionado = formularioConCalculos.cargo_pago_fraccionado || '';
+    expedientePayload.gastos_expedicion = formularioConCalculos.gastos_expedicion || '';
+    
+    console.log('🚨 [PAYLOAD SIMPLE] cargo_pago_fraccionado FORZADO:', expedientePayload.cargo_pago_fraccionado);
+    console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
+    
+    // Limpiar campos innecesarios
+    delete expedientePayload.__pdf_file;
+    delete expedientePayload.__pdf_nombre;
+    delete expedientePayload.__pdf_size;
+    delete expedientePayload.contacto_nombre;
+    delete expedientePayload.contacto_apellido_paterno;
+    delete expedientePayload.contacto_apellido_materno;
+    delete expedientePayload.contacto_email;
+    delete expedientePayload.contacto_telefono_fijo;
+    delete expedientePayload.contacto_telefono_movil;
+    
+    // Limpiar duplicados camelCase
+    delete expedientePayload.cargoPagoFraccionado;
+    delete expedientePayload.gastosExpedicion;
+    delete expedientePayload.proximoPago;
+    delete expedientePayload.estatusPago;
+    delete expedientePayload.motivoCancelacion;
+    delete expedientePayload.razonSocial;
+    delete expedientePayload.tasaFinanciamiento;
+    delete expedientePayload.subTotal;
 
     
     // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
@@ -6236,10 +6406,20 @@ const estadoInicialFormulario = {
       expedientePayload.coberturas = JSON.stringify(expedientePayload.coberturas);
     }
 
-    // DEBUG: Verificar los 6 campos solicitados al momento de GUARDAR
+    // DEBUG: Verificar los campos al momento de GUARDAR
     try {
       const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
       console.groupCollapsed('🧪 DEBUG Guardar Expediente — Campos clave');
+      console.log('📊 Formulario original (formularioConCalculos):');
+      console.table([
+        { campo: 'uso', valor: k(formularioConCalculos.uso) },
+        { campo: 'servicio', valor: k(formularioConCalculos.servicio) },
+        { campo: 'movimiento', valor: k(formularioConCalculos.movimiento) },
+        { campo: 'cargo_pago_fraccionado', valor: k(formularioConCalculos.cargo_pago_fraccionado) },
+        { campo: 'gastos_expedicion', valor: k(formularioConCalculos.gastos_expedicion) },
+        { campo: 'subtotal', valor: k(formularioConCalculos.subtotal) }
+      ]);
+      console.log('📤 Payload final (expedientePayload):');
       console.table([
         { campo: 'uso', valor: k(expedientePayload.uso) },
         { campo: 'servicio', valor: k(expedientePayload.servicio) },
@@ -6248,11 +6428,35 @@ const estadoInicialFormulario = {
         { campo: 'gastos_expedicion', valor: k(expedientePayload.gastos_expedicion) },
         { campo: 'subtotal', valor: k(expedientePayload.subtotal) }
       ]);
+      
+      // 🚨 DEBUG CRÍTICO: Verificar el JSON que se envía al backend
+      console.log('🚨 JSON FINAL que se enviará al backend:');
+      console.log(JSON.stringify(expedientePayload, null, 2));
+      console.log('🚨 cargo_pago_fraccionado en JSON:', JSON.stringify(expedientePayload.cargo_pago_fraccionado));
+      console.log('🚨 gastos_expedicion en JSON:', JSON.stringify(expedientePayload.gastos_expedicion));
+      
       console.groupEnd();
     } catch (_) { /* noop */ }
 
     if (modoEdicion) {
-  fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
+      // ✅ VERIFICACIÓN FINAL OBLIGATORIA - Asegurar que los campos estén ahí
+      if (!expedientePayload.hasOwnProperty('cargo_pago_fraccionado')) {
+        console.error('❌ FALTA cargo_pago_fraccionado en payload!');
+        expedientePayload.cargo_pago_fraccionado = formularioConCalculos.cargo_pago_fraccionado || '';
+      }
+      if (!expedientePayload.hasOwnProperty('gastos_expedicion')) {
+        console.error('❌ FALTA gastos_expedicion en payload!');
+        expedientePayload.gastos_expedicion = formularioConCalculos.gastos_expedicion || '';
+      }
+      
+      // 🚨 DEBUG CRÍTICO: Verificar el JSON exacto que se enviará
+      console.log('🚨 [FETCH PUT] FINAL VERIFICADO:');
+      console.log('🚨 cargo_pago_fraccionado:', expedientePayload.cargo_pago_fraccionado);
+      console.log('🚨 gastos_expedicion:', expedientePayload.gastos_expedicion);
+      console.log('🚨 [FETCH PUT] JSON.stringify del payload:');
+      console.log(JSON.stringify(expedientePayload, null, 2));
+      
+      fetch(`${API_URL}/api/expedientes/${formularioConCalculos.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(expedientePayload)
@@ -6316,13 +6520,22 @@ const estadoInicialFormulario = {
           toast.error('Error al actualizar expediente: ' + err.message);
         });
     } else {
+      // 🚨 DEBUG CRÍTICO: Verificar el payload final del POST
+      const payloadFinal = {
+        ...expedientePayload,
+        fecha_creacion: new Date().toISOString().split('T')[0]
+      };
+      
+      console.log('🚨 [FETCH POST] Payload final antes de JSON.stringify:');
+      console.log('🚨 [FETCH POST] cargo_pago_fraccionado:', payloadFinal.cargo_pago_fraccionado);
+      console.log('🚨 [FETCH POST] gastos_expedicion:', payloadFinal.gastos_expedicion);
+      console.log('🚨 [FETCH POST] JSON.stringify completo:');
+      console.log(JSON.stringify(payloadFinal, null, 2));
+      
   fetch(`${API_URL}/api/expedientes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...expedientePayload,
-          fecha_creacion: new Date().toISOString().split('T')[0]
-        })
+        body: JSON.stringify(payloadFinal)
       })
         .then(response => response.json())
         .then(async (data) => {
@@ -6462,6 +6675,94 @@ const estadoInicialFormulario = {
       console.error('Error al recargar expedientes:', err);
     }
   }, []);
+  // ✅ FUNCIÓN para convertir snake_case a camelCase
+  const snakeToCamel = (str) => {
+    return str.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
+  };
+
+  // ✅ CONVERSIÓN de snake_case a camelCase para uso interno del frontend
+  const convertirACamelCase = (obj) => {
+    console.log('🔄 [convertirACamelCase] ENTRADA - obj:', obj);
+    console.log('🔄 [convertirACamelCase] cargo_pago_fraccionado entrante:', obj.cargo_pago_fraccionado);
+    console.log('🔄 [convertirACamelCase] gastos_expedicion entrante:', obj.gastos_expedicion);
+    
+    const resultado = {};
+    
+    // Mapeo específico de campos conocidos (inverso del anterior)
+    const mapeoEspecifico = {
+      // Identificación
+      numero_poliza: 'numeroPoliza',
+      cliente_id: 'clienteId', 
+      agente_id: 'agenteId',
+      vendedor_id: 'vendedorId',
+      clave_aseguradora: 'claveAseguradora',
+      
+      // Datos Cliente
+      apellido_paterno: 'apellidoPaterno',
+      apellido_materno: 'apellidoMaterno',
+      razon_social: 'razonSocial',
+      nombre_comercial: 'nombreComercial',
+      numero_identificacion: 'numeroIdentificacion',
+      telefono_fijo: 'telefonoFijo',
+      telefono_movil: 'telefonoMovil',
+      
+      // Póliza
+      cargo_pago_fraccionado: 'cargoPagoFraccionado',
+      motivo_cancelacion: 'motivoCancelacion',
+      frecuencia_pago: 'frecuenciaPago',
+      proximo_pago: 'proximoPago',
+      estatus_pago: 'estatusPago',
+      gastos_expedicion: 'gastosExpedicion',
+      sub_agente: 'subAgente',
+      
+      // Vehículo
+      numero_serie: 'numeroSerie',
+      tipo_vehiculo: 'tipoVehiculo',
+      tipo_cobertura: 'tipoCobertura',
+      suma_asegurada: 'sumaAsegurada',
+      conductor_habitual: 'conductorHabitual',
+      edad_conductor: 'edadConductor',
+      licencia_conducir: 'licenciaConducir',
+      
+      // Financiero
+      prima_pagada: 'primaPagada',
+      periodo_gracia: 'periodoGracia',
+      fecha_ultimo_pago: 'fechaUltimoPago',
+      fecha_vencimiento_pago: 'fechaVencimientoPago',
+      
+      // Vigencia
+      inicio_vigencia: 'inicioVigencia',
+      termino_vigencia: 'terminoVigencia',
+      
+      // Estado
+      etapa_activa: 'etapaActiva',
+      tipo_pago: 'tipoPago',
+      fecha_creacion: 'fechaCreacion'
+    };
+
+    Object.keys(obj).forEach(key => {
+      // Usar mapeo específico si existe, sino conversión automática
+      const camelKey = mapeoEspecifico[key] || snakeToCamel(key);
+      resultado[camelKey] = obj[key];
+      
+      // También mantener la versión original para compatibilidad
+      resultado[key] = obj[key];
+      
+      // Debug específico para campos problemáticos
+      if (key === 'cargo_pago_fraccionado' || key === 'gastos_expedicion') {
+        console.log(`🔄 [convertirACamelCase] ${key} → ${camelKey}: "${obj[key]}" (tipo: ${typeof obj[key]})`);
+      }
+    });
+
+    console.log('🔄 [convertirACamelCase] SALIDA - resultado:', resultado);
+    console.log('🔄 [convertirACamelCase] cargo_pago_fraccionado final:', resultado.cargo_pago_fraccionado);
+    console.log('🔄 [convertirACamelCase] cargoPagoFraccionado final:', resultado.cargoPagoFraccionado);
+    console.log('🔄 [convertirACamelCase] gastos_expedicion final:', resultado.gastos_expedicion);
+    console.log('🔄 [convertirACamelCase] gastosExpedicion final:', resultado.gastosExpedicion);
+    
+    return resultado;
+  };
+
   const editarExpediente = useCallback(async (expediente) => {
     // Traer el expediente completo por ID para garantizar que vengan todos los campos (incluye uso y cargo_pago_fraccionado)
     let expedienteCompleto = expediente;
@@ -6471,8 +6772,10 @@ const estadoInicialFormulario = {
         const data = await resp.json();
         const desdeApi = data?.data ?? data;
         if (desdeApi && typeof desdeApi === 'object') {
+          // Convertir snake_case a camelCase para uso interno del frontend
+          const datosConvertidos = convertirACamelCase(desdeApi);
           // Merge no destructivo: los campos del detalle tienen prioridad
-          expedienteCompleto = { ...expediente, ...desdeApi };
+          expedienteCompleto = { ...expediente, ...datosConvertidos };
         }
         try {
           console.groupCollapsed('🌐 API GET /api/expedientes/:id — payload crudo');
@@ -6526,8 +6829,38 @@ const estadoInicialFormulario = {
   fecha_cancelacion: formatearFechaParaInput(expedienteCompleto.fecha_cancelacion) || '',
   // Asegurar que campos numéricos no sean undefined (aceptar snake_case y camelCase del backend)
   prima_pagada: (expedienteCompleto.prima_pagada ?? expedienteCompleto.primaPagada ?? 0),
-  cargo_pago_fraccionado: (expedienteCompleto.cargo_pago_fraccionado ?? expedienteCompleto.cargoPagoFraccionado ?? expedienteCompleto.tasa_financiamiento ?? expedienteCompleto.tasaFinanciamiento ?? 0),
-  gastos_expedicion: (expedienteCompleto.gastos_expedicion ?? expedienteCompleto.gastosExpedicion ?? expedienteCompleto.gastos ?? 0),
+  
+  // 🚨 DEBUG específico para cargo_pago_fraccionado
+  cargo_pago_fraccionado: (() => {
+    const valores = {
+      snake: expedienteCompleto.cargo_pago_fraccionado,
+      camel: expedienteCompleto.cargoPagoFraccionado,
+      tasa_snake: expedienteCompleto.tasa_financiamiento,
+      tasa_camel: expedienteCompleto.tasaFinanciamiento
+    };
+    console.log('🚨 [FORMULARIO INIT] cargo_pago_fraccionado - valores disponibles:', valores);
+    // ✅ Convertir null a string vacío para evitar problemas en inputs
+    const valor = valores.snake ?? valores.camel ?? valores.tasa_snake ?? valores.tasa_camel;
+    const resultado = (valor === null || valor === undefined) ? '' : String(valor);
+    console.log('🚨 [FORMULARIO INIT] cargo_pago_fraccionado - valor final:', resultado);
+    return resultado;
+  })(),
+  
+  // 🚨 DEBUG específico para gastos_expedicion
+  gastos_expedicion: (() => {
+    const valores = {
+      snake: expedienteCompleto.gastos_expedicion,
+      camel: expedienteCompleto.gastosExpedicion,
+      gastos: expedienteCompleto.gastos
+    };
+    console.log('🚨 [FORMULARIO INIT] gastos_expedicion - valores disponibles:', valores);
+    // ✅ Convertir null a string vacío para evitar problemas en inputs
+    const valor = valores.snake ?? valores.camel ?? valores.gastos;
+    const resultado = (valor === null || valor === undefined) ? '' : String(valor);
+    console.log('🚨 [FORMULARIO INIT] gastos_expedicion - valor final:', resultado);
+    return resultado;
+  })(),
+  
   subtotal: (expedienteCompleto.subtotal ?? expedienteCompleto.sub_total ?? expedienteCompleto.subTotal ?? 0),
     iva: (expedienteCompleto.iva ?? expedienteCompleto.IVA ?? 0),
     total: (expedienteCompleto.total ?? expedienteCompleto.importe_total ?? expedienteCompleto.importeTotal ?? 0),
