@@ -3262,36 +3262,15 @@ const Formulario = React.memo(({
         setTimeout(() => {
           setFormulario(prev => {
             const formularioConCalculos = actualizarCalculosAutomaticos(prev);
+            // ✅ SOLO aplicar los cálculos automáticos, NO sobrescribir datos del PDF
+            // Los datos del PDF ya están en 'prev' del setFormulario anterior
             return {
               ...prev,
-              ...formularioConCalculos,
-              // Preservar datos importantes que no deben cambiar
-              compania: datosExtraidos.compania,
-              producto: datosExtraidos.producto,
-              agente: agenteCodigo || '',
-              // Preservar datos del vehículo
-            marca: datosExtraidos.marca,
-            modelo: datosExtraidos.modelo,
-            anio: datosExtraidos.anio,
-            numero_serie: datosExtraidos.numero_serie,
-            motor: datosExtraidos.motor,
-            placas: datosExtraidos.placas,
-            color: datosExtraidos.color,
-            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-            tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo,
-            // Preservar campos adicionales de pago y póliza
-            tipo_pago: datosExtraidos.tipo_pago,
-            frecuenciaPago: datosExtraidos.frecuenciaPago,
-            primer_pago: datosExtraidos.primer_pago,
-            pagos_subsecuentes: datosExtraidos.pagos_subsecuentes,
-            forma_pago: datosExtraidos.forma_pago,
-            uso: datosExtraidos.uso,
-            servicio: datosExtraidos.servicio,
-            movimiento: datosExtraidos.movimiento
-          };
+              ...formularioConCalculos
+              // NO sobrescribir nada más - los datos del PDF ya están en 'prev'
+            };
           });
-          console.log('✅ Cálculos automáticos aplicados');
+          console.log('✅ Cálculos automáticos aplicados (preservando datos del PDF)');
         }, 150);
       } else {
         // FORZAR la actualización después de un pequeño delay
