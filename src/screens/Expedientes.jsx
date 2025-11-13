@@ -1158,7 +1158,10 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           frecuenciaPagoDetectada = '';
         }
         
-        console.log('   - Tipo de pago final:', tipoPagoDetectado || '(VACÍO - usuario debe completar)');
+        console.log('💳 RESUMEN NORMALIZACIÓN PAGOS:');
+        console.log('   - Forma de pago (PDF original):', formaPagoDetectada);
+        console.log('   - Tipo de pago (normalizado):', tipoPagoDetectado || '(VACÍO)');
+        console.log('   - Frecuencia de pago (normalizada):', frecuenciaPagoDetectada || '(VACÍO)');
 
         // ==================== USO / SERVICIO / MOVIMIENTO ====================
         const usoMatch = textoCompleto.match(/Uso:\s*([A-ZÁÉÍÓÚÑ]+)/i);
@@ -1264,6 +1267,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const totalMatch = textoCompleto.match(/IMPORTE\s+TOTAL\s+([\d,]+\.?\d*)/i);
         const pagoUnicoMatch = textoCompleto.match(/Pago\s+[UÚ]nico\s+([\d,]+\.?\d*)/i);
         const deducibleMatch = textoCompleto.match(/(\d+)%\s+[\d,]+\.?\d*\s+Robo/i);
+        
+        console.log('🔍 DEBUG PRE-OBJETO - Valores a asignar:');
+        console.log('   tipo_pago:', tipoPagoDetectado);
+        console.log('   frecuenciaPago:', frecuenciaPagoDetectada);
+        console.log('   forma_pago:', formaPagoDetectada);
         
         datosExtraidos = {
           // ASEGURADO
