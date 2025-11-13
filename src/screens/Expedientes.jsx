@@ -1329,6 +1329,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           // CONDUCTOR
           conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
         };
+
+        // 🔄 Normalizar frecuenciaPago para pólizas ANUAL / PAGO ÚNICO
+        if (datosExtraidos.tipo_pago && (datosExtraidos.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO/i.test(datosExtraidos.tipo_pago))) {
+          datosExtraidos.frecuenciaPago = 'Anual';
+        }
         
         // ==================== NORMALIZACIÓN DE VALORES ====================
         // Normalizar marca para que coincida con las opciones disponibles
@@ -1434,6 +1439,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           edad_conductor: extraerDato(/(?:EDAD)[:\s]+(\d+)/i, textoCompleto) || '',
           licencia_conducir: extraerDato(/(?:LICENCIA)[:\s]+([A-Z0-9]+)/i, textoCompleto) || ''
         };
+
+        // 🔄 Normalizar frecuenciaPago cuando tipo_pago es Anual
+        if (datosExtraidos.tipo_pago && (datosExtraidos.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO|CONTADO/i.test(datosExtraidos.forma_pago || ''))) {
+          datosExtraidos.frecuenciaPago = 'Anual';
+        }
       }
 
       console.log('📊 Datos extraídos:', datosExtraidos);
@@ -4214,10 +4224,13 @@ const Formulario = React.memo(({
                   className="form-select"
                   value={formulario.tipo_pago ?? ''}
                   onChange={(e) => {
+                    const tipo = e.target.value;
+                    const esAnual = tipo === 'Anual' || /pago\s+unico|pago\s+único/i.test(tipo);
                     const nuevoFormulario = {
-                      ...formulario, 
-                      tipo_pago: e.target.value,
-                      frecuenciaPago: e.target.value === 'Anual' ? '' : formulario.frecuenciaPago
+                      ...formulario,
+                      tipo_pago: tipo,
+                      // Forzar frecuenciaPago = 'Anual' para tipo anual o pago único
+                      frecuenciaPago: esAnual ? 'Anual' : formulario.frecuenciaPago
                     };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                     setFormulario(formularioActualizado);
@@ -4246,6 +4259,19 @@ const Formulario = React.memo(({
                       <option key={freq} value={freq}>{freq}</option>
                     ))}
                   </select>
+                </div>
+              )}
+              {formulario.tipo_pago && formulario.tipo_pago !== 'Fraccionado' && (
+                <div className="col-md-3 d-flex flex-column">
+                  <label className="form-label">Frecuencia de Pago</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.frecuenciaPago || 'Anual'}
+                    readOnly
+                    disabled
+                  />
+                  <small className="text-muted">Frecuencia fija para pago {formulario.tipo_pago === 'Anual' ? 'Anual' : 'Único'}.</small>
                 </div>
               )}
               
@@ -6873,6 +6899,11 @@ const estadoInicialFormulario = {
       servicio_poliza: expedienteCompleto.servicio || expedienteCompleto.servicio_poliza || expedienteCompleto.Servicio || expedienteCompleto.servicioVehiculo || '',
       movimiento_poliza: expedienteCompleto.movimiento || expedienteCompleto.movimiento_poliza || expedienteCompleto.Movimiento || ''
     };
+
+    // 🔄 Forzar frecuenciaPago='Anual' para tipo de pago Anual o Pago Único si no viene
+    if (formularioBase.tipo_pago && (formularioBase.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO/i.test(formularioBase.tipo_pago))) {
+      formularioBase.frecuenciaPago = 'Anual';
+    }
 
     // Si hay inicio de vigencia, recalcular automáticamente proximoPago/fecha_pago/estatus
     const formularioConCalculos = formularioBase.inicio_vigencia
