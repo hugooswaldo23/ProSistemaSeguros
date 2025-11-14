@@ -158,14 +158,7 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
                         onChange(index, 'ejecutivoId', val);
                         if (onAsignarEjecutivo && usuarioId) {
                           try {
-                            await onAsignarEjecutivo({ 
-                              usuarioId, 
-                              productoId: item.productoId, 
-                              aseguradoraId: item.aseguradoraId,
-                              ejecutivoId: val, 
-                              comisionPersonalizada: item.comisionPersonalizada || 0, 
-                              clave: item.clave || null 
-                            });
+                            await onAsignarEjecutivo({ usuarioId, productoId: item.productoId, ejecutivoId: val, comisionPersonalizada: item.comisionPersonalizada || 0, clave: item.clave || null });
                           } catch (err) {
                             console.error('Error al asignar ejecutivo por producto:', err);
                           }
@@ -566,14 +559,7 @@ const SistemaGestionPersonal = () => {
       if (formulario.id && item) {
         (async () => {
           try {
-            const res = await guardarEjecutivosPorProducto({ 
-              usuarioId: formulario.id, 
-              productoId: item.productoId, 
-              aseguradoraId: item.aseguradoraId,
-              ejecutivoId: item.ejecutivoId || null, 
-              comisionPersonalizada: Number(item.comisionPersonalizada || 0), 
-              clave: item.clave || null 
-            });
+            const res = await guardarEjecutivosPorProducto({ usuarioId: formulario.id, productoId: item.productoId, ejecutivoId: item.ejecutivoId || null, comisionPersonalizada: Number(item.comisionPersonalizada || 0), clave: item.clave || null });
             if (res && res.success) mostrarAlertaTemp('Clave guardada', 'success');
             else mostrarAlertaTemp('Error al guardar clave', 'danger');
           } catch (err) {
@@ -595,13 +581,7 @@ const SistemaGestionPersonal = () => {
     if (formulario.id && item) {
       (async () => {
         try {
-          const res = await guardarEjecutivosPorProducto({ 
-            usuarioId: formulario.id, 
-            productoId: item.productoId, 
-            aseguradoraId: item.aseguradoraId,
-            ejecutivoId: item.ejecutivoId || null, 
-            comisionPersonalizada: Number(item.comisionPersonalizada || 0) 
-          });
+          const res = await guardarEjecutivosPorProducto({ usuarioId: formulario.id, productoId: item.productoId, ejecutivoId: item.ejecutivoId || null, comisionPersonalizada: Number(item.comisionPersonalizada || 0) });
           if (res && res.success) mostrarAlertaTemp('Comisión personalizada guardada', 'success');
           else mostrarAlertaTemp('Error al guardar comisión', 'danger');
         } catch (err) {
@@ -1278,8 +1258,8 @@ const SistemaGestionPersonal = () => {
                                   onChange={handleProductosAseguradorasChange}
                                   onComisionChange={handleComisionChange}
                                   usuarioId={formulario.id}
-                                  onAsignarEjecutivo={async ({ usuarioId, productoId, aseguradoraId, ejecutivoId, comisionPersonalizada = 0, clave = null }) => {
-                                    const res = await guardarEjecutivosPorProducto({ usuarioId, productoId, aseguradoraId, ejecutivoId, comisionPersonalizada, clave });
+                                  onAsignarEjecutivo={async ({ usuarioId, productoId, ejecutivoId, comisionPersonalizada = 0, clave = null }) => {
+                                    const res = await guardarEjecutivosPorProducto({ usuarioId, productoId, ejecutivoId, comisionPersonalizada, clave });
                                     if (res && res.success) mostrarAlertaTemp('Asignación guardada', 'success');
                                     else mostrarAlertaTemp('Error al guardar asignación', 'danger');
                                   }}

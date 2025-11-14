@@ -124,9 +124,15 @@ const DetalleExpediente = ({
       <div className="card-body">
         {/* Asegurado */}
         <div className="seccion-bloque seccion-asegurado">
-          <h6 className="text-primary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>👤 Información del Asegurado</h6>
+          <h6 className="text-primary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+            👤 Información del {datos?.tipo_persona === 'Moral' ? 'Asegurado (Persona Moral)' : 'Asegurado'}
+          </h6>
           <div className="row g-2">
-            {renderCampo('Nombre Completo', `${datos?.nombre || ''} ${datos?.apellido_paterno || ''} ${datos?.apellido_materno || ''}`.trim())}
+            {datos?.tipo_persona === 'Moral' ? (
+              renderCampo('Razón Social', datos?.razonSocial || datos?.razon_social || '-')
+            ) : (
+              renderCampo('Nombre Completo', `${datos?.nombre || ''} ${datos?.apellido_paterno || ''} ${datos?.apellido_materno || ''}`.trim())
+            )}
             {renderCampo('Conductor Habitual', datos?.conductor_habitual || 'Mismo que asegurado')}
           </div>
         </div>
@@ -143,9 +149,6 @@ const DetalleExpediente = ({
             {renderCampo('Producto', datos?.producto)}
             {renderCampo('Tipo de Pago', tipoPagoMostrar || datos?.tipo_pago)}
             {renderCampo('Agente', datos?.agente)}
-            {usoMostrar && renderCampo('Uso', usoMostrar)}
-            {servicioMostrar && renderCampo('Servicio', servicioMostrar)}
-            {movimientoMostrar && renderCampo('Movimiento', movimientoMostrar)}
           </div>
         </div>
 
@@ -155,7 +158,8 @@ const DetalleExpediente = ({
           <div className="row g-2">
             {renderCampo('Inicio', datos?.inicio_vigencia ? new Date(datos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
             {renderCampo('Fin', datos?.termino_vigencia ? new Date(datos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
-            {renderCampo('Vencimiento de Pago', datos?.fecha_pago ? new Date(datos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
+            {renderCampo('Fecha de Emisión', datos?.fecha_emision ? new Date(datos.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
+            {renderCampo('Fecha de Captura', datos?.fecha_captura ? new Date(datos.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
           </div>
         </div>
 
@@ -233,12 +237,21 @@ const DetalleExpediente = ({
             <div className="accordion-body">
               {/* INFORMACIÓN DEL ASEGURADO */}
               <div className="p-2 bg-light rounded mb-2">
-                <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>👤 INFORMACIÓN DEL ASEGURADO</h6>
+                <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+                  👤 INFORMACIÓN DEL {datos.tipo_persona === 'Moral' ? 'ASEGURADO (PERSONA MORAL)' : 'ASEGURADO'}
+                </h6>
                 <div className="row g-1">
-                  <div className="col-md-6">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.nombre} {datos.apellido_paterno} {datos.apellido_materno}</strong></div>
-                  </div>
+                  {datos?.tipo_persona === 'Moral' ? (
+                    <div className="col-md-6">
+                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Razón Social:</small>
+                      <div><strong style={{ fontSize: '0.8rem' }}>{datos.razonSocial || datos.razon_social || '-'}</strong></div>
+                    </div>
+                  ) : (
+                    <div className="col-md-6">
+                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
+                      <div><strong style={{ fontSize: '0.8rem' }}>{datos.nombre} {datos.apellido_paterno} {datos.apellido_materno}</strong></div>
+                    </div>
+                  )}
                   <div className="col-md-6">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
@@ -287,47 +300,26 @@ const DetalleExpediente = ({
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.agente || '-'}</strong></div>
                   </div>
                 </div>
-                {(usoMostrar || servicioMostrar || movimientoMostrar) && (
-                  <div className="row g-1 mt-1">
-                    {usoMostrar && (
-                      <div className="col-md-4">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Uso:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{usoMostrar}</strong></div>
-                      </div>
-                    )}
-                    {servicioMostrar && (
-                      <div className="col-md-4">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Servicio:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{servicioMostrar}</strong></div>
-                      </div>
-                    )}
-                    {movimientoMostrar && (
-                      <div className="col-md-4">
-                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Movimiento:</small>
-                        <div><strong style={{ fontSize: '0.8rem' }}>{movimientoMostrar}</strong></div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
               {/* VIGENCIA */}
               <div className="p-2 bg-success bg-opacity-10 rounded mb-2">
                 <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
                 <div className="row g-1">
-                  <div className="col-md-4">
+                  <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.inicio_vigencia ? new Date(datos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
                   </div>
-                  <div className="col-md-4">
+                  <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.termino_vigencia ? new Date(datos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
                   </div>
-                  <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha Vencimiento del pago:</small>
-                    <div><strong className="text-warning-emphasis" style={{ fontSize: '0.8rem' }}>
-                      {datos.fecha_pago ? new Date(datos.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}
-                      {datos.plazo_pago_dias && ` (${datos.plazo_pago_dias} días)`}
-                    </strong></div>
+                  <div className="col-md-3">
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Emisión:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_emision ? new Date(datos.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                  </div>
+                  <div className="col-md-3">
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Captura:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_captura ? new Date(datos.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
                   </div>
                 </div>
               </div>
@@ -338,41 +330,49 @@ const DetalleExpediente = ({
                 <div className="row g-1">
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.prima_pagada ? utils.formatearMoneda(datos.prima_pagada) : '-'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.prima_pagada ? utils.formatearMoneda(datos.prima_pagada) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tasa Financiamiento:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.cargo_pago_fraccionado ? utils.formatearMoneda(datos.cargo_pago_fraccionado) : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Otros Descuentos:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.otros_descuentos ? utils.formatearMoneda(datos.otros_descuentos) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos por Expedición:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.gastos_expedicion ? utils.formatearMoneda(datos.gastos_expedicion) : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Financiamiento por pago fraccionado:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.cargo_pago_fraccionado ? utils.formatearMoneda(datos.cargo_pago_fraccionado) : '$0.00'}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subtotal:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.subtotal ? utils.formatearMoneda(datos.subtotal) : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos de expedición:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.gastos_expedicion ? utils.formatearMoneda(datos.gastos_expedicion) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A. 16%:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.iva ? utils.formatearMoneda(datos.iva) : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A.:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.iva ? utils.formatearMoneda(datos.iva) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>IMPORTE TOTAL:</small>
-                    <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datos.total ? utils.formatearMoneda(datos.total) : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Total a pagar:</small>
+                    <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datos.total ? utils.formatearMoneda(datos.total) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
-                    <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datos.tipo_pago || '-'}</strong></div>
+                    <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datos.tipo_pago || 'No especificado'}</strong></div>
                   </div>
                 </div>
-                {datos.fecha_pago && (
+                {(datos.fecha_limite_pago || datos.fecha_pago) && (
                   <div className="row g-1 mt-1">
-                    <div className="col-md-6">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Pago Único:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{datos.pago_unico ? utils.formatearMoneda(datos.pago_unico) : '-'}</strong></div>
-                    </div>
+                    {datos.fecha_limite_pago && (
+                      <div className="col-md-6">
+                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>📅 Fecha Límite de Pago:</small>
+                        <div><strong className="text-danger" style={{ fontSize: '0.8rem' }}>{utils.formatearFecha(datos.fecha_limite_pago)}</strong></div>
+                      </div>
+                    )}
+                    {datos.pago_unico && (
+                      <div className="col-md-6">
+                        <small className="text-muted" style={{ fontSize: '0.7rem' }}>Pago Único:</small>
+                        <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.pago_unico)}</strong></div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -422,11 +422,13 @@ const DetalleExpediente = ({
                     {renderCampo('Marca', datos?.marca)}
                     {renderCampo('Modelo', datos?.modelo)}
                     {renderCampo('Año', datos?.anio)}
+                    {renderCampo('Serie (VIN)', datos?.numero_serie, { strong: false, className: 'col-md-6' })}
                     {renderCampo('Placas', datos?.placas)}
                     {renderCampo('Color', datos?.color)}
                     {renderCampo('Tipo', datos?.tipo_vehiculo)}
-                    {renderCampo('Serie (VIN)', datos?.numero_serie, { strong: false, className: 'col-md-6' })}
                     {renderCampo('Motor', datos?.motor)}
+                    {usoMostrar && renderCampo('Uso', usoMostrar)}
+                    {servicioMostrar && renderCampo('Servicio', servicioMostrar)}
                   </div>
                 </div>
               )}

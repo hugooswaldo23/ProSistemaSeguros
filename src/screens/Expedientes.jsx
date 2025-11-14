@@ -68,7 +68,7 @@ import * as historialService from '../services/historialExpedienteService';
 import TimelineExpediente from '../components/TimelineExpediente';
 
 // Configurar worker de PDF.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
 
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
@@ -714,32 +714,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         })
         .join('\n');
       
-      // TAMBIÉN extraer TODO el texto sin ordenar por posición (captura mejor texto en cuadros)
-      const textoCompletoSinOrdenar = textContent.items.map(item => item.str).join(' ');
-
-      console.log('📄 Texto página 1 (primeras 20 líneas):\n', textoPagina1.split('\n').slice(0, 20).join('\n'));
-      console.log('📄 Texto página 2 (primeras 50 líneas):\n', textoCompleto.split('\n').slice(0, 50).join('\n'));
-      console.log('📄 Texto página 2 (ÚLTIMAS 50 líneas):\n', textoCompleto.split('\n').slice(-50).join('\n'));
-      
-      // DEBUG: Buscar si "TRIMESTRAL" aparece en alguna página
-      console.log('🔍 BUSCAR TRIMESTRAL en pág 1:', textoPagina1.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      console.log('🔍 BUSCAR TRIMESTRAL en pág 2:', textoCompleto.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      console.log('🔍 BUSCAR TRIMESTRAL en texto sin ordenar:', textoCompletoSinOrdenar.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      
-      // Si existe, mostrar contexto
-      if (textoCompleto.includes('TRIMESTRAL')) {
-        const idx = textoCompleto.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (ordenado):', textoCompleto.substring(Math.max(0, idx - 100), idx + 100));
-      }
-      if (textoCompletoSinOrdenar.includes('TRIMESTRAL')) {
-        const idx = textoCompletoSinOrdenar.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (sin ordenar):', textoCompletoSinOrdenar.substring(Math.max(0, idx - 100), idx + 100));
-      }
-      if (textoPagina1.includes('TRIMESTRAL')) {
-        const idx = textoPagina1.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (pág 1):', textoPagina1.substring(Math.max(0, idx - 100), idx + 100));
-      }
-
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
@@ -839,634 +813,56 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // Detectar el tipo de aseguradora
-      const esQualitas = /qu[aá]litas/i.test(textoCompleto);
-      const compania = esQualitas ? 'Qualitas' : 
-                       /gnp/i.test(textoCompleto) ? 'GNP' :
-                       /mapfre/i.test(textoCompleto) ? 'MAPFRE' :
-                       /axa/i.test(textoCompleto) ? 'AXA' :
-                       /hdi/i.test(textoCompleto) ? 'HDI' : 'Otra';
-
-      console.log('🏢 Aseguradora detectada:', compania);
-
-      // Extraer datos específicos para Qualitas
+       // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
+      console.log('🎯 Iniciando proceso de extracción modular...');
+      
       let datosExtraidos = {};
       
-      if (esQualitas) {
-        console.log('🎯 Aplicando extractor especializado para Qualitas (página 2)');
+      try {
+        const { detectarAseguradoraYProducto } = await import('../lib/pdf/detectorLigero.js');
+        const { loadExtractor } = await import('../lib/pdf/extractors/registry.js');
         
-        // ==================== MESES (definir primero) ====================
-        const meses = {
-          'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
-        };
+        const deteccion = detectarAseguradoraYProducto(textoPagina1);
+        console.log('🏢 Detección:', deteccion);
         
-        // ==================== RFC (PRIMERO - para determinar tipo de persona) ====================
-        // RFC puede ser:
-        // - Persona Física: 4 letras + 6 dígitos + 3 caracteres (AAAA######XXX) - 13 caracteres
-        // Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
-        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
-        let rfcExtraido = rfcMatch ? rfcMatch[1] : '';
+        const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
         
-        // ✅ Si no se encuentra RFC, continuar de todos modos (lo pediremos después si es necesario)
-        if (!rfcExtraido || rfcExtraido.trim() === '') {
-          console.warn('⚠️ RFC no encontrado en el PDF. Se solicitará después si es necesario.');
-          rfcExtraido = ''; // Dejar vacío, se manejará después
-        }
-        
-        const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
-        
-        console.log('🔍 RFC extraído:', rfcExtraido, '- Longitud:', rfcExtraido.length, '- Tipo:', tipoPersona);
-        
-        // ==================== INFORMACIÓN DEL ASEGURADO (según tipo de persona) ====================
-        let nombre = '';
-        let apellido_paterno = '';
-        let apellido_materno = '';
-        let razonSocial = '';
-        
-        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
-        if (nombreMatch) {
-          const nombreCompleto = nombreMatch[1].trim();
+        if (moduloExtractor && moduloExtractor.extraer) {
+          console.log(`✅ Extractor encontrado para ${deteccion.aseguradora} - ${deteccion.producto}`);
           
-          if (tipoPersona === 'Moral') {
-            // Persona Moral: TODO es razón social
-            razonSocial = nombreCompleto;
-            console.log('🏢 Razón Social (Persona Moral):', razonSocial);
-          } else {
-            // Persona Física: Separar en nombre y apellidos
-            const palabras = nombreCompleto.split(/\s+/);
-            console.log('📝 Palabras del nombre (Persona Física):', palabras);
-            
-            if (palabras.length === 4) {
-              nombre = `${palabras[0]} ${palabras[1]}`;
-              apellido_paterno = palabras[2];
-              apellido_materno = palabras[3];
-            } else if (palabras.length === 3) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-              apellido_materno = palabras[2];
-            } else if (palabras.length === 2) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-            } else {
-              nombre = palabras[0] || nombreCompleto;
-            }
-            console.log('👤 Nombre (Persona Física):', { nombre, apellido_paterno, apellido_materno });
-          }
-        }
-        
-        // ==================== DOMICILIO COMPLETO ====================
-        // Capturar solo hasta antes de "R.F.C:" para evitar incluir el RFC
-        const domicilioMatch = textoCompleto.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
-        const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
-        console.log('🏠 Domicilio extraído:', domicilio);
-        
-        // ==================== MUNICIPIO, COLONIA, ESTADO, CP Y PAÍS ====================
-        // En pólizas de Qualitas, después del domicilio vienen:
-        // C.P.: xxxxx Municipio: NOMBRE_MUNICIPIO Estado: NOMBRE_ESTADO Colonia: NOMBRE_COLONIA
-        const cpMatch = textoCompleto.match(/C\.P\.:\s*(\d{5})/i);
-        const municipioMatch = textoCompleto.match(/Municipio:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Estado:|\n)/i);
-        const estadoMatch = textoCompleto.match(/Estado:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Colonia:|\n)/i);
-        const coloniaMatch = textoCompleto.match(/Colonia:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
-        const paisMatch = textoCompleto.match(/Pa[ií]s:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
-        
-        const cp = cpMatch ? cpMatch[1] : '';
-        const municipio = municipioMatch ? municipioMatch[1].trim() : '';
-        const estado = estadoMatch ? estadoMatch[1].trim() : '';
-        const colonia = coloniaMatch ? coloniaMatch[1].trim() : '';
-        const pais = paisMatch ? paisMatch[1].trim() : 'MEXICO';
-        
-        console.log('📍 Datos de ubicación extraídos:');
-        console.log('   - CP:', cp);
-        console.log('   - Municipio:', municipio);
-        console.log('   - Estado:', estado);
-        console.log('   - Colonia:', colonia);
-        console.log('   - País:', pais);
-        
-        // ==================== AGENTE (buscar en ambas páginas) ====================
-        let agente = '';
-        const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-        const agenteMatch2 = textoCompleto.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-        
-        if (agenteMatch1) {
-          agente = `${agenteMatch1[1]} - ${agenteMatch1[2].trim()}`;
-          console.log('✅ Agente (pág 1):', agente);
-        } else if (agenteMatch2) {
-          agente = `${agenteMatch2[1]} - ${agenteMatch2[2].trim()}`;
-          console.log('✅ Agente (pág 2):', agente);
-        }
-        
-        // ==================== PÓLIZA (buscar en ambas páginas) ====================
-        // Formato: POLIZA    ENDOSO    INCISO
-        //          POLIZA DE SEGURO DE AUTOMOVILES  
-        //          0971413763  000000    0001
-        let polizaNum = '', endosoNum = '', incisoNum = '';
-        
-        // Buscar patrón simple: 10 dígitos + 6 dígitos + 4 dígitos en una línea
-        const lineaNumeros2 = textoCompleto.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        const lineaNumeros1 = textoPagina1.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        
-        if (lineaNumeros2) {
-          polizaNum = lineaNumeros2[1];
-          endosoNum = lineaNumeros2[2];
-          incisoNum = lineaNumeros2[3];
-          console.log('✅ Póliza extraída (pág 2):', { polizaNum, endosoNum, incisoNum });
-        } else if (lineaNumeros1) {
-          polizaNum = lineaNumeros1[1];
-          endosoNum = lineaNumeros1[2];
-          incisoNum = lineaNumeros1[3];
-          console.log('✅ Póliza extraída (pág 1):', { polizaNum, endosoNum, incisoNum });
+          console.log('📄 DEBUG antes de extraer:');
+          console.log('   - textoPagina1 length:', textoPagina1?.length);
+          console.log('   - textoCompleto length:', textoCompleto?.length);
+          console.log('   - textoPagina1 (primeros 500):', textoPagina1?.substring(0, 500));
+          
+          const textoCompletoPDF = textoPagina1 + '\n' + textoCompleto;
+          
+          datosExtraidos = await moduloExtractor.extraer({
+            textoCompleto: textoCompletoPDF,
+            textoPagina1,
+            textoPagina2: textoCompleto
+          });
+          
+          console.log('📊 Datos extraídos:', datosExtraidos);
         } else {
-          console.log('⚠️ No se encontró línea con 10+6+4 dígitos');
+          console.error('❌ No se encontró extractor para:', deteccion);
+          setEstado('error');
+          setErrores([{
+            tipo: 'error',
+            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+            detalle: 'Por favor, contacte al administrador.'
+          }]);
+          return;
         }
-        
-        const planMatch = textoCompleto.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
-        
-        // ==================== RFC ====================
-        
-        // ==================== CURP (solo para Persona Física) ====================
-        const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
-        
-  // ==================== VEHÍCULO ====================
-  // Algunos códigos de vehículo vienen con 3, 4, 5 o 6 dígitos. El patrón anterior esperaba exactamente 5.
-  // Ejemplos observados: "394 HONDA CIVIC ...", "0971462991 PORSCHE CAYENNE ..." (en otras pólizas el código puede ser largo).
-  // Ampliamos el rango y permitimos puntos y guiones en el modelo.
-  const descripcionMatch = textoCompleto.match(/(\d{3,6})\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=Tipo:|Serie:|Motor:|Modelo:|$)/i);
-  const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-  const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9\-]{3,})(?=\s|$)/i);
-  const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
-        
-        // MEJORAR EXTRACCIÓN DE PLACAS - Excluir palabras como VIGENCIA
-        // Las placas en México suelen tener formato: 3 letras + 3 números (ABC123) o 3 letras + 2 números + 1 letra (ABC12D)
-        // También pueden tener guiones: ABC-123 o ABC-12-D
-        let placasExtraidas = '';
-        const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]{3,10})(?=\s|$|\n)/i);
-        if (placasMatch) {
-          const posiblePlaca = placasMatch[1].toUpperCase();
-          // Validar que no sea una palabra común o tenga un formato razonable de placa
-          // Placas válidas: ABC123, ABC-123, ABC12D, etc.
-          // Excluir: VIGENCIA, AMPARADA, NA, SIN, NINGUNA, palabras largas
-          const esPlacaValida = posiblePlaca.length >= 3 && 
-                                posiblePlaca.length <= 10 && 
-                                !/^(VIGENCIA|AMPARADA|NA|N\/A|SIN|NINGUNA|TEMPORAL|PENDIENTE)$/i.test(posiblePlaca);
-          
-          if (esPlacaValida) {
-            placasExtraidas = posiblePlaca;
-            console.log('✅ Placas extraídas:', placasExtraidas);
-          } else {
-            console.log('⚠️ Placas rechazadas (no válida):', posiblePlaca);
-          }
-        } else {
-          console.log('⚠️ No se encontró patrón de placas en el PDF');
-        }
-        
-        const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
-        
-        // =============== EXTRACCIÓN MARCA / MODELO ===============
-        // Estrategia escalonada: patrón principal -> alternativo -> fallback por marcas conocidas.
-        let marca = '';
-        let modeloCompleto = '';
-
-        if (descripcionMatch) {
-          marca = descripcionMatch[2];
-          modeloCompleto = descripcionMatch[3].trim();
-          console.log('🚗 Extracción vehículo (principal) OK:', { marca, modeloCompleto });
-        } else {
-          const altMatch = textoCompleto.match(/\d{3,6}\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=\s*Tipo:|\s*Serie:|Motor:|Modelo:|\n)/i);
-          if (altMatch) {
-            marca = altMatch[1];
-            modeloCompleto = altMatch[2].trim();
-            console.log('🚗 Extracción vehículo (alternativa) OK:', { marca, modeloCompleto });
-          } else {
-            // Fallback: buscar línea que contenga una marca conocida seguida de más texto antes de "Tipo:" o "Serie:".
-            const marcasFallback = [
-              'AUDI','BMW','CHEVROLET','CHRYSLER','DODGE','FIAT','FORD','HONDA','HYUNDAI','JEEP','KIA','MAZDA','MERCEDES','MERCEDES-BENZ','MITSUBISHI','NISSAN','PEUGEOT','PORSCHE','RENAULT','SEAT','SUZUKI','TOYOTA','VOLKSWAGEN','VOLVO'
-            ];
-            const marcasRegex = new RegExp(`\\b(${marcasFallback.join('|')})\\b\\s+([A-Z0-9][A-Z0-9\\s\-\.]{3,})`, 'i');
-            const fallbackMatch = textoCompleto.match(marcasRegex);
-            if (fallbackMatch) {
-              marca = fallbackMatch[1];
-              // Cortar el modelo antes de palabras clave si aparecen
-              modeloCompleto = fallbackMatch[2]
-                .split(/\s+(?:Tipo:|Serie:|Motor:|Modelo:)/i)[0]
-                .trim();
-              console.log('🚗 Extracción vehículo (fallback) OK:', { marca, modeloCompleto });
-            } else {
-              console.log('⚠️ No se pudo extraer marca/modelo con ninguno de los patrones');
-            }
-          }
-        }
-        
-        console.log('🚗 Marca extraída:', marca);
-        console.log('🚗 Modelo extraído:', modeloCompleto);
-        console.log('🚗 Placas extraídas:', placasExtraidas);
-        
-        // ==================== VIGENCIA ====================
-  const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-  const hastaMatch = textoCompleto.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        
-        // ==================== PERIODO DE GRACIA ====================
-        // Extraer solo el periodo de gracia, el formulario calculará las fechas de pago
-        const plazoMatch = textoCompleto.match(/Plazo\s+de\s+pago:\s*(\d+)\s*d[ií]as/i);
-        const periodoGraciaExtraido = plazoMatch ? plazoMatch[1] : '14'; // Default 14 si no se encuentra
-        
-        console.log('📅 Periodo de gracia extraído:', plazoMatch ? `${plazoMatch[1]} días` : 'NO ENCONTRADO (usando 14 por defecto)');
-
-        // ==================== FORMA DE PAGO Y PARCIALES ====================
-        // En Qualitas, la forma de pago aparece DESPUÉS de "Gastos por Expedición" y ANTES de "Pago:"
-        // Puede ser: TRIMESTRAL, MENSUAL, SEMESTRAL, ANUAL, CONTADO, etc.
-        
-        console.log('🔍 DEBUG - Buscando forma de pago entre "Gastos" y "Pago:"...');
-        
-        // Buscar en textoCompleto (que YA sabemos que contiene TRIMESTRAL según los logs)
-        const seccionGastosAPago = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+[\d,]+\.?\d*\s+([\s\S]{0,100}?)Pago:/i);
-        
-        let formaPagoEncontrada = null;
-        
-        if (seccionGastosAPago) {
-          const textoEntreGastosYPago = seccionGastosAPago[1].trim();
-          console.log('🔍 DEBUG - Texto entre "Gastos Expedición" y "Pago:":', textoEntreGastosYPago);
-          
-          // Buscar palabras clave de periodicidad o forma de pago
-          const match = textoEntreGastosYPago.match(/(TRIMESTRAL|MENSUAL|SEMESTRAL|ANUAL|BIMESTRAL|CUATRIMESTRAL|CONTADO)/i);
-          
-          if (match) {
-            formaPagoEncontrada = match[1].toUpperCase();
-            console.log('✅ Forma de pago encontrada:', formaPagoEncontrada);
-          } else {
-            console.log('⚠️ No se encontró forma de pago en esa sección. Texto:', textoEntreGastosYPago);
-          }
-        } else {
-          console.log('⚠️ No se encontró la sección entre "Gastos Expedición" y "Pago:"');
-        }
-        
-        const formaPagoMatch = formaPagoEncontrada ? [null, formaPagoEncontrada] : null;
-        
-        const primerPagoMatch = textoCompleto.match(/Primer\s+pago\s+([\d,]+\.?\d*)/i);
-        const pagosSubMatch =
-          textoCompleto.match(/Pago\(s\)\s*Subsecuente\(s\)\s+([\d,]+\.?\d*)/i) ||
-          textoCompleto.match(/Pagos?\s+subsecuentes?\s+([\d,]+\.?\d*)/i);
-
-        const formaPagoDetectada = formaPagoMatch ? formaPagoMatch[1].trim().toUpperCase() : '';
-        const primerPago = primerPagoMatch ? primerPagoMatch[1].replace(/,/g, '') : '';
-        const pagosSubsecuentes = pagosSubMatch ? pagosSubMatch[1].replace(/,/g, '') : '';
-
-        console.log('💰 Datos de pago extraídos del PDF:');
-        console.log('   - Forma de pago (texto PDF):', formaPagoDetectada);
-        console.log('   - Primer pago:', primerPago);
-        console.log('   - Pagos subsecuentes:', pagosSubsecuentes);
-
-        // Normalizar tipo_pago y frecuenciaPago a partir de la forma de pago extraída
-        let tipoPagoDetectado = '';
-        let frecuenciaPagoDetectada = '';
-        
-        if (formaPagoDetectada) {
-          const f = formaPagoDetectada.toLowerCase();
-          
-          // Mapear palabras clave a tipos de pago y frecuencia
-          if (f.includes('tri')) {
-            tipoPagoDetectado = 'Fraccionado';
-            frecuenciaPagoDetectada = 'Trimestral';
-          } else if (f.includes('men')) {
-            tipoPagoDetectado = 'Fraccionado';
-            frecuenciaPagoDetectada = 'Mensual';
-          } else if (f.includes('sem')) {
-            tipoPagoDetectado = 'Fraccionado';
-            frecuenciaPagoDetectada = 'Semestral';
-          } else if (f.includes('bim')) {
-            tipoPagoDetectado = 'Fraccionado';
-            frecuenciaPagoDetectada = 'Bimestral';
-          } else if (f.includes('cuat')) {
-            tipoPagoDetectado = 'Fraccionado';
-            frecuenciaPagoDetectada = 'Cuatrimestral';
-          } else if (f.includes('anu') || f.includes('contado')) {
-            // CONTADO o ANUAL = pago único
-            tipoPagoDetectado = 'Anual';
-            frecuenciaPagoDetectada = 'Anual';
-          } else {
-            // Si no coincide con ningún patrón, asumir Anual
-            tipoPagoDetectado = 'Anual';
-            frecuenciaPagoDetectada = 'Anual';
-          }
-          
-          console.log('✅ Tipo de pago normalizado:', tipoPagoDetectado);
-          console.log('✅ Frecuencia de pago normalizada:', frecuenciaPagoDetectada);
-        } else {
-          // No se encontró forma de pago, dejar vacío
-          console.warn('⚠️ No se encontró forma de pago en PDF');
-          tipoPagoDetectado = '';
-          frecuenciaPagoDetectada = '';
-        }
-        
-        console.log('💳 RESUMEN NORMALIZACIÓN PAGOS:');
-        console.log('   - Forma de pago (PDF original):', formaPagoDetectada);
-        console.log('   - Tipo de pago (normalizado):', tipoPagoDetectado || '(VACÍO)');
-        console.log('   - Frecuencia de pago (normalizada):', frecuenciaPagoDetectada || '(VACÍO)');
-
-        // ==================== USO / SERVICIO / MOVIMIENTO ====================
-        const usoMatch = textoCompleto.match(/Uso:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        const servicioMatch = textoCompleto.match(/Servicio:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        const movimientoMatch = textoCompleto.match(/Movimiento:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        
-        // ==================== COBERTURAS ====================
-        console.log('🛡️ Extrayendo coberturas...');
-        
-        // Buscar la sección de coberturas contratadas
-        const coberturasSeccion = textoCompleto.match(/COBERTURAS\s+CONTRATADAS\s+SUMA\s+ASEGURADA\s+DEDUCIBLE\s+\$\s+PRIMAS([\s\S]*?)(?=Para\s+RC\s+en\s+el\s+extranjero|Quedan\s+excluidos|Textos:|Forma\s+de|$)/i);
-        
-        let coberturasExtraidas = [];
-        
-        if (coberturasSeccion) {
-          const textoCobertura = coberturasSeccion[1];
-          console.log('📋 Texto de coberturas encontrado:', textoCobertura.substring(0, 500));
-          
-          // Extraer cada línea de cobertura
-          // Formato 1: Nombre $monto deducible% prima
-          // Formato 2: Nombre $monto POR EVENTO deducible prima
-          // Formato 3: Nombre AMPARADA prima
-          
-          const lineas = textoCobertura.split('\n').filter(l => l.trim().length > 0);
-          
-          for (const linea of lineas) {
-            const lineaLimpia = linea.trim();
-            if (!lineaLimpia) continue;
-            
-            // Patrón 1: Cobertura con monto y deducible porcentual
-            // Ej: "Daños materiales $ 631,350.00 5% 12,972.86"
-            let match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+(\d+)%\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3] + '%',
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} - ${match[3]}%`);
-              continue;
-            }
-            
-            // Patrón 2: Cobertura POR EVENTO con deducible
-            // Ej: "Responsabilidad Civil por Daños a Terceros $ 3,000,000.00 POR EVENTO 0 uma 1,983.96"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+POR\s+EVENTO\s+(.+?)\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3].trim(),
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'por_evento'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} POR EVENTO`);
-              continue;
-            }
-            
-            // Patrón 3: Cobertura AMPARADA
-            // Ej: "Asistencia Vial Qualitas AMPARADA 565.00"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s.]+?)\s+AMPARADA\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: 'AMPARADA',
-                deducible: 'N/A',
-                prima: match[2].replace(/,/g, ''),
-                tipo: 'amparada'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - AMPARADA`);
-              continue;
-            }
-            
-            // Patrón 4: Cobertura con monto específico sin deducible porcentual
-            // Ej: "Muerte del Conductor por Accidente Automovilístico $ 100,000.00 122.40"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: 'N/A',
-                prima: match[3].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]}`);
-              continue;
-            }
-          }
-          
-          console.log(`📊 Total de coberturas extraídas: ${coberturasExtraidas.length}`);
-        } else {
-          console.log('⚠️ No se encontró la sección de coberturas');
-        }
-        
-        // ==================== MONTOS ====================
-        const sumaMatch = textoCompleto.match(/Daños\s+materiales\s+\$\s*([\d,]+\.?\d*)/i);
-        const primaMatch = textoCompleto.match(/Prima\s+Neta\s+([\d,]+\.?\d*)/i);
-        const tasaFinanciamientoMatch = textoCompleto.match(/Tasa\s+Financiamiento\s+([-]?[\d,]+\.?\d*)/i);
-        const gastosExpedicionMatch = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+([\d,]+\.?\d*)/i);
-        const subtotalMatch = textoCompleto.match(/Subtotal\s+([\d,]+\.?\d*)/i);
-        const ivaMatch = textoCompleto.match(/I\.V\.A[.\s]*16%\s+([\d,]+\.?\d*)/i);
-        const totalMatch = textoCompleto.match(/IMPORTE\s+TOTAL\s+([\d,]+\.?\d*)/i);
-        const pagoUnicoMatch = textoCompleto.match(/Pago\s+[UÚ]nico\s+([\d,]+\.?\d*)/i);
-        const deducibleMatch = textoCompleto.match(/(\d+)%\s+[\d,]+\.?\d*\s+Robo/i);
-        
-        console.log('🔍 DEBUG PRE-OBJETO - Valores a asignar:');
-        console.log('   tipo_pago:', tipoPagoDetectado);
-        console.log('   frecuenciaPago:', frecuenciaPagoDetectada);
-        console.log('   forma_pago:', formaPagoDetectada);
-        
-        datosExtraidos = {
-          // ASEGURADO
-          tipo_persona: tipoPersona,
-          nombre: nombre,
-          apellido_paterno: apellido_paterno,
-          apellido_materno: apellido_materno,
-          razonSocial: razonSocial,
-          rfc: rfcExtraido,
-          curp: curpMatch ? curpMatch[1] : '',
-          domicilio: domicilio,
-          municipio: municipio,
-          colonia: colonia,
-          estado: estado,
-          codigo_postal: cp,
-          pais: pais,
-          email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
-          
-          // PÓLIZA
-          compania: compania,
-          producto: 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: agente,
-          sub_agente: '',
-          numero_poliza: polizaNum,
-          endoso: endosoNum,
-          inciso: incisoNum,
-          plan: planMatch ? planMatch[1] : '',
-          
-          // VIGENCIA
-          inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
-          termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
-          // ✅ NO extraer fecha_pago - será calculada por el formulario usando inicio_vigencia + periodo_gracia
-          
-          // MONTOS
-          prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
-          cargo_pago_fraccionado: tasaFinanciamientoMatch ? tasaFinanciamientoMatch[1].replace(/,/g, '') : '',
-          gastos_expedicion: gastosExpedicionMatch ? gastosExpedicionMatch[1].replace(/,/g, '') : '',
-          subtotal: subtotalMatch ? subtotalMatch[1].replace(/,/g, '') : '',
-          iva: ivaMatch ? ivaMatch[1].replace(/,/g, '') : '',
-          total: totalMatch ? totalMatch[1].replace(/,/g, '') : '',
-          pago_unico: pagoUnicoMatch ? pagoUnicoMatch[1].replace(/,/g, '') : '',
-          // FORMA Y TIPO DE PAGO
-          tipo_pago: tipoPagoDetectado,
-          frecuenciaPago: frecuenciaPagoDetectada, // ✅ Normalizada desde el PDF
-          forma_pago: formaPagoDetectada || '',
-          primer_pago: primerPago,
-          pagos_subsecuentes: pagosSubsecuentes,
-          periodo_gracia: periodoGraciaExtraido, // ✅ Del PDF
-          suma_asegurada: sumaMatch ? sumaMatch[1].replace(/,/g, '') : '',
-          deducible: deducibleMatch ? deducibleMatch[1] : '5',
-          
-          // VEHÍCULO
-          marca: marca,
-          modelo: modeloCompleto,
-          anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
-          numero_serie: serieMatch ? serieMatch[1] : '',
-          motor: motorMatch ? motorMatch[1] : '',
-          placas: placasExtraidas || '',
-          color: colorMatch ? colorMatch[1].trim() : '',
-          codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
-          tipo_vehiculo: '', // Se debe seleccionar manualmente
-          tipo_cobertura: planMatch ? planMatch[1] : '',
-          
-          // COBERTURAS DETALLADAS
-          coberturas: coberturasExtraidas,
-          
-          // CAMPOS ADICIONALES QUALITAS
-          uso: usoMatch ? usoMatch[1].trim() : '',
-          servicio: servicioMatch ? servicioMatch[1].trim() : '',
-          movimiento: movimientoMatch ? movimientoMatch[1].trim() : '',
-
-          // CONDUCTOR
-          conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
-        };
-        
-        // ==================== NORMALIZACIÓN DE VALORES ====================
-        // Normalizar marca para que coincida con las opciones disponibles
-        const marcasDisponibles = [
-          'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
-          'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
-          'Mitsubishi', 'Nissan', 'Peugeot', 'Porsche', 'Renault', 'Seat', 
-          'Suzuki', 'Toyota', 'Volkswagen', 'Volvo'
-        ];
-        
-        if (datosExtraidos.marca) {
-          const marcaNormalizada = marcasDisponibles.find(
-            m => m.toUpperCase() === datosExtraidos.marca.toUpperCase()
-          );
-          datosExtraidos.marca = marcaNormalizada || 'Otra';
-          console.log('✅ Marca normalizada:', datosExtraidos.marca);
-        }
-        
-        // Normalizar tipo de cobertura (Amplia, Limitada, RC)
-        if (datosExtraidos.tipo_cobertura) {
-          const cobertura = datosExtraidos.tipo_cobertura.toUpperCase();
-          if (cobertura.includes('AMPLIA')) {
-            datosExtraidos.tipo_cobertura = 'Amplia';
-          } else if (cobertura.includes('LIMITADA')) {
-            datosExtraidos.tipo_cobertura = 'Limitada';
-          } else if (cobertura.includes('RC') || cobertura.includes('RESPONSABILIDAD')) {
-            datosExtraidos.tipo_cobertura = 'RC (Responsabilidad Civil)';
-          }
-          console.log('✅ Tipo de cobertura normalizado:', datosExtraidos.tipo_cobertura);
-        }
-        
-        // ✅ estatusPago será calculado por actualizarCalculosAutomaticos() después
-        // No lo calculamos aquí porque no tenemos fecha_pago en la extracción
-        
-        console.log('📊 Datos extraídos completos:', datosExtraidos);
-        console.log('🚗 DEBUG - Datos del vehículo después de extracción:', {
-          marca: datosExtraidos.marca,
-          modelo: datosExtraidos.modelo,
-          anio: datosExtraidos.anio,
-          numero_serie: datosExtraidos.numero_serie,
-          motor: datosExtraidos.motor,
-          placas: datosExtraidos.placas,
-          color: datosExtraidos.color,
-          tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-          tipo_cobertura: datosExtraidos.tipo_cobertura
-        });
-        
-      } else {
-        console.log('🔧 Aplicando extractor genérico');
-        // Extractor genérico para otras aseguradoras
-        datosExtraidos = {
-          // INFORMACIÓN DEL ASEGURADO
-          nombre: extraerDato(/(?:NOMBRE|ASEGURADO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_paterno: extraerDato(/(?:APELLIDO\s+PATERNO|AP\.\s*PATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_materno: extraerDato(/(?:APELLIDO\s+MATERNO|AP\.\s*MATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          rfc: extraerDato(/RFC[:\s]+([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i, textoCompleto) || '',
-          domicilio: extraerDato(/(?:DOMICILIO|DIRECCI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*C\.P\.|CP:|Municipio:|Ciudad:|Estado:|\n\n)/i, textoCompleto) || '',
-          municipio: extraerDato(/(?:MUNICIPIO|DELEGACI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*Estado:|Colonia:|País:|\n)/i, textoCompleto) || '',
-          colonia: extraerDato(/(?:COLONIA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Estado:|País:|\n)/i, textoCompleto) || '',
-          estado: extraerDato(/(?:ESTADO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Municipio:|Colonia:|País:|\n)/i, textoCompleto) || '',
-          codigo_postal: extraerDato(/(?:C\.P\.|CP)[:\s]*(\d{5})/i, textoCompleto) || '',
-          pais: extraerDato(/(?:PA[IÍ]S)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i, textoCompleto) || 'MEXICO',
-          email: extraerDato(/(?:E-?MAIL|CORREO)[:\s]+([\w\.-]+@[\w\.-]+\.\w+)/i, textoCompleto) || '',
-          telefono_fijo: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:FIJO|CASA))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          telefono_movil: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:M[OÓ]VIL|CELULAR))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          
-          // DATOS DE LA PÓLIZA
-          compania: compania,
-          producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos Individual' : 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: extraerDato(/(?:AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s,\.]+?)(?:\n|PÓLIZA)/i, textoCompleto) || '',
-          sub_agente: '',
-          numero_poliza: extraerDato(/(?:P[ÓO]LIZA|NO\.\s+DE\s+P[ÓO]LIZA)[:\s#]+(\d+[-\d]*)/i, textoCompleto) || '',
-          
-          // VIGENCIA
-          inicio_vigencia: '',
-          termino_vigencia: '',
-          
-          // INFORMACIÓN FINANCIERA
-          prima_pagada: extraerDato(/(?:PRIMA\s+(?:NETA|TOTAL))[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          cargo_pago_fraccionado: extraerDato(/(?:CARGO\s+(?:POR\s+)?FRACCIONAMIENTO)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          iva: extraerDato(/I\.?V\.?A\.?[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          total: extraerDato(/(?:TOTAL|PRIMA\s+TOTAL)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          tipo_pago: textoCompleto.match(/CONTADO/i) ? 'Anual' : textoCompleto.match(/FRACCIONADO/i) ? 'Fraccionado' : 'Anual',
-          periodo_gracia: 30,
-          
-          // DESCRIPCIÓN DEL VEHÍCULO
-          marca: extraerDato(/(?:MARCA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|MODELO|TIPO)/i, textoCompleto) || '',
-          modelo: extraerDato(/(?:MODELO|DESCRIPCI[ÓO]N)[:\s]+([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|MOTOR)/i, textoCompleto) || '',
-          anio: extraerDato(/(?:AÑO|A[ÑN]O\s+MODELO)[:\s]+(\d{4})/i, textoCompleto) || '',
-          numero_serie: extraerDato(/(?:SERIE|VIN|N[UÚ]MERO\s+DE\s+SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto) || '',
-          placas: extraerDato(/(?:PLACAS?|MATRÍCULA)[:\s]+([A-Z0-9\-]+)/i, textoCompleto) || '',
-          color: extraerDato(/(?:COLOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|TIPO)/i, textoCompleto) || '',
-          tipo_vehiculo: extraerDato(/(?:TIPO\s+DE\s+VEH[IÍ]CULO|USO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|COBERTURA)/i, textoCompleto) || '',
-          
-          // COBERTURAS
-          tipo_cobertura: extraerDato(/(?:COBERTURA|PLAN)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|DEDUCIBLE)/i, textoCompleto) || '',
-          deducible: extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+)%?/i, textoCompleto) || '',
-          suma_asegurada: extraerDato(/(?:SUMA\s+ASEGURADA|VALOR)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          
-          // CONDUCTOR
-          conductor_habitual: extraerDato(/(?:CONDUCTOR\s+HABITUAL)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|EDAD)/i, textoCompleto) || '',
-          edad_conductor: extraerDato(/(?:EDAD)[:\s]+(\d+)/i, textoCompleto) || '',
-          licencia_conducir: extraerDato(/(?:LICENCIA)[:\s]+([A-Z0-9]+)/i, textoCompleto) || ''
-        };
-
-        // 🔄 Normalizar frecuenciaPago cuando tipo_pago es Anual
-        if (datosExtraidos.tipo_pago && (datosExtraidos.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO|CONTADO/i.test(datosExtraidos.forma_pago || ''))) {
-          datosExtraidos.frecuenciaPago = 'Anual';
-        }
-      }
-
-      console.log('📊 Datos extraídos:', datosExtraidos);
-
-      // Extraer fechas de vigencia
-      const fechasMatch = textoCompleto.match(/(?:VIGENCIA|VIGENTE).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4}).*?(?:AL|A).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
-      if (fechasMatch) {
-        const [, diaIni, mesIni, anioIni, diaFin, mesFin, anioFin] = fechasMatch;
-        datosExtraidos.inicio_vigencia = `${anioIni.length === 2 ? '20' + anioIni : anioIni}-${mesIni.padStart(2, '0')}-${diaIni.padStart(2, '0')}`;
-        datosExtraidos.termino_vigencia = `${anioFin.length === 2 ? '20' + anioFin : anioFin}-${mesFin.padStart(2, '0')}-${diaFin.padStart(2, '0')}`;
+      } catch (error) {
+        console.error('❌ Error en sistema modular:', error);
+        setEstado('error');
+        setErrores([{
+          tipo: 'error',
+          mensaje: 'Error al procesar el PDF',
+          detalle: error.message
+        }]);
+        return;
       }
 
       // Limpiar montos (quitar comas)
@@ -2194,12 +1590,19 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                           }
                         </p>
                       </div>
-                      {datosExtraidos.rfc && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">RFC:</strong>
+                      <div className="col-md-6">
+                        <strong className="d-block mb-1">RFC:</strong>
+                        {datosExtraidos.rfc ? (
                           <p className="mb-0">{datosExtraidos.rfc}</p>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="d-flex align-items-center">
+                            <span className="badge bg-warning text-dark me-2">
+                              <i className="bi bi-exclamation-triangle me-1"></i>
+                              RFC no encontrado en PDF
+                            </span>
+                          </div>
+                        )}
+                      </div>
                       {datosExtraidos.domicilio && (
                         <div className="col-12">
                           <strong className="d-block mb-1">Dirección:</strong>
