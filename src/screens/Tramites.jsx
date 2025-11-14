@@ -1060,8 +1060,8 @@ export const Tramites = () => {
       fechaInicio: formularioTramite.fechaInicio,
       fecha_limite: formularioTramite.fechaLimite,
       fechaLimite: formularioTramite.fechaLimite,
-      fecha_creacion: formularioTramite.fechaCreacion || new Date().toISOString().split('T')[0],
-      fechaCreacion: formularioTramite.fechaCreacion || new Date().toISOString().split('T')[0],
+      // Nota: removemos fecha_creacion/fechaCreacion del payload porque el backend genera created_at automáticamente
+      // y actualmente la API responde error "Unknown column 'fecha_creacion'" al intentar insertar ese campo.
       ejecutivo_asignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
       ejecutivoAsignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
       // Guardar referencias como strings en campos cliente y expediente

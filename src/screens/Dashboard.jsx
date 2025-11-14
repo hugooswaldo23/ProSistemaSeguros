@@ -69,7 +69,13 @@ const DashboardComponent = () => {
         color = '#3B82F6';
         break;
       case 'pagadas':
-        polizasFiltradas = expedientes.filter(p => p.fecha_pago && p.etapa_activa !== 'Cancelada');
+        // Cambio: ahora solo contamos como PAGADAS aquellas pólizas cuyo estatus_pago es "Pagado/Pagada"
+        // No usamos únicamente fecha_pago porque ese campo puede representar una fecha programada (proximoPago) y generaba falsos positivos.
+        polizasFiltradas = expedientes.filter(p => {
+          const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+          const pagado = estatus === 'pagado' || estatus === 'pagada';
+          return pagado && p.etapa_activa !== 'Cancelada';
+        });
         titulo = 'Primas Pagadas - Mes Actual y Anterior';
         color = '#10B981';
         break;
@@ -217,49 +223,31 @@ const DashboardComponent = () => {
     console.log('💰 Ventas Nuevas:', ventasNuevasMesActual.length, '- $', primasVentasNuevas);
     console.log('🔄 Renovaciones:', renovacionesMesActual.length, '- $', primasRenovaciones);
 
-    // PRIMAS PAGADAS - Basado SOLO en fecha_pago registrada (no en estatus)
-    console.log('🔍 DEBUG - Buscando pólizas pagadas...');
+    // PRIMAS PAGADAS - Nuevo criterio: SOLO pólizas con estatus_pago = "Pagado/Pagada"
+    // Motivo: fecha_pago puede ser calculada automáticamente (fecha programada) y antes inflaba indebidamente las métricas.
+    console.log('🔍 DEBUG - Buscando pólizas pagadas (por estatus_pago=Pagado/Pagada)...');
     console.log('   Total expedientes:', expedientes.length);
-    
-    // Primero, veamos TODAS las pólizas con sus fechas clave
-    const expedientesConEstatus = expedientes.map(p => ({
-      id: p.id,
-      numero_poliza: p.numero_poliza,
-      estatus_pago: p.estatus_pago,
-      etapa_activa: p.etapa_activa,
-      fecha_pago: p.fecha_pago,
-      fecha_emision: p.fecha_emision
-    }));
-    console.log('   Todos los expedientes con estatus:', expedientesConEstatus);
-    
-    // Filtrar pólizas pagadas: requiere fecha_pago real y no cancelada
+
     const polizasPagadasTodas = expedientes.filter(p => {
-      const pagadaPorFecha = !!p.fecha_pago;
-      const noEsCancelada = p.etapa_activa !== 'Cancelada';
-      if (pagadaPorFecha) {
-        console.log('   ✅ Póliza con fecha_pago registrada:', {
+      const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+      const pagado = estatus === 'pagado' || estatus === 'pagada';
+      const noCancelada = p.etapa_activa !== 'Cancelada';
+      if (pagado) {
+        console.log('   ✅ Póliza marcada PAGADA:', {
           numero_poliza: p.numero_poliza,
+          estatus_pago: p.estatus_pago,
           fecha_pago: p.fecha_pago,
           monto: resolverMonto(p)
         });
       }
-      return pagadaPorFecha && noEsCancelada;
+      return pagado && noCancelada;
     });
-    
-    console.log('💰 Total pólizas PAGADAS encontradas:', polizasPagadasTodas.length);
-    
-    // DEBUG: Ver fechas de pago de TODAS las pagadas
-    console.log('📅 Fechas de pólizas PAGADAS:', polizasPagadasTodas.map(p => ({
-      numero: p.numero_poliza,
-      fecha_emision: p.fecha_emision,
-      fecha_pago: p.fecha_pago,
-      fecha_alta: p.fecha_alta,
-      monto: resolverMonto(p)
-    })));
-    
-    // Separar por mes actual vs mes anterior (exclusivamente por fecha_pago)
-    const pagadasMesActual = polizasPagadasTodas.filter(p => esMesActual(p.fecha_pago));
-    const pagadasMesAnterior = polizasPagadasTodas.filter(p => esMesAnterior(p.fecha_pago));
+
+    console.log('💰 Total pólizas PAGADAS (estatus) encontradas:', polizasPagadasTodas.length);
+
+    // Para la estadística mensual usamos fecha_pago si existe; si no hay fecha_pago aún (caso extremo), esa póliza no se clasifica en meses.
+    const pagadasMesActual = polizasPagadasTodas.filter(p => p.fecha_pago && esMesActual(p.fecha_pago));
+    const pagadasMesAnterior = polizasPagadasTodas.filter(p => p.fecha_pago && esMesAnterior(p.fecha_pago));
     
     const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => 
       sum + resolverMonto(p), 0

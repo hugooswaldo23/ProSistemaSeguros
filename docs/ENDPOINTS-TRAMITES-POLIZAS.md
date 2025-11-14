@@ -1,312 +1,183 @@
-# 🚀 Endpoints Necesarios para Módulo de Trámites
+# 📑 Especificación de Endpoints - Módulo Trámites
 
-## 📋 **CONTEXTO**
+Fecha: 12 Nov 2025  
+Estado Frontend: 100% funcional (usa fetch directa)  
+Estado Backend: Falta formalizar endpoints y validar columnas
 
-Se implementó el selector de clientes y pólizas en el formulario de Trámites. El usuario ahora puede:
-1. Seleccionar un cliente de un dropdown
-2. Ver automáticamente las pólizas vigentes de ese cliente
-3. Seleccionar la póliza específica para el trámite
+## 🎯 Objetivo
+Definir claramente los endpoints, payloads y columnas requeridas para el módulo de Trámites, evitando inconsistencias (ej. uso de `fecha_creacion` inexistente vs `created_at`).
 
-## 🎯 **ENDPOINTS A IMPLEMENTAR**
-
-### **1. Obtener Pólizas Vigentes de un Cliente**
-
-**Endpoint:** `GET /api/expedientes/vigentes/:clienteId`
-
-**Descripción:** Devuelve todas las pólizas activas y vigentes de un cliente específico.
-
-**Parámetros URL:**
-- `clienteId` (int): ID del cliente
-
-**Criterios de Filtrado:**
-1. `cliente_id = :clienteId` (debe coincidir con el cliente)
-2. `etapa_activa IN ('Emitida', 'Autorizado')` (solo pólizas activas)
-3. `termino_vigencia > CURDATE()` (vigencia no vencida)
-
-**Query SQL Sugerido:**
+## 🧱 Tabla `tramites` (propuesta mínima)
 ```sql
-SELECT 
-  e.id,
-  e.codigo,
-  e.numero_poliza,
-  e.cliente_id,
-  e.compania,
-  e.producto,
-  e.etapa_activa,
-  e.inicio_vigencia,
-  e.termino_vigencia,
-  e.prima_pagada,
-  e.agente,
-  e.agente_id,
-  e.aseguradora_id,
-  e.producto_id,
-  e.marca,
-  e.modelo,
-  e.anio,
-  e.placas,
-  e.numero_serie,
-  e.total
-FROM expedientes e
-WHERE e.cliente_id = ?
-  AND e.etapa_activa IN ('Emitida', 'Autorizado')
-  AND (e.termino_vigencia IS NULL OR e.termino_vigencia > CURDATE())
-ORDER BY e.inicio_vigencia DESC;
+CREATE TABLE tramites (
+	id INT AUTO_INCREMENT PRIMARY KEY,
+	codigo VARCHAR(20) NOT NULL UNIQUE,
+	tipo_tramite VARCHAR(100) NOT NULL,
+	descripcion TEXT NOT NULL,
+	cliente VARCHAR(100) NULL,          -- Código o ID externo del cliente
+	expediente VARCHAR(100) NULL,       -- Número de póliza o ID del expediente
+	estatus VARCHAR(30) NOT NULL DEFAULT 'Pendiente', -- Pendiente | En proceso | Completado | Cancelado | Rechazado
+	prioridad VARCHAR(20) NOT NULL DEFAULT 'Media',   -- Alta | Media | Baja
+	fecha_inicio DATE NOT NULL,
+	fecha_limite DATE NULL,
+	responsable VARCHAR(150) NULL,
+	departamento VARCHAR(150) NULL,
+	observaciones TEXT NULL,
+	created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+	updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+	INDEX idx_tramites_estatus (estatus),
+	INDEX idx_tramites_prioridad (prioridad),
+	INDEX idx_tramites_fecha_inicio (fecha_inicio),
+	INDEX idx_tramites_fecha_limite (fecha_limite)
+);
 ```
 
-**Respuesta Esperada:**
-```json
+### Notas
+- NO crear columna `fecha_creacion`: se usa `created_at` ya existente. El frontend debe dejar de enviar `fecha_creacion` (ya se ajustó).
+- `codigo` se genera secuencialmente en frontend (TR001, TR002...). Puede duplicarse si dos usuarios guardan simultáneo → opcional endpoint para reservar código.
+
+## 🔄 Mapeo Frontend → Backend
+| Frontend key          | Backend columna     | Observaciones |
+|-----------------------|---------------------|---------------|
+| codigo                | codigo              | Generado en FE si no existe |
+| tipoTramite           | tipo_tramite        | FE envía ambas: `tipo_tramite` y `tipoTramite` (compatibilidad) |
+| descripcion           | descripcion         | Texto libre |
+| cliente               | cliente             | Código/ID del cliente; puede ser NULL |
+| expediente            | expediente          | Número póliza o ID; puede ser NULL |
+| estatus               | estatus             | Ciclo de vida del trámite |
+| prioridad             | prioridad           | Alta/Media/Baja |
+| fechaInicio           | fecha_inicio        | Obligatoria (DATE) |
+| fechaLimite           | fecha_limite        | Permite nulo |
+| responsable           | responsable         | Ejecutiva/o asignado |
+| departamento          | departamento        | Texto corto |
+| observaciones         | observaciones       | Texto libre |
+| fechaCreacion (FE)    | created_at          | Solo lectura; eliminar del POST/PUT |
+
+## 🚀 Endpoints
+
+### 1. GET `/api/tramites`
+Retorna todos los trámites ordenados por `created_at` desc.
+```jsonc
 [
-  {
-    "id": 15,
-    "codigo": "EXP-2025-0015",
-    "numero_poliza": "POL-12345",
-    "cliente_id": 3,
-    "compania": "Qualitasss",
-    "producto": "Autos Individual",
-    "etapa_activa": "Emitida",
-    "inicio_vigencia": "2025-01-15",
-    "termino_vigencia": "2026-01-15",
-    "prima_pagada": "12500.00",
-    "agente": "AG001",
-    "agente_id": 5,
-    "aseguradora_id": 4,
-    "producto_id": 1,
-    "marca": "Toyota",
-    "modelo": "Corolla",
-    "anio": "2023",
-    "placas": "ABC-123-XYZ",
-    "numero_serie": "JT2BG22K8X0123456",
-    "total": "13500.00"
-  },
-  {
-    "id": 28,
-    "codigo": "EXP-2025-0028",
-    "numero_poliza": "POL-67890",
-    "cliente_id": 3,
-    "compania": "GNP",
-    "producto": "Vida",
-    "etapa_activa": "Emitida",
-    "inicio_vigencia": "2024-06-01",
-    "termino_vigencia": "2025-06-01",
-    "prima_pagada": "8500.00",
-    "agente": "AG002",
-    "agente_id": 7,
-    "aseguradora_id": 5,
-    "producto_id": 3,
-    "marca": null,
-    "modelo": null,
-    "anio": null,
-    "placas": null,
-    "numero_serie": null,
-    "total": "9200.00"
-  }
+	{
+		"id": 12,
+		"codigo": "TR012",
+		"tipo_tramite": "Endoso",
+		"descripcion": "Cambiar uso de vehículo",
+		"cliente": "CLI-00001",
+		"expediente": "0971452556",
+		"estatus": "Pendiente",
+		"prioridad": "Alta",
+		"fecha_inicio": "2025-11-12",
+		"fecha_limite": "2025-11-20",
+		"responsable": "Erika Olivares",
+		"departamento": "Operaciones",
+		"observaciones": "Urgente por renovación",
+		"created_at": "2025-11-12T15:03:22.000Z"
+	}
 ]
 ```
 
-**Casos Especiales:**
-- Si no hay pólizas vigentes: `[]` (array vacío)
-- Si el cliente no existe: `[]` (array vacío)
-- Si hay error: 
-  ```json
-  {
-    "error": "Error al consultar pólizas",
-    "message": "Descripción del error"
-  }
-  ```
-
----
-
-### **2. Modificar Tabla `tramites` (Campos Relacionales)**
-
-**Script SQL:**
-```sql
--- Agregar campos relacionales a la tabla tramites
-ALTER TABLE tramites 
-  ADD COLUMN cliente_id INT COMMENT 'FK al cliente',
-  ADD COLUMN poliza_id INT COMMENT 'FK al expediente/póliza',
-  ADD COLUMN aseguradora_id INT COMMENT 'ID de la aseguradora',
-  ADD COLUMN producto_id INT COMMENT 'ID del tipo de producto',
-  ADD COLUMN agente_id INT COMMENT 'ID del agente asignado',
-  ADD COLUMN ejecutivo_id INT COMMENT 'ID del ejecutivo supervisor';
-
--- Agregar foreign keys
-ALTER TABLE tramites
-  ADD FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT,
-  ADD FOREIGN KEY (poliza_id) REFERENCES expedientes(id) ON DELETE RESTRICT,
-  ADD FOREIGN KEY (aseguradora_id) REFERENCES aseguradoras(id) ON DELETE RESTRICT,
-  ADD FOREIGN KEY (producto_id) REFERENCES tipos_productos(id) ON DELETE RESTRICT,
-  ADD FOREIGN KEY (agente_id) REFERENCES equipo_trabajo(id) ON DELETE RESTRICT,
-  ADD FOREIGN KEY (ejecutivo_id) REFERENCES equipo_trabajo(id) ON DELETE SET NULL;
-
--- Crear índices
-CREATE INDEX idx_tramites_cliente ON tramites(cliente_id);
-CREATE INDEX idx_tramites_poliza ON tramites(poliza_id);
-CREATE INDEX idx_tramites_agente ON tramites(agente_id);
-CREATE INDEX idx_tramites_ejecutivo ON tramites(ejecutivo_id);
-```
-
----
-
-### **3. Modificar Endpoint POST de Trámites**
-
-**Endpoint:** `POST /api/tramites`
-
-**Body Actualizado:**
-```json
+### 2. POST `/api/tramites`
+Body esperado (sin `fecha_creacion`):
+```jsonc
 {
-  "codigo": "TR001",
-  "tipoTramite": "Renovación",
-  "descripcion": "Renovación de póliza de auto",
-  "clienteId": 3,
-  "cliente": "Juan Pérez López",
-  "polizaId": 15,
-  "expediente": "POL-12345",
-  "aseguradoraId": 4,
-  "productoId": 1,
-  "agenteId": 5,
-  "ejecutivoId": 2,
-  "estatus": "Pendiente",
-  "prioridad": "Alta",
-  "fechaInicio": "2025-10-20",
-  "fechaLimite": "2025-10-30",
-  "responsable": "Ejecutivo Principal",
-  "departamento": "Renovaciones",
-  "observaciones": "Cliente solicitó cotización para renovación anticipada"
+	"codigo": "TR013",        // Opcional: si se omite, backend podría generar
+	"tipo_tramite": "Reembolso",
+	"descripcion": "Reembolso gastos grúa",
+	"cliente": "CLI-00002",
+	"expediente": "0971451980",
+	"estatus": "Pendiente",
+	"prioridad": "Media",
+	"fecha_inicio": "2025-11-12",
+	"fecha_limite": "2025-11-25",
+	"responsable": "Juan Pérez",
+	"departamento": "Siniestros",
+	"observaciones": "Folio externo SIN-5566"
+}
+```
+Respuesta:
+```jsonc
+{
+	"success": true,
+	"data": { "id": 13, "codigo": "TR013" }
 }
 ```
 
-**Query SQL Actualizado:**
-```javascript
-const query = `
-  INSERT INTO tramites (
-    codigo, tipo_tramite, descripcion, 
-    cliente_id, cliente, 
-    poliza_id, expediente,
-    aseguradora_id, producto_id, agente_id, ejecutivo_id,
-    estatus, prioridad, 
-    fecha_inicio, fecha_limite, 
-    responsable, departamento, observaciones
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`;
-
-const params = [
-  req.body.codigo,
-  req.body.tipoTramite,
-  req.body.descripcion,
-  req.body.clienteId,
-  req.body.cliente,
-  req.body.polizaId,
-  req.body.expediente,
-  req.body.aseguradoraId,
-  req.body.productoId,
-  req.body.agenteId,
-  req.body.ejecutivoId,
-  req.body.estatus,
-  req.body.prioridad,
-  req.body.fechaInicio,
-  req.body.fechaLimite,
-  req.body.responsable,
-  req.body.departamento,
-  req.body.observaciones
-];
+### 3. PUT `/api/tramites/:id`
+Campos actualizables (todos menos id/created_at). Ejemplo:
+```jsonc
+{
+	"tipo_tramite": "Reembolso",
+	"descripcion": "Reembolso gastos grúa y corralón",
+	"estatus": "En proceso",
+	"prioridad": "Alta",
+	"fecha_inicio": "2025-11-12",
+	"fecha_limite": "2025-11-27",
+	"responsable": "Juan Pérez",
+	"departamento": "Siniestros",
+	"observaciones": "Se solicitó factura adicional"
+}
 ```
 
----
+### 4. DELETE `/api/tramites/:id`
+Elimina registro. Respuesta mínima:
+```json
+{ "success": true }
+```
 
-### **4. Modificar Endpoint PUT de Trámites**
+### 5. GET `/api/tramites/:id`
+Retorna un trámite específico (mismo formato que listado).
 
-**Endpoint:** `PUT /api/tramites/:id`
+### 6. GET `/api/tramites?estatus=Pendiente`
+Filtro por estatus (usar WHERE estatus = ?).
 
-Incluir los mismos campos nuevos en el UPDATE.
+### 7. GET `/api/tramites?vencidos=1`
+Regresa trámites con `fecha_limite < CURDATE()` y `estatus NOT IN ('Completado','Cancelado')`.
 
----
+### 8. GET `/api/tramites?prioridad=Alta`
+Filtro por prioridad.
 
-### **5. Modificar Endpoint GET de Trámites**
+## 🔐 Validaciones recomendadas backend
+- Rechazar códigos duplicados (UNIQUE).
+- Limitar longitud de `descripcion` si se requiere (p.e. TEXT normal está bien hasta 64KB).
+- Validar que `fecha_inicio <= fecha_limite` (cuando existe).
+- Normalizar `estatus` y `prioridad` contra listas permitidas.
 
-**Endpoint:** `GET /api/tramites`
+## ⚠️ Diferencias detectadas y ya corregidas en FE
+| Tema | Situación previa | Corrección |
+|------|------------------|-----------|
+| Campo fecha_creacion | Se enviaba en POST | Eliminado, usar created_at automático |
+| Doble keys tipo_tramite/tipoTramite | Frontend enviaba ambas | Backend puede ignorar la camelCase si desea |
+| Generación de código | Sólo FE | Opcionalmente backend puede validar/crear secuencia |
 
-**Query SQL Mejorado con JOINs:**
+## 🧪 Consultas de verificación
 ```sql
-SELECT 
-  t.*,
-  c.nombre as cliente_nombre,
-  c.codigo as cliente_codigo,
-  e.numero_poliza,
-  a.nombre as aseguradora_nombre,
-  tp.nombre as producto_nombre,
-  ag.codigo as agente_codigo,
-  ag.nombre as agente_nombre,
-  ej.codigo as ejecutivo_codigo,
-  ej.nombre as ejecutivo_nombre
-FROM tramites t
-LEFT JOIN clientes c ON t.cliente_id = c.id
-LEFT JOIN expedientes e ON t.poliza_id = e.id
-LEFT JOIN aseguradoras a ON t.aseguradora_id = a.id
-LEFT JOIN tipos_productos tp ON t.producto_id = tp.id
-LEFT JOIN equipo_trabajo ag ON t.agente_id = ag.id
-LEFT JOIN equipo_trabajo ej ON t.ejecutivo_id = ej.id
-ORDER BY t.created_at DESC;
+-- Últimos 10 trámites
+SELECT id, codigo, tipo_tramite, estatus, prioridad, fecha_inicio, fecha_limite, created_at
+FROM tramites ORDER BY created_at DESC LIMIT 10;
+
+-- Vencidos hoy
+SELECT codigo, descripcion, fecha_limite FROM tramites 
+WHERE fecha_limite < CURDATE() AND estatus NOT IN ('Completado','Cancelado');
+
+-- Por prioridad
+SELECT prioridad, COUNT(*) FROM tramites GROUP BY prioridad;
 ```
 
----
+## ✅ Checklist implementación backend
+- [ ] Confirmar estructura real de tabla `tramites`
+- [ ] Ajustar INSERT y UPDATE para recibir sólo columnas definidas
+- [ ] Añadir índices (estatus, prioridad, fechas)
+- [ ] Implementar filtros por query params (estatus, prioridad, vencidos)
+- [ ] Probar creación simultánea (código único)
+- [ ] Retornar `created_at` en todas las respuestas
 
-## 🧪 **TESTING**
-
-### **Caso de Prueba 1: Cliente con Pólizas Vigentes**
-
-1. Seleccionar cliente "Juan Pérez"
-2. Verificar que aparezcan sus 2 pólizas vigentes:
-   - Qualitasss - Autos Individual
-   - GNP - Vida
-3. Seleccionar póliza de Autos
-4. Verificar que se llenen automáticamente:
-   - `polizaId`: 15
-   - `expediente`: "POL-12345"
-   - `aseguradoraId`: 4
-   - `productoId`: 1
-   - `agenteId`: 5
-
-### **Caso de Prueba 2: Cliente sin Pólizas**
-
-1. Seleccionar cliente nuevo sin pólizas
-2. Verificar mensaje: "Este cliente no tiene pólizas vigentes"
-
-### **Caso de Prueba 3: Guardar Trámite**
-
-1. Crear trámite completo con cliente y póliza
-2. Guardar
-3. Verificar en BD que se guardaron todos los campos relacionales
-4. Consultar `SELECT * FROM tramites WHERE id = ?`
+## 📌 Próximas mejoras (opcional)
+- Audit log (tabla `tramites_historial` con cambios de estatus / prioridad).
+- Campo `origen` (manual, automático, derivado de siniestro). 
+- Integración con notificaciones (al pasar a "Vencido" o "Completado").
 
 ---
+Documento generado para alinear con tareas de `PENDIENTES-HUGO-BACKEND.md`.
 
-## 📊 **PRIORIDAD**
-
-**ALTA** - Este cambio es fundamental para el flujo completo:
-1. Cliente → Póliza → Trámite → Ejecutivo asignado
-
-Sin esto, no se puede determinar automáticamente qué ejecutivo debe atender el trámite.
-
----
-
-## 🔄 **ESTADO ACTUAL DEL FRONTEND**
-
-✅ **YA IMPLEMENTADO:**
-- Selector de clientes con búsqueda
-- Carga dinámica de pólizas al seleccionar cliente
-- Vista de tarjetas con información completa de cada póliza
-- Selección de póliza con radio buttons
-- Auto-llenado de campos al seleccionar póliza
-- Loading states y mensajes de error
-- Integración con formulario de trámites
-
-⏳ **ESPERANDO BACKEND:**
-- Endpoint `/api/expedientes/vigentes/:clienteId`
-- Campos nuevos en tabla `tramites`
-- Endpoints POST/PUT actualizados
-
----
-
-**Fecha:** 20 de Octubre 2025  
-**Implementado por:** Copilot  
-**Estado:** Frontend completo, esperando backend

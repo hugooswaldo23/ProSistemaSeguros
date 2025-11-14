@@ -2806,19 +2806,63 @@ const ListaExpedientes = React.memo(({
 }) => {
   const paginacion = usePaginacion(expedientes, 10);
 
-  // Detectar pólizas duplicadas
-  const polizasDuplicadas = React.useMemo(() => {
-    const grupos = {};
-    expedientes.forEach(exp => {
-      if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-        const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-        if (!grupos[clave]) {
-          grupos[clave] = [];
+  // Detectar 3 tipos de duplicados
+  const analisisDuplicados = React.useMemo(() => {
+    const polizasDuplicadas = [];
+    const vinsDuplicados = [];
+    const polizasVinDistinto = [];
+
+    expedientes.forEach((exp, index) => {
+      // Solo analizar si tiene número de póliza
+      if (!exp.numero_poliza) return;
+
+      const vin = exp.numero_serie?.trim() || '';
+
+      // Buscar otros expedientes
+      expedientes.forEach((otro, otroIndex) => {
+        if (index >= otroIndex || !otro.numero_poliza) return;
+
+        const otroVin = otro.numero_serie?.trim() || '';
+
+        // Regla 1: Misma póliza + mismo VIN (duplicada completa)
+        if (exp.numero_poliza === otro.numero_poliza &&
+            exp.compania === otro.compania &&
+            vin !== '' && otroVin !== '' &&
+            vin === otroVin) {
+          if (!polizasDuplicadas.find(d => d.id === exp.id)) {
+            polizasDuplicadas.push({ id: exp.id, tipo: 'completa', poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasDuplicadas.find(d => d.id === otro.id)) {
+            polizasDuplicadas.push({ id: otro.id, tipo: 'completa', poliza: otro.numero_poliza, vin: otroVin });
+          }
         }
-        grupos[clave].push(exp);
-      }
+        // Regla 2: Mismo VIN, diferente póliza
+        else if (vin !== '' && otroVin !== '' &&
+                 vin === otroVin &&
+                 exp.numero_poliza !== otro.numero_poliza) {
+          if (!vinsDuplicados.find(d => d.id === exp.id)) {
+            vinsDuplicados.push({ id: exp.id, vin, poliza: exp.numero_poliza });
+          }
+          if (!vinsDuplicados.find(d => d.id === otro.id)) {
+            vinsDuplicados.push({ id: otro.id, vin: otroVin, poliza: otro.numero_poliza });
+          }
+        }
+        // Regla 3: Misma póliza, diferente VIN
+        else if (exp.numero_poliza === otro.numero_poliza &&
+                 exp.compania === otro.compania &&
+                 vin !== '' && otroVin !== '' &&
+                 vin !== otroVin) {
+          if (!polizasVinDistinto.find(d => d.id === exp.id)) {
+            polizasVinDistinto.push({ id: exp.id, poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasVinDistinto.find(d => d.id === otro.id)) {
+            polizasVinDistinto.push({ id: otro.id, poliza: otro.numero_poliza, vin: otroVin });
+          }
+        }
+      });
     });
-    return Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
+
+    return { polizasDuplicadas, vinsDuplicados, polizasVinDistinto };
   }, [expedientes]);
 
   return (
@@ -2837,23 +2881,99 @@ const ListaExpedientes = React.memo(({
         </button>
       </div>
 
-      {polizasDuplicadas.length > 0 && (
-        <div className="alert alert-warning mb-3" role="alert">
-          <strong>⚠️ Atención:</strong> Se encontraron {polizasDuplicadas.length} póliza(s) duplicada(s).
-          Las filas están marcadas en amarillo.
-          <details className="mt-2">
-            <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
-              Ver detalles de duplicados
-            </summary>
-            <ul className="mt-2 mb-0">
-              {polizasDuplicadas.map(([clave, exps]) => (
-                <li key={clave}>
-                  <strong>{exps[0].numero_poliza}</strong> - {exps[0].compania} - Vigencia: {exps[0].inicio_vigencia}
-                  <span className="text-muted"> ({exps.length} registros)</span>
-                </li>
-              ))}
-            </ul>
-          </details>
+      {/* Alertas de duplicados */}
+      {(analisisDuplicados.polizasDuplicadas.length > 0 || 
+        analisisDuplicados.vinsDuplicados.length > 0 || 
+        analisisDuplicados.polizasVinDistinto.length > 0) && (
+        <div className="mb-3">
+          {analisisDuplicados.polizasDuplicadas.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas Duplicadas:</strong> {analisisDuplicados.polizasDuplicadas.length} registro(s) con misma póliza y mismo VIN
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas duplicadas
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasDuplicadas.forEach(d => {
+                      const clave = `${d.poliza}-${d.vin}`;
+                      if (!grupos[clave]) grupos[clave] = [];
+                      grupos[clave].push(d);
+                    });
+                    return Object.entries(grupos).map(([clave, items]) => (
+                      <li key={clave} className="mb-1">
+                        <strong>Póliza: {items[0].poliza}</strong> | VIN: {items[0].vin} 
+                        <span className="text-muted"> ({items.length} registros)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.vinsDuplicados.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert" style={{borderLeft: '4px solid #fd7e14'}}>
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ VINs Duplicados:</strong> {analisisDuplicados.vinsDuplicados.length} registro(s) con VIN repetido en diferentes pólizas
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver VINs duplicados - revisar
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.vinsDuplicados.forEach(d => {
+                      if (!grupos[d.vin]) grupos[d.vin] = [];
+                      grupos[d.vin].push(d);
+                    });
+                    return Object.entries(grupos).map(([vin, items]) => (
+                      <li key={vin} className="mb-1">
+                        <strong>VIN: {vin}</strong> aparece en pólizas: {items.map(i => i.poliza).join(', ')}
+                        <span className="text-muted"> ({items.length} pólizas)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.polizasVinDistinto.length > 0 && (
+            <div className="alert alert-danger mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas con VIN Distinto:</strong> {analisisDuplicados.polizasVinDistinto.length} registro(s) con mismo número de póliza pero VIN diferente
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas con VIN distinto - revisar urgente
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasVinDistinto.forEach(d => {
+                      if (!grupos[d.poliza]) grupos[d.poliza] = [];
+                      grupos[d.poliza].push(d);
+                    });
+                    return Object.entries(grupos).map(([poliza, items]) => (
+                      <li key={poliza} className="mb-1">
+                        <strong>Póliza: {poliza}</strong> tiene VINs: {items.map(i => i.vin).join(', ')}
+                        <span className="text-muted"> ({items.length} VINs diferentes)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
         </div>
       )}
 
@@ -2917,23 +3037,34 @@ const ListaExpedientes = React.memo(({
                   {paginacion.itemsPaginados.map((expediente) => {
                     const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
                     
-                    // Detectar si esta póliza está duplicada
-                    const esDuplicada = expedientes.filter(exp => 
-                      exp.numero_poliza === expediente.numero_poliza &&
-                      exp.compania === expediente.compania &&
-                      exp.inicio_vigencia === expediente.inicio_vigencia &&
-                      expediente.numero_poliza // Solo si tiene número de póliza
-                    ).length > 1;
+                    // Detectar tipo de duplicado para este expediente
+                    const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
+                    const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
+                    const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
                     
                     return (
-                      <tr key={expediente.id} className={esDuplicada ? 'table-warning' : ''} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
+                      <tr key={expediente.id} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
                         <td style={{ verticalAlign: 'middle' }}>
                           <div>
                             <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
-                            {esDuplicada && (
+                            {esDuplicadaCompleta && (
                               <div>
-                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada">
+                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada (misma póliza + mismo VIN)">
                                   ⚠️ Duplicada
+                                </span>
+                              </div>
+                            )}
+                            {esVinDuplicado && (
+                              <div>
+                                <span className="badge" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
+                                  ⚠️ VIN Duplicado
+                                </span>
+                              </div>
+                            )}
+                            {esPolizaVinDistinto && (
+                              <div>
+                                <span className="badge bg-danger" style={{ fontSize: '0.7rem' }} title="Mismo número de póliza con VIN diferente - Revisar urgente">
+                                  ⚠️ Póliza VIN Distinto
                                 </span>
                               </div>
                             )}
@@ -6084,46 +6215,86 @@ const estadoInicialFormulario = {
       return false;
     }
 
-    // Validar póliza duplicada (solo si NO estamos editando)
+    // Validar duplicados (solo si NO estamos editando)
     if (!modoEdicion && formulario.numero_poliza) {
+      const vinFormulario = formulario.numero_serie?.trim() || '';
       
-      const polizaDuplicada = expedientes.find(exp => {
-        // Normalizar fechas para comparación (solo YYYY-MM-DD)
-        const fechaFormulario = formulario.inicio_vigencia ? formulario.inicio_vigencia.split('T')[0] : '';
-        const fechaExpediente = exp.inicio_vigencia ? exp.inicio_vigencia.split('T')[0] : '';
-        
-        const coincide = exp.numero_poliza === formulario.numero_poliza &&
-                        exp.compania === formulario.compania &&
-                        fechaExpediente === fechaFormulario;
-        
-        if (coincide) {
-          // duplicado encontrado
-        }
-        return coincide;
-      });
+      // Buscar duplicados con las 3 reglas
+      const polizaDuplicadaCompleta = expedientes.find(exp => 
+        exp.numero_poliza === formulario.numero_poliza &&
+        exp.compania === formulario.compania &&
+        exp.numero_serie === vinFormulario &&
+        vinFormulario !== ''
+      );
       
-      if (polizaDuplicada) {
+      const vinDuplicado = vinFormulario !== '' && expedientes.find(exp => 
+        exp.numero_serie === vinFormulario &&
+        exp.numero_poliza !== formulario.numero_poliza
+      );
+      
+      const polizaDuplicadaVinDistinto = expedientes.find(exp => 
+        exp.numero_poliza === formulario.numero_poliza &&
+        exp.compania === formulario.compania &&
+        exp.numero_serie !== vinFormulario &&
+        (exp.numero_serie?.trim() || '') !== ''
+      );
+      
+      // Prioridad de alertas: 1) Póliza completa, 2) VIN duplicado, 3) Póliza VIN distinto
+      if (polizaDuplicadaCompleta) {
         const mensaje = 
           '⚠️ ATENCIÓN: PÓLIZA DUPLICADA DETECTADA\n\n' +
           'Ya existe un registro en el sistema con estos datos:\n\n' +
-          '📋 Póliza: ' + polizaDuplicada.numero_poliza + '\n' +
-          '🏢 Compañía: ' + polizaDuplicada.compania + '\n' +
-          '📅 Inicio Vigencia: ' + polizaDuplicada.inicio_vigencia.split('T')[0] + '\n' +
-          '👤 Cliente: ' + polizaDuplicada.nombre + ' ' + polizaDuplicada.apellido_paterno + '\n' +
-          '📊 Etapa: ' + polizaDuplicada.etapa_activa + '\n\n' +
+          '📋 Póliza: ' + polizaDuplicadaCompleta.numero_poliza + '\n' +
+          '🏢 Compañía: ' + polizaDuplicadaCompleta.compania + '\n' +
+          '🚗 VIN: ' + (polizaDuplicadaCompleta.numero_serie || 'N/A') + '\n' +
+          '👤 Cliente: ' + polizaDuplicadaCompleta.nombre + ' ' + polizaDuplicadaCompleta.apellido_paterno + '\n' +
+          '📊 Etapa: ' + polizaDuplicadaCompleta.etapa_activa + '\n\n' +
           '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
           'Presione ACEPTAR para continuar con el guardado\n' +
-          '(Podrá ver las pólizas duplicadas marcadas en el listado)\n\n' +
+          '(Se marcará como duplicada en el listado)\n\n' +
           'Presione CANCELAR para regresar al formulario';
         
         const confirmar = window.confirm(mensaje);
-        
         if (!confirmar) {
           toast('Operación cancelada. La póliza no fue guardada');
           return false;
         }
-      } else {
-        // no duplicados
+      } else if (vinDuplicado) {
+        const mensaje = 
+          '⚠️ ATENCIÓN: VIN DUPLICADO DETECTADO\n\n' +
+          'Este VIN ya está registrado en otra póliza:\n\n' +
+          '🚗 VIN: ' + vinFormulario + '\n' +
+          '📋 Póliza existente: ' + vinDuplicado.numero_poliza + '\n' +
+          '🏢 Compañía: ' + vinDuplicado.compania + '\n' +
+          '👤 Cliente: ' + vinDuplicado.nombre + ' ' + vinDuplicado.apellido_paterno + '\n\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+          'Presione ACEPTAR para continuar con el guardado\n' +
+          '(Se marcará como VIN duplicado para revisión)\n\n' +
+          'Presione CANCELAR para regresar al formulario';
+        
+        const confirmar = window.confirm(mensaje);
+        if (!confirmar) {
+          toast('Operación cancelada. La póliza no fue guardada');
+          return false;
+        }
+      } else if (polizaDuplicadaVinDistinto) {
+        const mensaje = 
+          '⚠️ ADVERTENCIA: PÓLIZA DUPLICADA CON VIN DISTINTO\n\n' +
+          'Esta póliza ya existe con un VIN diferente:\n\n' +
+          '📋 Póliza: ' + formulario.numero_poliza + '\n' +
+          '🚗 VIN actual: ' + vinFormulario + '\n' +
+          '🚗 VIN existente: ' + (polizaDuplicadaVinDistinto.numero_serie || 'N/A') + '\n' +
+          '🏢 Compañía: ' + formulario.compania + '\n\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+          'Presione ACEPTAR para continuar con el guardado\n' +
+          '(Se marcará para revisión en el listado)\n\n' +
+          'Presione CANCELAR para regresar al formulario';
+        
+        const confirmar = window.confirm(mensaje);
+        if (!confirmar) {
+          toast('Operación cancelada. La póliza no fue guardada');
+          return false;
+        }
       }
     }
 
