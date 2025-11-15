@@ -92,15 +92,14 @@ function normalizarFecha(fecha) {
 export async function extraer(ctx) {
   console.log('🎯 Extractor Chubb Autos - Iniciando... [v2.0]');
   
-  const { textoCompleto, textoPagina1, textoPagina2 } = ctx;
+  const { textoCompleto, textoPagina1, textoPagina2, textoAvisoDeCobro, todasLasPaginas } = ctx;
   
   // DEBUG: Ver qué texto tenemos
   console.log('📄 Longitud textoCompleto:', textoCompleto?.length, 'caracteres');
   console.log('📄 Longitud textoPagina1:', textoPagina1?.length, 'caracteres');
-  console.log('📄 Longitud textoPagina2:', textoPagina2?.length, 'caracteres');
-  console.log('📄 ========== CONTENIDO PÁGINA 1 ==========');
-  console.log(textoPagina1?.substring(0, 1000));
-  console.log('📄 ==========================================');
+  console.log('📄 Longitud textoPagina2 (Carátula):', textoPagina2?.length, 'caracteres');
+  console.log('📄 Longitud textoAvisoDeCobro:', textoAvisoDeCobro?.length, 'caracteres');
+  console.log('📄 Total de páginas:', todasLasPaginas?.length || 0);
   
   // ==================== RFC Y TIPO DE PERSONA ====================
   // Buscar RFC con múltiples variantes y más flexible con espacios
@@ -235,7 +234,83 @@ export async function extraer(ctx) {
   const fecha_captura = new Date().toISOString().split('T')[0];
 
   // ==================== FECHA LÍMITE DE PAGO ====================
-  const fechaLimiteMatch = (textoPagina1 || textoCompleto).match(/Fecha\s+L[ií]mite\s+de\s+Pago[:\s]+(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+  const textoFinanciero = textoAvisoDeCobro || textoPagina1 || textoCompleto;
+  
+  // Helper: Monto desde línea con etiqueta, tolerando desfasado
+  // CHUBB: Solo PRIMA NETA e IVA tienen valor ANTES de la etiqueta
+  // El resto de campos tienen valor en misma línea o línea siguiente
+  const obtenerMontoPorEtiqueta = (texto, etiquetasRegex, buscarLineaAnteriorPrimero = false) => {
+    try {
+      const lineas = texto.split(/\r?\n/);
+      const esMonto = (linea) => {
+        if (!linea) return '';
+        // Capturar montos monetarios reales:
+        // 1. Con símbolo $ (ej: $ 8,223.32 o $1443.58)
+        // 2. Con separadores de miles (ej: 8,223.32 o 1,443.58)
+        // 3. Con decimales .XX (ej: 1443.58 o 799.00)
+        // No capturar números enteros simples sin decimales (777, 123) para evitar direcciones
+        const m = linea.match(/\$\s*([0-9]{1,3}(?:,\d{3})*(?:\.\d{2})?)|([0-9]{1,3}(?:,\d{3})+(?:\.\d{2})?)|(\d+\.\d{2})/);
+        return m ? (m[1] || m[2] || m[3]) : '';
+      };
+      
+      for (let i = 0; i < lineas.length; i++) {
+        const l = lineas[i];
+        
+        // Verificar si la línea contiene alguna de las etiquetas
+        if (etiquetasRegex.some((re) => re.test(l))) {
+          console.log(`🔍 Etiqueta encontrada en línea ${i}:`, l.substring(0, 50));
+          
+          // 🎯 CASO ESPECIAL: Prima Neta e IVA (valor ANTES de etiqueta)
+          if (buscarLineaAnteriorPrimero && i > 0) {
+            const monto = esMonto(lineas[i - 1]);
+            if (monto) {
+              console.log(`   ✅ Monto en LÍNEA ANTERIOR (i-1=${i-1}): ${monto} [Prima Neta/IVA]`);
+              return monto;
+            }
+          }
+          
+          // 1. Buscar en la MISMA línea después de la etiqueta
+          let lineaSinEtiqueta = l;
+          for (const re of etiquetasRegex) {
+            if (re.test(l)) {
+              lineaSinEtiqueta = l.replace(re, '');
+              break;
+            }
+          }
+          const montoMismaLinea = esMonto(lineaSinEtiqueta);
+          if (montoMismaLinea) {
+            console.log(`   ✅ Monto en MISMA línea: ${montoMismaLinea}`);
+            return montoMismaLinea;
+          }
+          
+          // 2. Buscar en la SIGUIENTE línea
+          if (i + 1 < lineas.length) {
+            const montoSiguiente = esMonto(lineas[i + 1]);
+            if (montoSiguiente) {
+              console.log(`   ✅ Monto en SIGUIENTE línea: ${montoSiguiente}`);
+              return montoSiguiente;
+            }
+          }
+          
+          // 3. FALLBACK: Si no encontramos en misma/siguiente, probar línea anterior (solo si no se buscó antes)
+          if (!buscarLineaAnteriorPrimero && i > 0) {
+            const monto = esMonto(lineas[i - 1]);
+            if (monto) {
+              console.log(`   ⚠️ Monto en LÍNEA ANTERIOR (i-1=${i-1}): ${monto} [fallback]`);
+              return monto;
+            }
+          }
+        }
+      }
+      
+      console.log('   ❌ No se encontró monto cerca de la etiqueta');
+      return '';
+    } catch (e) {
+      console.error('Error en obtenerMontoPorEtiqueta:', e);
+      return '';
+    }
+  };
+  const fechaLimiteMatch = textoFinanciero.match(/Fecha\s+L[ií]mite\s+de\s+Pago[:\s]+(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
   let fecha_limite_pago = '';
   if (fechaLimiteMatch) {
     // Formato encontrado: DD/MM/YYYY → convertir a YYYY-MM-DD
@@ -249,37 +324,67 @@ export async function extraer(ctx) {
   }
 
   // ==================== INFORMACIÓN FINANCIERA (Página 1 - Aviso de Cobro) ====================
-  // Prima Neta - Buscar con múltiples variantes (el formato es "Prima Neta $ 8,223.32")
-  let primaNeta = extraerDato(/Prima\s+Neta[\s\$]+([\d,]+\.?\d*)/i, textoPagina1 || textoCompleto);
-  if (!primaNeta) {
-    primaNeta = extraerDato(/PRIMA\s+NETA[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoPagina1 || textoCompleto);
-  }
-  const prima_pagada = primaNeta?.replace(/,/g, '') || '';
+  // NOTA: "Desglose de pago" es solo el TÍTULO de la sección, NO es un campo
+  // Los campos reales son: Prima Neta, Otros descuentos, Financiamiento, Gastos, IVA, Total
+  // 
+  // 🎯 IMPORTANTE: En Chubb PDFs:
+  //    - Prima Neta e IVA: valor ANTES de etiqueta (línea anterior)
+  //    - Resto de campos: valor en misma línea o línea siguiente
   
-  // IVA (formato: "I.V.A $ 1443.58")
-  let ivaExtraido = extraerDato(/I\.?V\.?A\.?[\s\$]+([\d,]+\.?\d*)/i, textoPagina1 || textoCompleto);
-  const iva = ivaExtraido?.replace(/,/g, '') || '';
+  // Prima Neta: buscar en línea ANTERIOR primero (valor antes de etiqueta)
+  const primaNeta = obtenerMontoPorEtiqueta(textoFinanciero, [/Prima\s+Neta/i, /PRIMA\s+NETA/i], true) 
+    || extraerDato(/Prima\s+Neta[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero) 
+    || extraerDato(/PRIMA\s+NETA[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero);
   
-  // Gastos de expedición
-  let derecho = extraerDato(/Gastos\s+de\s+expedici[oó]n[\s\$]+([\d,]+\.?\d*)/i, textoPagina1 || textoCompleto);
-  const gastos_expedicion = derecho?.replace(/,/g, '') || '';
+  // Otros descuentos: buscar normal (misma línea o siguiente)
+  const otros_descuentos = obtenerMontoPorEtiqueta(textoFinanciero, [/Otros\s+descuentos?/i], false) 
+    || extraerDato(/Otros\s+descuentos?[\s\$]*([\d,]+\.?\d*)/i, textoFinanciero);
   
-  // Financiamiento por pago fraccionado
-  let recargo = extraerDato(/Financiamiento\s+por\s+pago\s+fraccionado[\s\$]+([\d,]+\.?\d*)/i, textoPagina1 || textoCompleto);
-  const cargo_pago_fraccionado = recargo?.replace(/,/g, '') || '';
+  // Financiamiento: buscar normal (misma línea o siguiente)
+  const financiamiento_fraccionado = obtenerMontoPorEtiqueta(textoFinanciero, [/Financiamiento\s+por\s+pago\s+fraccionado/i], false) 
+    || extraerDato(/Financiamiento\s+por\s+pago\s+fraccionado[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero);
   
-  // Total a pagar (formato: "Total a pagar: $ 10,465.90")
-  let primaTotalMatch = (textoPagina1 || textoCompleto).match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i);
-  const costo_poliza = primaTotalMatch ? primaTotalMatch[1].replace(/,/g, '') : '';
-  const total = costo_poliza;
+  // IVA: buscar en línea ANTERIOR primero (valor antes de etiqueta)
+  // Variantes: "I.V.A.", "IVA", "I V A", "Impuesto al Valor Agregado"
+  console.log('🔍 Buscando IVA en texto financiero...');
+  console.log('   Longitud texto:', textoFinanciero?.length);
+  console.log('   Contiene "I.V.A."?', textoFinanciero?.includes('I.V.A.'));
+  console.log('   Contiene "IVA"?', textoFinanciero?.includes('IVA'));
   
-  console.log('💰 INFORMACIÓN FINANCIERA:', {
-    primaNeta: prima_pagada || '❌',
-    iva: iva || '❌',
-    derecho: gastos_expedicion || '❌',
-    recargo: cargo_pago_fraccionado || '❌',
-    primaTotal: costo_poliza || '❌ NO ENCONTRADO'
-  });
+  const ivaExtraido = obtenerMontoPorEtiqueta(textoFinanciero, [
+    /I\.V\.A\./i,  // Exacto: I.V.A.
+    /I\s*V\s*A/i,  // Con espacios opcionales
+    /\bIVA\b/i,    // Palabra completa
+    /Impuesto\s+al\s+Valor\s+Agregado/i
+  ], true) 
+    || extraerDato(/I\.V\.A\.[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero)
+    || extraerDato(/IVA[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero);
+  
+  console.log('   IVA extraído:', ivaExtraido || '❌ NO ENCONTRADO');
+  
+  // Gastos de expedición: buscar normal (misma línea o siguiente)
+  const derecho = obtenerMontoPorEtiqueta(textoFinanciero, [/Gastos\s+de\s+expedici[oó]n/i], false) 
+    || extraerDato(/Gastos\s+de\s+expedici[oó]n[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero);
+  
+  // Total: buscar normal (misma línea o siguiente)
+  const totalPagar = obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i], false) 
+    || (textoFinanciero.match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i)?.[1] || '');
+
+  const prima_pagada = primaNeta ? primaNeta.replace(/,/g, '') : '';
+  const iva = ivaExtraido ? ivaExtraido.replace(/,/g, '') : '';
+  const gastos_expedicion = derecho ? derecho.replace(/,/g, '') : '';
+  const cargo_pago_fraccionado = financiamiento_fraccionado ? financiamiento_fraccionado.replace(/,/g, '') : '';
+  const total = totalPagar ? totalPagar.replace(/,/g, '') : '';
+  
+  console.log('💰 INFORMACIÓN FINANCIERA (6 campos en orden):');
+  console.log('─────────────────────────────────────────────');
+  console.log('1. Prima Neta:                          $', prima_pagada || '0.00');
+  console.log('2. Otros Descuentos:                    $', otros_descuentos || '0.00');
+  console.log('3. Financiamiento por pago fraccionado: $', cargo_pago_fraccionado || '0.00');
+  console.log('4. Gastos de expedición:                $', gastos_expedicion || '0.00');
+  console.log('5. I.V.A.:                              $', iva || '0.00');
+  console.log('6. Total a pagar:                       $', total || '0.00');
+  console.log('─────────────────────────────────────────────');
 
   // ==================== TIPO DE PAGO ====================
   // Buscar "Serie del aviso: X/Y" para determinar forma de pago
@@ -287,42 +392,58 @@ export async function extraer(ctx) {
   let frecuenciaPago = '';
   let forma_pago = '';
   
-  const serieAvisoMatch = (textoPagina1 || textoCompleto).match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
+  const serieAvisoMatch = textoFinanciero.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
   
   if (serieAvisoMatch) {
     const serieActual = serieAvisoMatch[1];
     const serieTotal = serieAvisoMatch[2];
     
-    console.log(`📊 Serie del aviso: ${serieActual}/${serieTotal}`);
+    console.log(`📊 Serie del aviso encontrada: ${serieActual}/${serieTotal}`);
     
-    // Determinar tipo de pago según el total de pagos
+    // Determinar tipo de pago según el total de pagos (denominador)
+    // 1/1 = 1 pago único/anual
+    // 1/2 = 2 pagos (semestral)
+    // 1/3 = 3 pagos (cuatrimestral - cada 4 meses)
+    // 1/4 = 4 pagos (trimestral - cada 3 meses)
+    // 1/6 = 6 pagos (bimestral - cada 2 meses)
+    // 1/12 = 12 pagos (mensual)
+    
     if (serieTotal === '1') {
       tipo_pago = 'Anual';
       frecuenciaPago = 'Anual';
-      forma_pago = 'CONTADO';
+      // Mostrar como ANUAL en vez de CONTADO para el preview
+      forma_pago = 'ANUAL';
+      console.log('✅ Pago anual detectado (1/1)');
     } else if (serieTotal === '2') {
       tipo_pago = 'Fraccionado';
       frecuenciaPago = 'Semestral';
       forma_pago = 'SEMESTRAL';
+      console.log('✅ Pago semestral detectado (1/2)');
     } else if (serieTotal === '3') {
-      tipo_pago = 'Fraccionado';
-      frecuenciaPago = 'Trimestral';
-      forma_pago = 'TRIMESTRAL';
-    } else if (serieTotal === '4') {
       tipo_pago = 'Fraccionado';
       frecuenciaPago = 'Cuatrimestral';
       forma_pago = 'CUATRIMESTRAL';
+      console.log('✅ Pago cuatrimestral detectado (1/3)');
+    } else if (serieTotal === '4') {
+      tipo_pago = 'Fraccionado';
+      frecuenciaPago = 'Trimestral';
+      forma_pago = 'TRIMESTRAL';
+      console.log('✅ Pago trimestral detectado (1/4)');
     } else if (serieTotal === '6') {
       tipo_pago = 'Fraccionado';
       frecuenciaPago = 'Bimestral';
       forma_pago = 'BIMESTRAL';
+      console.log('✅ Pago bimestral detectado (1/6)');
     } else if (serieTotal === '12') {
       tipo_pago = 'Fraccionado';
       frecuenciaPago = 'Mensual';
       forma_pago = 'MENSUAL';
+      console.log('✅ Pago mensual detectado (1/12)');
     }
     
-    console.log(`✅ Tipo de pago determinado: ${tipo_pago} (${frecuenciaPago})`);
+    console.log(`📋 Tipo de pago FINAL: ${tipo_pago} | Frecuencia: ${frecuenciaPago}`);
+  } else {
+    console.log('⚠️ Serie del aviso NO encontrada en el PDF');
   }
   
   // ==================== VEHÍCULO (Página 2) ====================
@@ -424,6 +545,7 @@ export async function extraer(ctx) {
     
     // Financiero (Página 1 - Aviso de Cobro)
     prima_pagada,
+    otros_descuentos: otros_descuentos ? otros_descuentos.replace(/,/g, '') : '',
     cargo_pago_fraccionado,
     gastos_expedicion,
     iva,
@@ -491,9 +613,14 @@ export async function extraer(ctx) {
   console.log('   Servicio:', servicio || '❌');
   
   console.log('\n💰 INFORMACIÓN FINANCIERA (Página 1 - Aviso de Cobro):');
-  console.log('   Prima:', prima_pagada || '❌');
-  console.log('   IVA:', iva || '❌');
-  console.log('   Total:', total || '❌');
+  console.log('   Prima Neta: $', prima_pagada || '0.00');
+  console.log('   Otros descuentos: $', datosExtraidos.otros_descuentos || '0.00');
+  console.log('   Financiamiento por pago fraccionado: $', cargo_pago_fraccionado || '0.00');
+  console.log('   Gastos de expedición: $', gastos_expedicion || '0.00');
+  console.log('   IVA: $', iva || '0.00');
+  console.log('   Desglose de pago: $', datosExtraidos.desglose_pago || '0.00');
+  console.log('   Total a pagar: $', total || '0.00');
+  console.log('   ---');
   console.log('   Fecha Límite de Pago:', fecha_limite_pago || '❌');
   console.log('   Serie del aviso → Forma de pago:', forma_pago || '❌');
   console.log('   Tipo:', tipo_pago, '/', frecuenciaPago);

@@ -659,60 +659,79 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       
-      // Extraer PÁGINAS 1 Y 2 (algunos datos están en página 1)
       console.log('📄 Total de páginas:', pdf.numPages);
       
-      if (pdf.numPages < 2) {
-        throw new Error('El PDF debe tener al menos 2 páginas');
+      if (pdf.numPages < 1) {
+        throw new Error('El PDF debe tener al menos 1 página');
       }
       
-      // PÁGINA 1: Póliza, Endoso, Inciso, Agente
-      const page1 = await pdf.getPage(1);
-      const textContent1 = await page1.getTextContent();
+      // ==================== EXTRAER TODAS LAS PÁGINAS ====================
+      const todasLasPaginas = [];
+      let textoPagina1 = '';
+      let textoAvisoDeCobro = '';
+      let textoPaginaCaratula = '';
       
-      const lineas1 = {};
-      textContent1.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas1[y]) lineas1[y] = [];
-        lineas1[y].push({
-          text: item.str,
-          x: item.transform[4]
+      for (let numPagina = 1; numPagina <= pdf.numPages; numPagina++) {
+        const page = await pdf.getPage(numPagina);
+        const textContent = await page.getTextContent();
+        
+        const lineas = {};
+        textContent.items.forEach(item => {
+          const y = Math.round(item.transform[5]);
+          if (!lineas[y]) lineas[y] = [];
+          lineas[y].push({
+            text: item.str,
+            x: item.transform[4]
+          });
         });
-      });
-      
-      const textoPagina1 = Object.keys(lineas1)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas1[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
-      
-      // PÁGINA 2: Resto de datos
-      const page2 = await pdf.getPage(2);
-      const textContent = await page2.getTextContent();
-      
-      const lineas = {};
-      textContent.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas[y]) lineas[y] = [];
-        lineas[y].push({
-          text: item.str,
-          x: item.transform[4]
+        
+        const textoPagina = Object.keys(lineas)
+          .sort((a, b) => b - a)
+          .map(y => {
+            return lineas[y]
+              .sort((a, b) => a.x - b.x)
+              .map(item => item.text)
+              .join(' ');
+          })
+          .join('\n');
+        
+        todasLasPaginas.push({
+          numero: numPagina,
+          texto: textoPagina
         });
-      });
+        
+        // Guardar página 1 para detección de aseguradora
+        if (numPagina === 1) {
+          textoPagina1 = textoPagina;
+        }
+        
+        // Buscar página con "AVISO DE COBRO" o "Prima Neta"
+        if (textoPagina.match(/AVISO\s+DE\s+COBRO|Prima\s+Neta|PRIMA\s+NETA/i)) {
+          textoAvisoDeCobro = textoPagina;
+          console.log(`💰 Página ${numPagina} contiene AVISO DE COBRO`);
+          console.log('📄 Contenido completo de Aviso de Cobro:', textoPagina.substring(0, 1000));
+        }
+        
+        // Buscar página con "CARÁTULA" o datos del vehículo
+        if (textoPagina.match(/CARÁTULA|CAR[AÁ]TULA|Descripción\s+del\s+vehículo|DESCRIPCI[ÓO]N\s+DEL\s+VEH[ÍI]CULO/i)) {
+          textoPaginaCaratula = textoPagina;
+          console.log(`🚗 Página ${numPagina} contiene CARÁTULA`);
+        }
+      }
       
-      const textoCompleto = Object.keys(lineas)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
+      // Si no encontramos aviso de cobro, usar página 2 como fallback
+      if (!textoAvisoDeCobro && todasLasPaginas.length >= 2) {
+        textoAvisoDeCobro = todasLasPaginas[1].texto;
+        console.log('⚠️ No se encontró "AVISO DE COBRO", usando página 2 como fallback');
+      }
+      
+      // Si no encontramos carátula, usar página 2 como fallback
+      if (!textoPaginaCaratula && todasLasPaginas.length >= 2) {
+        textoPaginaCaratula = todasLasPaginas[1].texto;
+      }
+      
+      // Crear textoCompleto con todas las páginas
+      const textoCompleto = todasLasPaginas.map(p => p.texto).join('\n\n');
       
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
@@ -832,15 +851,17 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           
           console.log('📄 DEBUG antes de extraer:');
           console.log('   - textoPagina1 length:', textoPagina1?.length);
+          console.log('   - textoAvisoDeCobro length:', textoAvisoDeCobro?.length);
+          console.log('   - textoPaginaCaratula length:', textoPaginaCaratula?.length);
           console.log('   - textoCompleto length:', textoCompleto?.length);
-          console.log('   - textoPagina1 (primeros 500):', textoPagina1?.substring(0, 500));
-          
-          const textoCompletoPDF = textoPagina1 + '\n' + textoCompleto;
+          console.log('   - Total páginas extraídas:', todasLasPaginas?.length);
           
           datosExtraidos = await moduloExtractor.extraer({
-            textoCompleto: textoCompletoPDF,
+            textoCompleto,
             textoPagina1,
-            textoPagina2: textoCompleto
+            textoPagina2: textoPaginaCaratula,
+            textoAvisoDeCobro,
+            todasLasPaginas
           });
           
           console.log('📊 Datos extraídos:', datosExtraidos);
@@ -865,10 +886,21 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         return;
       }
 
-      // Limpiar montos (quitar comas)
-      ['prima_pagada', 'cargo_pago_fraccionado', 'iva', 'total', 'suma_asegurada'].forEach(campo => {
-        if (datosExtraidos[campo]) {
-          datosExtraidos[campo] = datosExtraidos[campo].replace(/,/g, '');
+      // Limpiar montos (quitar comas) y asegurar defaults "0.00" si faltan
+      const camposMontos = [
+        'prima_pagada',
+        'otros_descuentos',
+        'cargo_pago_fraccionado',
+        'gastos_expedicion',
+        'iva',
+        'total',
+        'suma_asegurada'
+      ];
+      camposMontos.forEach(campo => {
+        if (datosExtraidos[campo] !== undefined && datosExtraidos[campo] !== null && datosExtraidos[campo] !== '') {
+          datosExtraidos[campo] = String(datosExtraidos[campo]).replace(/,/g, '');
+        } else {
+          datosExtraidos[campo] = '0.00';
         }
       });
 
@@ -1428,81 +1460,75 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       }
 
       // ================== AJUSTES DE PAGO FRACCIONADO ==================
-      // Si la extracción detectó forma_pago y no se ha definido en el formulario, mapear:
-      // tipo_pago: 'Fraccionado' si la frecuencia no es anual
-      // ✅ Normalización DEFENSIVA adicional: si tipo_pago o frecuenciaPago vienen vacíos pero tenemos forma_pago
+      // Normalización: Mapear forma_pago a tipo_pago y frecuenciaPago
+      // El extractor de PDF debe proveer tipo_pago y frecuenciaPago correctos desde la Serie del aviso
+      // Este código es un FALLBACK por si el extractor no los detectó
+      
       if (!datosConCliente.tipo_pago || !datosConCliente.frecuenciaPago) {
         const fp = (datosConCliente.forma_pago || '').toLowerCase();
-        if (fp) {
-          if (fp.includes('tri')) {
-            datosConCliente.tipo_pago = 'Fraccionado';
-            datosConCliente.frecuenciaPago = 'Trimestral';
-          } else if (fp.includes('men')) {
-            datosConCliente.tipo_pago = 'Fraccionado';
-            datosConCliente.frecuenciaPago = 'Mensual';
-          } else if (fp.includes('sem')) {
-            datosConCliente.tipo_pago = 'Fraccionado';
-            datosConCliente.frecuenciaPago = 'Semestral';
-          } else if (fp.includes('bim')) {
-            datosConCliente.tipo_pago = 'Fraccionado';
-            datosConCliente.frecuenciaPago = 'Bimestral';
-          } else if (fp.includes('cuat')) {
-            datosConCliente.tipo_pago = 'Fraccionado';
-            datosConCliente.frecuenciaPago = 'Cuatrimestral';
-          } else if (fp.includes('anu') || fp.includes('contado') || fp.includes('unico') || fp.includes('único')) {
-            datosConCliente.tipo_pago = 'Anual';
-            datosConCliente.frecuenciaPago = 'Anual';
-          }
-          console.log('🛠 Normalización defensiva aplicada (faltaban tipo_pago / frecuenciaPago):', {
+        
+        console.log('🔧 Normalizando tipo_pago desde forma_pago:', datosConCliente.forma_pago);
+        
+        if (fp.includes('tri')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Trimestral';
+        } else if (fp.includes('men')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Mensual';
+        } else if (fp.includes('sem')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Semestral';
+        } else if (fp.includes('bim')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Bimestral';
+        } else if (fp.includes('cuat')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Cuatrimestral';
+        } else if (fp.includes('anu') || fp.includes('contado') || fp.includes('unico') || fp.includes('único')) {
+          datosConCliente.tipo_pago = 'Anual';
+          datosConCliente.frecuenciaPago = 'Anual';
+        }
+        
+        if (datosConCliente.tipo_pago) {
+          console.log('✅ Normalización aplicada:', {
             forma_pago: datosConCliente.forma_pago,
             tipo_pago: datosConCliente.tipo_pago,
             frecuenciaPago: datosConCliente.frecuenciaPago
           });
+        } else {
+          console.log('⚠️ No se pudo determinar tipo_pago desde forma_pago:', datosConCliente.forma_pago);
         }
-      }
-      if (datosConCliente.forma_pago) {
-        const forma = datosConCliente.forma_pago.toLowerCase();
-        console.log('💳 Detectada forma de pago:', datosConCliente.forma_pago);
-        // Determinar frecuenciaPago según forma
-        if (forma.includes('tri')) datosConCliente.frecuenciaPago = 'Trimestral';
-        else if (forma.includes('men')) datosConCliente.frecuenciaPago = 'Mensual';
-        else if (forma.includes('sem')) datosConCliente.frecuenciaPago = 'Semestral';
-        else if (forma.includes('bim')) datosConCliente.frecuenciaPago = 'Bimestral';
-        else if (forma.includes('cuat')) datosConCliente.frecuenciaPago = 'Cuatrimestral';
-        else if (forma.includes('anu') || forma.includes('contado') || forma.includes('unico') || forma.includes('único')) datosConCliente.frecuenciaPago = 'Anual';
-
-        // Solo marcar Fraccionado si la frecuencia NO es anual
-        if (datosConCliente.frecuenciaPago && datosConCliente.frecuenciaPago !== 'Anual') {
-          datosConCliente.tipo_pago = 'Fraccionado';
-          console.log('✅ Asignado tipo_pago=Fraccionado, frecuenciaPago=', datosConCliente.frecuenciaPago);
-        } else if (datosConCliente.frecuenciaPago === 'Anual' && !datosConCliente.tipo_pago) {
-          datosConCliente.tipo_pago = 'Anual';
-          console.log('✅ Confirmado tipo_pago=Anual (no fraccionado)');
-        }
+      } else {
+        console.log('✅ tipo_pago y frecuenciaPago ya vienen del extractor:', {
+          tipo_pago: datosConCliente.tipo_pago,
+          frecuenciaPago: datosConCliente.frecuenciaPago
+        });
       }
 
-      // Calendario sugerido de pagos basado en primer_pago y pagos_subsecuentes (solo si fraccionado y hay monto)
-      if (datosConCliente.tipo_pago === 'Fraccionado' && datosConCliente.frecuenciaPago && datosConCliente.inicio_vigencia) {
-        try {
-          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
-          const mesesSalto = CONSTANTS.MESES_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
-          const inicio = new Date(datosConCliente.inicio_vigencia);
-          const pagos = [];
-          for (let i = 0; i < numeroPagos; i++) {
-            const fechaPago = new Date(inicio);
-            fechaPago.setMonth(fechaPago.getMonth() + i * mesesSalto);
-            pagos.push({
-              numero: i + 1,
-              fecha: fechaPago.toISOString().split('T')[0],
-              monto: i === 0 ? datosConCliente.primer_pago || '' : datosConCliente.pagos_subsecuentes || datosConCliente.primer_pago || '',
-              estado: '' // Se calculará después en interfaz
-            });
-          }
-          datosConCliente.calendario_pagos_sugerido = pagos;
-        } catch (e) {
-          console.warn('No se pudo generar calendario de pagos sugerido:', e);
-        }
-      }
+      // ⚠️ NOTA: El calendario de pagos NO se genera aquí.
+      // El formulario principal tiene funciones dedicadas que:
+      //   1. Calculan fechas de pago con periodo de gracia (calcularProximoPago)
+      //   2. Determinan estados (pagado, vencido, por vencer)
+      //   3. Generan el calendario visual completo (CalendarioPagos component)
+      // Solo pasamos los datos básicos: tipo_pago, frecuenciaPago, primer_pago, pagos_subsecuentes
+      
+      console.log('📋 Datos de pago para formulario:', {
+        tipo_pago: datosConCliente.tipo_pago,
+        frecuenciaPago: datosConCliente.frecuenciaPago,
+        primer_pago: datosConCliente.primer_pago,
+        pagos_subsecuentes: datosConCliente.pagos_subsecuentes
+      });
+
+      // Log financiero para verificar que todos los campos lleguen (aun en 0.00)
+      console.log('📋 Desglose financiero (preview) - 6 campos en orden:');
+      console.log('─────────────────────────────────────────────────');
+      console.log('1. Prima Neta:                          $', datosConCliente.prima_pagada || '0.00');
+      console.log('2. Otros Descuentos:                    $', datosConCliente.otros_descuentos || '0.00');
+      console.log('3. Financiamiento por pago fraccionado: $', datosConCliente.cargo_pago_fraccionado || '0.00');
+      console.log('4. Gastos de expedición:                $', datosConCliente.gastos_expedicion || '0.00');
+      console.log('5. I.V.A.:                              $', datosConCliente.iva || '0.00');
+      console.log('6. Total a pagar:                       $', datosConCliente.total || '0.00');
+      console.log('─────────────────────────────────────────────────');
 
       // ================== CAMPOS ADICIONALES POLIZA (Uso/Servicio/Movimiento) ==================
       // Si existen y el formulario espera camelCase, mantenerlos así.

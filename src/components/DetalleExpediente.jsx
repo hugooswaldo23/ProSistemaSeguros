@@ -167,14 +167,13 @@ const DetalleExpediente = ({
         <div className="seccion-bloque seccion-financiera">
           <h6 className="text-secondary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>💰 Información Financiera</h6>
           <div className="row g-2">
-            {renderCampo('Prima Neta', datos?.prima_pagada ? utils.formatearMoneda?.(datos.prima_pagada) : '-')}
-            {renderCampo('Financiamiento', datos?.cargo_pago_fraccionado ? utils.formatearMoneda?.(datos.cargo_pago_fraccionado) : '-')}
-            {renderCampo('Gastos por Expedición', datos?.gastos_expedicion ? utils.formatearMoneda?.(datos.gastos_expedicion) : '-')}
-            {renderCampo('Subtotal', datos?.subtotal ? utils.formatearMoneda?.(datos.subtotal) : '-')}
-            {renderCampo('IVA 16%', datos?.iva ? utils.formatearMoneda?.(datos.iva) : '-')}
-            {renderCampo('Importe Total', datos?.total ? utils.formatearMoneda?.(datos.total) : '-')}
+            {renderCampo('Prima Neta', datos?.prima_pagada ? utils.formatearMoneda?.(datos.prima_pagada) : '$0.00')}
+            {renderCampo('Otros Descuentos', datos?.otros_descuentos ? utils.formatearMoneda?.(datos.otros_descuentos) : '$0.00')}
+            {renderCampo('Financiamiento por pago fraccionado', datos?.cargo_pago_fraccionado ? utils.formatearMoneda?.(datos.cargo_pago_fraccionado) : '$0.00')}
+            {renderCampo('Gastos de expedición', datos?.gastos_expedicion ? utils.formatearMoneda?.(datos.gastos_expedicion) : '$0.00')}
+            {renderCampo('I.V.A.', datos?.iva ? utils.formatearMoneda?.(datos.iva) : '$0.00')}
+            {renderCampo('Total a pagar', datos?.total ? utils.formatearMoneda?.(datos.total) : '$0.00')}
             {renderCampo('Forma de Pago', (tipoPagoMostrar || datos?.tipo_pago)?.toUpperCase?.())}
-            {datos?.fecha_pago && renderCampo('Pago Único', datos?.pago_unico ? utils.formatearMoneda?.(datos.pago_unico) : '-')}
           </div>
         </div>
 
@@ -329,29 +328,29 @@ const DetalleExpediente = ({
                 <h6 className="text-secondary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
                 <div className="row g-1">
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Prima Neta:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>1. Prima Neta:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.prima_pagada ? utils.formatearMoneda(datos.prima_pagada) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Otros Descuentos:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>2. Otros Descuentos:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.otros_descuentos ? utils.formatearMoneda(datos.otros_descuentos) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Financiamiento por pago fraccionado:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>3. Financiamiento por pago fraccionado:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.cargo_pago_fraccionado ? utils.formatearMoneda(datos.cargo_pago_fraccionado) : '$0.00'}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Gastos de expedición:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>4. Gastos de expedición:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.gastos_expedicion ? utils.formatearMoneda(datos.gastos_expedicion) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>I.V.A.:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>5. I.V.A.:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.iva ? utils.formatearMoneda(datos.iva) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Total a pagar:</small>
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>6. Total a pagar:</small>
                     <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datos.total ? utils.formatearMoneda(datos.total) : '$0.00'}</strong></div>
                   </div>
                   <div className="col-md-3">
