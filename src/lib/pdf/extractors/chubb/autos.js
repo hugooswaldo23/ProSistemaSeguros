@@ -103,17 +103,21 @@ export async function extraer(ctx) {
   
   // ==================== RFC Y TIPO DE PERSONA ====================
   // Buscar RFC con múltiples variantes y más flexible con espacios
-  // Chubb usa formato: "R.F.C.: ADT200310 RF0" (con espacio en medio)
-  let rfcMatch = textoCompleto.match(/(?:RFC|R\.?\s*F\.?\s*C\.?)[:\s]+([A-Z&Ñ]{3,4}\d{6})\s*([A-Z0-9]{3})/i);
-  
+  // Chubb usa formato: "R.F.C.: ADT200310 RF0" (con espacio en medio) o "ADT200310RF0"
   let rfcExtraido = '';
+  
+  // Capturar RFC que puede tener espacios internos o estar junto
+  const rfcMatch = textoCompleto.match(/(?:RFC|R\.?\s*F\.?\s*C\.?)[:\s]+([A-Z&Ñ]{3,4})\s*(\d{6})\s*([A-Z0-9]{3})/i);
+  
   if (rfcMatch) {
-    // Combinar las dos partes del RFC (eliminar espacio)
-    rfcExtraido = (rfcMatch[1] + rfcMatch[2]).toUpperCase().replace(/\s/g, '').trim();
+    // Combinar las tres partes del RFC (eliminar todos los espacios)
+    rfcExtraido = (rfcMatch[1] + rfcMatch[2] + rfcMatch[3]).toUpperCase().replace(/\s/g, '').trim();
+    console.log('🔍 RFC capturado en partes:', rfcMatch[1], rfcMatch[2], rfcMatch[3], '→', rfcExtraido);
   } else {
     // Fallback: buscar patrón continuo
     const rfcMatch2 = textoCompleto.match(/\b([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})\b/);
     rfcExtraido = rfcMatch2 ? rfcMatch2[1].toUpperCase().replace(/\s/g, '').trim() : '';
+    if (rfcExtraido) console.log('🔍 RFC capturado continuo:', rfcExtraido);
   }
   
   // Validar RFC
