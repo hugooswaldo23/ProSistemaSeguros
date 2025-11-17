@@ -372,21 +372,20 @@ export async function extraer(ctx) {
   const totalPagar = obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i], false) 
     || (textoFinanciero.match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i)?.[1] || '');
 
-  const prima_pagada = primaNeta ? primaNeta.replace(/,/g, '') : '';
-  const iva = ivaExtraido ? ivaExtraido.replace(/,/g, '') : '';
-  const gastos_expedicion = derecho ? derecho.replace(/,/g, '') : '';
-  const cargo_pago_fraccionado = financiamiento_fraccionado ? financiamiento_fraccionado.replace(/,/g, '') : '';
-  const total = totalPagar ? totalPagar.replace(/,/g, '') : '';
+  // Usar let para permitir fallback desde carátula si algo falta
+  let prima_pagada = primaNeta ? primaNeta.replace(/,/g, '') : '';
+  let gastos_expedicion = derecho ? derecho.replace(/,/g, '') : '';
+  let cargo_pago_fraccionado = financiamiento_fraccionado ? financiamiento_fraccionado.replace(/,/g, '') : '';
+  let iva = ivaExtraido ? ivaExtraido.replace(/,/g, '') : '';
+  let total = totalPagar ? totalPagar.replace(/,/g, '') : '';
   
-  console.log('💰 INFORMACIÓN FINANCIERA (6 campos en orden):');
-  console.log('─────────────────────────────────────────────');
-  console.log('1. Prima Neta:                          $', prima_pagada || '0.00');
-  console.log('2. Otros Descuentos:                    $', otros_descuentos || '0.00');
-  console.log('3. Financiamiento por pago fraccionado: $', cargo_pago_fraccionado || '0.00');
-  console.log('4. Gastos de expedición:                $', gastos_expedicion || '0.00');
-  console.log('5. I.V.A.:                              $', iva || '0.00');
-  console.log('6. Total a pagar:                       $', total || '0.00');
-  console.log('─────────────────────────────────────────────');
+  console.log('💰 INFORMACIÓN FINANCIERA (Página Aviso de Cobro):');
+  console.log('1. Prima Neta:', prima_pagada || '0.00');
+  console.log('2. Otros Descuentos:', otros_descuentos || '0.00');
+  console.log('3. Financiamiento:', cargo_pago_fraccionado || '0.00');
+  console.log('4. Gastos de expedición:', gastos_expedicion || '0.00');
+  console.log('5. IVA:', iva || '0.00');
+  console.log('6. Total a pagar:', total || '0.00');
 
   // ==================== TIPO DE PAGO ====================
   // Buscar "Serie del aviso: X/Y" para determinar forma de pago
@@ -565,17 +564,24 @@ export async function extraer(ctx) {
   const deducible = extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+(?:\.\d+)?)%?/i, textoCompleto) || '5';
 
   // ==================== COBERTURAS AMPARADAS (Tabla) ====================
-  const coberturas = (() => {
+  const { coberturas, bloqueFinancieroCaratula } = (() => {
     try {
       const inicio = textoCompleto.search(/Coberturas\s+amparadas/i);
-      if (inicio === -1) return [];
+      if (inicio === -1) return { coberturas: [], bloqueFinancieroCaratula: '' };
       const resto = textoCompleto.slice(inicio);
       const finIdx = resto.search(/(?:\n\s*Notas?\b|\n\s*CONDICIONES\s+GENERALES\b|\n\s*Datos\s+de\s+la\s+p[oó]liza\b|\n\s*Vigencia\b)/i);
       const bloque = finIdx > 0 ? resto.slice(0, finIdx) : resto;
 
-      const lineas = bloque.split(/\r?\n/)
-        .map(l => l.replace(/\s{2,}/g, ' ').trim())
-        .filter(l => l && !/^(Coberturas\s+amparadas|Desglose\s+de\s+coberturas|Suma\s+asegurada|Deducible|Prima)$/i.test(l));
+      const lineasRaw = bloque.split(/\r?\n/).map(l => l.replace(/\s{2,}/g, ' ').trim()).filter(Boolean);
+      const financialLabelRegex = /^(PRIMA\s+NETA|Prima\s+Neta|OTROS\s+DESCUENTOS|Otros\s+descuentos?|FINANCIAMIENTO|Financiamiento|GASTOS\s+DE\s+EXPEDICI|Gastos\s+de\s+expedici|I\.V\.A\.|IVA|TOTAL\s+A\s+PAGAR|Total\s+a\s+pagar)/i;
+
+      // Encontrar punto de corte donde empiezan los costos de póliza
+      let corte = lineasRaw.findIndex(l => financialLabelRegex.test(l));
+      if (corte === -1) corte = lineasRaw.length; // si no hay, todo es coberturas
+
+      const lineasCob = lineasRaw
+        .slice(0, corte)
+        .filter(l => !/^(Coberturas\s+amparadas|Desglose\s+de\s+coberturas|Suma\s+asegurada|Deducible|Prima)$/i.test(l));
 
       const esMonto = (s) => /\d{1,3}(?:,\d{3})*(?:\.\d{2})$/.test(s.trim());
       const normalizaMonto = (s) => {
@@ -592,37 +598,31 @@ export async function extraer(ctx) {
       };
 
       const filas = [];
-      for (let i = 0; i < lineas.length; i++) {
-        let l = lineas[i];
+      for (let i = 0; i < lineasCob.length; i++) {
+        let l = lineasCob[i];
         // Unir líneas hasta que termine con un monto de prima
-        while (i + 1 < lineas.length && !esMonto(l)) {
-          const candidato = `${l} ${lineas[i + 1]}`.trim();
-          // Si al unir ya termina con monto, avanzar
+        while (i + 1 < lineasCob.length && !esMonto(l)) {
+          const candidato = `${l} ${lineasCob[i + 1]}`.trim();
           if (esMonto(candidato)) { l = candidato; i++; break; }
-          // Si la siguiente línea tampoco ayuda, unir y avanzar
           l = candidato; i++;
         }
         if (!esMonto(l)) continue;
 
-        // Extraer PRIMA (monto al final)
         const mPrima = l.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s*$/);
         if (!mPrima) continue;
         const prima = mPrima[1].replace(/,/g, '');
         let antesPrima = l.slice(0, mPrima.index).trim();
 
-        // DEDUCIBLE (última coincidencia de % o NO APLICA/SCGP)
         const dedu = tomarUltimo(antesPrima, /(NO\s+APLICA|SCGP|SCCP|A\)\s*\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%)/gi) || 'NO APLICA';
-        // Quitar deducible del texto restante
         if (dedu) {
-          const pos = antesPrima.toUpperCase().lastIndexOf(dedu.toUpperCase());
-          if (pos >= 0) antesPrima = antesPrima.slice(0, pos).trim();
+          const posD = antesPrima.toUpperCase().lastIndexOf(dedu.toUpperCase());
+          if (posD >= 0) antesPrima = antesPrima.slice(0, posD).trim();
         }
 
-        // SUMA ASEGURADA (último match de monto o literal VALOR COMERCIAL/AMPARADA)
         let sumaStr = tomarUltimo(antesPrima, /(VALOR\s+COMERCIAL|VALOR\s+FACTURA|AMPARADA|\d{1,3}(?:,\d{3})*(?:\.\d{2}))/gi) || 'AMPARADA';
         if (sumaStr) {
-          const pos = antesPrima.toUpperCase().lastIndexOf(sumaStr.toUpperCase());
-          if (pos >= 0) antesPrima = antesPrima.slice(0, pos).trim();
+          const posS = antesPrima.toUpperCase().lastIndexOf(sumaStr.toUpperCase());
+          if (posS >= 0) antesPrima = antesPrima.slice(0, posS).trim();
         }
         const nombre = antesPrima.replace(/\s+/g, ' ').trim();
         if (!nombre) continue;
@@ -634,12 +634,35 @@ export async function extraer(ctx) {
           prima
         });
       }
-      return filas;
+
+      const bloqueFinanciero = lineasRaw.slice(corte).join('\n');
+      return { coberturas: filas, bloqueFinancieroCaratula: bloqueFinanciero };
     } catch (e) {
       console.warn('⚠️ Error parseando coberturas:', e);
-      return [];
+      return { coberturas: [], bloqueFinancieroCaratula: '' };
     }
   })();
+
+  // Fallback financiero desde carátula si algún campo crítico falta
+  if ((!prima_pagada || !iva || !total) && bloqueFinancieroCaratula) {
+    console.log('🔄 Fallback: intentando obtener montos desde bloque financiero en carátula');
+    const linesFin = bloqueFinancieroCaratula.split(/\r?\n/);
+    const extraeMontoLinea = (labelRegex) => {
+      for (const ln of linesFin) {
+        if (labelRegex.test(ln)) {
+          const m = ln.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2}))/g);
+          if (m && m.length) return m[m.length - 1].replace(/,/g, '');
+        }
+      }
+      return '';
+    };
+    prima_pagada = prima_pagada || extraeMontoLinea(/Prima\s+Neta/i);
+    gastos_expedicion = gastos_expedicion || extraeMontoLinea(/Gastos\s+de\s+expedici/i);
+    cargo_pago_fraccionado = cargo_pago_fraccionado || extraeMontoLinea(/Financiamiento\s+por\s+pago\s+fraccionado/i);
+    iva = iva || extraeMontoLinea(/I\.V\.A\.|IVA/i);
+    total = total || extraeMontoLinea(/Total\s+a\s+pagar/i);
+    console.log('🔄 Fallback resultados:', { prima_pagada, gastos_expedicion, cargo_pago_fraccionado, iva, total });
+  }
   
   // ==================== RESULTADO ====================
   const datosExtraidos = {
