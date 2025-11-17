@@ -109,7 +109,7 @@ const DetalleExpediente = ({
               )}
               {datos?.termino_vigencia && (
                 <span className="badge bg-info-subtle text-info border">
-                  Termina {new Date(datos.termino_vigencia).toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' }).toUpperCase()}
+                  Termina {utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() || '-'}
                 </span>
               )}
               <span className={`badge ${pagoInfo.clase} border`}> {pagoInfo.estatus}
@@ -156,10 +156,10 @@ const DetalleExpediente = ({
         <div className="seccion-bloque seccion-vigencia">
           <h6 className="text-success mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>📅 Vigencia de la Póliza</h6>
           <div className="row g-2">
-            {renderCampo('Inicio', datos?.inicio_vigencia ? new Date(datos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
-            {renderCampo('Fin', datos?.termino_vigencia ? new Date(datos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
-            {renderCampo('Fecha de Emisión', datos?.fecha_emision ? new Date(datos.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
-            {renderCampo('Fecha de Captura', datos?.fecha_captura ? new Date(datos.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-')}
+            {renderCampo('Inicio', datos?.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-')}
+            {renderCampo('Fin', datos?.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-')}
+            {renderCampo('Fecha de Emisión', datos?.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-')}
+            {renderCampo('Fecha de Captura', datos?.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-')}
           </div>
         </div>
 
@@ -306,19 +306,19 @@ const DetalleExpediente = ({
                 <div className="row g-1">
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.inicio_vigencia ? new Date(datos.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.termino_vigencia ? new Date(datos.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Emisión:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_emision ? new Date(datos.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Captura:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_captura ? new Date(datos.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase() : '-'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                 </div>
               </div>
