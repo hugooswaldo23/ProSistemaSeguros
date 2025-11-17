@@ -179,11 +179,13 @@ export async function extraer(ctx) {
   let agente = '';
   
   // Buscar clave del agente
-  const claveAgenteMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CLAVE\s+AGENTE|AGENTE)[:\s]+(\d+)/i);
+  const claveAgenteMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CLAVE\s+AGENTE|AGENTE|CLAVE\s+DEL\s+AGENTE|CLAVE\s+PRODUCTOR|CLAVE\s+INTERNA)[:\s]+(\d{3,})/i);
   const claveAgente = claveAgenteMatch ? claveAgenteMatch[1] : '';
   
   // Buscar nombre del conducto/agente
-  const conductoMatch = textoCompleto.match(/(?:CONDUCTO)[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|\n\n))/i);
+  const conductoMatch = textoCompleto.match(/(?:CONDUCTO|CONDUC[TO]?)[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|\n\n))/i)
+    || textoCompleto.match(/AGENTE[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|\n\n))/i)
+    || textoCompleto.match(/(?:NOMBRE\s+DEL\s+AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:CLAVE|RFC|Domicilio|\n\n))/i);
   const nombreAgente = conductoMatch ? conductoMatch[1].trim() : '';
   
   // Si encontramos ambos, combinarlos
@@ -451,43 +453,93 @@ export async function extraer(ctx) {
   
   console.log('🚗 Buscando datos del vehículo...');
   
-  // Marca: "Marca:\nFORD"
-  const marcaMatch = textoCompleto.match(/Marca[:\s]*\n([A-Z]+)/i);
-  const marca = marcaMatch ? marcaMatch[1] : '';
+  // Marca (en la misma línea)
+  const marca = extraerDato(/(?:MARCA|Marca)[:\s]*([^\r\n]+)/i, textoCompleto);
   console.log('   Marca:', marca || '❌');
   
-  // Modelo/Año: "Modelo:\n2016"
-  const modeloAnioMatch = textoCompleto.match(/\bModelo[:\s]*\n(\d{4})/i);
-  const anio = modeloAnioMatch ? modeloAnioMatch[1] : '';
+  // Modelo/Año (Año en la misma línea)
+  const anio = extraerDato(/(?:MODELO|Modelo)[:\s]*([0-9]{4})/i, textoCompleto);
   console.log('   Año:', anio || '❌');
   
-  // Clave vehicular (después de Motor)
-  const claveMatch = textoCompleto.match(/Motor[:\s]*\n[A-Z]+[\s]+(\d+)[\s]+([A-Z0-9]+)/i);
-  const modelo = claveMatch ? claveMatch[2] : '';
-  console.log('   Clave vehicular/Modelo:', modelo || '❌');
+  // Descripción del vehículo (si está disponible)
+  const modelo = extraerDato(/Descripci[óo]n\s+del\s+veh[íi]culo[^:]*:\s*([^\r\n]+)/i, textoCompleto);
+  console.log('   Modelo/Descripción:', modelo || '❌');
   
   // Serie/VIN
   const numero_serie = extraerDato(/(?:Serie|SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto);
   console.log('   Serie/VIN:', numero_serie || '❌');
   
-  // Motor (capacidad)
-  const motor = claveMatch ? claveMatch[1] : '';
-  console.log('   Capacidad:', motor || '❌');
+  // Motor y capacidad (en líneas separadas en la carátula)
+  const motor = extraerDato(/(?:MOTOR|Motor)[:\s]*([A-Z0-9]+)/i, textoCompleto);
+  const capacidad = extraerDato(/(?:CAPACIDAD|Capacidad)[:\s]*([0-9]+)/i, textoCompleto);
+  console.log('   Motor:', motor || '❌');
+  console.log('   Capacidad:', capacidad || '❌');
   
-  // Placas
-  const placasMatch = textoCompleto.match(/Placas[:\s]+([A-Z0-9\-]{6,10})/i);
-  const placas = placasMatch ? placasMatch[1] : '';
+  // Placas (solo misma línea para evitar capturas lejanas tipo "MEXICANAS")
+  const placas = extraerDato(/(?:PLACAS|Placas)[:\s]*([^\r\n]{5,12})/i, textoCompleto)
+    .replace(/[^A-Z0-9\-\s]/gi, '')
+    .trim();
   console.log('   Placas:', placas || '❌');
   
   // Color
-  const color = extraerDato(/(?:COLOR|Color)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Placas|\n))/i, textoCompleto);
+  const color = extraerDato(/(?:COLOR|Color)[:\s]*([^\r\n]+)/i, textoCompleto);
   console.log('   Color:', color || '❌');
+
+  // ==================== PAGOS FRACCIONADOS: PRIMER Y SUBSECUENTES ====================
+  // Intentar extraer explícitamente si el PDF lo indica
+  // Variantes frecuentes: "Primer Pago", "Pago Inicial", "Pagos subsecuentes", "Pago subsecuente", "Mensualidad"
+  const textoPagos = textoAvisoDeCobro || textoPagina1 || textoCompleto;
+  const buscarMontoEnContexto = (lineas, idx) => {
+    const esMonto = (s) => {
+      if (!s) return '';
+      const m = s.match(/\$\s*([0-9]{1,3}(?:,\d{3})*(?:\.\d{2})?)|([0-9]{1,3}(?:,\d{3})+(?:\.\d{2})?)|(\d+\.\d{2})/);
+      return m ? (m[1] || m[2] || m[3]) : '';
+    };
+    // misma línea
+    let monto = esMonto(lineas[idx]);
+    if (monto) return monto;
+    // siguiente
+    if (idx + 1 < lineas.length) {
+      monto = esMonto(lineas[idx + 1]);
+      if (monto) return monto;
+    }
+    // anterior
+    if (idx > 0) {
+      monto = esMonto(lineas[idx - 1]);
+      if (monto) return monto;
+    }
+    return '';
+  };
+  let primer_pago = '';
+  let pagos_subsecuentes = '';
+  try {
+    const lineasFin = textoPagos.split(/\r?\n/);
+    for (let i = 0; i < lineasFin.length; i++) {
+      const l = lineasFin[i];
+      if (/PRIMER\s+PAGO|PAGO\s+INICIAL/i.test(l)) {
+        const monto = buscarMontoEnContexto(lineasFin, i);
+        if (monto) {
+          primer_pago = monto.replace(/,/g, '');
+          console.log('💳 Primer pago detectado:', primer_pago);
+        }
+      }
+      if (/PAGOS?\s+SUBSECUENTES?|SUBSECUENTE|MENSUALIDAD|CUOTA\s+SUBSECUENTE/i.test(l)) {
+        const monto = buscarMontoEnContexto(lineasFin, i);
+        if (monto) {
+          pagos_subsecuentes = monto.replace(/,/g, '');
+          console.log('💳 Pago subsecuente detectado:', pagos_subsecuentes);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ Error extrayendo primer/subsecuentes:', e);
+  }
   
   // ==================== USO Y SERVICIO ====================
-  const uso = extraerDato(/(?:USO|Uso)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Servicio|SERVICIO|\n))/i, textoCompleto);
+  const uso = extraerDato(/(?:USO|Uso)[:\s]*([^\r\n]+)/i, textoCompleto);
   console.log('   Uso:', uso || '❌');
   
-  const servicio = extraerDato(/(?:SERVICIO|Servicio)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Tipo|TIPO|\n))/i, textoCompleto);
+  const servicio = extraerDato(/(?:SERVICIO|Servicio)[:\s]*([^\r\n]+)/i, textoCompleto);
   console.log('   Servicio:', servicio || '❌');
   
   // ==================== COBERTURA Y PLAN ====================
@@ -510,7 +562,84 @@ export async function extraer(ctx) {
   }
   
   const suma_asegurada = extraerDato(/(?:SUMA\s+ASEGURADA|VALOR\s+COMERCIAL)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto)?.replace(/,/g, '') || '';
-  const deducible = extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+)%?/i, textoCompleto) || '5';
+  const deducible = extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+(?:\.\d+)?)%?/i, textoCompleto) || '5';
+
+  // ==================== COBERTURAS AMPARADAS (Tabla) ====================
+  const coberturas = (() => {
+    try {
+      const inicio = textoCompleto.search(/Coberturas\s+amparadas/i);
+      if (inicio === -1) return [];
+      const resto = textoCompleto.slice(inicio);
+      const finIdx = resto.search(/(?:\n\s*Notas?\b|\n\s*CONDICIONES\s+GENERALES\b|\n\s*Datos\s+de\s+la\s+p[oó]liza\b|\n\s*Vigencia\b)/i);
+      const bloque = finIdx > 0 ? resto.slice(0, finIdx) : resto;
+
+      const lineas = bloque.split(/\r?\n/)
+        .map(l => l.replace(/\s{2,}/g, ' ').trim())
+        .filter(l => l && !/^(Coberturas\s+amparadas|Desglose\s+de\s+coberturas|Suma\s+asegurada|Deducible|Prima)$/i.test(l));
+
+      const esMonto = (s) => /\d{1,3}(?:,\d{3})*(?:\.\d{2})$/.test(s.trim());
+      const normalizaMonto = (s) => {
+        if (!s) return '';
+        const t = s.trim();
+        if (/^(AMPARADA|VALOR\s+COMERCIAL|VALOR\s+FACTURA)$/i.test(t)) return t.toUpperCase();
+        const mm = t.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2}))/);
+        return mm ? mm[1].replace(/,/g, '') : t;
+      };
+      const tomarUltimo = (s, re) => {
+        let m, last = null;
+        while ((m = re.exec(s)) !== null) last = m[0];
+        return last;
+      };
+
+      const filas = [];
+      for (let i = 0; i < lineas.length; i++) {
+        let l = lineas[i];
+        // Unir líneas hasta que termine con un monto de prima
+        while (i + 1 < lineas.length && !esMonto(l)) {
+          const candidato = `${l} ${lineas[i + 1]}`.trim();
+          // Si al unir ya termina con monto, avanzar
+          if (esMonto(candidato)) { l = candidato; i++; break; }
+          // Si la siguiente línea tampoco ayuda, unir y avanzar
+          l = candidato; i++;
+        }
+        if (!esMonto(l)) continue;
+
+        // Extraer PRIMA (monto al final)
+        const mPrima = l.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2}))\s*$/);
+        if (!mPrima) continue;
+        const prima = mPrima[1].replace(/,/g, '');
+        let antesPrima = l.slice(0, mPrima.index).trim();
+
+        // DEDUCIBLE (última coincidencia de % o NO APLICA/SCGP)
+        const dedu = tomarUltimo(antesPrima, /(NO\s+APLICA|SCGP|SCCP|A\)\s*\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*%)/gi) || 'NO APLICA';
+        // Quitar deducible del texto restante
+        if (dedu) {
+          const pos = antesPrima.toUpperCase().lastIndexOf(dedu.toUpperCase());
+          if (pos >= 0) antesPrima = antesPrima.slice(0, pos).trim();
+        }
+
+        // SUMA ASEGURADA (último match de monto o literal VALOR COMERCIAL/AMPARADA)
+        let sumaStr = tomarUltimo(antesPrima, /(VALOR\s+COMERCIAL|VALOR\s+FACTURA|AMPARADA|\d{1,3}(?:,\d{3})*(?:\.\d{2}))/gi) || 'AMPARADA';
+        if (sumaStr) {
+          const pos = antesPrima.toUpperCase().lastIndexOf(sumaStr.toUpperCase());
+          if (pos >= 0) antesPrima = antesPrima.slice(0, pos).trim();
+        }
+        const nombre = antesPrima.replace(/\s+/g, ' ').trim();
+        if (!nombre) continue;
+
+        filas.push({
+          nombre,
+          suma_asegurada: normalizaMonto(sumaStr),
+          deducible: dedu.replace(/\s+/g, ' ').toUpperCase(),
+          prima
+        });
+      }
+      return filas;
+    } catch (e) {
+      console.warn('⚠️ Error parseando coberturas:', e);
+      return [];
+    }
+  })();
   
   // ==================== RESULTADO ====================
   const datosExtraidos = {
@@ -550,6 +679,8 @@ export async function extraer(ctx) {
     gastos_expedicion,
     iva,
     total,
+    primer_pago: primer_pago || undefined,
+    pagos_subsecuentes: pagos_subsecuentes || undefined,
     tipo_pago,
     frecuenciaPago,
     forma_pago, // Extraído de Serie del aviso
@@ -562,12 +693,14 @@ export async function extraer(ctx) {
     numero_serie,
     motor,
     placas,
+    capacidad,
     color,
     tipo_cobertura,
     suma_asegurada,
     deducible,
     uso, // Extraído de página 2
     servicio, // Extraído de página 2
+    coberturas,
     
     // Metadata de validación
     alertas_extraccion: alertasRFC.length > 0 ? alertasRFC : undefined

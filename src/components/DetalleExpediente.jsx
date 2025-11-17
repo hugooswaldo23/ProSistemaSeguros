@@ -449,11 +449,15 @@ const DetalleExpediente = ({
                           <tr key={idx}>
                             <td className="fw-medium" style={{ padding: '0.25rem 0.5rem' }}>{cob.nombre}</td>
                             <td className="text-end" style={{ padding: '0.25rem 0.5rem' }}>
-                              {cob.suma_asegurada === 'AMPARADA' ? (
-                                <span className="badge bg-success">AMPARADA</span>
-                              ) : (
-                                `$${parseFloat(cob.suma_asegurada).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                              )}
+                              {(() => {
+                                const sa = cob.suma_asegurada?.toString?.() || '';
+                                const esNumero = /^\d+(?:\.\d+)?$/.test(sa);
+                                if (!sa) return <span className="text-muted">—</span>;
+                                if (sa.toUpperCase() === 'AMPARADA') return <span className="badge bg-success">AMPARADA</span>;
+                                if (/VALOR\s+COMERCIAL|VALOR\s+FACTURA/i.test(sa)) return <span className="badge bg-info text-dark">{sa.toUpperCase()}</span>;
+                                if (esNumero) return `$${parseFloat(sa).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                return <span className="badge bg-secondary">{sa}</span>;
+                              })()}
                               {cob.tipo === 'por_evento' && <small className="d-block text-muted">POR EVENTO</small>}
                             </td>
                             <td className="text-center">
