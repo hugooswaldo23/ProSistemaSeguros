@@ -225,23 +225,24 @@ const DashboardComponent = () => {
         polizasFiltradas = expedientes.filter(exp => {
           if (exp.etapa_activa !== 'Cancelada') return false;
           
-          // Si tiene fecha_cancelacion, usarla para filtrar por periodo
-          if (exp.fecha_cancelacion) {
-            if (periodo === 'mesActual') return estaEnRango(exp.fecha_cancelacion, inicioMesActual, finMesActual);
-            if (periodo === 'mesAnterior') {
-              // Meses anteriores del año: desde enero hasta fin del mes anterior
-              return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesAnterior);
-            }
-            return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesActual);
-          } else {
-            // Si NO tiene fecha_cancelacion (pólizas viejas), usar fecha_emision como referencia
-            console.warn('⚠️ Póliza cancelada sin fecha_cancelacion:', exp.numero_poliza, '- Usando fecha_emision');
-            if (periodo === 'mesActual') return estaEnRango(exp.fecha_emision, inicioMesActual, finMesActual);
-            if (periodo === 'mesAnterior') {
-              return estaEnRango(exp.fecha_emision, inicioAnioActual, finMesAnterior);
-            }
-            return estaEnRango(exp.fecha_emision, inicioAnioActual, finMesActual);
+          // ⚠️ IMPORTANTE: Si NO tiene fecha_cancelacion, considerar que es del mes actual
+          if (!exp.fecha_cancelacion) {
+            console.warn('⚠️ Póliza cancelada sin fecha_cancelacion:', exp.numero_poliza, '- Asumiendo mes actual');
+            return periodo === 'mesActual' || periodo === 'ambos';
           }
+          
+          // Si tiene fecha_cancelacion, usarla para filtrar por periodo
+          if (periodo === 'mesActual') {
+            return estaEnRango(exp.fecha_cancelacion, inicioMesActual, finMesActual);
+          }
+          
+          if (periodo === 'mesAnterior') {
+            // Meses anteriores del año: desde enero hasta fin del mes anterior
+            return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesAnterior);
+          }
+          
+          // Si no se especifica periodo (ambos), mostrar todas
+          return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesActual);
         });
         
         titulo = `Primas Canceladas - ${periodoTexto}`;

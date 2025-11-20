@@ -325,6 +325,13 @@ export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterio
 
 /**
  * Helper: Registrar envío de documento
+ * 
+ * @param {number} expedienteId - ID del expediente
+ * @param {number} clienteId - ID del cliente
+ * @param {string} canal - 'Email' o 'WhatsApp'
+ * @param {Object} destinatario - { nombre, contacto }
+ * @param {string} mensaje - Mensaje completo (se descartará, solo para compatibilidad)
+ * @param {string} documentoUrl - URL del documento (opcional)
  */
 export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, destinatario, mensaje, documentoUrl = null) => {
   const tipoEvento = canal === 'Email' 
@@ -332,21 +339,27 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     : TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP;
   
   const usuario = obtenerUsuarioActual();
+  
+  // 📝 Descripción simplificada: Solo lo esencial
+  const descripcion = `Enviado a ${destinatario.nombre} por ${canal} (${destinatario.contacto})`;
+  
   return await registrarEvento({
     expediente_id: expedienteId,
     cliente_id: clienteId,
     tipo_evento: tipoEvento,
     usuario_id: usuario.id || null,
     usuario_nombre: usuario.nombre || 'Sistema',
-    descripcion: `Documento enviado por ${canal}`,
+    descripcion: descripcion,
     metodo_contacto: canal,
     destinatario_nombre: destinatario.nombre,
     destinatario_contacto: destinatario.contacto,
     documento_url: documentoUrl,
     documento_tipo: 'poliza',
     datos_adicionales: {
-      mensaje: mensaje,
-      fecha_envio: new Date().toISOString()
+      // ✅ NO guardamos el mensaje completo, solo metadata esencial
+      canal: canal,
+      fecha_envio: new Date().toISOString(),
+      tiene_documento: !!documentoUrl
     }
   });
 };
