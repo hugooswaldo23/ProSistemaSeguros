@@ -15,6 +15,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { obtenerNotificacionesPorExpediente } from '../services/notificacionesService';
+import * as historialService from '../services/historialExpedienteService';
 
 const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const [historial, setHistorial] = useState([]);
@@ -33,9 +34,23 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
       setCargando(true);
       setError(null);
       
-      // Cargar notificaciones desde el backend (YA EXISTE)
+      // 🎯 PRIORIDAD 1: Intentar cargar desde el nuevo sistema de historial
+      try {
+        const eventosHistorial = await historialService.obtenerHistorialExpediente(expedienteId);
+        console.log('📋 Historial cargado desde nuevo sistema:', eventosHistorial);
+        
+        if (eventosHistorial && eventosHistorial.length > 0) {
+          setHistorial(eventosHistorial);
+          setCargando(false);
+          return; // ✅ Usar el nuevo sistema si está disponible
+        }
+      } catch (errorHistorial) {
+        console.warn('⚠️ Sistema de historial no disponible, usando notificaciones:', errorHistorial.message);
+      }
+      
+      // 🔄 FALLBACK: Usar tabla de notificaciones (sistema legacy)
       const notificaciones = await obtenerNotificacionesPorExpediente(expedienteId);
-      console.log('📋 Notificaciones cargadas:', notificaciones);
+      console.log('📋 Notificaciones cargadas (fallback):', notificaciones);
       
       // Convertir notificaciones a formato timeline
       const eventosTimeline = notificaciones.map(notif => ({
@@ -159,44 +174,12 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
 
   // Obtener estilo (icono y color) para cada tipo de evento
   const obtenerEstiloEvento = (tipoEvento) => {
-    const estilos = {
-      'cotizacion_creada': { icon: '📝', color: '#17a2b8', bgColor: '#d1ecf1' },
-      'cotizacion_enviada': { icon: '📧', color: '#ffc107', bgColor: '#fff3cd' },
-      'poliza_emitida': { icon: '📄', color: '#007bff', bgColor: '#cce5ff' },
-      'poliza_enviada_email': { icon: '📨', color: '#28a745', bgColor: '#d4edda' },
-      'poliza_enviada_whatsapp': { icon: '💬', color: '#25d366', bgColor: '#d4f4dd' },
-      'pago_registrado': { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
-      'pago_vencido': { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
-      'recordatorio_pago_enviado': { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
-      'poliza_renovada': { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
-      'poliza_cancelada': { icon: '🚫', color: '#dc3545', bgColor: '#f8d7da' },
-      'endoso_aplicado': { icon: '📝', color: '#007bff', bgColor: '#cce5ff' },
-      'documento_enviado': { icon: '📤', color: '#28a745', bgColor: '#d4edda' },
-      'nota_agregada': { icon: '📌', color: '#6c757d', bgColor: '#e2e3e5' }
-    };
-    
-    return estilos[tipoEvento] || { icon: '📋', color: '#6c757d', bgColor: '#e2e3e5' };
+    return historialService.obtenerEstiloEvento(tipoEvento);
   };
 
   // Obtener título legible para cada tipo de evento
   const obtenerTituloEvento = (tipoEvento) => {
-    const titulos = {
-      'cotizacion_creada': 'Cotización Creada',
-      'cotizacion_enviada': 'Cotización Enviada al Cliente',
-      'poliza_emitida': 'Póliza Emitida',
-      'poliza_enviada_email': 'Póliza Enviada por Email',
-      'poliza_enviada_whatsapp': 'Póliza Enviada por WhatsApp',
-      'pago_registrado': 'Pago Registrado',
-      'pago_vencido': 'Pago Vencido',
-      'recordatorio_pago_enviado': 'Recordatorio de Pago Enviado',
-      'poliza_renovada': 'Póliza Renovada',
-      'poliza_cancelada': 'Póliza Cancelada',
-      'endoso_aplicado': 'Endoso Aplicado',
-      'documento_enviado': 'Documento Enviado',
-      'nota_agregada': 'Nota Agregada'
-    };
-    
-    return titulos[tipoEvento] || tipoEvento.replace(/_/g, ' ').toUpperCase();
+    return historialService.obtenerTituloEvento(tipoEvento);
   };
 
   // Filtrar historial
@@ -205,7 +188,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     : historial.filter(evento => {
         const tipo = evento.tipo_evento || '';
         if (filtroTipo === 'Emisión') {
-          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion');
+          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion') || tipo.includes('captura_extractor_pdf');
         }
         if (filtroTipo === 'Pagos') {
           return tipo.includes('pago');

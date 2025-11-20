@@ -12,8 +12,11 @@ import { API_URL } from '../constants/apiUrl';
  * Tipos de eventos predefinidos para mantener consistencia
  */
 export const TIPOS_EVENTO = {
-  // Ciclo de cotización
+  // Captura y creación
+  CAPTURA_EXTRACTOR_PDF: 'captura_extractor_pdf',
   COTIZACION_CREADA: 'cotizacion_creada',
+  
+  // Ciclo de cotización
   COTIZACION_ENVIADA: 'cotizacion_enviada',
   COTIZACION_AUTORIZADA: 'cotizacion_autorizada',
   COTIZACION_RECHAZADA: 'cotizacion_rechazada',
@@ -57,6 +60,7 @@ export const TIPOS_EVENTO = {
  */
 export const obtenerEstiloEvento = (tipoEvento) => {
   const estilos = {
+    [TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF]: { icon: '📄', color: '#6f42c1', bgColor: '#e7d9f7' },
     [TIPOS_EVENTO.COTIZACION_CREADA]: { icon: '📝', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.COTIZACION_ENVIADA]: { icon: '📧', color: '#ffc107', bgColor: '#fff3cd' },
     [TIPOS_EVENTO.COTIZACION_AUTORIZADA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
@@ -97,6 +101,7 @@ export const obtenerEstiloEvento = (tipoEvento) => {
  */
 export const obtenerTituloEvento = (tipoEvento) => {
   const titulos = {
+    [TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF]: 'Captura con Extractor PDF',
     [TIPOS_EVENTO.COTIZACION_CREADA]: 'Cotización Creada',
     [TIPOS_EVENTO.COTIZACION_ENVIADA]: 'Cotización Enviada al Cliente',
     [TIPOS_EVENTO.COTIZACION_AUTORIZADA]: 'Cotización Autorizada',

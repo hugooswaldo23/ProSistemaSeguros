@@ -1636,6 +1636,26 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.log('💳 Estatus de pago por defecto: Pendiente (sin fecha de vencimiento)');
       }
       
+      // ✨ Agregar bandera para identificar que fue capturado con extractor PDF
+      datosConCliente._capturado_con_extractor_pdf = true;
+      datosConCliente._nombre_archivo_pdf = archivo?.name || informacionArchivo?.nombre || 'PDF importado';
+      
+      // 🔍 Guardar "huella digital" de los datos originales del PDF para detectar cambios manuales
+      datosConCliente._datos_originales_pdf = {
+        numero_poliza: datosConCliente.numero_poliza,
+        compania: datosConCliente.compania,
+        producto: datosConCliente.producto,
+        cliente_id: datosConCliente.cliente_id,
+        prima_pagada: datosConCliente.prima_pagada,
+        total: datosConCliente.total,
+        fecha_emision: datosConCliente.fecha_emision,
+        inicio_vigencia: datosConCliente.inicio_vigencia,
+        termino_vigencia: datosConCliente.termino_vigencia,
+        etapa_activa: datosConCliente.etapa_activa,
+        tipo_pago: datosConCliente.tipo_pago,
+        agente: datosConCliente.agente
+      };
+      
       console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
       onClose();
@@ -2596,6 +2616,15 @@ const ListaExpedientes = React.memo(({
                             {expediente.inciso && (
                               <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Inc: {expediente.inciso}</small></div>
                             )}
+                            {/* Fechas de captura y emisión */}
+                            <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '4px', lineHeight: '1.3' }}>
+                              {expediente.created_at && (
+                                <div>📝 Cap: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                              )}
+                              {expediente.fecha_emision && (
+                                <div>📄 Emi: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
@@ -2655,71 +2684,80 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td>
-                          <div className="d-flex gap-1 flex-wrap align-items-start">
-                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
-                              <button
-                                onClick={() => abrirModalCompartir(expediente)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Compartir"
-                              >
-                                <Share2 size={12} />
-                              </button>
-                            )}
-
-                            {(() => {
-                              // Permitir aplicar pago en estas etapas
-                              const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-                              const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
-                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                              const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
-                              
-                              return etapaValida && noPagado ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
+                            <div className="d-flex gap-1 align-items-center">
+                              {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
                                 <button
-                                  onClick={() => aplicarPago(expediente.id)}
+                                  onClick={() => abrirModalCompartir(expediente)}
                                   className="btn btn-success btn-sm"
                                   style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Aplicar Pago"
+                                  title="Compartir"
                                 >
-                                  <DollarSign size={12} />
+                                  <Share2 size={12} />
                                 </button>
-                              ) : null;
-                            })()}
+                              )}
 
-                            
-                            {expediente.etapa_activa !== 'Cancelada' && (
+                              {(() => {
+                                // Permitir aplicar pago en estas etapas
+                                const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
+                                const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
+                                const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                                const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
+                                
+                                return etapaValida && noPagado ? (
+                                  <button
+                                    onClick={() => aplicarPago(expediente.id)}
+                                    className="btn btn-success btn-sm"
+                                    style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                    title="Aplicar Pago"
+                                  >
+                                    <DollarSign size={12} />
+                                  </button>
+                                ) : null;
+                              })()}
+
+                              
+                              {expediente.etapa_activa !== 'Cancelada' && (
+                                <button
+                                  onClick={() => iniciarCancelacion(expediente)}
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                  title="Cancelar Póliza"
+                                >
+                                  <XCircle size={12} />
+                                </button>
+                              )}
+                              
                               <button
-                                onClick={() => iniciarCancelacion(expediente)}
-                                className="btn btn-danger btn-sm"
+                                onClick={() => verDetalles(expediente)}
+                                className="btn btn-outline-primary btn-sm"
                                 style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Cancelar Póliza"
+                                title="Ver detalles"
                               >
-                                <XCircle size={12} />
+                                <Eye size={12} />
                               </button>
-                            )}
+                            </div>
                             
-                            <button
-                              onClick={() => verDetalles(expediente)}
-                              className="btn btn-outline-primary btn-sm"
-                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                              title="Ver detalles"
-                            >
-                              <Eye size={12} />
-                            </button>
-                            <button
-                              onClick={() => editarExpediente(expediente)}
-                              className="btn btn-outline-secondary btn-sm"
-                              title="Editar"
-                            >
-                              <Edit size={14} />
-                            </button>
-                            <button
-                              onClick={() => eliminarExpediente(expediente.id)}
-                              className="btn btn-outline-danger btn-sm"
-                              title="Eliminar"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {/* Fila 2: Editar, Eliminar */}
+                            <div className="d-flex gap-1 align-items-center">
+                              <button
+                                onClick={() => editarExpediente(expediente)}
+                                className="btn btn-outline-secondary btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Editar"
+                              >
+                                <Edit size={12} />
+                              </button>
+                              <button
+                                onClick={() => eliminarExpediente(expediente.id)}
+                                className="btn btn-outline-danger btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Eliminar"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -6608,18 +6646,78 @@ const estadoInicialFormulario = {
           try {
             const nuevoId = data?.id || data?.data?.id;
             if (nuevoId) {
-              // Determinar tipo de evento según la etapa actual
               const etapaActual = expedientePayload.etapa_activa || 'En cotización';
+              const capturadoConExtractorPDF = formularioConCalculos._capturado_con_extractor_pdf === true;
+              const nombreArchivoPDF = formularioConCalculos._nombre_archivo_pdf || 'PDF importado';
+              
+              // 🔍 Detectar si hubo modificaciones manuales después del extractor
+              let huboModificacionesManuales = false;
+              const camposModificados = [];
+              
+              if (capturadoConExtractorPDF && formularioConCalculos._datos_originales_pdf) {
+                const originales = formularioConCalculos._datos_originales_pdf;
+                const camposAComparar = [
+                  { key: 'numero_poliza', label: 'Número de póliza' },
+                  { key: 'compania', label: 'Aseguradora' },
+                  { key: 'producto', label: 'Producto' },
+                  { key: 'prima_pagada', label: 'Prima' },
+                  { key: 'total', label: 'Total' },
+                  { key: 'fecha_emision', label: 'Fecha de emisión' },
+                  { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
+                  { key: 'termino_vigencia', label: 'Término de vigencia' },
+                  { key: 'etapa_activa', label: 'Etapa' },
+                  { key: 'tipo_pago', label: 'Tipo de pago' },
+                  { key: 'agente', label: 'Agente' }
+                ];
+                
+                camposAComparar.forEach(({ key, label }) => {
+                  const valorOriginal = String(originales[key] || '').trim();
+                  const valorActual = String(formularioConCalculos[key] || '').trim();
+                  
+                  if (valorOriginal && valorActual && valorOriginal !== valorActual) {
+                    huboModificacionesManuales = true;
+                    camposModificados.push(`${label}: "${valorOriginal}" → "${valorActual}"`);
+                  }
+                });
+              }
+              
+              // 🎯 EVENTO 1: Captura con Extractor PDF (si aplica)
+              if (capturadoConExtractorPDF) {
+                const descripcionCaptura = huboModificacionesManuales 
+                  ? `Póliza capturada con Extractor PDF y editada manualmente`
+                  : `Póliza capturada mediante Extractor PDF`;
+                
+                await historialService.registrarEvento({
+                  expediente_id: nuevoId,
+                  cliente_id: expedientePayload.cliente_id,
+                  tipo_evento: 'captura_extractor_pdf',
+                  usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
+                  descripcion: descripcionCaptura,
+                  datos_adicionales: {
+                    archivo_pdf: nombreArchivoPDF,
+                    aseguradora: expedientePayload.compania,
+                    producto: expedientePayload.producto,
+                    numero_poliza: expedientePayload.numero_poliza,
+                    metodo_captura: 'Extractor PDF Automático',
+                    fecha_captura: expedientePayload.fecha_captura || new Date().toISOString().split('T')[0],
+                    modificado_manualmente: huboModificacionesManuales,
+                    campos_modificados: huboModificacionesManuales ? camposModificados : undefined
+                  }
+                });
+                console.log(`✅ Evento "Captura con Extractor PDF${huboModificacionesManuales ? ' (con ajustes manuales)' : ''}" registrado`);
+              }
+              
+              // 🎯 EVENTO 2: Estado inicial de la póliza (Cotización/Emitida/etc.)
               let tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_CREADA;
               let descripcionEvento = `Cotización creada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
               
               // Si se crea directo en etapa "Emitida", registrar como póliza emitida
               if (etapaActual === 'Emitida') {
                 tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
-                descripcionEvento = `Póliza emitida y capturada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+                descripcionEvento = `Póliza ${capturadoConExtractorPDF ? 'importada desde PDF' : 'capturada'}: ${expedientePayload.compania} - ${expedientePayload.producto}`;
               } else if (etapaActual === 'Enviada al Cliente') {
                 tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL;
-                descripcionEvento = `Póliza capturada como enviada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+                descripcionEvento = `Póliza ${capturadoConExtractorPDF ? 'importada' : 'capturada'} como enviada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
               }
               
               await historialService.registrarEvento({
@@ -6633,7 +6731,7 @@ const estadoInicialFormulario = {
                   numero_poliza: expedientePayload.numero_poliza,
                   compania: expedientePayload.compania,
                   producto: expedientePayload.producto,
-                  origen: 'captura_manual'
+                  origen: capturadoConExtractorPDF ? 'extractor_pdf' : 'captura_manual'
                 }
               });
               console.log(`✅ Evento ${tipoEvento} registrado en historial`);
