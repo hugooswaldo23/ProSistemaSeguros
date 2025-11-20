@@ -90,18 +90,29 @@ function normalizarFecha(fecha) {
  * @returns {Object} Datos extraídos de la póliza
  */
 export async function extraer(ctx) {
-  console.log('🎯 Extractor Chubb Autos - Iniciando... [v2.0]');
+  console.log('\n╔═══════════════════════════════════════════════════════════╗');
+  console.log('║  🏢 EXTRACTOR CHUBB AUTOS - INICIANDO                    ║');
+  console.log('╚═══════════════════════════════════════════════════════════╝\n');
   
   const { textoCompleto, textoPagina1, textoPagina2, textoAvisoDeCobro, todasLasPaginas } = ctx;
   
-  // DEBUG: Ver qué texto tenemos
-  console.log('📄 Longitud textoCompleto:', textoCompleto?.length, 'caracteres');
-  console.log('📄 Longitud textoPagina1:', textoPagina1?.length, 'caracteres');
-  console.log('📄 Longitud textoPagina2 (Carátula):', textoPagina2?.length, 'caracteres');
-  console.log('📄 Longitud textoAvisoDeCobro:', textoAvisoDeCobro?.length, 'caracteres');
-  console.log('📄 Total de páginas:', todasLasPaginas?.length || 0);
+  // 🔍 DEBUG: MOSTRAR TEXTO COMPLETO DEL PDF PARA ANÁLISIS
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('📄 TEXTO COMPLETO DEL PDF (primeros 3000 caracteres):');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(textoCompleto.substring(0, 3000));
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(`📊 Total caracteres: ${textoCompleto.length}`);
+  console.log('═══════════════════════════════════════════════════════════\n');
   
-  // ==================== RFC Y TIPO DE PERSONA ====================
+  // ==================== PASO 1: RFC Y TIPO DE PERSONA ====================
+  console.log('📋 PASO 1: EXTRACCIÓN DE RFC Y TIPO DE PERSONA');
+  console.log('─────────────────────────────────────────────────────────');
+  
+  // 🔍 DEBUG: Info del texto disponible
+  console.log(`📊 Texto completo: ${textoCompleto.length} caracteres`);
+  console.log(`📊 Texto Aviso Cobro: ${textoAvisoDeCobro?.length || 0} caracteres`);
+  
   // Buscar RFC con múltiples variantes y más flexible con espacios
   // Chubb usa formato: "R.F.C.: ADT200310 RF0" (con espacio en medio) o "ADT200310RF0"
   let rfcExtraido = '';
@@ -130,9 +141,10 @@ export async function extraer(ctx) {
   
   const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
   
-  console.log('🔍 RFC:', rfcExtraido || '❌ NO ENCONTRADO', '- Tipo:', tipoPersona);
+  console.log('RFC extraído:', rfcExtraido || '❌ NO ENCONTRADO');
+  console.log('Tipo de persona:', tipoPersona);
   if (alertasRFC.length > 0) {
-    alertasRFC.forEach(alerta => console.warn(alerta));
+    alertasRFC.forEach(alerta => console.warn('  ', alerta));
   }
   
   // ==================== ASEGURADO ====================
@@ -163,6 +175,12 @@ export async function extraer(ctx) {
     }
   }
   
+  if (tipoPersona === 'Moral') {
+    console.log('Razón Social:', razonSocial || '❌');
+  } else {
+    console.log('Nombre completo:', nombre, apellido_paterno, apellido_materno || '');
+  }
+  
   // ==================== UBICACIÓN ====================
   // Chubb usa formato: "Domicilio del asegurado y/o propietario: DIRECCION"
   const domicilio = extraerDato(/(?:Domicilio del asegurado|Domicilio|DOMICILIO|DIRECCI[OÓ]N)[:\s]+(.+?)(?=\s*(?:R\.F\.C|Datos generales|Póliza anterior)|$)/is, textoCompleto);
@@ -178,32 +196,53 @@ export async function extraer(ctx) {
   const endoso = extraerDato(/(?:ENDOSO|Endoso)[:\s#]*(\d+)/i, textoCompleto) || '000000';
   const inciso = extraerDato(/(?:INCISO|Inciso)[:\s#]*(\d+)/i, textoCompleto) || '0001';
   
-  // ==================== AGENTE ====================
-  // Chubb usa "Clave interna del agente: XXXXX" y "Conducto: X - NOMBRE"
+  // ==================== PASO 2: AGENTE ====================
+  console.log('\n📋 PASO 2: EXTRACCIÓN DE AGENTE');
+  console.log('─────────────────────────────────────────────────────────');
+  
+  // Chubb usa "Clave interna del agente: XXXXX" o "Clave interna del agente: NOMBRE APELLIDOS"
   let agente = '';
   
-  // Buscar clave del agente
-  const claveAgenteMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CLAVE\s+AGENTE|AGENTE|CLAVE\s+DEL\s+AGENTE|CLAVE\s+PRODUCTOR|CLAVE\s+INTERNA)[:\s]+(\d{3,})/i);
-  const claveAgente = claveAgenteMatch ? claveAgenteMatch[1] : '';
+  // Estrategia 1: Capturar código numérico + nombre (ej: "141975 - RITA DINGLER CHAIRES")
+  const claveConNombreMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CONDUCTO)[:\s]+(\d{3,})\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|Desglose|\n\n))/i);
   
-  // Buscar nombre del conducto/agente
-  const conductoMatch = textoCompleto.match(/(?:CONDUCTO|CONDUC[TO]?)[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|\n\n))/i)
-    || textoCompleto.match(/AGENTE[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|\n\n))/i)
-    || textoCompleto.match(/(?:NOMBRE\s+DEL\s+AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:CLAVE|RFC|Domicilio|\n\n))/i);
-  const nombreAgente = conductoMatch ? conductoMatch[1].trim() : '';
+  // Estrategia 2: Capturar solo nombre después de "Clave interna del agente:" (ej: "RITA DINGLER CHAIRES")
+  const soloPalabraMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Desglose|RFC|Datos|Domicilio|\n\n))/i);
   
-  // Si encontramos ambos, combinarlos
-  if (claveAgente && nombreAgente) {
-    agente = `${claveAgente} - ${nombreAgente}`;
-  } else if (claveAgente) {
-    agente = claveAgente;
-  } else {
-    // Fallback: buscar patrón genérico
-    const agenteMatch = textoCompleto.match(/(?:AGENTE|CLAVE\s+AGENTE)[:\s]+(\d+)[\s\-]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\n|$)/i);
-    agente = agenteMatch ? `${agenteMatch[1]} - ${agenteMatch[2].trim()}` : '';
+  // Estrategia 3: Capturar código numérico solo
+  const soloCodigoMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CLAVE\s+AGENTE|AGENTE|CLAVE\s+DEL\s+AGENTE|CLAVE\s+PRODUCTOR|CLAVE\s+INTERNA)[:\s]+(\d{3,})/i);
+  
+  if (claveConNombreMatch) {
+    // Caso ideal: código + nombre
+    agente = `${claveConNombreMatch[1]} - ${claveConNombreMatch[2].trim()}`;
+  } else if (soloPalabraMatch && !/\d/.test(soloPalabraMatch[1])) {
+    // Si solo hay nombre (sin dígitos), buscamos si hay código en otro lugar
+    const codigoSeparado = textoCompleto.match(/(?:C[OÓ]DIGO\s+AGENTE|AGENTE)[:\s]+(\d{3,})/i);
+    if (codigoSeparado) {
+      agente = `${codigoSeparado[1]} - ${soloPalabraMatch[1].trim()}`;
+    } else {
+      agente = soloPalabraMatch[1].trim();
+    }
+  } else if (soloCodigoMatch) {
+    // Solo código, intentar buscar nombre en otro lugar
+    const nombreSeparado = textoCompleto.match(/(?:NOMBRE\s+DEL\s+AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:CLAVE|RFC|Domicilio|\n\n))/i);
+    if (nombreSeparado) {
+      agente = `${soloCodigoMatch[1]} - ${nombreSeparado[1].trim()}`;
+    } else {
+      agente = soloCodigoMatch[1];
+    }
   }
   
-  console.log('👔 Agente encontrado:', agente || '❌ NO ENCONTRADO');
+  console.log('Agente:', agente || '❌ NO ENCONTRADO');
+  
+  // ==================== PASO 3: DATOS DE LA PÓLIZA ====================
+  console.log('\n📋 PASO 3: EXTRACCIÓN DE DATOS DE LA PÓLIZA');
+  console.log('─────────────────────────────────────────────────────────');
+  
+  // Número de póliza ya extraído arriba
+  console.log('Número de póliza:', numero_poliza || '❌');
+  console.log('Endoso:', endoso);
+  console.log('Inciso:', inciso);
   
   // ==================== VIGENCIA ====================
   // Chubb usa formato: "Vigencia: Del 13/Nov/2025 12:00 horas al 13/Nov/2026 12:00 horas"
@@ -216,10 +255,8 @@ export async function extraer(ctx) {
     fecha_fin_vigencia = normalizarFecha(vigenciaMatch[2]);
   }
   
-  console.log('📅 VIGENCIA:', { 
-    inicio: fecha_inicio_vigencia || '❌ NO ENCONTRADO', 
-    fin: fecha_fin_vigencia || '❌ NO ENCONTRADO' 
-  });
+  console.log('Vigencia inicio:', fecha_inicio_vigencia || '❌');
+  console.log('Vigencia fin:', fecha_fin_vigencia || '❌');
 
   // ==================== FECHA DE EMISIÓN ====================
   // Buscar fecha de emisión, si no se encuentra, usar fecha de captura
@@ -228,13 +265,12 @@ export async function extraer(ctx) {
   
   if (fechaEmisionMatch) {
     fecha_emision = normalizarFecha(fechaEmisionMatch[1]);
-    console.log('📝 Fecha de emisión encontrada:', fecha_emision);
   } else {
     // Si no encuentra fecha de emisión, usar fecha de captura
     const fechaHoy = new Date();
     fecha_emision = fechaHoy.toISOString().split('T')[0];
-    console.log('📝 Fecha de emisión NO encontrada, usando fecha de captura:', fecha_emision);
   }
+  console.log('Fecha emisión:', fecha_emision);
   
   // Fecha de captura (siempre la fecha actual)
   const fecha_captura = new Date().toISOString().split('T')[0];
@@ -451,43 +487,137 @@ export async function extraer(ctx) {
     console.log('⚠️ Serie del aviso NO encontrada en el PDF');
   }
   
-  // ==================== VEHÍCULO (Página 2) ====================
-  // IMPORTANTE: En Chubb, los datos están en formato multi-línea (label\nvalue)
+  // ==================== PASO 4: VEHÍCULO (Página 2) ====================
+  console.log('\n📋 PASO 4: EXTRACCIÓN DE DATOS DEL VEHÍCULO');
+  console.log('─────────────────────────────────────────────────────────');
   
-  console.log('🚗 Buscando datos del vehículo...');
+  // 🔍 DEBUG: Mostrar muestra del texto donde buscamos datos del vehículo
+  const muestraVehiculo = textoCompleto.substring(textoCompleto.indexOf('Marca:'), textoCompleto.indexOf('Marca:') + 300);
+  console.log('📄 MUESTRA DE TEXTO (sección vehículo):\n', muestraVehiculo);
   
-  // Marca (en la misma línea)
-  const marca = extraerDato(/(?:MARCA|Marca)[:\s]*([^\r\n]+)/i, textoCompleto);
-  console.log('   Marca:', marca || '❌');
+  // Helper: Extraer valor después de etiqueta
+  // El PDF de Chubb tiene formato mixto:
+  // - A veces: "Etiqueta: VALOR" en la misma línea
+  // - A veces: "Etiqueta:\nVALOR" en líneas separadas
+  // - A veces: "Etiqueta:   Etiqueta2:" en la misma línea (valores en siguiente línea)
+  const extraerCampoLinea = (etiqueta, texto) => {
+    // Estrategia 1: Buscar "Etiqueta: VALOR" en la misma línea (valor directo después de los dos puntos)
+    const regexMismaLinea = new RegExp(`\\b${etiqueta}:\\s+([A-Z0-9][^:\\r\\n]+?)(?=\\s{2,}[A-Za-zÁÉÍÓÚñÑ]+:|\\r|\\n|$)`, 'i');
+    const matchMismaLinea = texto.match(regexMismaLinea);
+    
+    if (matchMismaLinea && matchMismaLinea[1].trim().length > 0) {
+      return matchMismaLinea[1].trim();
+    }
+    
+    // Estrategia 2: Buscar "Etiqueta:" seguido de salto de línea y luego el valor
+    const regexSiguienteLinea = new RegExp(`\\b${etiqueta}:\\s*[\\r\\n]+\\s*([A-Z0-9][^:\\r\\n]+?)(?=\\s*\\r|\\n|$)`, 'i');
+    const matchSiguienteLinea = texto.match(regexSiguienteLinea);
+    
+    if (matchSiguienteLinea && matchSiguienteLinea[1].trim().length > 0) {
+      return matchSiguienteLinea[1].trim();
+    }
+    
+    // Estrategia 3: Formato "Etiqueta:   Etiqueta2:   Etiqueta3:\nVALOR1  VALOR2  VALOR3"
+    // Primero encontrar la posición de la etiqueta
+    const regexPosicion = new RegExp(`\\b${etiqueta}:`, 'i');
+    const matchPosicion = texto.match(regexPosicion);
+    
+    if (matchPosicion) {
+      const indiceEtiqueta = texto.indexOf(matchPosicion[0]);
+      const restoTexto = texto.substring(indiceEtiqueta);
+      
+      // Buscar salto de línea después de la etiqueta
+      const matchLineaValores = restoTexto.match(/:\s*[\r\n]+(.+)/);
+      if (matchLineaValores) {
+        // Extraer la línea completa de valores
+        const lineaValores = matchLineaValores[1];
+        
+        // Dividir por espacios múltiples (2 o más)
+        const valores = lineaValores.split(/\s{2,}/);
+        
+        // Contar cuántas etiquetas hay en la línea de etiquetas antes de la nuestra
+        const lineaEtiquetas = restoTexto.substring(0, restoTexto.indexOf('\n'));
+        const etiquetasAntes = (lineaEtiquetas.substring(0, lineaEtiquetas.indexOf(matchPosicion[0])).match(/\w+:/g) || []).length;
+        
+        // El valor correspondiente está en la misma posición
+        if (valores[etiquetasAntes]) {
+          return valores[etiquetasAntes].trim();
+        }
+      }
+    }
+    
+    return '';
+  };
   
-  // Modelo/Año (Año en la misma línea)
-  const anio = extraerDato(/(?:MODELO|Modelo)[:\s]*([0-9]{4})/i, textoCompleto);
-  console.log('   Año:', anio || '❌');
+  // 1. MARCA
+  const marca = extraerCampoLinea('Marca', textoCompleto);
+  console.log('Marca:', marca || '❌');
   
-  // Descripción del vehículo (si está disponible)
-  const modelo = extraerDato(/Descripci[óo]n\s+del\s+veh[íi]culo[^:]*:\s*([^\r\n]+)/i, textoCompleto);
-  console.log('   Modelo/Descripción:', modelo || '❌');
+  // 2. MODELO/Descripción del vehículo (descripción completa)
+  const modelo = extraerCampoLinea('Descripci[óo]n\\s+del\\s+veh[íi]culo\\*?', textoCompleto);
+  console.log('Descripción:', modelo || '❌');
   
-  // Serie/VIN
-  const numero_serie = extraerDato(/(?:Serie|SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto);
-  console.log('   Serie/VIN:', numero_serie || '❌');
+  // 3. AÑO (campo "Modelo" en Chubb contiene el año)
+  const anio = extraerCampoLinea('Modelo', textoCompleto);
+  console.log('Año:', anio || '❌');
   
-  // Motor y capacidad (en líneas separadas en la carátula)
-  const motor = extraerDato(/(?:MOTOR|Motor)[:\s]*([A-Z0-9]+)/i, textoCompleto);
-  const capacidad = extraerDato(/(?:CAPACIDAD|Capacidad)[:\s]*([0-9]+)/i, textoCompleto);
-  console.log('   Motor:', motor || '❌');
-  console.log('   Capacidad:', capacidad || '❌');
+  // 4. SERIE/VIN
+  const numero_serie = extraerCampoLinea('Serie', textoCompleto);
+  console.log('Serie/VIN:', numero_serie || '❌');
   
-  // Placas (solo misma línea para evitar capturas lejanas tipo "MEXICANAS")
-  const placas = extraerDato(/(?:PLACAS|Placas)[:\s]*([^\r\n]{5,12})/i, textoCompleto)
-    .replace(/[^A-Z0-9\-\s]/gi, '')
-    .trim();
-  console.log('   Placas:', placas || '❌');
+  // 5. CAPACIDAD
+  let capacidad = extraerCampoLinea('Capacidad', textoCompleto);
+  // Validar que sea un número (5, 7, 2, etc.)
+  if (capacidad && !/^\d+$/.test(capacidad.trim())) {
+    // Si no es solo dígitos, está capturando texto equivocado
+    capacidad = '';
+  }
+  console.log('Capacidad:', capacidad || '❌');
   
-  // Color
-  const color = extraerDato(/(?:COLOR|Color)[:\s]*([^\r\n]+)/i, textoCompleto);
-  console.log('   Color:', color || '❌');
+  // 6. MOTOR
+  let motor = extraerCampoLinea('Motor', textoCompleto);
+  // Limpiar si capturó la marca o capacidad por error
+  // Motor debe ser alfanumérico sin espacios múltiples (ej: CLS441152)
+  if (motor) {
+    // Remover palabras que claramente son marcas
+    motor = motor.replace(/VOLKSWAGEN|NISSAN|FORD|CHEVROLET|TOYOTA|HONDA/gi, '').trim();
+    // Remover números sueltos al inicio (capacidad: 5, 7, 2, etc.)
+    motor = motor.replace(/^\s*\d+\s+/, '').trim();
+    // Limpiar espacios múltiples
+    motor = motor.replace(/\s+/g, ' ').trim();
+  }
+  console.log('Motor:', motor || '❌');
+  
+  // 7. PLACAS (puede estar vacío)
+  let placas = extraerCampoLinea('Placas', textoCompleto);
+  // Validar que no sea texto inválido
+  if (placas && (
+    placas.includes('Uso') || 
+    placas.includes('PRIVADO') || 
+    placas.includes('Inspección') || 
+    placas === 'No' ||
+    placas.length < 3
+  )) {
+    placas = '';
+  }
+  console.log('Placas:', placas || '(vacío)');
+  
+  // 8. USO
+  const uso = extraerCampoLinea('Uso', textoCompleto);
+  console.log('Uso:', uso || '❌');
+  
+  // 9. SERVICIO
+  const servicio = extraerCampoLinea('Servicio', textoCompleto);
+  console.log('Servicio:', servicio || '❌');
+  
+  // 10. COLOR (si existe)
+  const color = extraerCampoLinea('Color', textoCompleto);
+  console.log('Color:', color || '❌');
 
+  // ==================== PASO 5: DATOS FINANCIEROS ====================
+  console.log('\n📋 PASO 5: EXTRACCIÓN DE DATOS FINANCIEROS');
+  console.log('─────────────────────────────────────────────────────────');
+  
   // ==================== PAGOS FRACCIONADOS: PRIMER Y SUBSECUENTES ====================
   // Intentar extraer explícitamente si el PDF lo indica
   // Variantes frecuentes: "Primer Pago", "Pago Inicial", "Pagos subsecuentes", "Pago subsecuente", "Mensualidad"
@@ -539,11 +669,8 @@ export async function extraer(ctx) {
   }
   
   // ==================== USO Y SERVICIO ====================
-  const uso = extraerDato(/(?:USO|Uso)[:\s]*([^\r\n]+)/i, textoCompleto);
-  console.log('   Uso:', uso || '❌');
-  
-  const servicio = extraerDato(/(?:SERVICIO|Servicio)[:\s]*([^\r\n]+)/i, textoCompleto);
-  console.log('   Servicio:', servicio || '❌');
+  // Ya extraídos arriba en la sección de vehículo
+  console.log('   ✅ Uso y Servicio ya extraídos en sección de vehículo');
   
   // ==================== COBERTURA Y PLAN ====================
   // Buscar paquete (INTEGRAL, LIMITADA, etc.)
@@ -668,6 +795,21 @@ export async function extraer(ctx) {
     console.log('🔄 Fallback resultados:', { prima_pagada, gastos_expedicion, cargo_pago_fraccionado, iva, total });
   }
   
+  console.log('Prima Neta:', prima_pagada || '0.00');
+  console.log('Otros Descuentos:', otros_descuentos || '0.00');
+  console.log('Cargo Fraccionado:', cargo_pago_fraccionado || '0.00');
+  console.log('Gastos Expedición:', gastos_expedicion || '0.00');
+  console.log('IVA:', iva || '0.00');
+  console.log('TOTAL:', total || '0.00');
+  console.log('Tipo de pago:', tipo_pago);
+  console.log('Frecuencia:', frecuenciaPago);
+  if (primer_pago) console.log('Primer pago:', primer_pago);
+  if (pagos_subsecuentes) console.log('Pagos subsecuentes:', pagos_subsecuentes);
+  
+  // ==================== PASO 6: COBERTURAS ====================
+  console.log('\n📋 PASO 6: EXTRACCIÓN DE COBERTURAS');
+  console.log('─────────────────────────────────────────────────────────');
+  
   // ==================== RESULTADO ====================
   const datosExtraidos = {
     // Asegurado (Página 1)
@@ -733,64 +875,19 @@ export async function extraer(ctx) {
     alertas_extraccion: alertasRFC.length > 0 ? alertasRFC : undefined
   };
   
-  console.log('✅ Extractor Chubb Autos - Completado');
-  console.log('\n📋 ========== RESUMEN DE DATOS EXTRAÍDOS ==========');
-  console.log('📑 Fuente de datos: Página 1 (Aviso de Cobro) + Página 2 (Carátula)');
-  
-  console.log('\n👤 INFORMACIÓN DEL ASEGURADO (Página 1):');
-  console.log('   RFC:', rfcExtraido || '❌');
-  console.log('   Tipo:', tipoPersona);
-  if (tipoPersona === 'Moral') {
-    console.log('   Razón Social:', razonSocial || '❌');
-  } else {
-    console.log('   Nombre:', nombre, apellido_paterno, apellido_materno || '❌');
+  console.log('Total de coberturas extraídas:', coberturas?.length || 0);
+  if (coberturas && coberturas.length > 0) {
+    coberturas.slice(0, 3).forEach((cob, i) => {
+      console.log(`  ${i+1}. ${cob.nombre} - Suma: ${cob.suma_asegurada || 'N/A'}`);
+    });
+    if (coberturas.length > 3) {
+      console.log(`  ... y ${coberturas.length - 3} más`);
+    }
   }
-  console.log('   Domicilio:', domicilio || '❌');
-  console.log('   CP:', codigo_postal || '❌');
-  console.log('   Email:', extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto) || '❌');
   
-  console.log('\n📄 DATOS DE LA PÓLIZA (Página 1):');
-  console.log('   Póliza:', numero_poliza || '❌');
-  console.log('   Endoso:', endoso || '❌');
-  console.log('   Inciso:', inciso || '❌');
-  console.log('   Plan/Paquete:', plan || '❌');
-  console.log('   Agente:', agente || '❌');
-  
-  console.log('\n🗓 VIGENCIA (Página 1):');
-  console.log('   Inicio:', fecha_inicio_vigencia || '❌');
-  console.log('   Término:', fecha_fin_vigencia || '❌');
-  console.log('   Fecha de Emisión:', fecha_emision || '❌');
-  console.log('   Fecha de Captura:', fecha_captura || '❌');
-  
-  console.log('\n🚗 VEHÍCULO ASEGURADO (Página 2):');
-  console.log('   Marca:', marca || '❌');
-  console.log('   Modelo/Clave:', modelo || '❌');
-  console.log('   Año:', anio || '❌');
-  console.log('   Serie:', numero_serie || '❌');
-  console.log('   Placas:', placas || '❌');
-  console.log('   Capacidad:', motor || '❌');
-  console.log('   Uso:', uso || '❌');
-  console.log('   Servicio:', servicio || '❌');
-  
-  console.log('\n💰 INFORMACIÓN FINANCIERA (Página 1 - Aviso de Cobro):');
-  console.log('   Prima Neta: $', prima_pagada || '0.00');
-  console.log('   Otros descuentos: $', datosExtraidos.otros_descuentos || '0.00');
-  console.log('   Financiamiento por pago fraccionado: $', cargo_pago_fraccionado || '0.00');
-  console.log('   Gastos de expedición: $', gastos_expedicion || '0.00');
-  console.log('   IVA: $', iva || '0.00');
-  console.log('   Desglose de pago: $', datosExtraidos.desglose_pago || '0.00');
-  console.log('   Total a pagar: $', total || '0.00');
-  console.log('   ---');
-  console.log('   Fecha Límite de Pago:', fecha_limite_pago || '❌');
-  console.log('   Serie del aviso → Forma de pago:', forma_pago || '❌');
-  console.log('   Tipo:', tipo_pago, '/', frecuenciaPago);
-  
-  console.log('\n🛡 COBERTURA:');
-  console.log('   Tipo:', tipo_cobertura || '❌');
-  console.log('   Suma asegurada:', suma_asegurada || '❌');
-  console.log('   Deducible:', deducible + '%' || '❌');
-  
-  console.log('\n==================================================\n');
+  console.log('\n╔═══════════════════════════════════════════════════════════╗');
+  console.log('║  ✅ EXTRACCIÓN COMPLETADA EXITOSAMENTE                   ║');
+  console.log('╚═══════════════════════════════════════════════════════════╝\n');
   
   return datosExtraidos;
 }

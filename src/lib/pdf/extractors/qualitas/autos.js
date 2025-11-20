@@ -113,8 +113,10 @@ export async function extraer(ctx) {
   
   // ==================== AGENTE ====================
   let agente = '';
-  const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-  const agenteMatch2 = textoQualitas.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
+  // Patrón mejorado: captura código + cualquier texto hasta el final de línea o separador
+  // Acepta letras con acentos, números, espacios, puntos, guiones, comas, ampersand, paréntesis
+  const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ0-9\s.,&()\-]+?)(?=\s*Teléfono|\s*Canal|$)/im);
+  const agenteMatch2 = textoQualitas.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ0-9\s.,&()\-]+?)(?=\s*Teléfono|\s*Canal|$)/im);
   
   if (agenteMatch1) {
     agente = `${agenteMatch1[1]} - ${agenteMatch1[2].trim()}`;

@@ -133,7 +133,9 @@ const utils = {
       pago: {
         'Pagado': 'bg-success',
         'Vencido': 'bg-danger',
-        'Pago por vencer': 'bg-warning',
+        'Por Vencer': 'bg-warning',
+        'Pendiente': 'bg-info',
+        'Cancelado': 'bg-dark',
         'Sin definir': 'bg-secondary'
       },
       tipo_pago: {
@@ -649,6 +651,41 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Estados para captura de RFC
   const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
   const [rfcCapturado, setRfcCapturado] = useState('');
+  
+  // Ref para el input file
+  const fileInputRef = useRef(null);
+  const yaAbriSelectorRef = useRef(false); // Bandera para evitar abrir selector múltiples veces
+  
+  // Abrir selector automáticamente solo la primera vez
+  useEffect(() => {
+    // Si ya abrimos el selector o ya procesamos un archivo, no hacer nada
+    if (yaAbriSelectorRef.current) {
+      return;
+    }
+    
+    // Verificar si ya hay un archivo seleccionado desde el modal anterior
+    if (window._selectedPDFFile) {
+      yaAbriSelectorRef.current = true; // Marcar como procesado
+      const file = window._selectedPDFFile;
+      delete window._selectedPDFFile; // Limpiar
+      // Procesar el archivo directamente
+      setArchivo(file);
+      setInformacionArchivo({
+        nombre: file.name,
+        tamaño: `${(file.size / 1024).toFixed(2)} KB`,
+        tipo: file.type,
+        fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
+      });
+      procesarPDF(file);
+    } else if (estado === 'esperando' && fileInputRef.current) {
+      // Si no hay archivo, abrir el selector (solo una vez)
+      yaAbriSelectorRef.current = true; // Marcar antes de abrir
+      const timer = setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, []); // Solo al montar el componente
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -708,21 +745,17 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         // Buscar página con "AVISO DE COBRO" o "Prima Neta"
         if (textoPagina.match(/AVISO\s+DE\s+COBRO|Prima\s+Neta|PRIMA\s+NETA/i)) {
           textoAvisoDeCobro = textoPagina;
-          console.log(`💰 Página ${numPagina} contiene AVISO DE COBRO`);
-          console.log('📄 Contenido completo de Aviso de Cobro:', textoPagina.substring(0, 1000));
         }
         
         // Buscar página con "CARÁTULA" o datos del vehículo
         if (textoPagina.match(/CARÁTULA|CAR[AÁ]TULA|Descripción\s+del\s+vehículo|DESCRIPCI[ÓO]N\s+DEL\s+VEH[ÍI]CULO/i)) {
           textoPaginaCaratula = textoPagina;
-          console.log(`🚗 Página ${numPagina} contiene CARÁTULA`);
         }
       }
       
       // Si no encontramos aviso de cobro, usar página 2 como fallback
       if (!textoAvisoDeCobro && todasLasPaginas.length >= 2) {
         textoAvisoDeCobro = todasLasPaginas[1].texto;
-        console.log('⚠️ No se encontró "AVISO DE COBRO", usando página 2 como fallback');
       }
       
       // Si no encontramos carátula, usar página 2 como fallback
@@ -821,18 +854,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // Función para extraer datos usando expresiones regulares
-      const extraerDato = (patron, texto, grupo = 1) => {
-        try {
-          const match = texto.match(patron);
-          return match && match[grupo] ? match[grupo].trim() : '';
-        } catch (error) {
-          console.warn('Error en extraerDato:', error, 'Patrón:', patron);
-          return '';
-        }
-      };
-
-       // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
+      // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
       console.log('🎯 Iniciando proceso de extracción modular...');
       
       let datosExtraidos = {};
@@ -1066,11 +1088,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
       });
       procesarPDF(file);
+    } else if (!file) {
+      // Usuario canceló la selección del archivo, cerrar el modal
+      console.log('⚠️ Usuario canceló la selección de archivo');
+      onClose();
     } else {
       setErrores(['❌ Por favor, seleccione un archivo PDF válido']);
       setEstado('error');
     }
-  }, [procesarPDF]);
+  }, [procesarPDF, onClose]);
 
   // PASO 1: Manejar decisión sobre el cliente
   const handleDecisionCliente = useCallback(async (decision) => {
@@ -1364,20 +1390,36 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       
       const codigo = codigoMatch[1];
       const nombreCompleto = nombreCompletoMatch[1].trim();
-      const palabras = nombreCompleto.split(/\s+/);
+      
+      // Detectar si es persona moral (empresa)
+      const palabrasEmpresa = ['ASOCIADOS', 'Y CIA', 'S.A.', 'SA DE CV', 'S DE RL', 'SC', 'AGTE DE SEGU', 'AGENTE DE SEGUROS', 'ASESORES', 'CONSULTORES', 'GRUPO', 'CORPORATIVO'];
+      const esPersonaMoral = palabrasEmpresa.some(palabra => nombreCompleto.toUpperCase().includes(palabra));
       
       let nombre = '', apellidoPaterno = '', apellidoMaterno = '';
-      if (palabras.length >= 4) {
-        nombre = palabras.slice(0, -2).join(' ');
-        apellidoPaterno = palabras[palabras.length - 2];
-        apellidoMaterno = palabras[palabras.length - 1];
-      } else if (palabras.length === 3) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-        apellidoMaterno = palabras[2];
-      } else if (palabras.length === 2) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
+      
+      if (esPersonaMoral) {
+        // Persona Moral: Usar el nombre completo como "nombre" y dejar apellidos vacíos
+        nombre = nombreCompleto;
+        apellidoPaterno = '';
+        apellidoMaterno = '';
+        console.log('🏢 Detectado como Persona Moral:', nombreCompleto);
+      } else {
+        // Persona Física: Dividir en nombre y apellidos
+        const palabras = nombreCompleto.split(/\s+/);
+        
+        if (palabras.length >= 4) {
+          nombre = palabras.slice(0, -2).join(' ');
+          apellidoPaterno = palabras[palabras.length - 2];
+          apellidoMaterno = palabras[palabras.length - 1];
+        } else if (palabras.length === 3) {
+          nombre = palabras[0];
+          apellidoPaterno = palabras[1];
+          apellidoMaterno = palabras[2];
+        } else if (palabras.length === 2) {
+          nombre = palabras[0];
+          apellidoPaterno = palabras[1];
+        }
+        console.log('👤 Detectado como Persona Física:', nombre, apellidoPaterno, apellidoMaterno);
       }
       
       try {
@@ -1398,13 +1440,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         if (resultado.success) {
           setAgenteEncontrado(resultado.data);
           console.log('✅ Agente creado:', resultado.data.nombre);
-          toast.success(`Agente creado: ${nombre} ${apellidoPaterno}`);
+          const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
+          toast.success(`Agente creado: ${nombreMostrar}`);
         } else {
           throw new Error(resultado.error);
         }
       } catch (error) {
         console.error('❌ Error al crear agente:', error);
-  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
+        const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno} ${apellidoMaterno}`;
+  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
         // Continuar sin el agente
       }
     }
@@ -1536,11 +1580,67 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       if (datosConCliente.servicio) datosConCliente.servicio_poliza = datosConCliente.servicio;
       if (datosConCliente.movimiento) datosConCliente.movimiento_poliza = datosConCliente.movimiento;
       
+      // ================== TIPO DE COBERTURA / PLAN ==================
+      // Si viene "plan" del extractor (ej: INTEGRAL de Chubb), usarlo como tipo_cobertura
+      if (datosConCliente.plan && !datosConCliente.tipo_cobertura) {
+        // Normalizar el plan a formato title case para que coincida con el select
+        const planNormalizado = datosConCliente.plan.charAt(0).toUpperCase() + datosConCliente.plan.slice(1).toLowerCase();
+        datosConCliente.tipo_cobertura = planNormalizado;
+        console.log('📋 Tipo de cobertura asignado desde plan:', planNormalizado);
+      } else if (datosConCliente.tipo_cobertura) {
+        // Normalizar tipo_cobertura si ya viene
+        datosConCliente.tipo_cobertura = datosConCliente.tipo_cobertura.charAt(0).toUpperCase() + datosConCliente.tipo_cobertura.slice(1).toLowerCase();
+      }
+      
+      // ================== FECHA LÍMITE DE PAGO ==================
+      // Si el extractor trae fecha_limite_pago (como Chubb), usarla como fecha_vencimiento_pago
+      if (datosConCliente.fecha_limite_pago) {
+        datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
+        datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
+        console.log('📅 Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
+      }
+      
+      // ================== PERÍODO DE GRACIA ==================
+      // Si no viene del PDF, usar valores sugeridos por aseguradora
+      if (!datosConCliente.periodo_gracia) {
+        const aseguradora = (datosConCliente.compania || '').toLowerCase();
+        if (aseguradora.includes('qualitas')) {
+          datosConCliente.periodo_gracia = 14; // Qualitas: 14 días
+        } else if (aseguradora) {
+          datosConCliente.periodo_gracia = 30; // Otras: 30 días
+        }
+        console.log('📆 Período de gracia sugerido:', datosConCliente.periodo_gracia, 'días');
+      }
+      
+      // ================== ESTATUS DE PAGO INICIAL ==================
+      // Calcular el estatus de pago basado en la fecha de vencimiento
+      if (datosConCliente.fecha_vencimiento_pago) {
+        const fechaVencimiento = new Date(datosConCliente.fecha_vencimiento_pago);
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        fechaVencimiento.setHours(0, 0, 0, 0);
+        
+        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+        
+        if (diasRestantes < 0) {
+          datosConCliente.estatusPago = 'Vencido';
+        } else if (diasRestantes <= 15) {
+          datosConCliente.estatusPago = 'Por Vencer';
+        } else {
+          datosConCliente.estatusPago = 'Pendiente';
+        }
+        console.log('💳 Estatus de pago calculado:', datosConCliente.estatusPago, '(días restantes:', diasRestantes, ')');
+      } else {
+        // Si no hay fecha de vencimiento, el pago está pendiente
+        datosConCliente.estatusPago = 'Pendiente';
+        console.log('💳 Estatus de pago por defecto: Pendiente (sin fecha de vencimiento)');
+      }
+      
       console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
       onClose();
     }
-  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose]);
+  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose, archivo, informacionArchivo]);
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -1558,27 +1658,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             ></button>
           </div>
           
+          {/* Input file oculto que se activa automáticamente */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          
           <div className="modal-body">
-            {estado === 'esperando' && (
-              <div className="text-center py-5">
-                <Upload size={48} className="text-muted mb-3" />
-                <h6 className="mb-3">Seleccione el archivo PDF de la póliza</h6>
-                <p className="text-muted mb-4">
-                  Sistema de extracción inteligente optimizado para pólizas mexicanas
-                </p>
-                <label className="btn btn-primary btn-lg">
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleFileUpload}
-                    className="d-none"
-                  />
-                  <Upload className="me-2" size={20} />
-                  Seleccionar Póliza PDF
-                </label>
-              </div>
-            )}
-
             {estado === 'procesando' && (
               <div className="text-center py-5">
                 <div className="spinner-border text-primary mb-3" role="status">
@@ -2220,6 +2309,11 @@ const ListaExpedientes = React.memo(({
   agentes,
   limpiarFormulario,
   setVistaActual,
+  setModoEdicion,
+  mostrarModalMetodoCaptura,
+  setMostrarModalMetodoCaptura,
+  mostrarExtractorPDF,
+  setMostrarExtractorPDF,
   aplicarPago,
   puedeAvanzarEstado,
   avanzarEstado,
@@ -2300,8 +2394,7 @@ const ListaExpedientes = React.memo(({
         <h3 className="mb-0">Gestión de Pólizas</h3>
         <button
           onClick={() => {
-            limpiarFormulario();
-            setVistaActual('formulario');
+            setMostrarModalMetodoCaptura(true);
           }}
           className="btn btn-primary"
         >
@@ -2647,6 +2740,145 @@ const ListaExpedientes = React.memo(({
           </>
         )}
       </div>
+
+      {/* Modal de Selección de Método de Captura */}
+      {mostrarModalMetodoCaptura && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header border-0 pb-0">
+                <h5 className="modal-title w-100 text-center">
+                  📋 Selecciona el Método de Captura
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close"
+                  onClick={() => setMostrarModalMetodoCaptura(false)}
+                ></button>
+              </div>
+              
+              <div className="modal-body pt-2">
+                <p className="text-center text-muted mb-4">
+                  ¿Cómo deseas agregar la nueva póliza?
+                </p>
+
+                {/* Input file oculto para PDF */}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  id="pdfFileInput"
+                  ref={(input) => {
+                    if (input) {
+                      input.onclick = () => {
+                        // Guardar referencia para poder procesar el archivo después
+                        window._pdfInputForExtractor = input;
+                      };
+                    }
+                  }}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                      // Cerrar modal de selección
+                      setMostrarModalMetodoCaptura(false);
+                      // Cambiar a vista formulario
+                      setVistaActual('formulario');
+                      setModoEdicion(false);
+                      limpiarFormulario();
+                      // Guardar archivo temporalmente y abrir el extractor
+                      window._selectedPDFFile = file;
+                      setTimeout(() => {
+                        setMostrarExtractorPDF(true);
+                      }, 100);
+                    }
+                    // NO resetear el input todavía
+                  }}
+                />
+
+                <div className="row g-3">
+                  {/* Opción Captura Manual */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-primary text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        setMostrarModalMetodoCaptura(false);
+                        setVistaActual('formulario');
+                        setModoEdicion(false);
+                        limpiarFormulario();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(13,110,253,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          ✍️
+                        </div>
+                        <h5 className="card-title text-primary mb-2">Captura Manual</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Llena el formulario campo por campo
+                        </p>
+                        <button 
+                          className="btn btn-primary w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarModalMetodoCaptura(false);
+                            setVistaActual('formulario');
+                            setModoEdicion(false);
+                            limpiarFormulario();
+                          }}
+                        >
+                          Captura Manual
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opción Extractor PDF */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-success text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        document.getElementById('pdfFileInput')?.click();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,135,84,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          📄
+                        </div>
+                        <h5 className="card-title text-success mb-2">Extractor PDF</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Importa datos automáticamente desde el PDF
+                        </p>
+                        <button 
+                          className="btn btn-success w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('pdfFileInput')?.click();
+                          }}
+                        >
+                          <Upload size={16} className="me-2" />
+                          Importar PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="alert alert-info mt-4 mb-0">
+                  <small>
+                    <strong>💡 Recomendación:</strong> Usa el extractor PDF para mayor velocidad y precisión. 
+                    La captura manual es útil cuando no tienes el PDF de la póliza.
+                  </small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 });
@@ -2677,9 +2909,11 @@ const Formulario = React.memo(({
   handleSeleccionarPDF,
   archivoSeleccionado,
   subiendoPDF,
-  subirPDFPoliza
+  subirPDFPoliza,
+  mostrarExtractorPDF,
+  setMostrarExtractorPDF
 }) => {
-  const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
+  // Estados movidos al componente padre
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
   const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
@@ -2950,19 +3184,6 @@ const Formulario = React.memo(({
           {modoEdicion ? 'Editar Expediente' : 'Nuevo Expediente'}
         </h3>
         <div className="d-flex gap-2">
-          {!modoEdicion && (
-            <button
-              onClick={() => {
-                console.log('🔵 Abriendo extractor PDF...');
-                setMostrarExtractorPDF(true);
-              }}
-              className="btn btn-outline-primary"
-              title="Extraer datos automáticamente desde una póliza PDF"
-            >
-              <Upload size={16} className="me-2" />
-              Importar PDF
-            </button>
-          )}
           <button
             onClick={() => setVistaActual('lista')}
             className="btn btn-outline-secondary"
@@ -3470,6 +3691,61 @@ const Formulario = React.memo(({
                     ))}
                   </select>
                 </div>
+                <div className="col-md-4">
+                  <label className="form-label">Número de Motor</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.motor || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, motor: e.target.value.toUpperCase() }))}
+                    placeholder="Número de motor"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Uso</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.uso || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      uso: e.target.value, 
+                      uso_poliza: e.target.value 
+                    }))}
+                    placeholder="Ej: PARTICULAR"
+                  />
+                  <small className="form-text text-muted">Uso del vehículo según póliza</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Servicio</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.servicio || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      servicio: e.target.value,
+                      servicio_poliza: e.target.value
+                    }))}
+                    placeholder="Ej: PRIVADO"
+                  />
+                  <small className="form-text text-muted">Servicio del vehículo</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Movimiento</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.movimiento || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      movimiento: e.target.value,
+                      movimiento_poliza: e.target.value
+                    }))}
+                    placeholder="Ej: NACIONAL"
+                  />
+                  <small className="form-text text-muted">Movimiento permitido</small>
+                </div>
               </div>
             </div>
           )}
@@ -3529,52 +3805,6 @@ const Formulario = React.memo(({
                       step="0.01"
                     />
                   </div>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Uso</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.uso || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      uso: e.target.value, 
-                      // Mantener alias para backend si lo utiliza
-                      uso_poliza: e.target.value 
-                    }))}
-                    placeholder="Ej: PARTICULAR"
-                  />
-                  <small className="form-text text-muted">Uso del vehículo según póliza</small>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Servicio</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.servicio || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      servicio: e.target.value,
-                      servicio_poliza: e.target.value
-                    }))}
-                    placeholder="Ej: PRIVADO"
-                  />
-                  <small className="form-text text-muted">Servicio del vehículo</small>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Movimiento</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.movimiento || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      movimiento: e.target.value,
-                      movimiento_poliza: e.target.value
-                    }))}
-                    placeholder="Ej: NACIONAL"
-                  />
-                  <small className="form-text text-muted">Movimiento permitido</small>
                 </div>
               </div>
             </div>
@@ -3762,7 +3992,7 @@ const Formulario = React.memo(({
           <div className="mb-4">
             <h5 className="card-title border-bottom pb-2">Fechas y Vigencia</h5>
             <div className="row g-3">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Fecha de Emisión</label>
                 <input
                   type="date"
@@ -3774,7 +4004,19 @@ const Formulario = React.memo(({
                   Fecha en que se emitió la póliza
                 </small>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label">Fecha de Captura</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={formulario.fecha_captura || new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, fecha_captura: e.target.value }))}
+                />
+                <small className="form-text text-muted">
+                  Fecha de registro en el sistema
+                </small>
+              </div>
+              <div className="col-md-3">
                 <label className="form-label">Inicio de Vigencia</label>
                 <input
                   type="date"
@@ -3787,7 +4029,7 @@ const Formulario = React.memo(({
                   }}
                 />
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <CampoFechaCalculada
                   label="Término de Vigencia"
                   value={formulario.termino_vigencia}
@@ -3873,10 +4115,44 @@ const Formulario = React.memo(({
                     value={formulario.periodo_gracia ?? ''}
                     onChange={(e) => {
                       const valor = e.target.value;
-                      const numero = valor === '' ? '' : Math.max(0, parseInt(valor, 10) || 0);
-                      const nuevoFormulario = { ...formulario, periodo_gracia: numero };
-                      const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
-                      setFormulario(formularioActualizado);
+                      const diasGracia = valor === '' ? 0 : Math.max(0, parseInt(valor, 10) || 0);
+                      
+                      setFormulario(prev => {
+                        // Si tiene inicio_vigencia, recalcular fecha_pago
+                        let nuevaFechaPago = prev.fecha_vencimiento_pago || prev.fecha_pago;
+                        
+                        if (prev.inicio_vigencia) {
+                          const fechaInicio = new Date(prev.inicio_vigencia);
+                          fechaInicio.setDate(fechaInicio.getDate() + diasGracia);
+                          nuevaFechaPago = fechaInicio.toISOString().split('T')[0];
+                        }
+                        
+                        // Calcular estatus de pago inline
+                        let nuevoEstatus = prev.estatusPago;
+                        if (nuevoEstatus !== 'Pagado' && nuevaFechaPago) {
+                          const fechaPago = new Date(nuevaFechaPago);
+                          const hoy = new Date();
+                          hoy.setHours(0, 0, 0, 0);
+                          fechaPago.setHours(0, 0, 0, 0);
+                          const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
+                          
+                          if (diasRestantes < 0) {
+                            nuevoEstatus = 'Vencido';
+                          } else if (diasRestantes <= 15) {
+                            nuevoEstatus = 'Por Vencer';
+                          } else {
+                            nuevoEstatus = 'Pendiente';
+                          }
+                        }
+                        
+                        return {
+                          ...prev,
+                          periodo_gracia: diasGracia,
+                          fecha_vencimiento_pago: nuevaFechaPago,
+                          fecha_pago: nuevaFechaPago,
+                          estatusPago: nuevoEstatus
+                        };
+                      });
                     }}
                     min={0}
                   />
@@ -3889,7 +4165,7 @@ const Formulario = React.memo(({
                     ? 'Sugerido Qualitas: 14 días' 
                     : formulario.compania 
                       ? 'Sugerido otras aseguradoras: 30 días'
-                      : 'Seleccione una compañía'}
+                      : 'Editable para pruebas'}
                 </small>
               </div>
               
@@ -3901,17 +4177,53 @@ const Formulario = React.memo(({
                   value={formulario.fecha_vencimiento_pago || ''}
                   onChange={(e) => {
                     const nuevaFecha = e.target.value;
+                    
                     setFormulario(prev => {
-                      const nuevoEstatus = calcularEstatusPago(nuevaFecha, prev.estatusPago);
+                      // Calcular periodo de gracia basado en la diferencia con inicio_vigencia
+                      let nuevoPeriodoGracia = prev.periodo_gracia || 0;
+                      
+                      if (prev.inicio_vigencia && nuevaFecha) {
+                        const fechaInicio = new Date(prev.inicio_vigencia);
+                        const fechaPago = new Date(nuevaFecha);
+                        fechaInicio.setHours(0, 0, 0, 0);
+                        fechaPago.setHours(0, 0, 0, 0);
+                        
+                        const diferenciaDias = Math.ceil((fechaPago - fechaInicio) / (1000 * 60 * 60 * 24));
+                        nuevoPeriodoGracia = Math.max(0, diferenciaDias);
+                      }
+                      
+                      // Calcular estatus de pago inline
+                      let nuevoEstatus = prev.estatusPago;
+                      if (nuevoEstatus !== 'Pagado' && nuevaFecha) {
+                        const fechaPago = new Date(nuevaFecha);
+                        const hoy = new Date();
+                        hoy.setHours(0, 0, 0, 0);
+                        fechaPago.setHours(0, 0, 0, 0);
+                        const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
+                        
+                        if (diasRestantes < 0) {
+                          nuevoEstatus = 'Vencido';
+                        } else if (diasRestantes <= 15) {
+                          nuevoEstatus = 'Por Vencer';
+                        } else {
+                          nuevoEstatus = 'Pendiente';
+                        }
+                      }
+                      
                       return {
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
                         fecha_pago: nuevaFecha,
-                        estatusPago: nuevoEstatus
+                        periodo_gracia: nuevoPeriodoGracia,
+                        estatusPago: nuevoEstatus,
+                        _fechaManual: true // Bandera para evitar recálculo automático
                       };
                     });
                   }}
                 />
+                <small className="text-muted">
+                  Editable - Recalcula periodo de gracia
+                </small>
               </div>
               
               <div className="col-md-6">
@@ -4334,37 +4646,46 @@ const ModuloExpedientes = () => {
         setClientes(clientesData);
         setClientesMap(mapa);
         
-        // 4. Calcular estatusPago en los expedientes basándose en la fecha de vencimiento
+        // 4. Normalizar estatusPago respetando el valor de la BD
         const expedientesProcesados = expedientesData.map(exp => {
-          let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
+          // ✅ RESPETAR EL ESTATUS QUE VIENE DE LA BASE DE DATOS
+          let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
           
           // Normalizar para comparación (case-insensitive)
           const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
           
-          // Si el estatus es 'Pagado' (cualquier variación), mantenerlo
+          // Normalizar variaciones a formato estándar
           if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-            console.log('✅ Póliza pagada encontrada:', exp.numero_poliza, '- Manteniendo estatus:', estatusPagoCalculado);
-            return {
-              ...exp,
-              estatusPago: 'Pagado'  // Normalizar a "Pagado" con mayúscula
-            };
-          }
-          
-          // Para cualquier otro estatus, recalcular basándose en la fecha
-          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-          if (fechaVencimiento) {
-            const fechaVenc = new Date(fechaVencimiento);
-            const hoy = new Date();
-            hoy.setHours(0, 0, 0, 0);
-            fechaVenc.setHours(0, 0, 0, 0);
-            
-            if (fechaVenc < hoy) {
-              estatusPagoCalculado = 'Vencido';
+            estatusPagoCalculado = 'Pagado';
+          } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+            estatusPagoCalculado = 'Cancelado';
+          } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+            estatusPagoCalculado = 'Vencido';
+          } else if (estatusNormalizado === 'por vencer') {
+            estatusPagoCalculado = 'Por Vencer';
+          } else if (estatusNormalizado === 'pendiente') {
+            estatusPagoCalculado = 'Pendiente';
+          } else if (estatusPagoCalculado) {
+            // Si tiene algún valor que no reconocemos, mantenerlo y solo normalizar capitalización
+            estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
+            console.log(`⚠️ Estatus no reconocido pero preservado: "${estatusPagoCalculado}" en póliza ${exp.numero_poliza}`);
+          } else {
+            // Solo si NO viene ningún estatus, calcular basándose en la fecha
+            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+            if (fechaVencimiento) {
+              const fechaVenc = new Date(fechaVencimiento);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              if (fechaVenc < hoy) {
+                estatusPagoCalculado = 'Vencido';
+              } else {
+                estatusPagoCalculado = 'Pendiente';
+              }
             } else {
               estatusPagoCalculado = 'Pendiente';
             }
-          } else {
-            estatusPagoCalculado = 'Pendiente';
           }
           
           return {
@@ -4415,6 +4736,8 @@ const ModuloExpedientes = () => {
   const [mostrarModalCancelacion, setMostrarModalCancelacion] = useState(false);
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
   const [expedienteACancelar, setExpedienteACancelar] = useState(null);
+  const [mostrarModalMetodoCaptura, setMostrarModalMetodoCaptura] = useState(false);
+  const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   
     // Estados para manejo de PDFs
     const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
@@ -4541,7 +4864,7 @@ const ModuloExpedientes = () => {
   const tiposPago = useMemo(() => ['Anual', 'Fraccionado'], []);
   const frecuenciasPago = useMemo(() => Object.keys(CONSTANTS.PAGOS_POR_FRECUENCIA).sort(), []);
   const periodosGracia = useMemo(() => [14, 30], []);
-  const estatusPago = useMemo(() => ['Pendiente', 'Por Vencer', 'Vencido', 'Pagado'], []);
+  const estatusPago = useMemo(() => ['Pendiente', 'Por Vencer', 'Vencido', 'Pagado', 'Cancelado'], []);
   const motivosCancelacion = useMemo(() => [
     'Cliente desistió',
     'Documentación incompleta',
@@ -4552,7 +4875,7 @@ const ModuloExpedientes = () => {
   ], []);
 
   const tiposVehiculo = useMemo(() => ['Deportivo', 'Hatchback', 'Pickup', 'Sedán', 'SUV', 'Vagoneta', 'Otro'].sort(), []);
-  const tiposCobertura = useMemo(() => ['Amplia', 'Limitada', 'RC (Responsabilidad Civil)'].sort(), []);
+  const tiposCobertura = useMemo(() => ['Amplia', 'Limitada', 'RC (Responsabilidad Civil)', 'Integral'].sort(), []);
   const marcasVehiculo = useMemo(() => [
     'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
     'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
@@ -4824,6 +5147,18 @@ const estadoInicialFormulario = {
     
     console.log('🔧 actualizarCalculosAutomaticos - Periodo de gracia:', periodoGracia, '| Del formulario:', formularioActual.periodo_gracia, '| Tipo:', typeof formularioActual.periodo_gracia);
     
+    // ⚠️ Si la fecha fue editada manualmente, NO recalcular
+    if (formularioActual._fechaManual) {
+      console.log('⏭️ Saltando recálculo automático - Fecha editada manualmente');
+      const resultado = {
+        ...formularioActual,
+        termino_vigencia,
+        periodo_gracia: periodoGracia
+      };
+      delete resultado._fechaManual; // Limpiar bandera temporal
+      return resultado;
+    }
+    
     // Calcular proximoPago según el tipo de pago
     let proximoPago = '';
     
@@ -4904,6 +5239,14 @@ const estadoInicialFormulario = {
         fecha_actualizacion: new Date().toISOString().split('T')[0]
       };
       
+      // ✅ IMPORTANTE: Si se cancela la póliza, asignar fecha_cancelacion Y cambiar estatus de pago
+      if (nuevoEstado === 'Cancelada') {
+        datosActualizacion.fecha_cancelacion = new Date().toISOString().split('T')[0];
+        datosActualizacion.estatus_pago = 'Cancelado';
+        console.log('📅 Asignando fecha_cancelacion:', datosActualizacion.fecha_cancelacion);
+        console.log('💳 Cambiando estatus_pago a: Cancelado');
+      }
+      
       if (motivo) {
         datosActualizacion.motivoCancelacion = motivo;
       }
@@ -4940,11 +5283,20 @@ const estadoInicialFormulario = {
       }
 
       // Actualizar localmente
-      setExpedientes(prev => prev.map(exp => 
-        exp.id === expedienteId 
-          ? { ...exp, ...datosActualizacion }
-          : exp
-      ));
+      setExpedientes(prev => prev.map(exp => {
+        if (exp.id === expedienteId) {
+          // Combinar los datos actualizados y normalizar nombres de campos
+          const expedienteActualizado = { ...exp, ...datosActualizacion };
+          
+          // Si se actualizó estatus_pago, también actualizar estatusPago para el frontend
+          if (datosActualizacion.estatus_pago) {
+            expedienteActualizado.estatusPago = datosActualizacion.estatus_pago;
+          }
+          
+          return expedienteActualizado;
+        }
+        return exp;
+      }));
     } catch (error) {
       console.error('❌ Error al cambiar etapa:', error);
   toast.error('Error al actualizar: ' + error.message);
@@ -5994,6 +6346,7 @@ const estadoInicialFormulario = {
       // Forzar estos campos específicos sin conversión compleja
       cargo_pago_fraccionado: formularioConCalculos.cargo_pago_fraccionado || '',
       gastos_expedicion: formularioConCalculos.gastos_expedicion || '',
+      estatus_pago: formularioConCalculos.estatusPago || 'Pendiente', // ✅ FORZAR estatus_pago
     };
     
     // Solo hacer conversión básica de campos que no sean problemáticos
@@ -6017,6 +6370,10 @@ const estadoInicialFormulario = {
         resultado.termino_vigencia = resultado.terminoVigencia;
         delete resultado.terminoVigencia;
       }
+      if (resultado.estatusPago) {
+        resultado.estatus_pago = resultado.estatusPago;
+        delete resultado.estatusPago;
+      }
       
       return resultado;
     };
@@ -6026,9 +6383,11 @@ const estadoInicialFormulario = {
     // ✅ GARANTIZAR que estos campos problemáticos estén presentes
     expedientePayload.cargo_pago_fraccionado = formularioConCalculos.cargo_pago_fraccionado || '';
     expedientePayload.gastos_expedicion = formularioConCalculos.gastos_expedicion || '';
+    expedientePayload.estatus_pago = formularioConCalculos.estatusPago || 'Pendiente'; // ✅ GARANTIZAR estatus_pago
     
     console.log('🚨 [PAYLOAD SIMPLE] cargo_pago_fraccionado FORZADO:', expedientePayload.cargo_pago_fraccionado);
     console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
+    console.log('🚨 [PAYLOAD SIMPLE] estatus_pago FORZADO:', expedientePayload.estatus_pago);
     
     // Limpiar campos innecesarios
     delete expedientePayload.__pdf_file;
@@ -6138,6 +6497,26 @@ const estadoInicialFormulario = {
             const expedienteId = formularioConCalculos.id;
             const expedienteAnterior = expedientes.find(exp => exp.id === expedienteId);
             
+            // Detectar cambios en campos críticos
+            const cambiosCriticos = [];
+            
+            if (expedienteAnterior) {
+              // Verificar cambio de periodo de gracia
+              if (expedienteAnterior.periodo_gracia !== formularioConCalculos.periodo_gracia) {
+                cambiosCriticos.push(`Periodo de gracia: ${expedienteAnterior.periodo_gracia || 0} → ${formularioConCalculos.periodo_gracia || 0} días`);
+              }
+              
+              // Verificar cambio de fecha de pago
+              if (expedienteAnterior.fecha_vencimiento_pago !== formularioConCalculos.fecha_vencimiento_pago) {
+                cambiosCriticos.push(`Fecha de pago: ${expedienteAnterior.fecha_vencimiento_pago || 'sin fecha'} → ${formularioConCalculos.fecha_vencimiento_pago || 'sin fecha'}`);
+              }
+              
+              // Verificar cambio de estatus de pago
+              if (expedienteAnterior.estatusPago !== formularioConCalculos.estatusPago) {
+                cambiosCriticos.push(`Estatus de pago: ${expedienteAnterior.estatusPago || 'sin estatus'} → ${formularioConCalculos.estatusPago || 'sin estatus'}`);
+              }
+            }
+            
             // Verificar si hubo cambio de etapa para registrar evento específico
             if (expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa) {
               await historialService.registrarCambioEtapa(
@@ -6148,8 +6527,24 @@ const estadoInicialFormulario = {
                 'Sistema', // TODO: usuario actual
                 'Cambio manual desde formulario de edición'
               );
-            } else {
-              // Si NO hubo cambio de etapa, registrar actualización genérica
+            }
+            
+            // Registrar cambios críticos en historial
+            if (cambiosCriticos.length > 0) {
+              await historialService.registrarEvento({
+                expediente_id: expedienteId,
+                cliente_id: formularioConCalculos.cliente_id,
+                tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
+                usuario_nombre: 'Sistema', // TODO: usuario actual
+                descripcion: `Campos de pago editados manualmente:\n${cambiosCriticos.join('\n')}`,
+                datos_adicionales: {
+                  numero_poliza: formularioConCalculos.numero_poliza,
+                  campos_modificados: cambiosCriticos,
+                  tipo_modificacion: 'manual'
+                }
+              });
+            } else if (!expedienteAnterior || expedienteAnterior.etapa_activa === formularioConCalculos.etapa_activa) {
+              // Si NO hubo cambio de etapa ni cambios críticos, registrar actualización genérica
               await historialService.registrarEvento({
                 expediente_id: expedienteId,
                 cliente_id: formularioConCalculos.cliente_id,
@@ -6158,7 +6553,7 @@ const estadoInicialFormulario = {
                 descripcion: `Expediente actualizado: ${formularioConCalculos.compania} - ${formularioConCalculos.producto}`,
                 datos_adicionales: {
                   numero_poliza: formularioConCalculos.numero_poliza,
-                  campos_modificados: true // marcador simple; idealmente diferencias
+                  campos_modificados: true
                 }
               });
             }
@@ -6312,6 +6707,40 @@ const estadoInicialFormulario = {
             exp.coberturas = null;
           }
         }
+        
+        // ✅ NORMALIZAR ESTATUS DE PAGO (igual que en cargarDatos)
+        let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
+        const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
+        
+        if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
+          estatusPagoCalculado = 'Pagado';
+        } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+          estatusPagoCalculado = 'Cancelado';
+        } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+          estatusPagoCalculado = 'Vencido';
+        } else if (estatusNormalizado === 'por vencer') {
+          estatusPagoCalculado = 'Por Vencer';
+        } else if (estatusNormalizado === 'pendiente') {
+          estatusPagoCalculado = 'Pendiente';
+        } else if (estatusPagoCalculado) {
+          // Preservar valores no reconocidos
+          estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
+        } else {
+          // Solo calcular si viene vacío
+          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+          if (fechaVencimiento) {
+            const fechaVenc = new Date(fechaVencimiento);
+            const hoy = new Date();
+            hoy.setHours(0, 0, 0, 0);
+            fechaVenc.setHours(0, 0, 0, 0);
+            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
+          } else {
+            estatusPagoCalculado = 'Pendiente';
+          }
+        }
+        
+        exp.estatusPago = estatusPagoCalculado;
+        
         // Normalizar alias para que edición y detalle los tengan listos
         exp.uso = exp.uso || exp.uso_poliza || exp.Uso || exp.usoVehiculo || '';
         exp.servicio = exp.servicio || exp.servicio_poliza || exp.Servicio || exp.servicioVehiculo || '';
@@ -6647,6 +7076,11 @@ const eliminarExpediente = useCallback((id) => {
             agentes={agentes}
             limpiarFormulario={limpiarFormulario}
             setVistaActual={setVistaActual}
+            setModoEdicion={setModoEdicion}
+            mostrarModalMetodoCaptura={mostrarModalMetodoCaptura}
+            setMostrarModalMetodoCaptura={setMostrarModalMetodoCaptura}
+            mostrarExtractorPDF={mostrarExtractorPDF}
+            setMostrarExtractorPDF={setMostrarExtractorPDF}
             aplicarPago={aplicarPago}
             puedeAvanzarEstado={puedeAvanzarEstado}
             avanzarEstado={avanzarEstado}
@@ -6690,6 +7124,8 @@ const eliminarExpediente = useCallback((id) => {
             archivoSeleccionado={archivoSeleccionado}
             subiendoPDF={subiendoPDF}
             subirPDFPoliza={subirPDFPoliza}
+            mostrarExtractorPDF={mostrarExtractorPDF}
+            setMostrarExtractorPDF={setMostrarExtractorPDF}
           />
         )}
         
