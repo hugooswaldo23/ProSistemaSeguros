@@ -13,10 +13,12 @@ import { API_URL } from '../constants/apiUrl';
  */
 export const TIPOS_EVENTO = {
   // Captura y creación
+  CAPTURA_MANUAL: 'captura_manual',
   CAPTURA_EXTRACTOR_PDF: 'captura_extractor_pdf',
-  COTIZACION_CREADA: 'cotizacion_creada',
   
   // Ciclo de cotización
+  COTIZACION_SOLICITADA: 'cotizacion_solicitada',
+  COTIZACION_CREADA: 'cotizacion_creada',
   COTIZACION_ENVIADA: 'cotizacion_enviada',
   COTIZACION_AUTORIZADA: 'cotizacion_autorizada',
   COTIZACION_RECHAZADA: 'cotizacion_rechazada',
@@ -36,6 +38,11 @@ export const TIPOS_EVENTO = {
   RENOVACION_INICIADA: 'renovacion_iniciada',
   POLIZA_RENOVADA: 'poliza_renovada',
   RECORDATORIO_RENOVACION_ENVIADO: 'recordatorio_renovacion_enviado',
+  
+  // Vigencia y vencimientos
+  POLIZA_EN_VIGENCIA: 'poliza_en_vigencia',
+  POLIZA_PROXIMA_VENCER: 'poliza_proxima_vencer',
+  POLIZA_VENCIDA: 'poliza_vencida',
   
   // Cancelaciones
   POLIZA_CANCELADA: 'poliza_cancelada',
@@ -60,7 +67,10 @@ export const TIPOS_EVENTO = {
  */
 export const obtenerEstiloEvento = (tipoEvento) => {
   const estilos = {
+    [TIPOS_EVENTO.CAPTURA_MANUAL]: { icon: '✍️', color: '#6c757d', bgColor: '#e2e3e5' },
     [TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF]: { icon: '📄', color: '#6f42c1', bgColor: '#e7d9f7' },
+    
+    [TIPOS_EVENTO.COTIZACION_SOLICITADA]: { icon: '📞', color: '#6c757d', bgColor: '#e2e3e5' },
     [TIPOS_EVENTO.COTIZACION_CREADA]: { icon: '📝', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.COTIZACION_ENVIADA]: { icon: '📧', color: '#ffc107', bgColor: '#fff3cd' },
     [TIPOS_EVENTO.COTIZACION_AUTORIZADA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
@@ -78,6 +88,10 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.RENOVACION_INICIADA]: { icon: '🔄', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.POLIZA_RENOVADA]: { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    
+    [TIPOS_EVENTO.POLIZA_EN_VIGENCIA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
+    [TIPOS_EVENTO.POLIZA_PROXIMA_VENCER]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.POLIZA_VENCIDA]: { icon: '❌', color: '#dc3545', bgColor: '#f8d7da' },
     
     [TIPOS_EVENTO.POLIZA_CANCELADA]: { icon: '🚫', color: '#dc3545', bgColor: '#f8d7da' },
     [TIPOS_EVENTO.SOLICITUD_CANCELACION]: { icon: '⚠️', color: '#ffc107', bgColor: '#fff3cd' },
@@ -101,7 +115,10 @@ export const obtenerEstiloEvento = (tipoEvento) => {
  */
 export const obtenerTituloEvento = (tipoEvento) => {
   const titulos = {
+    [TIPOS_EVENTO.CAPTURA_MANUAL]: 'Captura Manual',
     [TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF]: 'Captura con Extractor PDF',
+    
+    [TIPOS_EVENTO.COTIZACION_SOLICITADA]: 'Cotización Solicitada',
     [TIPOS_EVENTO.COTIZACION_CREADA]: 'Cotización Creada',
     [TIPOS_EVENTO.COTIZACION_ENVIADA]: 'Cotización Enviada al Cliente',
     [TIPOS_EVENTO.COTIZACION_AUTORIZADA]: 'Cotización Autorizada',
@@ -119,6 +136,10 @@ export const obtenerTituloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.RENOVACION_INICIADA]: 'Proceso de Renovación Iniciado',
     [TIPOS_EVENTO.POLIZA_RENOVADA]: 'Póliza Renovada',
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: 'Recordatorio de Renovación Enviado',
+    
+    [TIPOS_EVENTO.POLIZA_EN_VIGENCIA]: 'Póliza en Vigencia',
+    [TIPOS_EVENTO.POLIZA_PROXIMA_VENCER]: 'Póliza Próxima a Vencer',
+    [TIPOS_EVENTO.POLIZA_VENCIDA]: 'Póliza Vencida',
     
     [TIPOS_EVENTO.POLIZA_CANCELADA]: 'Póliza Cancelada',
     [TIPOS_EVENTO.SOLICITUD_CANCELACION]: 'Solicitud de Cancelación',
@@ -278,41 +299,49 @@ export const obtenerEventosPorTipo = async (expedienteId, tipoEvento) => {
  * 7. Renovada → POLIZA_RENOVADA
  * 8. Cancelada → POLIZA_CANCELADA
  */
-export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterior, etapaNueva, usuarioNombre, descripcionAdicional = '') => {
-  let tipoEvento = TIPOS_EVENTO.DATOS_ACTUALIZADOS;
+export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterior, etapaNueva, usuarioNombre, descripcionAdicional = '', tipoEventoPersonalizado = null) => {
+  let tipoEvento = tipoEventoPersonalizado || TIPOS_EVENTO.DATOS_ACTUALIZADOS;
   let descripcion = `Cambio de etapa: ${etapaAnterior} → ${etapaNueva}`;
   
-  // Mapear etapa a tipo de evento específico
-  if (etapaNueva === 'En cotización') {
-    tipoEvento = TIPOS_EVENTO.COTIZACION_CREADA;
-    descripcion = 'Cotización creada y en proceso';
-  } else if (etapaNueva === 'Cotización enviada') {
-    tipoEvento = TIPOS_EVENTO.COTIZACION_ENVIADA;
-    descripcion = 'Cotización enviada al cliente';
-  } else if (etapaNueva === 'Autorizado') {
-    tipoEvento = TIPOS_EVENTO.COTIZACION_AUTORIZADA;
-    descripcion = 'Cotización autorizada por el cliente';
-  } else if (etapaNueva === 'En proceso emisión') {
-    tipoEvento = TIPOS_EVENTO.EMISION_INICIADA;
-    descripcion = 'Proceso de emisión de póliza iniciado';
-  } else if (etapaNueva === 'Emitida') {
-    tipoEvento = TIPOS_EVENTO.POLIZA_EMITIDA;
-    descripcion = 'Póliza emitida exitosamente';
-  } else if (etapaNueva === 'Enviada al Cliente') {
-    // Nota: Este cambio normalmente se registra con registrarEnvioDocumento,
-    // pero si se cambia manualmente la etapa, lo registramos aquí
-    tipoEvento = TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL; // Por defecto email
-    descripcion = 'Póliza marcada como enviada al cliente';
-  } else if (etapaNueva === 'Renovada') {
-    tipoEvento = TIPOS_EVENTO.POLIZA_RENOVADA;
-    descripcion = 'Póliza renovada exitosamente';
-  } else if (etapaNueva === 'Cancelada' || etapaNueva === 'Cancelado') {
-    tipoEvento = TIPOS_EVENTO.POLIZA_CANCELADA;
-    descripcion = 'Póliza cancelada';
+  // Si no se especificó tipo de evento personalizado, mapear etapa a tipo de evento específico
+  if (!tipoEventoPersonalizado) {
+    if (etapaNueva === 'En cotización') {
+      tipoEvento = TIPOS_EVENTO.COTIZACION_CREADA;
+      descripcion = 'Cotización creada y en proceso';
+    } else if (etapaNueva === 'Cotización enviada') {
+      tipoEvento = TIPOS_EVENTO.COTIZACION_ENVIADA;
+      descripcion = 'Cotización enviada al cliente';
+    } else if (etapaNueva === 'Autorizado') {
+      tipoEvento = TIPOS_EVENTO.COTIZACION_AUTORIZADA;
+      descripcion = 'Cotización autorizada por el cliente';
+    } else if (etapaNueva === 'En proceso emisión') {
+      tipoEvento = TIPOS_EVENTO.EMISION_INICIADA;
+      descripcion = 'Proceso de emisión de póliza iniciado';
+    } else if (etapaNueva === 'Emitida') {
+      tipoEvento = TIPOS_EVENTO.POLIZA_EMITIDA;
+      descripcion = 'Póliza emitida exitosamente';
+    } else if (etapaNueva === 'Enviada al Cliente') {
+      // Nota: Este cambio normalmente se registra con registrarEnvioDocumento,
+      // pero si se cambia manualmente la etapa, lo registramos aquí
+      tipoEvento = TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL; // Por defecto email
+      descripcion = 'Póliza marcada como enviada al cliente';
+    } else if (etapaNueva === 'En Vigencia') {
+      tipoEvento = TIPOS_EVENTO.POLIZA_EN_VIGENCIA;
+      descripcion = 'Póliza en vigencia activa';
+    } else if (etapaNueva === 'Vencida') {
+      tipoEvento = TIPOS_EVENTO.POLIZA_VENCIDA;
+      descripcion = 'Póliza vencida';
+    } else if (etapaNueva === 'Renovada') {
+      tipoEvento = TIPOS_EVENTO.POLIZA_RENOVADA;
+      descripcion = 'Póliza renovada exitosamente';
+    } else if (etapaNueva === 'Cancelada' || etapaNueva === 'Cancelado') {
+      tipoEvento = TIPOS_EVENTO.POLIZA_CANCELADA;
+      descripcion = 'Póliza cancelada';
+    }
   }
   
   if (descripcionAdicional) {
-    descripcion += `. ${descripcionAdicional}`;
+    descripcion = descripcionAdicional; // Usar la descripción personalizada completa
   }
   
   const usuario = obtenerUsuarioActual();

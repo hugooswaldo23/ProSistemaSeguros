@@ -188,7 +188,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     : historial.filter(evento => {
         const tipo = evento.tipo_evento || '';
         if (filtroTipo === 'Emisión') {
-          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion') || tipo.includes('captura_extractor_pdf');
+          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion') || tipo.includes('captura_extractor_pdf') || tipo.includes('captura_manual') || tipo.includes('emision_iniciada');
         }
         if (filtroTipo === 'Pagos') {
           return tipo.includes('pago');

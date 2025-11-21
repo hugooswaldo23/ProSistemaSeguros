@@ -128,7 +128,9 @@ const utils = {
         'Autorizado': 'bg-primary',
         'Cotización enviada': 'bg-warning',
         'En proceso emisión': 'bg-info',
-        'Pendiente de pago': 'bg-warning'
+        'Pendiente de pago': 'bg-warning',
+        'En Vigencia': 'bg-success',
+        'Vencida': 'bg-danger'
       },
       pago: {
         'Pagado': 'bg-success',
@@ -4894,7 +4896,9 @@ const ModuloExpedientes = () => {
     'En proceso emisión',
     'Emitida',
     'Enviada al Cliente',
+    'En Vigencia',
     'Renovada',
+    'Vencida',
     'Cancelada'
   ], []);
 
@@ -5306,16 +5310,46 @@ const estadoInicialFormulario = {
 
       // ✨ NUEVO: Registrar cambio de etapa en historial de trazabilidad
       try {
-        let descripcion = motivo ? `Cambio de etapa. Motivo: ${motivo}` : undefined;
+        // Determinar el tipo de evento según el cambio de etapa
+        let tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS; // Default
+        let descripcion = motivo ? `Motivo: ${motivo}` : undefined;
+        
+        // Mapear etapas a eventos específicos
+        // TODO: Cuando implementemos módulo de cotizaciones, agregar aquí:
+        // - Botón "Enviar cotización" → cambia a 'Cotización enviada' + COTIZACION_ENVIADA
+        // - Botón "Autorizar" → cambia a 'Autorizado' + COTIZACION_AUTORIZADA
+        // - Botón "Iniciar emisión" → cambia a 'En proceso emisión' + EMISION_INICIADA
+        
+        if (nuevoEstado === 'Cotización enviada' && etapaAnterior === 'En cotización') {
+          tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_ENVIADA;
+          descripcion = 'Cotización enviada al cliente para revisión';
+        } else if (nuevoEstado === 'Autorizado' && etapaAnterior === 'Cotización enviada') {
+          tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_AUTORIZADA;
+          descripcion = 'Cotización autorizada por el cliente';
+        } else if (nuevoEstado === 'En proceso emisión') {
+          tipoEvento = historialService.TIPOS_EVENTO.EMISION_INICIADA;
+          descripcion = 'Proceso de emisión de póliza iniciado';
+        } else if (nuevoEstado === 'Emitida' && etapaAnterior !== 'Enviada al Cliente') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
+          descripcion = 'Póliza emitida correctamente';
+        } else if (nuevoEstado === 'Cancelada') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
+          descripcion = motivo ? `Póliza cancelada. Motivo: ${motivo}` : 'Póliza cancelada';
+        } else if (nuevoEstado === 'Renovada') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_RENOVADA;
+          descripcion = 'Póliza renovada exitosamente';
+        }
+        
         await historialService.registrarCambioEtapa(
           expedienteId,
           expedienteActual?.cliente_id,
           etapaAnterior,
           nuevoEstado,
           'Sistema', // TODO: Obtener nombre del usuario actual
-          descripcion
+          descripcion,
+          tipoEvento
         );
-        console.log('✅ Cambio de etapa registrado en historial de trazabilidad');
+        console.log(`✅ Evento "${tipoEvento}" registrado en historial de trazabilidad`);
       } catch (error) {
         console.error('⚠️ Error al registrar cambio de etapa en historial:', error);
       }
@@ -5863,6 +5897,12 @@ const estadoInicialFormulario = {
         fecha_ultimo_pago: fechaActual,
         proximo_pago: proximoPago
       };
+      
+      // Si está completamente pagado, cambiar etapa a "En Vigencia"
+      if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.etapa_activa !== 'En Vigencia') {
+        datosActualizacion.etapa_activa = 'En Vigencia';
+        console.log('✅ Cambiando etapa a "En Vigencia" porque póliza está completamente pagada');
+      }
 
       console.log('💰 Aplicando pago:', { 
         expedienteId: expedienteParaPago.id, 
@@ -5912,6 +5952,23 @@ const estadoInicialFormulario = {
             }
           });
           console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad');
+          
+          // Si la póliza está completamente pagada, registrar evento "En Vigencia"
+          if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.inicio_vigencia) {
+            await historialService.registrarEvento({
+              expediente_id: expedienteParaPago.id,
+              cliente_id: expedienteParaPago.cliente_id,
+              tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
+              usuario_nombre: 'Sistema',
+              descripcion: `Póliza en vigencia desde ${new Date(expedienteParaPago.inicio_vigencia).toLocaleDateString('es-MX')} hasta ${new Date(expedienteParaPago.termino_vigencia).toLocaleDateString('es-MX')}`,
+              datos_adicionales: {
+                numero_poliza: expedienteParaPago.numero_poliza,
+                inicio_vigencia: expedienteParaPago.inicio_vigencia,
+                termino_vigencia: expedienteParaPago.termino_vigencia
+              }
+            });
+            console.log('✅ Evento POLIZA_EN_VIGENCIA agregado a historial');
+          }
         } catch (errorRegistroPago) {
           console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
         }
@@ -6681,7 +6738,7 @@ const estadoInicialFormulario = {
                 });
               }
               
-              // 🎯 EVENTO 1: Captura con Extractor PDF (si aplica)
+              // 🎯 EVENTO 1: Captura con Extractor PDF o Manual
               if (capturadoConExtractorPDF) {
                 const descripcionCaptura = huboModificacionesManuales 
                   ? `Póliza capturada con Extractor PDF y editada manualmente`
@@ -6690,7 +6747,7 @@ const estadoInicialFormulario = {
                 await historialService.registrarEvento({
                   expediente_id: nuevoId,
                   cliente_id: expedientePayload.cliente_id,
-                  tipo_evento: 'captura_extractor_pdf',
+                  tipo_evento: historialService.TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF,
                   usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
                   descripcion: descripcionCaptura,
                   datos_adicionales: {
@@ -6705,6 +6762,23 @@ const estadoInicialFormulario = {
                   }
                 });
                 console.log(`✅ Evento "Captura con Extractor PDF${huboModificacionesManuales ? ' (con ajustes manuales)' : ''}" registrado`);
+              } else {
+                // Captura manual (no se usó extractor PDF)
+                await historialService.registrarEvento({
+                  expediente_id: nuevoId,
+                  cliente_id: expedientePayload.cliente_id,
+                  tipo_evento: historialService.TIPOS_EVENTO.CAPTURA_MANUAL,
+                  usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
+                  descripcion: 'Póliza capturada manualmente en el sistema',
+                  datos_adicionales: {
+                    aseguradora: expedientePayload.compania,
+                    producto: expedientePayload.producto,
+                    numero_poliza: expedientePayload.numero_poliza,
+                    metodo_captura: 'Captura Manual',
+                    fecha_captura: expedientePayload.fecha_captura || new Date().toISOString().split('T')[0]
+                  }
+                });
+                console.log('✅ Evento "Captura Manual" registrado');
               }
               
               // 🎯 EVENTO 2: Estado inicial de la póliza (Cotización/Emitida/etc.)
