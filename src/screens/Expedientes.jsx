@@ -2349,7 +2349,84 @@ const ListaExpedientes = React.memo(({
   clientesMap,
   abrirModalCompartir
 }) => {
-  const paginacion = usePaginacion(expedientes, 10);
+  // Estado para carpeta/categoría seleccionada
+  const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('todas');
+  
+  // Filtrar expedientes según la carpeta seleccionada
+  const expedientesFiltrados = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    switch (carpetaSeleccionada) {
+      case 'en_proceso':
+        // En cotización, Cotización enviada, Autorizado, En proceso emisión
+        return expedientes.filter(exp => 
+          ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión'].includes(exp.etapa_activa)
+        );
+      
+      case 'vigentes':
+        // Emitidas, Enviada al Cliente, En Vigencia (pagadas y activas)
+        return expedientes.filter(exp => 
+          ['Emitida', 'Enviada al Cliente'].includes(exp.etapa_activa) && 
+          exp.etapa_activa !== 'Cancelada'
+        );
+      
+      case 'por_renovar':
+        // Próximas a vencer en 30 días
+        return expedientes.filter(exp => {
+          if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+          const fechaVencimiento = new Date(exp.termino_vigencia);
+          const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+          return diasRestantes > 0 && diasRestantes <= 30;
+        });
+      
+      case 'vencidas':
+        // Pólizas vencidas sin renovar
+        return expedientes.filter(exp => {
+          if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+          const fechaVencimiento = new Date(exp.termino_vigencia);
+          return fechaVencimiento < hoy;
+        });
+      
+      case 'canceladas':
+        return expedientes.filter(exp => exp.etapa_activa === 'Cancelada');
+      
+      case 'todas':
+      default:
+        return expedientes;
+    }
+  }, [expedientes, carpetaSeleccionada]);
+  
+  // Contadores para cada carpeta
+  const contadores = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    return {
+      todas: expedientes.length,
+      en_proceso: expedientes.filter(exp => 
+        ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión'].includes(exp.etapa_activa)
+      ).length,
+      vigentes: expedientes.filter(exp => 
+        ['Emitida', 'Enviada al Cliente'].includes(exp.etapa_activa) && 
+        exp.etapa_activa !== 'Cancelada'
+      ).length,
+      por_renovar: expedientes.filter(exp => {
+        if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+        const fechaVencimiento = new Date(exp.termino_vigencia);
+        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+        return diasRestantes > 0 && diasRestantes <= 30;
+      }).length,
+      vencidas: expedientes.filter(exp => {
+        if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+        const fechaVencimiento = new Date(exp.termino_vigencia);
+        return fechaVencimiento < hoy;
+      }).length,
+      canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
+    };
+  }, [expedientes]);
+  
+  const paginacion = usePaginacion(expedientesFiltrados, 10);
 
   // Detectar 3 tipos de duplicados
   const analisisDuplicados = React.useMemo(() => {
@@ -2424,6 +2501,82 @@ const ListaExpedientes = React.memo(({
           Nueva Póliza
         </button>
       </div>
+
+      {/* Layout: Sidebar + Contenido */}
+      <div className="row g-2">
+        {/* Sidebar - Carpetas */}
+        <div className="col-auto" style={{ minWidth: '160px', maxWidth: '180px' }}>
+          <div className="card">
+            <div className="card-header bg-light py-2 px-2">
+              <h6 className="mb-0" style={{ fontSize: '0.85rem' }}>📂 Carpetas</h6>
+            </div>
+            <div className="list-group list-group-flush">
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'todas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('todas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>📋 Todas</span>
+                <span className={`badge ${carpetaSeleccionada === 'todas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.todas}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'en_proceso' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('en_proceso')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>📝 En Proceso</span>
+                <span className={`badge ${carpetaSeleccionada === 'en_proceso' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.en_proceso}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vigentes' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('vigentes')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>✅ Vigentes</span>
+                <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-primary' : 'bg-success'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.vigentes}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'por_renovar' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('por_renovar')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>🔄 Por Renovar</span>
+                <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-primary' : 'bg-warning'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.por_renovar}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vencidas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('vencidas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>⚠️ Vencidas</span>
+                <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-primary' : 'bg-danger'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.vencidas}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'canceladas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('canceladas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>🚫 Canceladas</span>
+                <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.canceladas}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Contenido principal */}
+        <div className="col">
 
       {/* Alertas de duplicados */}
       {(analisisDuplicados.polizasDuplicadas.length > 0 || 
@@ -2919,6 +3072,8 @@ const ListaExpedientes = React.memo(({
           </div>
         </div>
       )}
+        </div>
+      </div>
     </div>
   );
 });
