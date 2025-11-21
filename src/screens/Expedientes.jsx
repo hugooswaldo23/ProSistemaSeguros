@@ -5230,6 +5230,14 @@ const estadoInicialFormulario = {
     const fechaParaCalculo = formularioActual.fecha_vencimiento_pago || proximoPago;
     const estatusPago = calcularEstatusPago(fechaParaCalculo, formularioActual.estatusPago);
     
+    // ✨ Calcular fecha_aviso_renovacion (30 días antes del término de vigencia)
+    let fechaAvisoRenovacion = null;
+    if (termino_vigencia) {
+      const fechaTermino = new Date(termino_vigencia);
+      fechaTermino.setDate(fechaTermino.getDate() - 30);
+      fechaAvisoRenovacion = fechaTermino.toISOString().split('T')[0];
+    }
+    
     // Retornar con todos los campos sincronizados
     const resultado = { 
       ...formularioActual, 
@@ -5238,7 +5246,8 @@ const estadoInicialFormulario = {
       fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
       fecha_vencimiento_pago: proximoPago, // Asegurar que fecha_vencimiento_pago esté sincronizada
       estatusPago, 
-      periodo_gracia: periodoGracia 
+      periodo_gracia: periodoGracia,
+      fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
     };
     
     // 🚨 DEBUG: Verificar campos problemáticos al SALIR de actualizarCalculosAutomaticos
@@ -6491,10 +6500,12 @@ const estadoInicialFormulario = {
     expedientePayload.cargo_pago_fraccionado = formularioConCalculos.cargo_pago_fraccionado || '';
     expedientePayload.gastos_expedicion = formularioConCalculos.gastos_expedicion || '';
     expedientePayload.estatus_pago = formularioConCalculos.estatusPago || 'Pendiente'; // ✅ GARANTIZAR estatus_pago
+    expedientePayload.fecha_aviso_renovacion = formularioConCalculos.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     
     console.log('🚨 [PAYLOAD SIMPLE] cargo_pago_fraccionado FORZADO:', expedientePayload.cargo_pago_fraccionado);
     console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
     console.log('🚨 [PAYLOAD SIMPLE] estatus_pago FORZADO:', expedientePayload.estatus_pago);
+    console.log('📅 [PAYLOAD SIMPLE] fecha_aviso_renovacion:', expedientePayload.fecha_aviso_renovacion);
     
     // Limpiar campos innecesarios
     delete expedientePayload.__pdf_file;

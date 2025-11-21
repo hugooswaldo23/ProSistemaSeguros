@@ -80,8 +80,9 @@ Solo falta conectarlos cuando se implemente la UI del módulo cotizaciones.
 
 Los siguientes eventos están definidos pero requieren lógica específica:
 
-- ⏰ `POLIZA_PROXIMA_VENCER` - **Lógica existente**: `utils.calcularDiasRestantes()` y `useEstatusExpediente`. Pendiente: job automático para registrar eventos
-- ❌ `POLIZA_VENCIDA` - **Lógica existente**: Ya se calcula en `cargarDatos()`. Pendiente: job automático para cambiar etapa y registrar evento
+- ⏰ `POLIZA_PROXIMA_VENCER` - **Optimizado**: Campo `fecha_aviso_renovacion` precalculado (termino_vigencia - 30 días). Query simple: `SELECT * WHERE fecha_aviso_renovacion = CURDATE()`
+- ❌ `POLIZA_VENCIDA` - **Optimizado**: Campo `termino_vigencia` ya existe. Query simple: `SELECT * WHERE termino_vigencia < CURDATE()`
+- **Pendiente**: Job backend que ejecute queries diariamente y registre eventos en historial
 - 🔄 `RENOVACION_INICIADA` - Requiere flujo de renovación
 - 🔁 `POLIZA_RENOVADA` - Requiere completar renovación
 - 🔔 `RECORDATORIO_PAGO_ENVIADO` - Requiere sistema de recordatorios
