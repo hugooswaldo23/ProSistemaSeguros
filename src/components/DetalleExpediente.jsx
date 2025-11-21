@@ -158,6 +158,7 @@ const DetalleExpediente = ({
           <div className="row g-2">
             {renderCampo('Inicio', datos?.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-')}
             {renderCampo('Fin', datos?.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-')}
+            {renderCampo('Aviso de Renovación', datos?.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-', 'text-warning')}
             {renderCampo('Fecha de Emisión', datos?.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-')}
             {renderCampo('Fecha de Captura', datos?.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-')}
           </div>

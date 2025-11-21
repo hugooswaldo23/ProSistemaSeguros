@@ -4082,6 +4082,18 @@ const Formulario = React.memo(({
                   helpText="La vigencia siempre es de 1 año"
                 />
               </div>
+              <div className="col-md-3">
+                <label className="form-label">📅 Aviso de Renovación</label>
+                <input
+                  type="date"
+                  className="form-control bg-light"
+                  value={formulario.fecha_aviso_renovacion || ''}
+                  readOnly
+                  disabled
+                  style={{ cursor: 'not-allowed' }}
+                />
+                <small className="text-muted">Se calcula automáticamente (Término - 30 días)</small>
+              </div>
             </div>
           </div>
 
@@ -5343,7 +5355,7 @@ const estadoInicialFormulario = {
           descripcion = 'Póliza emitida correctamente';
         } else if (nuevoEstado === 'Cancelada') {
           tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
-          descripcion = motivo ? `Póliza cancelada. Motivo: ${motivo}` : 'Póliza cancelada';
+          descripcion = motivo ? `Motivo: ${motivo}` : 'Póliza cancelada sin especificar motivo';
         } else if (nuevoEstado === 'Renovada') {
           tipoEvento = historialService.TIPOS_EVENTO.POLIZA_RENOVADA;
           descripcion = 'Póliza renovada exitosamente';
@@ -6615,65 +6627,77 @@ const estadoInicialFormulario = {
             const expedienteId = formularioConCalculos.id;
             const expedienteAnterior = expedientes.find(exp => exp.id === expedienteId);
             
-            // Detectar cambios en campos críticos
-            const cambiosCriticos = [];
+            // Detectar cambios en campos importantes
+            const camposModificados = [];
             
             if (expedienteAnterior) {
-              // Verificar cambio de periodo de gracia
-              if (expedienteAnterior.periodo_gracia !== formularioConCalculos.periodo_gracia) {
-                cambiosCriticos.push(`Periodo de gracia: ${expedienteAnterior.periodo_gracia || 0} → ${formularioConCalculos.periodo_gracia || 0} días`);
-              }
+              // Lista de campos a verificar con sus labels
+              const camposAComparar = [
+                { key: 'numero_poliza', label: 'Número de póliza' },
+                { key: 'compania', label: 'Aseguradora' },
+                { key: 'producto', label: 'Producto' },
+                { key: 'prima_pagada', label: 'Prima', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
+                { key: 'total', label: 'Total', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
+                { key: 'fecha_emision', label: 'Fecha de emisión' },
+                { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
+                { key: 'termino_vigencia', label: 'Término de vigencia' },
+                { key: 'tipo_pago', label: 'Tipo de pago' },
+                { key: 'periodo_gracia', label: 'Periodo de gracia', formatter: (v) => `${v || 0} días` },
+                { key: 'fecha_vencimiento_pago', label: 'Fecha de vencimiento' },
+                { key: 'estatusPago', label: 'Estatus de pago' },
+                { key: 'agente', label: 'Agente' },
+                { key: 'uso', label: 'Uso' },
+                { key: 'servicio', label: 'Servicio' },
+                { key: 'movimiento', label: 'Movimiento' }
+              ];
               
-              // Verificar cambio de fecha de pago
-              if (expedienteAnterior.fecha_vencimiento_pago !== formularioConCalculos.fecha_vencimiento_pago) {
-                cambiosCriticos.push(`Fecha de pago: ${expedienteAnterior.fecha_vencimiento_pago || 'sin fecha'} → ${formularioConCalculos.fecha_vencimiento_pago || 'sin fecha'}`);
-              }
-              
-              // Verificar cambio de estatus de pago
-              if (expedienteAnterior.estatusPago !== formularioConCalculos.estatusPago) {
-                cambiosCriticos.push(`Estatus de pago: ${expedienteAnterior.estatusPago || 'sin estatus'} → ${formularioConCalculos.estatusPago || 'sin estatus'}`);
-              }
+              camposAComparar.forEach(({ key, label, formatter }) => {
+                const valorAnterior = String(expedienteAnterior[key] || '').trim();
+                const valorNuevo = String(formularioConCalculos[key] || '').trim();
+                
+                if (valorAnterior !== valorNuevo) {
+                  const valorAnteriorFormateado = formatter ? formatter(expedienteAnterior[key]) : (valorAnterior || 'vacío');
+                  const valorNuevoFormateado = formatter ? formatter(formularioConCalculos[key]) : (valorNuevo || 'vacío');
+                  camposModificados.push(`${label}: ${valorAnteriorFormateado} → ${valorNuevoFormateado}`);
+                }
+              });
             }
             
-            // Verificar si hubo cambio de etapa para registrar evento específico
-            if (expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa) {
-              await historialService.registrarCambioEtapa(
-                expedienteId,
-                formularioConCalculos.cliente_id,
-                expedienteAnterior.etapa_activa,
-                formularioConCalculos.etapa_activa,
-                'Sistema', // TODO: usuario actual
-                'Cambio manual desde formulario de edición'
-              );
-            }
-            
-            // Registrar cambios críticos en historial
-            if (cambiosCriticos.length > 0) {
+            // Solo registrar evento si hubo cambios reales
+            if (camposModificados.length > 0) {
+              // Verificar si cambió la etapa
+              const cambioEtapa = expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa;
+              
+              if (cambioEtapa) {
+                // Registrar cambio de etapa con evento específico
+                await historialService.registrarCambioEtapa(
+                  expedienteId,
+                  formularioConCalculos.cliente_id,
+                  expedienteAnterior.etapa_activa,
+                  formularioConCalculos.etapa_activa,
+                  'Sistema', // TODO: usuario actual
+                  'Cambio de etapa desde edición'
+                );
+              }
+              
+              // Registrar los cambios de datos
               await historialService.registrarEvento({
                 expediente_id: expedienteId,
                 cliente_id: formularioConCalculos.cliente_id,
                 tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
                 usuario_nombre: 'Sistema', // TODO: usuario actual
-                descripcion: `Campos de pago editados manualmente:\n${cambiosCriticos.join('\n')}`,
+                descripcion: `Póliza editada - ${camposModificados.length} campo(s) modificado(s)`,
                 datos_adicionales: {
                   numero_poliza: formularioConCalculos.numero_poliza,
-                  campos_modificados: cambiosCriticos,
-                  tipo_modificacion: 'manual'
+                  compania: formularioConCalculos.compania,
+                  producto: formularioConCalculos.producto,
+                  campos_modificados: camposModificados,
+                  cantidad_cambios: camposModificados.length
                 }
               });
-            } else if (!expedienteAnterior || expedienteAnterior.etapa_activa === formularioConCalculos.etapa_activa) {
-              // Si NO hubo cambio de etapa ni cambios críticos, registrar actualización genérica
-              await historialService.registrarEvento({
-                expediente_id: expedienteId,
-                cliente_id: formularioConCalculos.cliente_id,
-                tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
-                usuario_nombre: 'Sistema', // TODO: usuario actual
-                descripcion: `Expediente actualizado: ${formularioConCalculos.compania} - ${formularioConCalculos.producto}`,
-                datos_adicionales: {
-                  numero_poliza: formularioConCalculos.numero_poliza,
-                  campos_modificados: true
-                }
-              });
+              console.log(`✅ Evento "Edición" registrado con ${camposModificados.length} cambios`);
+            } else {
+              console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');
             }
           } catch (e) {
             console.warn('⚠️ No se pudo registrar evento de actualización:', e);
