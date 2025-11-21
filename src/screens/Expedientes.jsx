@@ -65,6 +65,7 @@ import * as pdfService from '../services/pdfService';
 import * as notificacionesService from '../services/notificacionesService';
 import * as clientesService from '../services/clientesService';
 import * as historialService from '../services/historialExpedienteService';
+import { registrarNotificacion, TIPOS_NOTIFICACION, TIPOS_MENSAJE } from '../services/notificacionesService';
 import TimelineExpediente from '../components/TimelineExpediente';
 
 // Configurar worker de PDF.js
@@ -2359,29 +2360,59 @@ const ListaExpedientes = React.memo(({
     
     switch (carpetaSeleccionada) {
       case 'en_proceso':
-        // En cotización, Cotización enviada, Autorizado, En proceso emisión
-        return expedientes.filter(exp => 
-          ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión'].includes(exp.etapa_activa)
-        );
+        // Pólizas pendientes de pago (nuevas o renovaciones)
+        // Incluye: En cotización, Emitida, Renovación en Proceso, etc. que NO estén pagadas
+        return expedientes.filter(exp => {
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
+        });
       
       case 'vigentes':
-        // Emitidas, Enviada al Cliente, En Vigencia (pagadas y activas)
-        return expedientes.filter(exp => 
-          ['Emitida', 'Enviada al Cliente'].includes(exp.etapa_activa) && 
-          exp.etapa_activa !== 'Cancelada'
-        );
+        // Pólizas NUEVAS pagadas que aún no necesitan renovación
+        // Criterio: Pagadas + hoy < fecha_aviso_renovacion + etapa NO es Renovada
+        return expedientes.filter(exp => {
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Renovada') return false; // Renovadas van a su propia carpeta
+          
+          // Si no tiene fecha_aviso_renovacion, mostrar en vigentes (fallback)
+          if (!exp.fecha_aviso_renovacion) return true;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+        });
+      
+      case 'renovadas':
+        // Pólizas RENOVADAS pagadas que aún no necesitan renovarse otra vez
+        // Criterio: etapa = Renovada + hoy < fecha_aviso_renovacion
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa !== 'Renovada') return false;
+          
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          if (estatusPago !== 'pagado') return false;
+          
+          // Si no tiene fecha_aviso_renovacion, mostrar aquí (fallback)
+          if (!exp.fecha_aviso_renovacion) return true;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+        });
       
       case 'por_renovar':
-        // Próximas a vencer en 30 días
+        // Pólizas (nuevas o renovadas) que ya llegaron a su fecha de aviso de renovación
+        // Criterio: hoy >= fecha_aviso_renovacion && hoy < termino_vigencia
         return expedientes.filter(exp => {
-          if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
-          const fechaVencimiento = new Date(exp.termino_vigencia);
-          const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
-          return diasRestantes > 0 && diasRestantes <= 30;
+          if (exp.etapa_activa === 'Cancelada') return false;
+          if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          const fechaTermino = new Date(exp.termino_vigencia);
+          
+          return hoy >= fechaAviso && hoy < fechaTermino;
         });
       
       case 'vencidas':
-        // Pólizas vencidas sin renovar
+        // Pólizas vencidas (termino_vigencia < hoy)
         return expedientes.filter(exp => {
           if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
           const fechaVencimiento = new Date(exp.termino_vigencia);
@@ -2404,24 +2435,44 @@ const ListaExpedientes = React.memo(({
     
     return {
       todas: expedientes.length,
-      en_proceso: expedientes.filter(exp => 
-        ['En cotización', 'Cotización enviada', 'Autorizado', 'En proceso emisión'].includes(exp.etapa_activa)
-      ).length,
-      vigentes: expedientes.filter(exp => 
-        ['Emitida', 'Enviada al Cliente'].includes(exp.etapa_activa) && 
-        exp.etapa_activa !== 'Cancelada'
-      ).length,
-      por_renovar: expedientes.filter(exp => {
-        if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
-        const fechaVencimiento = new Date(exp.termino_vigencia);
-        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
-        return diasRestantes > 0 && diasRestantes <= 30;
+      
+      en_proceso: expedientes.filter(exp => {
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
       }).length,
+      
+      vigentes: expedientes.filter(exp => {
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        if (!exp.fecha_aviso_renovacion) return true;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        return hoy < fechaAviso;
+      }).length,
+      
+      renovadas: expedientes.filter(exp => {
+        if (exp.etapa_activa !== 'Renovada') return false;
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        if (estatusPago !== 'pagado') return false;
+        if (!exp.fecha_aviso_renovacion) return true;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        return hoy < fechaAviso;
+      }).length,
+      
+      por_renovar: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        const fechaTermino = new Date(exp.termino_vigencia);
+        return hoy >= fechaAviso && hoy < fechaTermino;
+      }).length,
+      
       vencidas: expedientes.filter(exp => {
         if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
         const fechaVencimiento = new Date(exp.termino_vigencia);
         return fechaVencimiento < hoy;
       }).length,
+      
       canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
     };
   }, [expedientes]);
@@ -2542,11 +2593,21 @@ const ListaExpedientes = React.memo(({
                 </span>
               </button>
               <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'renovadas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('renovadas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>🔄 Renovadas</span>
+                <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-primary' : 'bg-info'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.renovadas}
+                </span>
+              </button>
+              <button
                 className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'por_renovar' ? 'active' : ''}`}
                 onClick={() => setCarpetaSeleccionada('por_renovar')}
                 style={{ fontSize: '0.8rem' }}
               >
-                <span>🔄 Por Renovar</span>
+                <span>⏰ Por Renovar</span>
                 <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-primary' : 'bg-warning'}`} style={{ fontSize: '0.7rem' }}>
                   {contadores.por_renovar}
                 </span>
@@ -5064,6 +5125,7 @@ const ModuloExpedientes = () => {
     'Emitida',
     'Enviada al Cliente',
     'En Vigencia',
+    'Renovación en Proceso',
     'Renovada',
     'Vencida',
     'Cancelada'
@@ -5508,12 +5570,15 @@ const estadoInicialFormulario = {
         } else if (nuevoEstado === 'Emitida' && etapaAnterior !== 'Enviada al Cliente') {
           tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
           descripcion = 'Póliza emitida correctamente';
+        } else if (nuevoEstado === 'Renovación en Proceso') {
+          tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_INICIADA;
+          descripcion = 'Renovación de póliza iniciada - pendiente de pago';
+        } else if (nuevoEstado === 'Renovada') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_RENOVADA;
+          descripcion = 'Póliza renovada exitosamente - pago aplicado';
         } else if (nuevoEstado === 'Cancelada') {
           tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
           descripcion = motivo ? `Motivo: ${motivo}` : 'Póliza cancelada sin especificar motivo';
-        } else if (nuevoEstado === 'Renovada') {
-          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_RENOVADA;
-          descripcion = 'Póliza renovada exitosamente';
         }
         
         await historialService.registrarCambioEtapa(
@@ -6940,84 +7005,29 @@ const estadoInicialFormulario = {
                 });
               }
               
-              // 🎯 EVENTO 1: Captura con Extractor PDF o Manual
-              if (capturadoConExtractorPDF) {
-                const descripcionCaptura = huboModificacionesManuales 
-                  ? `Póliza capturada con Extractor PDF y editada manualmente`
-                  : `Póliza capturada mediante Extractor PDF`;
-                
-                await historialService.registrarEvento({
-                  expediente_id: nuevoId,
-                  cliente_id: expedientePayload.cliente_id,
-                  tipo_evento: historialService.TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF,
-                  usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
-                  descripcion: descripcionCaptura,
-                  datos_adicionales: {
-                    archivo_pdf: nombreArchivoPDF,
-                    aseguradora: expedientePayload.compania,
-                    producto: expedientePayload.producto,
-                    numero_poliza: expedientePayload.numero_poliza,
-                    metodo_captura: 'Extractor PDF Automático',
-                    fecha_captura: expedientePayload.fecha_captura || new Date().toISOString().split('T')[0],
-                    modificado_manualmente: huboModificacionesManuales,
-                    campos_modificados: huboModificacionesManuales ? camposModificados : undefined
-                  }
-                });
-                console.log(`✅ Evento "Captura con Extractor PDF${huboModificacionesManuales ? ' (con ajustes manuales)' : ''}" registrado`);
-              } else {
-                // Captura manual (no se usó extractor PDF)
-                await historialService.registrarEvento({
-                  expediente_id: nuevoId,
-                  cliente_id: expedientePayload.cliente_id,
-                  tipo_evento: historialService.TIPOS_EVENTO.CAPTURA_MANUAL,
-                  usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
-                  descripcion: 'Póliza capturada manualmente en el sistema',
-                  datos_adicionales: {
-                    aseguradora: expedientePayload.compania,
-                    producto: expedientePayload.producto,
-                    numero_poliza: expedientePayload.numero_poliza,
-                    metodo_captura: 'Captura Manual',
-                    fecha_captura: expedientePayload.fecha_captura || new Date().toISOString().split('T')[0]
-                  }
-                });
-                console.log('✅ Evento "Captura Manual" registrado');
-              }
+              // 🎯 EVENTO CAPTURA: Registrar en notificaciones (tabla que SÍ tiene endpoint)
+              const metodCaptura = capturadoConExtractorPDF ? 'Extractor PDF' : 'Captura Manual';
+              const aseguradoraNombre = expedientePayload.compania || 'Aseguradora';
+              const fechaCaptura = new Date().toISOString().split('T')[0];
               
-              // 🎯 EVENTO 2: Estado inicial de la póliza (Cotización/Emitida/etc.)
-              let tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_CREADA;
-              let descripcionEvento = `Cotización creada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
-              
-              // Si se crea directo en etapa "Emitida", registrar como póliza emitida
-              if (etapaActual === 'Emitida') {
-                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
-                descripcionEvento = `Póliza ${capturadoConExtractorPDF ? 'importada desde PDF' : 'capturada'}: ${expedientePayload.compania} - ${expedientePayload.producto}`;
-              } else if (etapaActual === 'Enviada al Cliente') {
-                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL;
-                descripcionEvento = `Póliza ${capturadoConExtractorPDF ? 'importada' : 'capturada'} como enviada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
-              }
-              
-              await historialService.registrarEvento({
+              await registrarNotificacion({
                 expediente_id: nuevoId,
                 cliente_id: expedientePayload.cliente_id,
-                tipo_evento: tipoEvento,
-                etapa_nueva: etapaActual,
-                usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
-                descripcion: descripcionEvento,
-                datos_adicionales: {
-                  numero_poliza: expedientePayload.numero_poliza,
-                  compania: expedientePayload.compania,
-                  producto: expedientePayload.producto,
-                  origen: capturadoConExtractorPDF ? 'extractor_pdf' : 'captura_manual'
-                }
+                tipo_notificacion: 'sistema',
+                tipo_mensaje: 'captura',
+                asunto: `Póliza capturada: ${metodCaptura}`,
+                mensaje: `Captura de póliza mediante ${metodCaptura}`,
+                numero_poliza: expedientePayload.numero_poliza,
+                compania: aseguradoraNombre,
+                producto: expedientePayload.producto || '',
+                enviado_por_nombre: 'Sistema',
+                fecha_envio: fechaCaptura
               });
-              console.log(`✅ Evento ${tipoEvento} registrado en historial`);
+              
+              console.log(`✅ Captura registrada: ${metodCaptura} - ${aseguradoraNombre}`);
             }
           } catch (error) {
-            console.warn('⚠️ Historial no disponible (backend endpoint pendiente):', error.message);
-            toast('⚠️ Expediente creado correctamente. Historial temporal no disponible hasta que se implemente el backend.', {
-              duration: 4000,
-              icon: 'ℹ️'
-            });
+            console.warn('⚠️ Error al registrar captura:', error.message);
           }
 
           try {

@@ -52,6 +52,23 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
       const notificaciones = await obtenerNotificacionesPorExpediente(expedienteId);
       console.log('📋 Notificaciones cargadas (fallback):', notificaciones);
       
+      // Si tampoco hay notificaciones, crear evento sintético de captura
+      if (!notificaciones || notificaciones.length === 0) {
+        // Crear evento temporal de captura si es un expediente nuevo
+        const eventoCaptura = {
+          id: 'temp-captura-' + expedienteId,
+          expediente_id: expedienteId,
+          tipo_evento: 'CAPTURA_MANUAL',
+          fecha_evento: new Date().toISOString(),
+          usuario_nombre: 'Sistema',
+          descripcion: '⚠️ Historial temporal no disponible. Backend pendiente de implementación.',
+          es_temporal: true
+        };
+        setHistorial([eventoCaptura]);
+        setCargando(false);
+        return;
+      }
+      
       // Convertir notificaciones a formato timeline (sin URLs en descripción)
       const eventosTimeline = notificaciones.map(notif => {
         // Limpiar descripción: quitar URLs largas
@@ -114,17 +131,18 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const mapearTipoNotificacionAEvento = (tipoNotif, tipoMensaje) => {
     // Mapeo basado en tipo_mensaje
     const mapaMensajes = {
-      'emision': tipoNotif === 'whatsapp' ? 'poliza_enviada_whatsapp' : 'poliza_enviada_email',
-      'recordatorio_pago': 'recordatorio_pago_enviado',
-      'pago_vencido': 'pago_vencido',
-      'pago_recibido': 'pago_registrado',
-      'renovacion': 'poliza_renovada',
-      'cancelacion': 'poliza_cancelada',
-      'modificacion': 'endoso_aplicado',
-      'otro': 'nota_agregada'
+      'captura': 'CAPTURA_MANUAL', // Evento de captura
+      'emision': tipoNotif === 'whatsapp' ? 'POLIZA_ENVIADA_WHATSAPP' : 'POLIZA_ENVIADA_EMAIL',
+      'recordatorio_pago': 'RECORDATORIO_PAGO_ENVIADO',
+      'pago_vencido': 'PAGO_VENCIDO',
+      'pago_recibido': 'PAGO_REGISTRADO',
+      'renovacion': 'POLIZA_RENOVADA',
+      'cancelacion': 'POLIZA_CANCELADA',
+      'modificacion': 'ENDOSO_APLICADO',
+      'otro': 'NOTA_AGREGADA'
     };
     
-    return mapaMensajes[tipoMensaje] || 'documento_enviado';
+    return mapaMensajes[tipoMensaje] || 'DOCUMENTO_ENVIADO';
   };
 
   // Obtener estilo (icono y color) para cada tipo de evento

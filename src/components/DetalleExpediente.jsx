@@ -18,9 +18,9 @@ const DetalleExpediente = ({
   caratulaColapsable = true
 }) => {
   // Estados controlados en React para no depender del JS de Bootstrap
-  const [openGeneral, setOpenGeneral] = useState(true);
-  const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(!!autoOpenCoberturas);
-  const [openHistorial, setOpenHistorial] = useState(!!autoOpenHistorial);
+  const [openGeneral, setOpenGeneral] = useState(false);
+  const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(false);
+  const [openHistorial, setOpenHistorial] = useState(true);
 
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
   const tipoRiesgo = useMemo(() => {
