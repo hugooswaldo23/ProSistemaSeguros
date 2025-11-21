@@ -80,8 +80,8 @@ Solo falta conectarlos cuando se implemente la UI del módulo cotizaciones.
 
 Los siguientes eventos están definidos pero requieren lógica específica:
 
-- ⏰ `POLIZA_PROXIMA_VENCER` - Requiere job automático 30 días antes
-- ❌ `POLIZA_VENCIDA` - Requiere job automático al vencer
+- ⏰ `POLIZA_PROXIMA_VENCER` - **Lógica existente**: `utils.calcularDiasRestantes()` y `useEstatusExpediente`. Pendiente: job automático para registrar eventos
+- ❌ `POLIZA_VENCIDA` - **Lógica existente**: Ya se calcula en `cargarDatos()`. Pendiente: job automático para cambiar etapa y registrar evento
 - 🔄 `RENOVACION_INICIADA` - Requiere flujo de renovación
 - 🔁 `POLIZA_RENOVADA` - Requiere completar renovación
 - 🔔 `RECORDATORIO_PAGO_ENVIADO` - Requiere sistema de recordatorios

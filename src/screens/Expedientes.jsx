@@ -5396,6 +5396,18 @@ const estadoInicialFormulario = {
     }
   }, [motivoCancelacion, expedienteACancelar, cambiarEstadoExpediente]);
 
+  // ✨ Verificar vigencias y registrar eventos automáticos
+  const verificarVigenciasAutomaticas = useCallback(async (expedientesLista) => {
+    // TODO: Implementar como job programado en el backend
+    // Por ahora solo registra eventos si detecta cambios
+    console.log('🔍 Verificación de vigencias pendiente (implementar en backend)');
+    
+    // La lógica ya existe en:
+    // - utils.calcularDiasRestantes() para calcular días
+    // - useEstatusExpediente para calcular estatus de pago
+    // Solo falta conectar con eventos de historial cuando se implemente job automático
+  }, []);
+
   // ✨ NUEVO: Manejar guardado de contacto faltante
   const handleGuardarContactoFaltante = useCallback(async (valorContacto) => {
     try {
