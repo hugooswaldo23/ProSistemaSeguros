@@ -20,7 +20,16 @@ const Sidebar = ({ onLogout }) =>  {
     ], []);
 
     return (
-        <div className="d-flex flex-column bg-dark text-white" style={{ width: '280px', minHeight: '100vh' }}>
+        <div 
+            className="d-flex flex-column bg-dark text-white" 
+            style={{ 
+                width: '280px', 
+                minWidth: '280px',
+                maxWidth: '280px',
+                minHeight: '100vh',
+                flexShrink: 0
+            }}
+        >
             <div className="py-3 px-4 border-bottom border-secondary">
                 <h5 className="mb-0 text-center">
                     <Shield className="me-2" size={24} />

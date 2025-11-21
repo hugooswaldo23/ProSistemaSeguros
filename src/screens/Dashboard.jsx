@@ -21,19 +21,86 @@ const DashboardComponent = () => {
     return isNaN(n) ? 0 : n;
   };
 
+  // Helper para formatear fechas sin problemas de zona horaria
+  const formatearFecha = (fechaStr, formato = 'completo') => {
+    if (!fechaStr) return '';
+    
+    // Si ya es un objeto Date, convertir a string ISO primero
+    if (fechaStr instanceof Date) {
+      fechaStr = fechaStr.toISOString().split('T')[0];
+    }
+    
+    // Convertir a string y extraer solo la parte de fecha (antes de T si existe)
+    fechaStr = String(fechaStr).split('T')[0];
+    
+    // Parsear la fecha manualmente para evitar problemas de zona horaria
+    const partes = fechaStr.split('-');
+    if (partes.length !== 3) return fechaStr; // Si no es formato YYYY-MM-DD, devolver tal cual
+    
+    const [year, month, day] = partes.map(Number);
+    if (isNaN(year) || isNaN(month) || isNaN(day)) return fechaStr;
+    
+    // Formato: dd/mm/yyyy
+    return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+  };
+
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      const res = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
-      if (!res.ok) {
-        console.error('Error al cargar expedientes:', res.status, res.statusText);
+      // Cargar expedientes y clientes en paralelo
+      const [resExpedientes, resClientes] = await Promise.all([
+        fetch(`${API_URL}/api/expedientes?t=${Date.now()}`),
+        fetch(`${API_URL}/api/clientes?t=${Date.now()}`)
+      ]);
+      
+      if (!resExpedientes.ok) {
+        console.error('Error al cargar expedientes:', resExpedientes.status, resExpedientes.statusText);
         setExpedientes([]);
+        return;
+      }
+      
+      const expedientesData = await resExpedientes.json();
+      const expedientesArray = Array.isArray(expedientesData) ? expedientesData : [];
+      
+      // Si hay clientes disponibles, enriquecer los expedientes con datos del cliente
+      if (resClientes.ok) {
+        const clientesData = await resClientes.json();
+        const clientesMap = new Map();
+        
+        if (Array.isArray(clientesData)) {
+          clientesData.forEach(cliente => {
+            clientesMap.set(cliente.id, cliente);
+          });
+        }
+        
+        // Enriquecer cada expediente con datos del cliente
+        const expedientesEnriquecidos = expedientesArray.map(exp => {
+          if (exp.cliente_id && clientesMap.has(exp.cliente_id)) {
+            const cliente = clientesMap.get(exp.cliente_id);
+            return {
+              ...exp,
+              // Agregar campos del cliente para facilitar el acceso
+              tipoPersona: cliente.tipoPersona || cliente.tipo_persona,
+              razonSocial: cliente.razonSocial || cliente.razon_social,
+              nombreComercial: cliente.nombreComercial || cliente.nombre_comercial,
+              nombre: cliente.nombre,
+              apellidoPaterno: cliente.apellidoPaterno || cliente.apellido_paterno,
+              apellidoMaterno: cliente.apellidoMaterno || cliente.apellido_materno,
+              email: cliente.email || cliente.contacto_email,
+              telefonoMovil: cliente.telefonoMovil || cliente.telefono_movil || cliente.contacto_telefono_movil,
+              telefonoFijo: cliente.telefonoFijo || cliente.telefono_fijo || cliente.contacto_telefono_fijo,
+              rfc: cliente.rfc
+            };
+          }
+          return exp;
+        });
+        
+        setExpedientes(expedientesEnriquecidos);
       } else {
-        const data = await res.json();
-        setExpedientes(Array.isArray(data) ? data : []);
+        setExpedientes(expedientesArray);
       }
     } catch (e) {
-      console.error('Fallo de red al cargar expedientes:', e);
+      console.error('Fallo de red al cargar datos:', e);
       setExpedientes([]);
     } finally {
       setCargando(false);
@@ -46,59 +113,139 @@ const DashboardComponent = () => {
     cargarDatos();
   }, []);
 
-  const abrirDesglose = (tipo) => {
+  const abrirDesglose = (tipo, periodo = 'ambos') => {
     const hoy = new Date();
-    const esMesActual = (fecha) => {
+    hoy.setHours(0, 0, 0, 0);
+    
+    // Calcular rangos
+    const inicioMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
+    const inicioMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const finMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
+    
+    // Rango "meses anteriores del año": desde enero hasta fin del mes anterior
+    const inicioAnioActual = new Date(hoy.getFullYear(), 0, 1); // 1 de enero del año actual
+    
+    const estaEnRango = (fecha, inicio, fin) => {
       if (!fecha) return false;
-      const f = new Date(fecha);
-      return f.getMonth() === hoy.getMonth() && f.getFullYear() === hoy.getFullYear();
+      
+      // Extraer solo la parte de fecha (sin hora) para evitar problemas de zona horaria
+      const fechaStr = String(fecha).split('T')[0];
+      const [year, month, day] = fechaStr.split('-').map(Number);
+      
+      if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
+      
+      // Crear fecha en hora local
+      const f = new Date(year, month - 1, day);
+      f.setHours(0, 0, 0, 0);
+      
+      return f >= inicio && f <= fin;
     };
 
     let polizasFiltradas = [];
     let titulo = '';
     let color = '#3B82F6';
+    let periodoTexto = periodo === 'mesActual' ? 'Mes Actual' : periodo === 'mesAnterior' ? 'Meses Anteriores' : 'Mes Actual + Anterior';
 
     switch (tipo) {
       case 'emitidas':
-        polizasFiltradas = expedientes.filter(p =>
-          ['Emitida','Renovada','Enviada al Cliente'].includes(p.etapa_activa) &&
-          p.etapa_activa !== 'Cancelada' &&
-          p.fecha_emision
-        );
-        titulo = 'Primas Emitidas - Mes Actual y Anterior';
+        polizasFiltradas = expedientes.filter(p => {
+          if (!['Emitida','Renovada','Enviada al Cliente'].includes(p.etapa_activa)) return false;
+          if (p.etapa_activa === 'Cancelada') return false;
+          if (!p.fecha_emision) return false;
+          
+          if (periodo === 'mesActual') return estaEnRango(p.fecha_emision, inicioMesActual, finMesActual);
+          if (periodo === 'mesAnterior') return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior);
+          return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesActual);
+        });
+        titulo = `Primas Emitidas - ${periodoTexto}`;
         color = '#3B82F6';
         break;
       case 'pagadas':
-        polizasFiltradas = expedientes.filter(p => p.fecha_pago && p.etapa_activa !== 'Cancelada');
-        titulo = 'Primas Pagadas - Mes Actual y Anterior';
+        polizasFiltradas = expedientes.filter(p => {
+          const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+          const pagado = estatus === 'pagado' || estatus === 'pagada';
+          if (!pagado || p.etapa_activa === 'Cancelada') return false;
+          
+          if (periodo === 'mesActual') return estaEnRango(p.fecha_pago, inicioMesActual, finMesActual);
+          if (periodo === 'mesAnterior') return estaEnRango(p.fecha_pago, inicioMesAnterior, finMesAnterior);
+          return estaEnRango(p.fecha_pago, inicioMesAnterior, finMesActual);
+        });
+        titulo = `Primas Pagadas - ${periodoTexto}`;
         color = '#10B981';
         break;
       case 'porVencer':
         polizasFiltradas = expedientes.filter(p => {
+          if (p.etapa_activa === 'Cancelada') return false;
+          
           const ref = p.fecha_vencimiento_pago || p.proximo_pago;
           if (!ref) return false;
-          const f = new Date(ref);
-          return esMesActual(ref) && f >= hoy && p.etapa_activa !== 'Cancelada';
+          
+          const fechaVenc = new Date(ref.split('T')[0]);
+          fechaVenc.setHours(0, 0, 0, 0);
+          
+          // Debe estar en el mes actual Y ser futura (no vencida)
+          const esFutura = fechaVenc >= hoy;
+          if (!esFutura) return false;
+          
+          return estaEnRango(ref, inicioMesActual, finMesActual);
         });
-        titulo = 'Primas Por Vencer - Acumulado';
+        titulo = 'Primas Por Vencer - Mes Actual';
         color = '#F59E0B';
         break;
       case 'vencidas':
         polizasFiltradas = expedientes.filter(p => {
           const ref = p.fecha_vencimiento_pago || p.proximo_pago;
           if (!ref) return false;
+          if (p.etapa_activa === 'Cancelada') return false;
+          
+          // Simple: si la fecha ya pasó, está vencida
           const venc = new Date(ref);
-          const gracia = Number(p.periodo_gracia || 0);
-          const limite = new Date(venc);
-          limite.setDate(limite.getDate() + gracia);
-          return new Date() > limite && p.etapa_activa !== 'Cancelada';
+          venc.setHours(0, 0, 0, 0);
+          const estaVencida = hoy > venc;
+          if (!estaVencida) return false;
+          
+          // Filtrar por mes de vencimiento
+          if (periodo === 'mesActual') return estaEnRango(ref, inicioMesActual, finMesActual);
+          if (periodo === 'mesAnterior') {
+            // Meses anteriores del año: desde enero hasta fin del mes anterior
+            return estaEnRango(ref, inicioAnioActual, finMesAnterior);
+          }
+          // Si no se especifica periodo, mostrar todas las vencidas
+          return true;
         });
-        titulo = 'Primas Vencidas - Acumulado';
+        titulo = periodo === 'mesActual' 
+          ? 'Primas Vencidas - Mes Actual'
+          : periodo === 'mesAnterior' 
+            ? 'Primas Vencidas - Meses Anteriores'
+            : 'Primas Vencidas - Acumulado';
         color = '#EF4444';
         break;
       case 'canceladas':
-        polizasFiltradas = expedientes.filter(exp => exp.etapa_activa === 'Cancelada' && esMesActual(exp.fecha_cancelacion));
-        titulo = 'Primas Canceladas - Mes Actual';
+        polizasFiltradas = expedientes.filter(exp => {
+          if (exp.etapa_activa !== 'Cancelada') return false;
+          
+          // ⚠️ IMPORTANTE: Si NO tiene fecha_cancelacion, considerar que es del mes actual
+          if (!exp.fecha_cancelacion) {
+            console.warn('⚠️ Póliza cancelada sin fecha_cancelacion:', exp.numero_poliza, '- Asumiendo mes actual');
+            return periodo === 'mesActual' || periodo === 'ambos';
+          }
+          
+          // Si tiene fecha_cancelacion, usarla para filtrar por periodo
+          if (periodo === 'mesActual') {
+            return estaEnRango(exp.fecha_cancelacion, inicioMesActual, finMesActual);
+          }
+          
+          if (periodo === 'mesAnterior') {
+            // Meses anteriores del año: desde enero hasta fin del mes anterior
+            return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesAnterior);
+          }
+          
+          // Si no se especifica periodo (ambos), mostrar todas
+          return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesActual);
+        });
+        
+        titulo = `Primas Canceladas - ${periodoTexto}`;
         color = '#6B7280';
         break;
       default:
@@ -124,219 +271,287 @@ const DashboardComponent = () => {
     });
   };
 
-  // Estadísticas Financieras - Calculadas desde expedientes (MES EN CURSO)
-  // ⚠️ IMPORTANTE: Cada póliza tiene DOS estados independientes:
-  //    - etapa_activa: Estado operativo ("Cotizada", "Emitida", "Cancelada", "Renovada")
-  //    - estatus_pago: Estado financiero ("Pendiente", "Pagado", "Por Vencer", "Vencido")
+  // Estadísticas Financieras - Calculadas por RANGOS DE FECHAS (MES ACTUAL + MES ANTERIOR)
+  // Estrategia simplificada: Cada tarjeta usa SU PROPIA fecha de referencia
   const estadisticasFinancieras = useMemo(() => {
-    console.log('📈 Calculando estadísticas con', expedientes.length, 'expedientes');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('📊 DASHBOARD FINANCIERO - CÁLCULO POR RANGOS DE FECHAS');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('📈 Total expedientes en BD:', expedientes.length);
     
-    // Obtener mes y año actual
+    // ==================== CALCULAR RANGOS DE FECHAS ====================
     const hoy = new Date();
-    const mesActual = hoy.getMonth(); // 0-11
-    const añoActual = hoy.getFullYear();
+    hoy.setHours(0, 0, 0, 0);
     
-    console.log(`📅 Filtrando datos del mes: ${mesActual + 1}/${añoActual}`);
+    // Mes actual: del 1 al último día del mes
+    const inicioMesActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const finMesActual = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0, 23, 59, 59);
     
-    // Función helper para verificar si una fecha está en el mes actual
-    const esMesActual = (fecha) => {
+    // Mes anterior: del 1 al último día del mes anterior
+    const inicioMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const finMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
+    
+    console.log('');
+    console.log('📅 RANGOS DE FECHAS DEFINIDOS:');
+    console.log(`  • Mes Actual:   ${inicioMesActual.toLocaleDateString('es-MX')} → ${finMesActual.toLocaleDateString('es-MX')}`);
+    console.log(`  • Mes Anterior: ${inicioMesAnterior.toLocaleDateString('es-MX')} → ${finMesAnterior.toLocaleDateString('es-MX')}`);
+    console.log(`  • Hoy:          ${hoy.toLocaleDateString('es-MX')}`);
+    
+    // Helper: Verificar si una fecha está en un rango
+    const estaEnRango = (fecha, inicio, fin) => {
       if (!fecha) return false;
-      const fechaObj = new Date(fecha);
-      return fechaObj.getMonth() === mesActual && fechaObj.getFullYear() === añoActual;
-    };
-    
-    // Función helper para verificar si una fecha está en el mes anterior
-    const esMesAnterior = (fecha) => {
-      if (!fecha) return false;
-      const fechaObj = new Date(fecha);
-      const mesAnterior = mesActual === 0 ? 11 : mesActual - 1; // Si es enero, mes anterior es diciembre
-      const añoMesAnterior = mesActual === 0 ? añoActual - 1 : añoActual;
-      return fechaObj.getMonth() === mesAnterior && fechaObj.getFullYear() === añoMesAnterior;
-    };
-    
-    console.log('✅ Total expedientes en BD:', expedientes.length);
-    
-    // DEBUG: Mostrar todas las pólizas con sus fechas
-    console.log('🔍 TODAS LAS PÓLIZAS:', expedientes.map(p => ({
-      id: p.id,
-      numero: p.numero_poliza,
-      etapa_activa: p.etapa_activa,
-      estatus_pago: p.estatus_pago,
-      fecha_emision: p.fecha_emision,
-      fecha_pago: p.fecha_pago,
-      monto: resolverMonto(p)
-    })));
-    
-    // PRIMAS EMITIDAS - Todas las pólizas EMITIDAS (sin importar estado de pago)
-    // Mostrar mes actual y mes anterior para comparar
-    // INCLUYE: Emitida, Renovada, Enviada al Cliente (todas son pólizas que ya fueron emitidas)
-    const etapasEmitidas = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-    const polizasEmitidasTodas = expedientes.filter(exp => 
-      etapasEmitidas.includes(exp.etapa_activa) && exp.etapa_activa !== 'Cancelada'
-    );
-    
-    console.log('📋 Pólizas con etapa Emitida/Renovada/Enviada:', polizasEmitidasTodas.length);
-    
-    // DEBUG: Ver fechas de emisión de TODAS las emitidas
-    console.log('📅 Fechas de emisión:', polizasEmitidasTodas.map(p => ({
-      numero: p.numero_poliza,
-      fecha_emision: p.fecha_emision,
-      fecha_alta: p.fecha_alta,
-      created_at: p.created_at
-    })));
-    
-    // Separar por mes SOLO si tienen fecha_emision REAL
-    // Si NO tienen fecha_emision, NO se contabilizan como emitidas
-    const emitidasMesActual = polizasEmitidasTodas.filter(p => {
-      if (!p.fecha_emision) {
-        console.log(`⚠️ Póliza ${p.numero_poliza} SIN fecha_emision - NO se cuenta en emitidas`);
+      
+      // Extraer solo la parte de fecha (sin hora) para evitar problemas de zona horaria
+      const fechaStr = String(fecha).split('T')[0];
+      const [year, month, day] = fechaStr.split('-').map(Number);
+      
+      if (isNaN(year) || isNaN(month) || isNaN(day)) {
+        console.warn('⚠️ Fecha inválida:', fecha);
         return false;
       }
-      const esMesActualResultado = esMesActual(p.fecha_emision);
-      console.log(`📆 Póliza ${p.numero_poliza}: fecha_emision=${p.fecha_emision} → ¿Mes actual? ${esMesActualResultado}`);
-      return esMesActualResultado;
+      
+      // Crear fecha en hora local
+      const f = new Date(year, month - 1, day);
+      f.setHours(0, 0, 0, 0);
+      
+      return f >= inicio && f <= fin;
+    };
+    
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📋 RESUMEN DE DATOS EN BD');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('Total expedientes en BD:', expedientes.length);
+    console.log('');
+    
+    // Mostrar resumen de campos clave
+    console.log('🔍 CAMPOS CLAVE POR PÓLIZA:');
+    expedientes.forEach((p, index) => {
+      console.log(`\nPóliza ${index + 1}: ${p.numero_poliza || 'Sin número'}`);
+      console.log(`  • ID: ${p.id}`);
+      console.log(`  • Etapa Activa: ${p.etapa_activa || 'Sin etapa'}`);
+      console.log(`  • Estatus Pago: ${p.estatus_pago || p.estatusPago || 'Sin estatus'}`);
+      console.log(`  • Fecha Emisión: ${p.fecha_emision || 'Sin fecha'}`);
+      console.log(`  • Fecha Pago: ${p.fecha_pago || 'Sin fecha'}`);
+      console.log(`  • Fecha Vencimiento Pago: ${p.fecha_vencimiento_pago || 'Sin fecha'}`);
+      console.log(`  • Prima Pagada: ${p.prima_pagada || 0}`);
+      console.log(`  • Total: ${p.total || 0}`);
+      console.log(`  • Monto Calculado: ${resolverMonto(p)}`);
+      console.log(`  • Tipo Movimiento: ${p.tipo_movimiento || 'Sin tipo'}`);
+      console.log(`  • Producto: ${p.producto || 'Sin producto'}`);
     });
     
-    const emitidasMesAnterior = polizasEmitidasTodas.filter(p => {
-      if (!p.fecha_emision) return false; // Sin fecha no puede estar en mes anterior
-      return esMesAnterior(p.fecha_emision);
-    });
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('💰 TARJETA 1: PRIMAS EMITIDAS');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📌 Campo fecha: fecha_emision');
+    console.log('📌 Rango: Mes actual + mes anterior');
+    console.log('📌 Filtro adicional: etapa_activa = Emitida/Renovada/Enviada al Cliente');
+    console.log('');
     
-    const ventasNuevasMesActual = emitidasMesActual.filter(p => p.tipo_movimiento === 'nueva' || p.tipo_movimiento === 'Nueva');
-    const renovacionesMesActual = emitidasMesActual.filter(p => p.tipo_movimiento === 'renovacion' || p.tipo_movimiento === 'Renovación');
+    // Filtrar por fecha_emision en rango de 2 meses
+    const emitidasMesActual = expedientes.filter(p => 
+      estaEnRango(p.fecha_emision, inicioMesActual, finMesActual) &&
+      ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(p.etapa_activa)
+    );
     
-    const primasVentasNuevas = ventasNuevasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
-    const primasRenovaciones = renovacionesMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const emitidasMesAnterior = expedientes.filter(p => 
+      estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior) &&
+      ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(p.etapa_activa)
+    );
     
     const primasEmitidasMesActual = emitidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasEmitidasMesAnterior = emitidasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
     
-    console.log('📄 Emitidas Mes Actual:', emitidasMesActual.length, '- $', primasEmitidasMesActual);
-    console.log('📄 Emitidas Mes Anterior:', emitidasMesAnterior.length, '- $', primasEmitidasMesAnterior);
-    console.log('💰 Ventas Nuevas:', ventasNuevasMesActual.length, '- $', primasVentasNuevas);
-    console.log('🔄 Renovaciones:', renovacionesMesActual.length, '- $', primasRenovaciones);
+    console.log(`✅ Mes Actual: ${emitidasMesActual.length} pólizas → $${primasEmitidasMesActual.toLocaleString('es-MX')}`);
+    emitidasMesActual.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_emision} | $${resolverMonto(p).toLocaleString()}`));
+    
+    console.log(`✅ Mes Anterior: ${emitidasMesAnterior.length} pólizas → $${primasEmitidasMesAnterior.toLocaleString('es-MX')}`);
+    emitidasMesAnterior.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_emision} | $${resolverMonto(p).toLocaleString()}`));
+    
+    console.log(`📊 TOTAL TARJETA: ${emitidasMesActual.length + emitidasMesAnterior.length} pólizas → $${primasEmitidasTotal.toLocaleString('es-MX')}`);
 
-    // PRIMAS PAGADAS - Basado SOLO en fecha_pago registrada (no en estatus)
-    console.log('🔍 DEBUG - Buscando pólizas pagadas...');
-    console.log('   Total expedientes:', expedientes.length);
-    
-    // Primero, veamos TODAS las pólizas con sus fechas clave
-    const expedientesConEstatus = expedientes.map(p => ({
-      id: p.id,
-      numero_poliza: p.numero_poliza,
-      estatus_pago: p.estatus_pago,
-      etapa_activa: p.etapa_activa,
-      fecha_pago: p.fecha_pago,
-      fecha_emision: p.fecha_emision
-    }));
-    console.log('   Todos los expedientes con estatus:', expedientesConEstatus);
-    
-    // Filtrar pólizas pagadas: requiere fecha_pago real y no cancelada
-    const polizasPagadasTodas = expedientes.filter(p => {
-      const pagadaPorFecha = !!p.fecha_pago;
-      const noEsCancelada = p.etapa_activa !== 'Cancelada';
-      if (pagadaPorFecha) {
-        console.log('   ✅ Póliza con fecha_pago registrada:', {
-          numero_poliza: p.numero_poliza,
-          fecha_pago: p.fecha_pago,
-          monto: resolverMonto(p)
-        });
-      }
-      return pagadaPorFecha && noEsCancelada;
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('💳 TARJETA 2: PRIMAS PAGADAS');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📌 Campo fecha: fecha_pago');
+    console.log('📌 Rango: Mes actual + mes anterior');
+    console.log('📌 Filtro adicional: estatus_pago = Pagado/Pagada');
+    console.log('');
+
+    // Filtrar por fecha_pago en rango de 2 meses Y estatus = Pagado
+    const pagadasMesActual = expedientes.filter(p => {
+      const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+      const pagado = estatus === 'pagado' || estatus === 'pagada';
+      return pagado && estaEnRango(p.fecha_pago, inicioMesActual, finMesActual);
     });
     
-    console.log('💰 Total pólizas PAGADAS encontradas:', polizasPagadasTodas.length);
+    const pagadasMesAnterior = expedientes.filter(p => {
+      const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+      const pagado = estatus === 'pagado' || estatus === 'pagada';
+      return pagado && estaEnRango(p.fecha_pago, inicioMesAnterior, finMesAnterior);
+    });
     
-    // DEBUG: Ver fechas de pago de TODAS las pagadas
-    console.log('📅 Fechas de pólizas PAGADAS:', polizasPagadasTodas.map(p => ({
-      numero: p.numero_poliza,
-      fecha_emision: p.fecha_emision,
-      fecha_pago: p.fecha_pago,
-      fecha_alta: p.fecha_alta,
-      monto: resolverMonto(p)
-    })));
-    
-    // Separar por mes actual vs mes anterior (exclusivamente por fecha_pago)
-    const pagadasMesActual = polizasPagadasTodas.filter(p => esMesActual(p.fecha_pago));
-    const pagadasMesAnterior = polizasPagadasTodas.filter(p => esMesAnterior(p.fecha_pago));
-    
-    const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
-    );
-    
-    const primasPagadasMesAnterior = pagadasMesAnterior.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
-    );
-    
+    const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasPagadasMesAnterior = pagadasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasPagadasTotal = primasPagadasMesActual + primasPagadasMesAnterior;
     
-    console.log('💵 Pagadas Mes Actual:', pagadasMesActual.length, '- $', primasPagadasMesActual);
-    console.log('💵 Pagadas Mes Anterior:', pagadasMesAnterior.length, '- $', primasPagadasMesAnterior);
-    console.log('💵 TOTAL PAGADAS:', polizasPagadasTodas.length, '- $', primasPagadasTotal);
+    console.log(`✅ Mes Actual: ${pagadasMesActual.length} pólizas → $${primasPagadasMesActual.toLocaleString('es-MX')}`);
+    pagadasMesActual.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_pago || 'SIN FECHA'} | Estatus: ${p.estatus_pago} | $${resolverMonto(p).toLocaleString()}`));
+    
+    console.log(`✅ Mes Anterior: ${pagadasMesAnterior.length} pólizas → $${primasPagadasMesAnterior.toLocaleString('es-MX')}`);
+    pagadasMesAnterior.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_pago || 'SIN FECHA'} | Estatus: ${p.estatus_pago} | $${resolverMonto(p).toLocaleString()}`));
+    
+    console.log(`📊 TOTAL TARJETA: ${pagadasMesActual.length + pagadasMesAnterior.length} pólizas → $${primasPagadasTotal.toLocaleString('es-MX')}`);
 
-    // PRIMAS POR VENCER - Basado SOLO en fechas (ignora estatus)
-    // Regla: fecha_vencimiento_pago (o proximo_pago) está en el mes actual y es futura o hoy
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('⏰ TARJETA 3: PRIMAS POR VENCER');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📌 Campo fecha: fecha_vencimiento_pago (o proximo_pago)');
+    console.log('📌 Rango: Solo mes actual');
+    console.log('📌 Condición: Fecha >= HOY (aún no vencida)');
+    console.log('');
+
+    // Filtrar por fecha_vencimiento_pago en mes actual Y que sea futura
     const polizasPorVencer = expedientes.filter(p => {
       const ref = p.fecha_vencimiento_pago || p.proximo_pago;
       if (!ref) return false;
       const fechaRef = new Date(ref);
-      return esMesActual(ref) && fechaRef >= hoy && p.etapa_activa !== 'Cancelada';
+      fechaRef.setHours(0, 0, 0, 0);
+      return estaEnRango(ref, inicioMesActual, finMesActual) && fechaRef >= hoy;
     });
     
-    const primasPorVencer = polizasPorVencer.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
-    );
+    const primasPorVencer = polizasPorVencer.reduce((sum, p) => sum + resolverMonto(p), 0);
     
-    console.log('⏰ Por Vencer Mes Actual:', polizasPorVencer.length, '- $', primasPorVencer);
+    console.log(`✅ Total: ${polizasPorVencer.length} pólizas → $${primasPorVencer.toLocaleString('es-MX')}`);
+    polizasPorVencer.forEach(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      const diasRestantes = Math.ceil((new Date(ref) - hoy) / (1000 * 60 * 60 * 24));
+      console.log(`    ${p.numero_poliza} | Vence: ${ref} (en ${diasRestantes} días) | $${resolverMonto(p).toLocaleString()}`);
+    });
+    
+    console.log(`📊 TOTAL TARJETA: ${polizasPorVencer.length} pólizas → $${primasPorVencer.toLocaleString('es-MX')}`);
 
-    // PRIMAS VENCIDAS - Basado SOLO en fechas (ignora estatus)
-    // Regla: hoy > fecha_vencimiento_pago + periodo_gracia
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('🚨 TARJETA 4: PRIMAS VENCIDAS');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📌 Campo fecha: fecha_vencimiento_pago');
+    console.log('📌 Condición: HOY > fecha_vencimiento (sin periodo de gracia)');
+    console.log('📌 Se divide en: Mes Actual + Meses Anteriores (acumulado)');
+    console.log('');
+
+    // Filtrar todas las pólizas vencidas (hoy > fecha_vencimiento)
     const polizasVencidasTodas = expedientes.filter(p => {
+      // Excluir canceladas
+      if (p.etapa_activa === 'Cancelada') return false;
+      
       const ref = p.fecha_vencimiento_pago || p.proximo_pago;
       if (!ref) return false;
       const venc = new Date(ref);
-      const gracia = Number(p.periodo_gracia || 0);
-      const limite = new Date(venc);
-      limite.setDate(limite.getDate() + gracia);
-      return hoy > limite && p.etapa_activa !== 'Cancelada';
+      venc.setHours(0, 0, 0, 0);
+      // Simple: si la fecha ya pasó, está vencida
+      return hoy > venc;
     });
     
-    const vencidasMesActual = polizasVencidasTodas.filter(p => esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
-    const vencidasAnteriores = polizasVencidasTodas.filter(p => !esMesActual(p.fecha_vencimiento_pago || p.proximo_pago));
-    
-    const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
+    // Separar por mes de vencimiento
+    const vencidasMesActual = polizasVencidasTodas.filter(p => 
+      estaEnRango(p.fecha_vencimiento_pago || p.proximo_pago, inicioMesActual, finMesActual)
     );
     
-    const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
-    );
+    const vencidasAnteriores = polizasVencidasTodas.filter(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      if (!ref) return false;
+      const f = new Date(ref);
+      f.setHours(0, 0, 0, 0);
+      return f < inicioMesActual; // Vencieron antes del mes actual
+    });
     
+    const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
     
-    console.log('🚨 Vencidas Mes Actual:', vencidasMesActual.length, '- $', primasVencidasMesActual);
-    console.log('🚨 Vencidas Anteriores:', vencidasAnteriores.length, '- $', primasVencidasAnteriores);
-    console.log('🚨 Vencidas Total:', polizasVencidasTodas.length, '- $', primasVencidasTotal);
-
-    // PRIMAS CANCELADAS - Pólizas canceladas (con o sin fecha de cancelación)
-    // Nota: etapa_activa = 'Cancelada' describe el estado operativo
-    const polizasCanceladas = expedientes.filter(exp => {
-      if (exp.etapa_activa !== 'Cancelada') return false;
-      
-      // Si tiene fecha de cancelación, verificar que sea del mes actual
-      if (exp.fecha_cancelacion) {
-        return esMesActual(exp.fecha_cancelacion);
-      }
-      
-      // Si NO tiene fecha de cancelación, incluir (son cancelaciones recientes)
-      return true;
+    console.log(`✅ Mes Actual: ${vencidasMesActual.length} pólizas → $${primasVencidasMesActual.toLocaleString('es-MX')}`);
+    vencidasMesActual.forEach(p => {
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      const fechaVenc = new Date(ref);
+      fechaVenc.setHours(0, 0, 0, 0);
+      const diasVencido = Math.ceil((hoy - fechaVenc) / (1000 * 60 * 60 * 24));
+      console.log(`    ${p.numero_poliza} | Vencida: ${ref} | Hace ${diasVencido} días | $${resolverMonto(p).toLocaleString()}`);
     });
     
-    const primasCanceladas = polizasCanceladas.reduce((sum, p) => 
-      sum + resolverMonto(p), 0
-    );
+    console.log(`✅ Meses Anteriores: ${vencidasAnteriores.length} pólizas → $${primasVencidasAnteriores.toLocaleString('es-MX')}`);
+    vencidasAnteriores.slice(0, 5).forEach(p => { // Mostrar solo primeras 5
+      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
+      const fechaVenc = new Date(ref);
+      fechaVenc.setHours(0, 0, 0, 0);
+      const diasVencido = Math.ceil((hoy - fechaVenc) / (1000 * 60 * 60 * 24));
+      console.log(`    ${p.numero_poliza} | Vencida: ${ref} | Hace ${diasVencido} días | $${resolverMonto(p).toLocaleString()}`);
+    });
+    if (vencidasAnteriores.length > 5) console.log(`    ... y ${vencidasAnteriores.length - 5} más`);
+    
+    console.log(`📊 TOTAL TARJETA: ${polizasVencidasTodas.length} pólizas → $${primasVencidasTotal.toLocaleString('es-MX')}`);
 
+    console.log('');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('❌ TARJETA 5: PRIMAS CANCELADAS');
+    console.log('─────────────────────────────────────────────────────────────────');
+    console.log('📌 Criterio: etapa_activa = "Cancelada" (por fecha_cancelacion)');
+    console.log('📌 Rango mes actual:', inicioMesActual.toLocaleDateString('es-MX'), 'a', finMesActual.toLocaleDateString('es-MX'));
+    console.log('📌 Rango mes anterior:', inicioMesAnterior.toLocaleDateString('es-MX'), 'a', finMesAnterior.toLocaleDateString('es-MX'));
+    console.log('');
+
+    // 🔍 DEBUG: Primero ver TODAS las canceladas sin filtro
+    const todasLasCanceladas = expedientes.filter(p => p.etapa_activa === 'Cancelada');
+    console.log(`🔍 DEBUG - Total pólizas con etapa_activa='Cancelada': ${todasLasCanceladas.length}`);
+    todasLasCanceladas.forEach(p => {
+      console.log(`    ${p.numero_poliza} | Etapa: ${p.etapa_activa} | fecha_cancelacion: ${p.fecha_cancelacion || 'SIN FECHA'} | $${resolverMonto(p).toLocaleString()}`);
+    });
+    console.log('');
+
+    // Filtrar canceladas del mes actual
+    // ⚠️ IMPORTANTE: Si no tienen fecha_cancelacion, asumimos que se cancelaron HOY (mes actual)
+    const canceladasMesActual = expedientes.filter(p => {
+      if (p.etapa_activa !== 'Cancelada') return false;
+      
+      // Si NO tiene fecha_cancelacion, considerar que es del mes actual
+      if (!p.fecha_cancelacion) return true;
+      
+      // Si tiene fecha, verificar que esté en rango del mes actual
+      return estaEnRango(p.fecha_cancelacion, inicioMesActual, finMesActual);
+    });
+    
+    // Filtrar canceladas del mes anterior
+    const canceladasMesAnterior = expedientes.filter(p => 
+      p.etapa_activa === 'Cancelada' && 
+      p.fecha_cancelacion && 
+      estaEnRango(p.fecha_cancelacion, inicioMesAnterior, finMesAnterior)
+    );
+    
+    const primasCanceladasMesActual = canceladasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasCanceladasMesAnterior = canceladasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasCanceladasTotal = primasCanceladasMesActual + primasCanceladasMesAnterior;
+    
+    console.log(`📊 Mes actual: ${canceladasMesActual.length} pólizas → $${primasCanceladasMesActual.toLocaleString('es-MX')}`);
+    canceladasMesActual.slice(0, 5).forEach(p => {
+      console.log(`    ${p.numero_poliza} | Cancelada: ${p.fecha_cancelacion} | $${resolverMonto(p).toLocaleString()}`);
+    });
+    if (canceladasMesActual.length > 5) console.log(`    ... y ${canceladasMesActual.length - 5} más`);
+    
+    console.log(`📊 Mes anterior: ${canceladasMesAnterior.length} pólizas → $${primasCanceladasMesAnterior.toLocaleString('es-MX')}`);
+    canceladasMesAnterior.slice(0, 5).forEach(p => {
+      console.log(`    ${p.numero_poliza} | Cancelada: ${p.fecha_cancelacion} | $${resolverMonto(p).toLocaleString()}`);
+    });
+    if (canceladasMesAnterior.length > 5) console.log(`    ... y ${canceladasMesAnterior.length - 5} más`);
+    
+    console.log(`📊 TOTAL TARJETA: ${canceladasMesActual.length + canceladasMesAnterior.length} pólizas → $${primasCanceladasTotal.toLocaleString('es-MX')}`);
+
+    
+    // ==================== CONSTRUIR OBJETO DE ESTADÍSTICAS ====================
     const stats = {
       primasEmitidas: {
         monto: primasEmitidasTotal,
@@ -348,14 +563,6 @@ const DashboardComponent = () => {
         mesAnterior: {
           monto: primasEmitidasMesAnterior,
           cantidad: emitidasMesAnterior.length
-        },
-        ventasNuevas: {
-          monto: primasVentasNuevas,
-          cantidad: ventasNuevasMesActual.length
-        },
-        renovaciones: {
-          monto: primasRenovaciones,
-          cantidad: renovacionesMesActual.length
         }
       },
       primasPagadas: {
@@ -387,12 +594,35 @@ const DashboardComponent = () => {
         }
       },
       primasCanceladas: {
-        monto: primasCanceladas,
-        cantidad: polizasCanceladas.length
+        monto: primasCanceladasTotal,
+        cantidad: canceladasMesActual.length + canceladasMesAnterior.length,
+        mesActual: {
+          monto: primasCanceladasMesActual,
+          cantidad: canceladasMesActual.length
+        },
+        mesAnterior: {
+          monto: primasCanceladasMesAnterior,
+          cantidad: canceladasMesAnterior.length
+        }
       }
     };
     
-    console.log('💰 Estadísticas calculadas (MES ACTUAL):', stats);
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('📋 RESUMEN FINAL - PANEL FINANCIERO');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('');
+    console.log('💰 TARJETAS DEL DASHBOARD (Cálculo por rangos de fechas):');
+    console.log(`  1️⃣ Emitidas:    ${stats.primasEmitidas.cantidad} pólizas → $${stats.primasEmitidas.monto.toLocaleString('es-MX')}`);
+    console.log(`  2️⃣ Pagadas:     ${stats.primasPagadas.cantidad} pólizas → $${stats.primasPagadas.monto.toLocaleString('es-MX')}`);
+    console.log(`  3️⃣ Por Vencer:  ${stats.primasPorVencer.cantidad} pólizas → $${stats.primasPorVencer.monto.toLocaleString('es-MX')}`);
+    console.log(`  4️⃣ Vencidas:    ${stats.primasVencidas.cantidad} pólizas → $${stats.primasVencidas.monto.toLocaleString('es-MX')}`);
+    console.log(`  5️⃣ Canceladas:  ${stats.primasCanceladas.cantidad} pólizas → $${stats.primasCanceladas.monto.toLocaleString('es-MX')}`);
+    console.log('');
+    console.log('✅ Estrategia: Filtros directos por rango de fechas (más simple y preciso)');
+    console.log('═══════════════════════════════════════════════════════════════');
+    console.log('');
+    
     return stats;
   }, [expedientes]);
 
@@ -644,12 +874,14 @@ const DashboardComponent = () => {
           <div className="row g-3 mb-4">
             {/* Primas Emitidas */}
             <div className="col-md-6 col-lg-4 col-xl">
-              <div 
-                className="executive-card p-3" 
-                style={{ cursor: 'pointer' }}
-                onClick={() => abrirDesglose('emitidas')}
-              >
-                <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="executive-card p-3">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-3"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onClick={() => abrirDesglose('emitidas', 'mesActual')}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
                   <div style={{ 
                     width: '48px', 
                     height: '48px', 
@@ -666,26 +898,28 @@ const DashboardComponent = () => {
                       Primas Emitidas
                     </div>
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#3B82F6' }}>
-                      ${estadisticasFinancieras.primasEmitidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
+                    <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} pólizas • Mes actual
+                    </small>
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between mb-1">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#3B82F6' }}></span>
-                      Mes actual: {estadisticasFinancieras.primasEmitidas.mesActual.cantidad}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#3B82F6', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                  <div className="d-flex justify-content-between">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#2563EB' }}></span>
+                  <div 
+                    className="d-flex justify-content-between p-2 rounded" 
+                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirDesglose('emitidas', 'mesAnterior');
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       Mes anterior: {estadisticasFinancieras.primasEmitidas.mesAnterior.cantidad}
                     </span>
-                    <span style={{ fontSize: '11px', color: '#2563EB', fontWeight: '600' }}>
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       ${estadisticasFinancieras.primasEmitidas.mesAnterior.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
@@ -695,12 +929,14 @@ const DashboardComponent = () => {
 
             {/* Primas Pagadas */}
             <div className="col-md-6 col-lg-4 col-xl">
-              <div 
-                className="executive-card p-3"
-                style={{ cursor: 'pointer' }}
-                onClick={() => abrirDesglose('pagadas')}
-              >
-                <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="executive-card p-3">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-3"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onClick={() => abrirDesglose('pagadas', 'mesActual')}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
                   <div style={{ 
                     width: '48px', 
                     height: '48px', 
@@ -717,26 +953,28 @@ const DashboardComponent = () => {
                       Primas Pagadas
                     </div>
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#10B981' }}>
-                      ${estadisticasFinancieras.primasPagadas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      ${estadisticasFinancieras.primasPagadas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
+                    <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasPagadas.mesActual.cantidad} pólizas • Mes actual
+                    </small>
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between mb-1">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#10B981' }}></span>
-                      Mes actual: {estadisticasFinancieras.primasPagadas.mesActual.cantidad}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#10B981', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasPagadas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                  <div className="d-flex justify-content-between">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#059669' }}></span>
+                  <div 
+                    className="d-flex justify-content-between p-2 rounded" 
+                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirDesglose('pagadas', 'mesAnterior');
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       Mes anterior: {estadisticasFinancieras.primasPagadas.mesAnterior.cantidad}
                     </span>
-                    <span style={{ fontSize: '11px', color: '#059669', fontWeight: '600' }}>
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       ${estadisticasFinancieras.primasPagadas.mesAnterior.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
@@ -746,12 +984,14 @@ const DashboardComponent = () => {
 
             {/* Primas Por Vencer */}
             <div className="col-md-6 col-lg-4 col-xl">
-              <div 
-                className="executive-card p-3"
-                style={{ cursor: 'pointer' }}
-                onClick={() => abrirDesglose('porVencer')}
-              >
-                <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="executive-card p-3">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-3"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onClick={() => abrirDesglose('porVencer', 'mesActual')}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
                   <div style={{ 
                     width: '48px', 
                     height: '48px', 
@@ -770,32 +1010,43 @@ const DashboardComponent = () => {
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#F59E0B' }}>
                       ${estadisticasFinancieras.primasPorVencer.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
+                    <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasPorVencer.cantidad} pólizas • Mes actual
+                    </small>
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between mb-1">
-                    <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasPorVencer.cantidad} pólizas este mes
+                  <div 
+                    className="d-flex justify-content-between p-2 rounded" 
+                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirDesglose('porVencer', 'mesAnterior');
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                      Mes anterior: 0
                     </span>
-                    <span className="metric-badge" style={{ background: '#FEF3C7', color: '#D97706' }}>
-                      <Clock size={10} className="me-1" />
-                      Mes en curso
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                      $0
                     </span>
                   </div>
-                  {/* Línea invisible para mantener altura consistente */}
-                  <div style={{ height: '16px' }}>&nbsp;</div>
                 </div>
               </div>
             </div>
 
             {/* Primas Vencidas */}
             <div className="col-md-6 col-lg-6 col-xl">
-              <div 
-                className="executive-card p-3"
-                style={{ cursor: 'pointer' }}
-                onClick={() => abrirDesglose('vencidas')}
-              >
-                <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="executive-card p-3">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-3"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onClick={() => abrirDesglose('vencidas', 'mesActual')}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
                   <div style={{ 
                     width: '48px', 
                     height: '48px', 
@@ -812,26 +1063,28 @@ const DashboardComponent = () => {
                       Vencidas
                     </div>
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#EF4444' }}>
-                      ${estadisticasFinancieras.primasVencidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
+                    <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasVencidas.mesActual.cantidad} pólizas • Mes actual
+                    </small>
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex justify-content-between mb-1">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#EF4444' }}></span>
-                      Mes actual: {estadisticasFinancieras.primasVencidas.mesActual.cantidad}
+                  <div 
+                    className="d-flex justify-content-between p-2 rounded" 
+                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirDesglose('vencidas', 'mesAnterior');
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                      Mes anterior: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
                     </span>
-                    <span style={{ fontSize: '11px', color: '#EF4444', fontWeight: '600' }}>
-                      ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
-                  <div className="d-flex justify-content-between">
-                    <span style={{ fontSize: '11px', color: '#6B7280' }}>
-                      <span className="status-dot" style={{ background: '#DC2626' }}></span>
-                      Anteriores: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#DC2626', fontWeight: '600' }}>
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       ${estadisticasFinancieras.primasVencidas.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
@@ -841,12 +1094,14 @@ const DashboardComponent = () => {
 
             {/* Primas Canceladas */}
             <div className="col-md-6 col-lg-6 col-xl">
-              <div 
-                className="executive-card p-3"
-                style={{ cursor: 'pointer' }}
-                onClick={() => abrirDesglose('canceladas')}
-              >
-                <div className="d-flex align-items-center justify-content-between mb-3">
+              <div className="executive-card p-3">
+                <div 
+                  className="d-flex align-items-center justify-content-between mb-3"
+                  style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
+                  onClick={() => abrirDesglose('canceladas', 'mesActual')}
+                  onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
+                  onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                >
                   <div style={{ 
                     width: '48px', 
                     height: '48px', 
@@ -863,22 +1118,31 @@ const DashboardComponent = () => {
                       Canceladas
                     </div>
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#6B7280' }}>
-                      ${estadisticasFinancieras.primasCanceladas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      ${estadisticasFinancieras.primasCanceladas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
+                    <small style={{ fontSize: '11px', color: '#6B7280' }}>
+                      {estadisticasFinancieras.primasCanceladas.mesActual.cantidad} pólizas • Mes actual
+                    </small>
                   </div>
                 </div>
                 <div className="pt-2 border-top">
-                  <div className="d-flex align-items-center justify-content-between mb-1">
-                    <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasCanceladas.cantidad} pólizas
+                  <div 
+                    className="d-flex justify-content-between p-2 rounded" 
+                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      abrirDesglose('canceladas', 'mesAnterior');
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                      Mes anterior: {estadisticasFinancieras.primasCanceladas.mesAnterior.cantidad}
                     </span>
-                    <span className="metric-badge" style={{ background: '#F3F4F6', color: '#6B7280' }}>
-                      <X size={10} className="me-1" />
-                      Perdidas
+                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
+                      ${estadisticasFinancieras.primasCanceladas.mesAnterior.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </span>
                   </div>
-                  {/* Línea invisible para mantener altura consistente */}
-                  <div style={{ height: '16px' }}>&nbsp;</div>
                 </div>
               </div>
             </div>
@@ -1022,7 +1286,7 @@ const DashboardComponent = () => {
       {/* MODAL DE DESGLOSE - Por Producto */}
       {modalDesglose && (
         <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setModalDesglose(null)}>
-          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '95%', width: '1400px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
               {/* Header del modal */}
               <div className="modal-header" style={{ background: modalDesglose.color, color: 'white' }}>
@@ -1072,19 +1336,101 @@ const DashboardComponent = () => {
                         <table className="table table-hover mb-0 compact-table">
                           <thead>
                             <tr>
+                              <th>Fechas</th>
                               <th>Póliza</th>
                               <th>Cliente</th>
+                              {/* Columna de Vehículo solo para productos de Autos */}
+                              {producto.toLowerCase().includes('auto') && (
+                                <th>Vehículo</th>
+                              )}
                               <th>Aseguradora</th>
                               <th>Estado</th>
-                              {modalDesglose.tipo === 'pagadas' ? (
-                                <th>Pago</th>
-                              ) : (modalDesglose.tipo !== 'emitidas' && <th>Fecha Vencimiento</th>)}
                               <th className="text-end">Importe</th>
                             </tr>
                           </thead>
                           <tbody>
                             {data.polizas.map((poliza, pIdx) => (
                               <tr key={pIdx} className="data-row">
+                                <td>
+                                  <div style={{ fontSize: '11px' }}>
+                                    {modalDesglose.tipo === 'emitidas' && poliza.fecha_captura && (
+                                      <div className="mb-1">
+                                        <strong className="d-block text-muted">Captura:</strong>
+                                        <span className="text-muted">
+                                          {formatearFecha(poliza.fecha_captura)}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {modalDesglose.tipo === 'emitidas' && poliza.fecha_emision && (
+                                      <div>
+                                        <strong className="d-block text-muted">Emisión:</strong>
+                                        <span className="text-dark">
+                                          {formatearFecha(poliza.fecha_emision)}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {modalDesglose.tipo === 'pagadas' && (
+                                      <>
+                                        {poliza.fecha_emision && (
+                                          <div className="mb-1">
+                                            <strong className="d-block text-muted">Emisión:</strong>
+                                            <span className="text-muted">
+                                              {formatearFecha(poliza.fecha_emision)}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {poliza.fecha_pago && (
+                                          <div>
+                                            <strong className="d-block text-muted">Pago:</strong>
+                                            <span className="text-dark">
+                                              {formatearFecha(poliza.fecha_pago)}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                    {modalDesglose.tipo === 'canceladas' && (
+                                      <>
+                                        {poliza.fecha_emision && (
+                                          <div className="mb-1">
+                                            <strong className="d-block text-muted">Emisión:</strong>
+                                            <span className="text-muted">
+                                              {formatearFecha(poliza.fecha_emision)}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {poliza.fecha_cancelacion && (
+                                          <div>
+                                            <strong className="d-block text-muted">Cancelación:</strong>
+                                            <span className="text-dark">
+                                              {formatearFecha(poliza.fecha_cancelacion)}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                    {(modalDesglose.tipo === 'porVencer' || modalDesglose.tipo === 'vencidas') && (
+                                      <>
+                                        {poliza.fecha_emision && (
+                                          <div className="mb-1">
+                                            <strong className="d-block text-muted">Emisión:</strong>
+                                            <span className="text-muted">
+                                              {formatearFecha(poliza.fecha_emision)}
+                                            </span>
+                                          </div>
+                                        )}
+                                        {(poliza.fecha_vencimiento_pago || poliza.proximo_pago) && (
+                                          <div>
+                                            <strong className="d-block text-muted">Vencimiento:</strong>
+                                            <span className="text-dark">
+                                              {formatearFecha(poliza.fecha_vencimiento_pago || poliza.proximo_pago)}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                </td>
                                 <td>
                                   <div>
                                     <div className="fw-semibold" style={{ color: '#111827', fontSize: '13px' }}>
@@ -1097,14 +1443,51 @@ const DashboardComponent = () => {
                                 </td>
                                 <td>
                                   <div>
+                                    {/* Nombre del Cliente según tipo de persona */}
                                     <div className="fw-medium" style={{ fontSize: '13px' }}>
-                                      {poliza.cliente_nombre || poliza.nombre || 'Sin nombre'}
+                                      {poliza.tipoPersona === 'Persona Moral' || poliza.tipo_persona === 'Moral'
+                                        ? (poliza.razonSocial || poliza.razon_social || poliza.cliente_nombre || 'Sin nombre')
+                                        : (poliza.cliente_nombre || 
+                                           `${poliza.nombre || ''} ${poliza.apellidoPaterno || poliza.apellido_paterno || ''}`.trim() || 
+                                           'Sin nombre')
+                                      }
                                     </div>
-                                    <small className="text-muted d-block">
-                                      {poliza.cliente_id || 'Sin código'}
-                                    </small>
+                                    {/* Datos de contacto */}
+                                    <div className="text-muted mt-1" style={{ fontSize: '11px', borderTop: '1px solid #eee', paddingTop: '3px' }}>
+                                      {(poliza.email || poliza.contacto_email) && (
+                                        <div className="mb-1">
+                                          📧 {poliza.email || poliza.contacto_email}
+                                        </div>
+                                      )}
+                                      {(poliza.telefonoMovil || poliza.telefono_movil || poliza.contacto_telefono_movil) && (
+                                        <div>
+                                          📱 {poliza.telefonoMovil || poliza.telefono_movil || poliza.contacto_telefono_movil}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
+                                {/* Columna de Vehículo solo para productos de Autos */}
+                                {producto.toLowerCase().includes('auto') && (
+                                  <td>
+                                    <div style={{ fontSize: '12px' }}>
+                                      {poliza.marca || poliza.modelo || poliza.anio ? (
+                                        <>
+                                          <div className="fw-medium">
+                                            {poliza.marca} {poliza.modelo}
+                                          </div>
+                                          <div className="text-muted" style={{ fontSize: '11px' }}>
+                                            {poliza.anio && <span>Año: {poliza.anio}</span>}
+                                            {poliza.anio && poliza.placas && <span> • </span>}
+                                            {poliza.placas && <span>🚗 {poliza.placas}</span>}
+                                          </div>
+                                        </>
+                                      ) : (
+                                        <span className="text-muted">Sin datos</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                )}
                                 <td>
                                   <div>
                                     <div style={{ fontSize: '13px' }}>
@@ -1154,49 +1537,13 @@ const DashboardComponent = () => {
                                     )}
                                   </div>
                                 </td>
-                                {modalDesglose.tipo === 'pagadas' ? (
-                                  <td>
-                                    <small className="d-block">
-                                      <strong>Vencimiento:</strong> {poliza.fecha_vencimiento_pago
-                                        ? new Date(poliza.fecha_vencimiento_pago).toLocaleDateString('es-MX', {
-                                            day: '2-digit',
-                                            month: 'short',
-                                            year: 'numeric'
-                                          })
-                                        : 'Sin fecha'}
-                                    </small>
-                                    <small className="d-block">
-                                      <strong>Pago:</strong> {poliza.fecha_pago
-                                        ? new Date(poliza.fecha_pago).toLocaleDateString('es-MX', {
-                                            day: '2-digit',
-                                            month: 'short',
-                                            year: 'numeric'
-                                          })
-                                        : 'Sin fecha'}
-                                    </small>
-                                  </td>
-                                ) : (modalDesglose.tipo !== 'emitidas' ? (
-                                  <td>
-                                    <small className={`${poliza.fecha_vencimiento_pago && new Date(poliza.fecha_vencimiento_pago) < new Date() && poliza.estatus_pago === 'Vencido' ? 'text-danger fw-bold' : ''}`}>
-                                      {(poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia)
-                                        ? new Date(
-                                            poliza.fecha_vencimiento_pago || poliza.proximo_pago || poliza.termino_vigencia
-                                          ).toLocaleDateString('es-MX', {
-                                            day: '2-digit',
-                                            month: 'short',
-                                            year: 'numeric'
-                                          })
-                                        : 'Sin fecha'}
-                                    </small>
-                                  </td>
-                                ) : null)}
                                 <td className="text-end">
                                   <span className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
                                     ${resolverMonto(poliza).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                                   </span>
-                                  {(poliza.prima_pagada || poliza.total) && (
+                                  {poliza.tipo_pago && (
                                     <small className="text-muted d-block" style={{ fontSize: '10px' }}>
-                                      Prima: {(poliza.prima_pagada || poliza.total || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                      {poliza.tipo_pago}{poliza.frecuenciaPago ? ` - ${poliza.frecuenciaPago}` : ''}
                                     </small>
                                   )}
                                 </td>
@@ -1205,7 +1552,7 @@ const DashboardComponent = () => {
                           </tbody>
                           <tfoot style={{ background: '#F9FAFB' }}>
                             <tr>
-                              <td colSpan={modalDesglose.tipo === 'pagadas' ? 6 : (modalDesglose.tipo !== 'emitidas' ? 6 : 5)} className="text-end fw-bold">
+                              <td colSpan={producto.toLowerCase().includes('auto') ? 6 : 5} className="text-end fw-bold">
                                 Subtotal {producto}:
                               </td>
                               <td className="text-end fw-bold" style={{ color: modalDesglose.color }}>

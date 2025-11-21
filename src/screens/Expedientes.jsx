@@ -65,10 +65,11 @@ import * as pdfService from '../services/pdfService';
 import * as notificacionesService from '../services/notificacionesService';
 import * as clientesService from '../services/clientesService';
 import * as historialService from '../services/historialExpedienteService';
+import { registrarNotificacion, TIPOS_NOTIFICACION, TIPOS_MENSAJE } from '../services/notificacionesService';
 import TimelineExpediente from '../components/TimelineExpediente';
 
 // Configurar worker de PDF.js
-pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdf.worker.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
 
 // ============= CONSTANTES GLOBALES =============
 const CONSTANTS = {
@@ -128,12 +129,16 @@ const utils = {
         'Autorizado': 'bg-primary',
         'Cotización enviada': 'bg-warning',
         'En proceso emisión': 'bg-info',
-        'Pendiente de pago': 'bg-warning'
+        'Pendiente de pago': 'bg-warning',
+        'En Vigencia': 'bg-success',
+        'Vencida': 'bg-danger'
       },
       pago: {
         'Pagado': 'bg-success',
         'Vencido': 'bg-danger',
-        'Pago por vencer': 'bg-warning',
+        'Por Vencer': 'bg-warning',
+        'Pendiente': 'bg-info',
+        'Cancelado': 'bg-dark',
         'Sin definir': 'bg-secondary'
       },
       tipo_pago: {
@@ -649,6 +654,41 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Estados para captura de RFC
   const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
   const [rfcCapturado, setRfcCapturado] = useState('');
+  
+  // Ref para el input file
+  const fileInputRef = useRef(null);
+  const yaAbriSelectorRef = useRef(false); // Bandera para evitar abrir selector múltiples veces
+  
+  // Abrir selector automáticamente solo la primera vez
+  useEffect(() => {
+    // Si ya abrimos el selector o ya procesamos un archivo, no hacer nada
+    if (yaAbriSelectorRef.current) {
+      return;
+    }
+    
+    // Verificar si ya hay un archivo seleccionado desde el modal anterior
+    if (window._selectedPDFFile) {
+      yaAbriSelectorRef.current = true; // Marcar como procesado
+      const file = window._selectedPDFFile;
+      delete window._selectedPDFFile; // Limpiar
+      // Procesar el archivo directamente
+      setArchivo(file);
+      setInformacionArchivo({
+        nombre: file.name,
+        tamaño: `${(file.size / 1024).toFixed(2)} KB`,
+        tipo: file.type,
+        fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
+      });
+      procesarPDF(file);
+    } else if (estado === 'esperando' && fileInputRef.current) {
+      // Si no hay archivo, abrir el selector (solo una vez)
+      yaAbriSelectorRef.current = true; // Marcar antes de abrir
+      const timer = setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, []); // Solo al montar el componente
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -659,87 +699,76 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       
-      // Extraer PÁGINAS 1 Y 2 (algunos datos están en página 1)
       console.log('📄 Total de páginas:', pdf.numPages);
       
-      if (pdf.numPages < 2) {
-        throw new Error('El PDF debe tener al menos 2 páginas');
+      if (pdf.numPages < 1) {
+        throw new Error('El PDF debe tener al menos 1 página');
       }
       
-      // PÁGINA 1: Póliza, Endoso, Inciso, Agente
-      const page1 = await pdf.getPage(1);
-      const textContent1 = await page1.getTextContent();
+      // ==================== EXTRAER TODAS LAS PÁGINAS ====================
+      const todasLasPaginas = [];
+      let textoPagina1 = '';
+      let textoAvisoDeCobro = '';
+      let textoPaginaCaratula = '';
       
-      const lineas1 = {};
-      textContent1.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas1[y]) lineas1[y] = [];
-        lineas1[y].push({
-          text: item.str,
-          x: item.transform[4]
+      for (let numPagina = 1; numPagina <= pdf.numPages; numPagina++) {
+        const page = await pdf.getPage(numPagina);
+        const textContent = await page.getTextContent();
+        
+        const lineas = {};
+        textContent.items.forEach(item => {
+          const y = Math.round(item.transform[5]);
+          if (!lineas[y]) lineas[y] = [];
+          lineas[y].push({
+            text: item.str,
+            x: item.transform[4]
+          });
         });
-      });
-      
-      const textoPagina1 = Object.keys(lineas1)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas1[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
-      
-      // PÁGINA 2: Resto de datos
-      const page2 = await pdf.getPage(2);
-      const textContent = await page2.getTextContent();
-      
-      const lineas = {};
-      textContent.items.forEach(item => {
-        const y = Math.round(item.transform[5]);
-        if (!lineas[y]) lineas[y] = [];
-        lineas[y].push({
-          text: item.str,
-          x: item.transform[4]
+        
+        const textoPagina = Object.keys(lineas)
+          .sort((a, b) => b - a)
+          .map(y => {
+            return lineas[y]
+              .sort((a, b) => a.x - b.x)
+              .map(item => item.text)
+              .join(' ');
+          })
+          .join('\n');
+        
+        todasLasPaginas.push({
+          numero: numPagina,
+          texto: textoPagina
         });
-      });
-      
-      const textoCompleto = Object.keys(lineas)
-        .sort((a, b) => b - a)
-        .map(y => {
-          return lineas[y]
-            .sort((a, b) => a.x - b.x)
-            .map(item => item.text)
-            .join(' ');
-        })
-        .join('\n');
-      
-      // TAMBIÉN extraer TODO el texto sin ordenar por posición (captura mejor texto en cuadros)
-      const textoCompletoSinOrdenar = textContent.items.map(item => item.str).join(' ');
-
-      console.log('📄 Texto página 1 (primeras 20 líneas):\n', textoPagina1.split('\n').slice(0, 20).join('\n'));
-      console.log('📄 Texto página 2 (primeras 50 líneas):\n', textoCompleto.split('\n').slice(0, 50).join('\n'));
-      console.log('📄 Texto página 2 (ÚLTIMAS 50 líneas):\n', textoCompleto.split('\n').slice(-50).join('\n'));
-      
-      // DEBUG: Buscar si "TRIMESTRAL" aparece en alguna página
-      console.log('🔍 BUSCAR TRIMESTRAL en pág 1:', textoPagina1.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      console.log('🔍 BUSCAR TRIMESTRAL en pág 2:', textoCompleto.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      console.log('🔍 BUSCAR TRIMESTRAL en texto sin ordenar:', textoCompletoSinOrdenar.includes('TRIMESTRAL') ? '✅ SÍ' : '❌ NO');
-      
-      // Si existe, mostrar contexto
-      if (textoCompleto.includes('TRIMESTRAL')) {
-        const idx = textoCompleto.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (ordenado):', textoCompleto.substring(Math.max(0, idx - 100), idx + 100));
+        
+        // Guardar página 1 para detección de aseguradora
+        if (numPagina === 1) {
+          textoPagina1 = textoPagina;
+        }
+        
+        // Buscar página con "AVISO DE COBRO" o "Prima Neta"
+        if (textoPagina.match(/AVISO\s+DE\s+COBRO|Prima\s+Neta|PRIMA\s+NETA/i)) {
+          textoAvisoDeCobro = textoPagina;
+        }
+        
+        // Buscar página con "CARÁTULA" o datos del vehículo
+        if (textoPagina.match(/CARÁTULA|CAR[AÁ]TULA|Descripción\s+del\s+vehículo|DESCRIPCI[ÓO]N\s+DEL\s+VEH[ÍI]CULO/i)) {
+          textoPaginaCaratula = textoPagina;
+        }
       }
-      if (textoCompletoSinOrdenar.includes('TRIMESTRAL')) {
-        const idx = textoCompletoSinOrdenar.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (sin ordenar):', textoCompletoSinOrdenar.substring(Math.max(0, idx - 100), idx + 100));
+      
+      // Si no encontramos aviso de cobro, usar página 2 como fallback
+      if (!textoAvisoDeCobro && todasLasPaginas.length >= 2) {
+        textoAvisoDeCobro = todasLasPaginas[1].texto;
       }
-      if (textoPagina1.includes('TRIMESTRAL')) {
-        const idx = textoPagina1.indexOf('TRIMESTRAL');
-        console.log('📍 Contexto de TRIMESTRAL (pág 1):', textoPagina1.substring(Math.max(0, idx - 100), idx + 100));
+      
+      // Si no encontramos carátula, usar página 2 como fallback
+      if (!textoPaginaCaratula && todasLasPaginas.length >= 2) {
+        textoPaginaCaratula = todasLasPaginas[1].texto;
       }
-
+      
+      // Crear textoCompleto con todas las páginas
+      const textoCompleto = todasLasPaginas.map(p => p.texto).join('\n\n');
+      
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
@@ -828,628 +857,75 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // Función para extraer datos usando expresiones regulares
-      const extraerDato = (patron, texto, grupo = 1) => {
-        try {
-          const match = texto.match(patron);
-          return match && match[grupo] ? match[grupo].trim() : '';
-        } catch (error) {
-          console.warn('Error en extraerDato:', error, 'Patrón:', patron);
-          return '';
-        }
-      };
-
-      // Detectar el tipo de aseguradora
-      const esQualitas = /qu[aá]litas/i.test(textoCompleto);
-      const compania = esQualitas ? 'Qualitas' : 
-                       /gnp/i.test(textoCompleto) ? 'GNP' :
-                       /mapfre/i.test(textoCompleto) ? 'MAPFRE' :
-                       /axa/i.test(textoCompleto) ? 'AXA' :
-                       /hdi/i.test(textoCompleto) ? 'HDI' : 'Otra';
-
-      console.log('🏢 Aseguradora detectada:', compania);
-
-      // Extraer datos específicos para Qualitas
+      // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
+      console.log('🎯 Iniciando proceso de extracción modular...');
+      
       let datosExtraidos = {};
       
-      if (esQualitas) {
-        console.log('🎯 Aplicando extractor especializado para Qualitas (página 2)');
+      try {
+        const { detectarAseguradoraYProducto } = await import('../lib/pdf/detectorLigero.js');
+        const { loadExtractor } = await import('../lib/pdf/extractors/registry.js');
         
-        // ==================== MESES (definir primero) ====================
-        const meses = {
-          'ENE': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'MAY': '05', 'JUN': '06',
-          'JUL': '07', 'AGO': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12'
-        };
+        const deteccion = detectarAseguradoraYProducto(textoPagina1);
+        console.log('🏢 Detección:', deteccion);
         
-        // ==================== RFC (PRIMERO - para determinar tipo de persona) ====================
-        // RFC puede ser:
-        // - Persona Física: 4 letras + 6 dígitos + 3 caracteres (AAAA######XXX) - 13 caracteres
-        // Persona Moral: 3 letras + 6 dígitos + 3 caracteres (AAA######XXX) - 12 caracteres
-        const rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
-        let rfcExtraido = rfcMatch ? rfcMatch[1] : '';
+        const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
         
-        // ✅ Si no se encuentra RFC, continuar de todos modos (lo pediremos después si es necesario)
-        if (!rfcExtraido || rfcExtraido.trim() === '') {
-          console.warn('⚠️ RFC no encontrado en el PDF. Se solicitará después si es necesario.');
-          rfcExtraido = ''; // Dejar vacío, se manejará después
-        }
-        
-        const tipoPersona = rfcExtraido.length === 13 ? 'Fisica' : rfcExtraido.length === 12 ? 'Moral' : 'Fisica';
-        
-        console.log('🔍 RFC extraído:', rfcExtraido, '- Longitud:', rfcExtraido.length, '- Tipo:', tipoPersona);
-        
-        // ==================== INFORMACIÓN DEL ASEGURADO (según tipo de persona) ====================
-        let nombre = '';
-        let apellido_paterno = '';
-        let apellido_materno = '';
-        let razonSocial = '';
-        
-        const nombreMatch = textoCompleto.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
-        if (nombreMatch) {
-          const nombreCompleto = nombreMatch[1].trim();
+        if (moduloExtractor && moduloExtractor.extraer) {
+          console.log(`✅ Extractor encontrado para ${deteccion.aseguradora} - ${deteccion.producto}`);
           
-          if (tipoPersona === 'Moral') {
-            // Persona Moral: TODO es razón social
-            razonSocial = nombreCompleto;
-            console.log('🏢 Razón Social (Persona Moral):', razonSocial);
-          } else {
-            // Persona Física: Separar en nombre y apellidos
-            const palabras = nombreCompleto.split(/\s+/);
-            console.log('📝 Palabras del nombre (Persona Física):', palabras);
-            
-            if (palabras.length === 4) {
-              nombre = `${palabras[0]} ${palabras[1]}`;
-              apellido_paterno = palabras[2];
-              apellido_materno = palabras[3];
-            } else if (palabras.length === 3) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-              apellido_materno = palabras[2];
-            } else if (palabras.length === 2) {
-              nombre = palabras[0];
-              apellido_paterno = palabras[1];
-            } else {
-              nombre = palabras[0] || nombreCompleto;
-            }
-            console.log('👤 Nombre (Persona Física):', { nombre, apellido_paterno, apellido_materno });
-          }
-        }
-        
-        // ==================== DOMICILIO COMPLETO ====================
-        // Capturar solo hasta antes de "R.F.C:" para evitar incluir el RFC
-        const domicilioMatch = textoCompleto.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
-        const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
-        console.log('🏠 Domicilio extraído:', domicilio);
-        
-        // ==================== MUNICIPIO, COLONIA, ESTADO, CP Y PAÍS ====================
-        // En pólizas de Qualitas, después del domicilio vienen:
-        // C.P.: xxxxx Municipio: NOMBRE_MUNICIPIO Estado: NOMBRE_ESTADO Colonia: NOMBRE_COLONIA
-        const cpMatch = textoCompleto.match(/C\.P\.:\s*(\d{5})/i);
-        const municipioMatch = textoCompleto.match(/Municipio:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Estado:|\n)/i);
-        const estadoMatch = textoCompleto.match(/Estado:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Colonia:|\n)/i);
-        const coloniaMatch = textoCompleto.match(/Colonia:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
-        const paisMatch = textoCompleto.match(/Pa[ií]s:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
-        
-        const cp = cpMatch ? cpMatch[1] : '';
-        const municipio = municipioMatch ? municipioMatch[1].trim() : '';
-        const estado = estadoMatch ? estadoMatch[1].trim() : '';
-        const colonia = coloniaMatch ? coloniaMatch[1].trim() : '';
-        const pais = paisMatch ? paisMatch[1].trim() : 'MEXICO';
-        
-        console.log('📍 Datos de ubicación extraídos:');
-        console.log('   - CP:', cp);
-        console.log('   - Municipio:', municipio);
-        console.log('   - Estado:', estado);
-        console.log('   - Colonia:', colonia);
-        console.log('   - País:', pais);
-        
-        // ==================== AGENTE (buscar en ambas páginas) ====================
-        let agente = '';
-        const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-        const agenteMatch2 = textoCompleto.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ\s]+?)(?=Teléfono|Canal|\n|$)/i);
-        
-        if (agenteMatch1) {
-          agente = `${agenteMatch1[1]} - ${agenteMatch1[2].trim()}`;
-          console.log('✅ Agente (pág 1):', agente);
-        } else if (agenteMatch2) {
-          agente = `${agenteMatch2[1]} - ${agenteMatch2[2].trim()}`;
-          console.log('✅ Agente (pág 2):', agente);
-        }
-        
-        // ==================== PÓLIZA (buscar en ambas páginas) ====================
-        // Formato: POLIZA    ENDOSO    INCISO
-        //          POLIZA DE SEGURO DE AUTOMOVILES  
-        //          0971413763  000000    0001
-        let polizaNum = '', endosoNum = '', incisoNum = '';
-        
-        // Buscar patrón simple: 10 dígitos + 6 dígitos + 4 dígitos en una línea
-        const lineaNumeros2 = textoCompleto.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        const lineaNumeros1 = textoPagina1.match(/(\d{10})\s+(\d{6})\s+(\d{4})/);
-        
-        if (lineaNumeros2) {
-          polizaNum = lineaNumeros2[1];
-          endosoNum = lineaNumeros2[2];
-          incisoNum = lineaNumeros2[3];
-          console.log('✅ Póliza extraída (pág 2):', { polizaNum, endosoNum, incisoNum });
-        } else if (lineaNumeros1) {
-          polizaNum = lineaNumeros1[1];
-          endosoNum = lineaNumeros1[2];
-          incisoNum = lineaNumeros1[3];
-          console.log('✅ Póliza extraída (pág 1):', { polizaNum, endosoNum, incisoNum });
+          console.log('📄 DEBUG antes de extraer:');
+          console.log('   - textoPagina1 length:', textoPagina1?.length);
+          console.log('   - textoAvisoDeCobro length:', textoAvisoDeCobro?.length);
+          console.log('   - textoPaginaCaratula length:', textoPaginaCaratula?.length);
+          console.log('   - textoCompleto length:', textoCompleto?.length);
+          console.log('   - Total páginas extraídas:', todasLasPaginas?.length);
+          
+          datosExtraidos = await moduloExtractor.extraer({
+            textoCompleto,
+            textoPagina1,
+            textoPagina2: textoPaginaCaratula,
+            textoAvisoDeCobro,
+            todasLasPaginas
+          });
+          
+          console.log('📊 Datos extraídos:', datosExtraidos);
         } else {
-          console.log('⚠️ No se encontró línea con 10+6+4 dígitos');
+          console.error('❌ No se encontró extractor para:', deteccion);
+          setEstado('error');
+          setErrores([{
+            tipo: 'error',
+            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+            detalle: 'Por favor, contacte al administrador.'
+          }]);
+          return;
         }
-        
-        const planMatch = textoCompleto.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
-        
-        // ==================== RFC ====================
-        
-        // ==================== CURP (solo para Persona Física) ====================
-        const curpMatch = textoCompleto.match(/C\.?\s*U\.?\s*R\.?\s*P\.?\s*[:.\s]*([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]{2})/i);
-        
-  // ==================== VEHÍCULO ====================
-  // Algunos códigos de vehículo vienen con 3, 4, 5 o 6 dígitos. El patrón anterior esperaba exactamente 5.
-  // Ejemplos observados: "394 HONDA CIVIC ...", "0971462991 PORSCHE CAYENNE ..." (en otras pólizas el código puede ser largo).
-  // Ampliamos el rango y permitimos puntos y guiones en el modelo.
-  const descripcionMatch = textoCompleto.match(/(\d{3,6})\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=Tipo:|Serie:|Motor:|Modelo:|$)/i);
-  const serieMatch = textoCompleto.match(/Serie[:\s]+([A-Z0-9]{17})/i);
-  const motorMatch = textoCompleto.match(/Motor[:\s]+([A-Z0-9\-]{3,})(?=\s|$)/i);
-  const modeloAnioMatch = textoCompleto.match(/Modelo:\s*(\d{4})/i);
-        
-        // MEJORAR EXTRACCIÓN DE PLACAS - Excluir palabras como VIGENCIA
-        // Las placas en México suelen tener formato: 3 letras + 3 números (ABC123) o 3 letras + 2 números + 1 letra (ABC12D)
-        // También pueden tener guiones: ABC-123 o ABC-12-D
-        let placasExtraidas = '';
-        const placasMatch = textoCompleto.match(/Placas:\s*([A-Z0-9\-]{3,10})(?=\s|$|\n)/i);
-        if (placasMatch) {
-          const posiblePlaca = placasMatch[1].toUpperCase();
-          // Validar que no sea una palabra común o tenga un formato razonable de placa
-          // Placas válidas: ABC123, ABC-123, ABC12D, etc.
-          // Excluir: VIGENCIA, AMPARADA, NA, SIN, NINGUNA, palabras largas
-          const esPlacaValida = posiblePlaca.length >= 3 && 
-                                posiblePlaca.length <= 10 && 
-                                !/^(VIGENCIA|AMPARADA|NA|N\/A|SIN|NINGUNA|TEMPORAL|PENDIENTE)$/i.test(posiblePlaca);
-          
-          if (esPlacaValida) {
-            placasExtraidas = posiblePlaca;
-            console.log('✅ Placas extraídas:', placasExtraidas);
-          } else {
-            console.log('⚠️ Placas rechazadas (no válida):', posiblePlaca);
-          }
-        } else {
-          console.log('⚠️ No se encontró patrón de placas en el PDF');
-        }
-        
-        const colorMatch = textoCompleto.match(/Color:\s*([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+)*?)(?=\s+Placas|\s+Ocupantes|\n|$)/i);
-        
-        // =============== EXTRACCIÓN MARCA / MODELO ===============
-        // Estrategia escalonada: patrón principal -> alternativo -> fallback por marcas conocidas.
-        let marca = '';
-        let modeloCompleto = '';
-
-        if (descripcionMatch) {
-          marca = descripcionMatch[2];
-          modeloCompleto = descripcionMatch[3].trim();
-          console.log('🚗 Extracción vehículo (principal) OK:', { marca, modeloCompleto });
-        } else {
-          const altMatch = textoCompleto.match(/\d{3,6}\s*\(?[A-Z0-9]*\)?\s*([A-Z]+)\s+([A-Z0-9\s\-\.]+?)(?=\s*Tipo:|\s*Serie:|Motor:|Modelo:|\n)/i);
-          if (altMatch) {
-            marca = altMatch[1];
-            modeloCompleto = altMatch[2].trim();
-            console.log('🚗 Extracción vehículo (alternativa) OK:', { marca, modeloCompleto });
-          } else {
-            // Fallback: buscar línea que contenga una marca conocida seguida de más texto antes de "Tipo:" o "Serie:".
-            const marcasFallback = [
-              'AUDI','BMW','CHEVROLET','CHRYSLER','DODGE','FIAT','FORD','HONDA','HYUNDAI','JEEP','KIA','MAZDA','MERCEDES','MERCEDES-BENZ','MITSUBISHI','NISSAN','PEUGEOT','PORSCHE','RENAULT','SEAT','SUZUKI','TOYOTA','VOLKSWAGEN','VOLVO'
-            ];
-            const marcasRegex = new RegExp(`\\b(${marcasFallback.join('|')})\\b\\s+([A-Z0-9][A-Z0-9\\s\-\.]{3,})`, 'i');
-            const fallbackMatch = textoCompleto.match(marcasRegex);
-            if (fallbackMatch) {
-              marca = fallbackMatch[1];
-              // Cortar el modelo antes de palabras clave si aparecen
-              modeloCompleto = fallbackMatch[2]
-                .split(/\s+(?:Tipo:|Serie:|Motor:|Modelo:)/i)[0]
-                .trim();
-              console.log('🚗 Extracción vehículo (fallback) OK:', { marca, modeloCompleto });
-            } else {
-              console.log('⚠️ No se pudo extraer marca/modelo con ninguno de los patrones');
-            }
-          }
-        }
-        
-        console.log('🚗 Marca extraída:', marca);
-        console.log('🚗 Modelo extraído:', modeloCompleto);
-        console.log('🚗 Placas extraídas:', placasExtraidas);
-        
-        // ==================== VIGENCIA ====================
-  const desdeMatch = textoCompleto.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-  const hastaMatch = textoCompleto.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
-        
-        // ==================== PERIODO DE GRACIA ====================
-        // Extraer solo el periodo de gracia, el formulario calculará las fechas de pago
-        const plazoMatch = textoCompleto.match(/Plazo\s+de\s+pago:\s*(\d+)\s*d[ií]as/i);
-        const periodoGraciaExtraido = plazoMatch ? plazoMatch[1] : '14'; // Default 14 si no se encuentra
-        
-        console.log('📅 Periodo de gracia extraído:', plazoMatch ? `${plazoMatch[1]} días` : 'NO ENCONTRADO (usando 14 por defecto)');
-
-        // ==================== FORMA DE PAGO Y PARCIALES ====================
-        // En Qualitas, la forma de pago aparece DESPUÉS de "Gastos por Expedición" y ANTES de "Pago:"
-        // Puede ser: TRIMESTRAL, MENSUAL, SEMESTRAL, ANUAL, CONTADO, etc.
-        
-        console.log('🔍 DEBUG - Buscando forma de pago entre "Gastos" y "Pago:"...');
-        
-        // Buscar en textoCompleto (que YA sabemos que contiene TRIMESTRAL según los logs)
-        const seccionGastosAPago = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+[\d,]+\.?\d*\s+([\s\S]{0,100}?)Pago:/i);
-        
-        let formaPagoEncontrada = null;
-        
-        if (seccionGastosAPago) {
-          const textoEntreGastosYPago = seccionGastosAPago[1].trim();
-          console.log('🔍 DEBUG - Texto entre "Gastos Expedición" y "Pago:":', textoEntreGastosYPago);
-          
-          // Buscar palabras clave de periodicidad o forma de pago
-          const match = textoEntreGastosYPago.match(/(TRIMESTRAL|MENSUAL|SEMESTRAL|ANUAL|BIMESTRAL|CUATRIMESTRAL|CONTADO)/i);
-          
-          if (match) {
-            formaPagoEncontrada = match[1].toUpperCase();
-            console.log('✅ Forma de pago encontrada:', formaPagoEncontrada);
-          } else {
-            console.log('⚠️ No se encontró forma de pago en esa sección. Texto:', textoEntreGastosYPago);
-          }
-        } else {
-          console.log('⚠️ No se encontró la sección entre "Gastos Expedición" y "Pago:"');
-        }
-        
-        const formaPagoMatch = formaPagoEncontrada ? [null, formaPagoEncontrada] : null;
-        
-        const primerPagoMatch = textoCompleto.match(/Primer\s+pago\s+([\d,]+\.?\d*)/i);
-        const pagosSubMatch =
-          textoCompleto.match(/Pago\(s\)\s*Subsecuente\(s\)\s+([\d,]+\.?\d*)/i) ||
-          textoCompleto.match(/Pagos?\s+subsecuentes?\s+([\d,]+\.?\d*)/i);
-
-        const formaPagoDetectada = formaPagoMatch ? formaPagoMatch[1].trim().toUpperCase() : '';
-        const primerPago = primerPagoMatch ? primerPagoMatch[1].replace(/,/g, '') : '';
-        const pagosSubsecuentes = pagosSubMatch ? pagosSubMatch[1].replace(/,/g, '') : '';
-
-        console.log('💰 Datos de pago extraídos del PDF:');
-        console.log('   - Forma de pago (texto PDF):', formaPagoDetectada);
-        console.log('   - Primer pago:', primerPago);
-        console.log('   - Pagos subsecuentes:', pagosSubsecuentes);
-
-        // Normalizar tipo_pago a partir de la forma de pago extraída
-        let tipoPagoDetectado = '';
-        
-        if (formaPagoDetectada) {
-          const f = formaPagoDetectada.toLowerCase();
-          
-          // Mapear palabras clave a tipos de pago
-          if (f.includes('tri')) {
-            tipoPagoDetectado = 'Trimestral';
-          } else if (f.includes('men')) {
-            tipoPagoDetectado = 'Mensual';
-          } else if (f.includes('sem')) {
-            tipoPagoDetectado = 'Semestral';
-          } else if (f.includes('anu')) {
-            tipoPagoDetectado = 'Anual';
-          } else if (f.includes('contado')) {
-            tipoPagoDetectado = 'Anual'; // CONTADO = pago único = Anual
-          } else if (f.includes('bim')) {
-            tipoPagoDetectado = 'Bimestral';
-          } else if (f.includes('cuat')) {
-            tipoPagoDetectado = 'Cuatrimestral';
-          } else {
-            // Si no coincide con ningún patrón, usar el texto tal cual
-            tipoPagoDetectado = formaPagoDetectada;
-          }
-          
-          console.log('✅ Tipo de pago normalizado:', tipoPagoDetectado);
-        } else {
-          // No se encontró forma de pago, dejar vacío
-          console.warn('⚠️ No se encontró forma de pago en PDF');
-          tipoPagoDetectado = '';
-        }
-        
-        console.log('   - Tipo de pago final:', tipoPagoDetectado || '(VACÍO - usuario debe completar)');
-
-        // ==================== USO / SERVICIO / MOVIMIENTO ====================
-        const usoMatch = textoCompleto.match(/Uso:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        const servicioMatch = textoCompleto.match(/Servicio:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        const movimientoMatch = textoCompleto.match(/Movimiento:\s*([A-ZÁÉÍÓÚÑ]+)/i);
-        
-        // ==================== COBERTURAS ====================
-        console.log('🛡️ Extrayendo coberturas...');
-        
-        // Buscar la sección de coberturas contratadas
-        const coberturasSeccion = textoCompleto.match(/COBERTURAS\s+CONTRATADAS\s+SUMA\s+ASEGURADA\s+DEDUCIBLE\s+\$\s+PRIMAS([\s\S]*?)(?=Para\s+RC\s+en\s+el\s+extranjero|Quedan\s+excluidos|Textos:|Forma\s+de|$)/i);
-        
-        let coberturasExtraidas = [];
-        
-        if (coberturasSeccion) {
-          const textoCobertura = coberturasSeccion[1];
-          console.log('📋 Texto de coberturas encontrado:', textoCobertura.substring(0, 500));
-          
-          // Extraer cada línea de cobertura
-          // Formato 1: Nombre $monto deducible% prima
-          // Formato 2: Nombre $monto POR EVENTO deducible prima
-          // Formato 3: Nombre AMPARADA prima
-          
-          const lineas = textoCobertura.split('\n').filter(l => l.trim().length > 0);
-          
-          for (const linea of lineas) {
-            const lineaLimpia = linea.trim();
-            if (!lineaLimpia) continue;
-            
-            // Patrón 1: Cobertura con monto y deducible porcentual
-            // Ej: "Daños materiales $ 631,350.00 5% 12,972.86"
-            let match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+(\d+)%\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3] + '%',
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} - ${match[3]}%`);
-              continue;
-            }
-            
-            // Patrón 2: Cobertura POR EVENTO con deducible
-            // Ej: "Responsabilidad Civil por Daños a Terceros $ 3,000,000.00 POR EVENTO 0 uma 1,983.96"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+POR\s+EVENTO\s+(.+?)\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: match[3].trim(),
-                prima: match[4].replace(/,/g, ''),
-                tipo: 'por_evento'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]} POR EVENTO`);
-              continue;
-            }
-            
-            // Patrón 3: Cobertura AMPARADA
-            // Ej: "Asistencia Vial Qualitas AMPARADA 565.00"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s.]+?)\s+AMPARADA\s+([\d,]+\.?\d*)/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: 'AMPARADA',
-                deducible: 'N/A',
-                prima: match[2].replace(/,/g, ''),
-                tipo: 'amparada'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - AMPARADA`);
-              continue;
-            }
-            
-            // Patrón 4: Cobertura con monto específico sin deducible porcentual
-            // Ej: "Muerte del Conductor por Accidente Automovilístico $ 100,000.00 122.40"
-            match = lineaLimpia.match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ\s]+?)\s+\$\s*([\d,]+\.?\d*)\s+([\d,]+\.?\d*)$/i);
-            if (match) {
-              coberturasExtraidas.push({
-                nombre: match[1].trim(),
-                suma_asegurada: match[2].replace(/,/g, ''),
-                deducible: 'N/A',
-                prima: match[3].replace(/,/g, ''),
-                tipo: 'monto'
-              });
-              console.log(`✅ Cobertura extraída: ${match[1].trim()} - $${match[2]}`);
-              continue;
-            }
-          }
-          
-          console.log(`📊 Total de coberturas extraídas: ${coberturasExtraidas.length}`);
-        } else {
-          console.log('⚠️ No se encontró la sección de coberturas');
-        }
-        
-        // ==================== MONTOS ====================
-        const sumaMatch = textoCompleto.match(/Daños\s+materiales\s+\$\s*([\d,]+\.?\d*)/i);
-        const primaMatch = textoCompleto.match(/Prima\s+Neta\s+([\d,]+\.?\d*)/i);
-        const tasaFinanciamientoMatch = textoCompleto.match(/Tasa\s+Financiamiento\s+([-]?[\d,]+\.?\d*)/i);
-        const gastosExpedicionMatch = textoCompleto.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+([\d,]+\.?\d*)/i);
-        const subtotalMatch = textoCompleto.match(/Subtotal\s+([\d,]+\.?\d*)/i);
-        const ivaMatch = textoCompleto.match(/I\.V\.A[.\s]*16%\s+([\d,]+\.?\d*)/i);
-        const totalMatch = textoCompleto.match(/IMPORTE\s+TOTAL\s+([\d,]+\.?\d*)/i);
-        const pagoUnicoMatch = textoCompleto.match(/Pago\s+[UÚ]nico\s+([\d,]+\.?\d*)/i);
-        const deducibleMatch = textoCompleto.match(/(\d+)%\s+[\d,]+\.?\d*\s+Robo/i);
-        
-        datosExtraidos = {
-          // ASEGURADO
-          tipo_persona: tipoPersona,
-          nombre: nombre,
-          apellido_paterno: apellido_paterno,
-          apellido_materno: apellido_materno,
-          razonSocial: razonSocial,
-          rfc: rfcExtraido,
-          curp: curpMatch ? curpMatch[1] : '',
-          domicilio: domicilio,
-          municipio: municipio,
-          colonia: colonia,
-          estado: estado,
-          codigo_postal: cp,
-          pais: pais,
-          email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
-          
-          // PÓLIZA
-          compania: compania,
-          producto: 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: agente,
-          sub_agente: '',
-          numero_poliza: polizaNum,
-          endoso: endosoNum,
-          inciso: incisoNum,
-          plan: planMatch ? planMatch[1] : '',
-          
-          // VIGENCIA
-          inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
-          termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
-          // ✅ NO extraer fecha_pago - será calculada por el formulario usando inicio_vigencia + periodo_gracia
-          
-          // MONTOS
-          prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
-          cargo_pago_fraccionado: tasaFinanciamientoMatch ? tasaFinanciamientoMatch[1].replace(/,/g, '') : '',
-          gastos_expedicion: gastosExpedicionMatch ? gastosExpedicionMatch[1].replace(/,/g, '') : '',
-          subtotal: subtotalMatch ? subtotalMatch[1].replace(/,/g, '') : '',
-          iva: ivaMatch ? ivaMatch[1].replace(/,/g, '') : '',
-          total: totalMatch ? totalMatch[1].replace(/,/g, '') : '',
-          pago_unico: pagoUnicoMatch ? pagoUnicoMatch[1].replace(/,/g, '') : '',
-          // FORMA Y TIPO DE PAGO
-          tipo_pago: tipoPagoDetectado,
-          forma_pago: formaPagoDetectada || '',
-          primer_pago: primerPago,
-          pagos_subsecuentes: pagosSubsecuentes,
-          periodo_gracia: periodoGraciaExtraido, // ✅ Del PDF
-          suma_asegurada: sumaMatch ? sumaMatch[1].replace(/,/g, '') : '',
-          deducible: deducibleMatch ? deducibleMatch[1] : '5',
-          
-          // VEHÍCULO
-          marca: marca,
-          modelo: modeloCompleto,
-          anio: modeloAnioMatch ? modeloAnioMatch[1] : '',
-          numero_serie: serieMatch ? serieMatch[1] : '',
-          motor: motorMatch ? motorMatch[1] : '',
-          placas: placasExtraidas || '',
-          color: colorMatch ? colorMatch[1].trim() : '',
-          codigo_vehiculo: descripcionMatch ? descripcionMatch[1] : '',
-          tipo_vehiculo: '', // Se debe seleccionar manualmente
-          tipo_cobertura: planMatch ? planMatch[1] : '',
-          
-          // COBERTURAS DETALLADAS
-          coberturas: coberturasExtraidas,
-          
-          // CAMPOS ADICIONALES QUALITAS
-          uso: usoMatch ? usoMatch[1].trim() : '',
-          servicio: servicioMatch ? servicioMatch[1].trim() : '',
-          movimiento: movimientoMatch ? movimientoMatch[1].trim() : '',
-
-          // CONDUCTOR
-          conductor_habitual: `${nombre} ${apellido_paterno} ${apellido_materno}`.trim()
-        };
-        
-        // ==================== NORMALIZACIÓN DE VALORES ====================
-        // Normalizar marca para que coincida con las opciones disponibles
-        const marcasDisponibles = [
-          'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
-          'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
-          'Mitsubishi', 'Nissan', 'Peugeot', 'Porsche', 'Renault', 'Seat', 
-          'Suzuki', 'Toyota', 'Volkswagen', 'Volvo'
-        ];
-        
-        if (datosExtraidos.marca) {
-          const marcaNormalizada = marcasDisponibles.find(
-            m => m.toUpperCase() === datosExtraidos.marca.toUpperCase()
-          );
-          datosExtraidos.marca = marcaNormalizada || 'Otra';
-          console.log('✅ Marca normalizada:', datosExtraidos.marca);
-        }
-        
-        // Normalizar tipo de cobertura (Amplia, Limitada, RC)
-        if (datosExtraidos.tipo_cobertura) {
-          const cobertura = datosExtraidos.tipo_cobertura.toUpperCase();
-          if (cobertura.includes('AMPLIA')) {
-            datosExtraidos.tipo_cobertura = 'Amplia';
-          } else if (cobertura.includes('LIMITADA')) {
-            datosExtraidos.tipo_cobertura = 'Limitada';
-          } else if (cobertura.includes('RC') || cobertura.includes('RESPONSABILIDAD')) {
-            datosExtraidos.tipo_cobertura = 'RC (Responsabilidad Civil)';
-          }
-          console.log('✅ Tipo de cobertura normalizado:', datosExtraidos.tipo_cobertura);
-        }
-        
-        // ✅ estatusPago será calculado por actualizarCalculosAutomaticos() después
-        // No lo calculamos aquí porque no tenemos fecha_pago en la extracción
-        
-        console.log('📊 Datos extraídos completos:', datosExtraidos);
-        console.log('🚗 DEBUG - Datos del vehículo después de extracción:', {
-          marca: datosExtraidos.marca,
-          modelo: datosExtraidos.modelo,
-          anio: datosExtraidos.anio,
-          numero_serie: datosExtraidos.numero_serie,
-          motor: datosExtraidos.motor,
-          placas: datosExtraidos.placas,
-          color: datosExtraidos.color,
-          tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-          tipo_cobertura: datosExtraidos.tipo_cobertura
-        });
-        
-      } else {
-        console.log('🔧 Aplicando extractor genérico');
-        // Extractor genérico para otras aseguradoras
-        datosExtraidos = {
-          // INFORMACIÓN DEL ASEGURADO
-          nombre: extraerDato(/(?:NOMBRE|ASEGURADO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_paterno: extraerDato(/(?:APELLIDO\s+PATERNO|AP\.\s*PATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          apellido_materno: extraerDato(/(?:APELLIDO\s+MATERNO|AP\.\s*MATERNO)[:\s]+([A-ZÁÉÍÓÚÑ]+)/i, textoCompleto) || '',
-          rfc: extraerDato(/RFC[:\s]+([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i, textoCompleto) || '',
-          domicilio: extraerDato(/(?:DOMICILIO|DIRECCI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*C\.P\.|CP:|Municipio:|Ciudad:|Estado:|\n\n)/i, textoCompleto) || '',
-          municipio: extraerDato(/(?:MUNICIPIO|DELEGACI[OÓ]N)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*Estado:|Colonia:|País:|\n)/i, textoCompleto) || '',
-          colonia: extraerDato(/(?:COLONIA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Estado:|País:|\n)/i, textoCompleto) || '',
-          estado: extraerDato(/(?:ESTADO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*C\.P\.|CP:|Municipio:|Colonia:|País:|\n)/i, textoCompleto) || '',
-          codigo_postal: extraerDato(/(?:C\.P\.|CP)[:\s]*(\d{5})/i, textoCompleto) || '',
-          pais: extraerDato(/(?:PA[IÍ]S)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i, textoCompleto) || 'MEXICO',
-          email: extraerDato(/(?:E-?MAIL|CORREO)[:\s]+([\w\.-]+@[\w\.-]+\.\w+)/i, textoCompleto) || '',
-          telefono_fijo: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:FIJO|CASA))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          telefono_movil: extraerDato(/(?:TEL(?:ÉFONO)?\.?\s+(?:M[OÓ]VIL|CELULAR))[:\s]+([\d\s\-()]+)/i, textoCompleto) || '',
-          
-          // DATOS DE LA PÓLIZA
-          compania: compania,
-          producto: textoCompleto.match(/AUTOS?|AUTOMÓVIL/i) ? 'Autos Individual' : 'Autos Individual',
-          etapa_activa: 'Emitida',
-          agente: extraerDato(/(?:AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s,\.]+?)(?:\n|PÓLIZA)/i, textoCompleto) || '',
-          sub_agente: '',
-          numero_poliza: extraerDato(/(?:P[ÓO]LIZA|NO\.\s+DE\s+P[ÓO]LIZA)[:\s#]+(\d+[-\d]*)/i, textoCompleto) || '',
-          
-          // VIGENCIA
-          inicio_vigencia: '',
-          termino_vigencia: '',
-          
-          // INFORMACIÓN FINANCIERA
-          prima_pagada: extraerDato(/(?:PRIMA\s+(?:NETA|TOTAL))[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          cargo_pago_fraccionado: extraerDato(/(?:CARGO\s+(?:POR\s+)?FRACCIONAMIENTO)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          iva: extraerDato(/I\.?V\.?A\.?[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          total: extraerDato(/(?:TOTAL|PRIMA\s+TOTAL)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          tipo_pago: textoCompleto.match(/CONTADO/i) ? 'Anual' : textoCompleto.match(/FRACCIONADO/i) ? 'Fraccionado' : 'Anual',
-          periodo_gracia: 30,
-          
-          // DESCRIPCIÓN DEL VEHÍCULO
-          marca: extraerDato(/(?:MARCA)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|MODELO|TIPO)/i, textoCompleto) || '',
-          modelo: extraerDato(/(?:MODELO|DESCRIPCI[ÓO]N)[:\s]+([A-ZÁÉÍÓÚÑ0-9\s\.\-]+?)(?:\n|AÑO|MOTOR)/i, textoCompleto) || '',
-          anio: extraerDato(/(?:AÑO|A[ÑN]O\s+MODELO)[:\s]+(\d{4})/i, textoCompleto) || '',
-          numero_serie: extraerDato(/(?:SERIE|VIN|N[UÚ]MERO\s+DE\s+SERIE)[:\s]+([A-Z0-9]{17})/i, textoCompleto) || '',
-          placas: extraerDato(/(?:PLACAS?|MATRÍCULA)[:\s]+([A-Z0-9\-]+)/i, textoCompleto) || '',
-          color: extraerDato(/(?:COLOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|TIPO)/i, textoCompleto) || '',
-          tipo_vehiculo: extraerDato(/(?:TIPO\s+DE\s+VEH[IÍ]CULO|USO)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|COBERTURA)/i, textoCompleto) || '',
-          
-          // COBERTURAS
-          tipo_cobertura: extraerDato(/(?:COBERTURA|PLAN)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|DEDUCIBLE)/i, textoCompleto) || '',
-          deducible: extraerDato(/(?:DEDUCIBLE)[:\s]+(\d+)%?/i, textoCompleto) || '',
-          suma_asegurada: extraerDato(/(?:SUMA\s+ASEGURADA|VALOR)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoCompleto) || '',
-          
-          // CONDUCTOR
-          conductor_habitual: extraerDato(/(?:CONDUCTOR\s+HABITUAL)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?:\n|EDAD)/i, textoCompleto) || '',
-          edad_conductor: extraerDato(/(?:EDAD)[:\s]+(\d+)/i, textoCompleto) || '',
-          licencia_conducir: extraerDato(/(?:LICENCIA)[:\s]+([A-Z0-9]+)/i, textoCompleto) || ''
-        };
+      } catch (error) {
+        console.error('❌ Error en sistema modular:', error);
+        setEstado('error');
+        setErrores([{
+          tipo: 'error',
+          mensaje: 'Error al procesar el PDF',
+          detalle: error.message
+        }]);
+        return;
       }
 
-      console.log('📊 Datos extraídos:', datosExtraidos);
-
-      // Extraer fechas de vigencia
-      const fechasMatch = textoCompleto.match(/(?:VIGENCIA|VIGENTE).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4}).*?(?:AL|A).*?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/i);
-      if (fechasMatch) {
-        const [, diaIni, mesIni, anioIni, diaFin, mesFin, anioFin] = fechasMatch;
-        datosExtraidos.inicio_vigencia = `${anioIni.length === 2 ? '20' + anioIni : anioIni}-${mesIni.padStart(2, '0')}-${diaIni.padStart(2, '0')}`;
-        datosExtraidos.termino_vigencia = `${anioFin.length === 2 ? '20' + anioFin : anioFin}-${mesFin.padStart(2, '0')}-${diaFin.padStart(2, '0')}`;
-      }
-
-      // Limpiar montos (quitar comas)
-      ['prima_pagada', 'cargo_pago_fraccionado', 'iva', 'total', 'suma_asegurada'].forEach(campo => {
-        if (datosExtraidos[campo]) {
-          datosExtraidos[campo] = datosExtraidos[campo].replace(/,/g, '');
+      // Limpiar montos (quitar comas) y asegurar defaults "0.00" si faltan
+      const camposMontos = [
+        'prima_pagada',
+        'otros_descuentos',
+        'cargo_pago_fraccionado',
+        'gastos_expedicion',
+        'iva',
+        'total',
+        'suma_asegurada'
+      ];
+      camposMontos.forEach(campo => {
+        if (datosExtraidos[campo] !== undefined && datosExtraidos[campo] !== null && datosExtraidos[campo] !== '') {
+          datosExtraidos[campo] = String(datosExtraidos[campo]).replace(/,/g, '');
+        } else {
+          datosExtraidos[campo] = '0.00';
         }
       });
 
@@ -1615,11 +1091,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
       });
       procesarPDF(file);
+    } else if (!file) {
+      // Usuario canceló la selección del archivo, cerrar el modal
+      console.log('⚠️ Usuario canceló la selección de archivo');
+      onClose();
     } else {
       setErrores(['❌ Por favor, seleccione un archivo PDF válido']);
       setEstado('error');
     }
-  }, [procesarPDF]);
+  }, [procesarPDF, onClose]);
 
   // PASO 1: Manejar decisión sobre el cliente
   const handleDecisionCliente = useCallback(async (decision) => {
@@ -1913,20 +1393,36 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       
       const codigo = codigoMatch[1];
       const nombreCompleto = nombreCompletoMatch[1].trim();
-      const palabras = nombreCompleto.split(/\s+/);
+      
+      // Detectar si es persona moral (empresa)
+      const palabrasEmpresa = ['ASOCIADOS', 'Y CIA', 'S.A.', 'SA DE CV', 'S DE RL', 'SC', 'AGTE DE SEGU', 'AGENTE DE SEGUROS', 'ASESORES', 'CONSULTORES', 'GRUPO', 'CORPORATIVO'];
+      const esPersonaMoral = palabrasEmpresa.some(palabra => nombreCompleto.toUpperCase().includes(palabra));
       
       let nombre = '', apellidoPaterno = '', apellidoMaterno = '';
-      if (palabras.length >= 4) {
-        nombre = palabras.slice(0, -2).join(' ');
-        apellidoPaterno = palabras[palabras.length - 2];
-        apellidoMaterno = palabras[palabras.length - 1];
-      } else if (palabras.length === 3) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
-        apellidoMaterno = palabras[2];
-      } else if (palabras.length === 2) {
-        nombre = palabras[0];
-        apellidoPaterno = palabras[1];
+      
+      if (esPersonaMoral) {
+        // Persona Moral: Usar el nombre completo como "nombre" y dejar apellidos vacíos
+        nombre = nombreCompleto;
+        apellidoPaterno = '';
+        apellidoMaterno = '';
+        console.log('🏢 Detectado como Persona Moral:', nombreCompleto);
+      } else {
+        // Persona Física: Dividir en nombre y apellidos
+        const palabras = nombreCompleto.split(/\s+/);
+        
+        if (palabras.length >= 4) {
+          nombre = palabras.slice(0, -2).join(' ');
+          apellidoPaterno = palabras[palabras.length - 2];
+          apellidoMaterno = palabras[palabras.length - 1];
+        } else if (palabras.length === 3) {
+          nombre = palabras[0];
+          apellidoPaterno = palabras[1];
+          apellidoMaterno = palabras[2];
+        } else if (palabras.length === 2) {
+          nombre = palabras[0];
+          apellidoPaterno = palabras[1];
+        }
+        console.log('👤 Detectado como Persona Física:', nombre, apellidoPaterno, apellidoMaterno);
       }
       
       try {
@@ -1947,13 +1443,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         if (resultado.success) {
           setAgenteEncontrado(resultado.data);
           console.log('✅ Agente creado:', resultado.data.nombre);
-          toast.success(`Agente creado: ${nombre} ${apellidoPaterno}`);
+          const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
+          toast.success(`Agente creado: ${nombreMostrar}`);
         } else {
           throw new Error(resultado.error);
         }
       } catch (error) {
         console.error('❌ Error al crear agente:', error);
-  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
+        const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno} ${apellidoMaterno}`;
+  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
         // Continuar sin el agente
       }
     }
@@ -2009,44 +1507,75 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       }
 
       // ================== AJUSTES DE PAGO FRACCIONADO ==================
-      // Si la extracción detectó forma_pago y no se ha definido en el formulario, mapear:
-      // tipo_pago: 'Fraccionado' si la frecuencia no es anual
-      if (datosConCliente.forma_pago) {
-        const forma = datosConCliente.forma_pago.toLowerCase();
-        console.log('💳 Detectada forma de pago:', datosConCliente.forma_pago);
-        // Determinar frecuenciaPago según forma
-        if (forma.includes('tri')) datosConCliente.frecuenciaPago = 'Trimestral';
-        else if (forma.includes('men')) datosConCliente.frecuenciaPago = 'Mensual';
-        else if (forma.includes('sem')) datosConCliente.frecuenciaPago = 'Semestral';
-        // Si hay frecuencia asignada distinta de anual, marcar tipo_pago Fraccionado
-        if (datosConCliente.frecuenciaPago) {
+      // Normalización: Mapear forma_pago a tipo_pago y frecuenciaPago
+      // El extractor de PDF debe proveer tipo_pago y frecuenciaPago correctos desde la Serie del aviso
+      // Este código es un FALLBACK por si el extractor no los detectó
+      
+      if (!datosConCliente.tipo_pago || !datosConCliente.frecuenciaPago) {
+        const fp = (datosConCliente.forma_pago || '').toLowerCase();
+        
+        console.log('🔧 Normalizando tipo_pago desde forma_pago:', datosConCliente.forma_pago);
+        
+        if (fp.includes('tri')) {
           datosConCliente.tipo_pago = 'Fraccionado';
-          console.log('✅ Asignado tipo_pago=Fraccionado, frecuenciaPago=', datosConCliente.frecuenciaPago);
+          datosConCliente.frecuenciaPago = 'Trimestral';
+        } else if (fp.includes('men')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Mensual';
+        } else if (fp.includes('sem')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Semestral';
+        } else if (fp.includes('bim')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Bimestral';
+        } else if (fp.includes('cuat')) {
+          datosConCliente.tipo_pago = 'Fraccionado';
+          datosConCliente.frecuenciaPago = 'Cuatrimestral';
+        } else if (fp.includes('anu') || fp.includes('contado') || fp.includes('unico') || fp.includes('único')) {
+          datosConCliente.tipo_pago = 'Anual';
+          datosConCliente.frecuenciaPago = 'Anual';
         }
+        
+        if (datosConCliente.tipo_pago) {
+          console.log('✅ Normalización aplicada:', {
+            forma_pago: datosConCliente.forma_pago,
+            tipo_pago: datosConCliente.tipo_pago,
+            frecuenciaPago: datosConCliente.frecuenciaPago
+          });
+        } else {
+          console.log('⚠️ No se pudo determinar tipo_pago desde forma_pago:', datosConCliente.forma_pago);
+        }
+      } else {
+        console.log('✅ tipo_pago y frecuenciaPago ya vienen del extractor:', {
+          tipo_pago: datosConCliente.tipo_pago,
+          frecuenciaPago: datosConCliente.frecuenciaPago
+        });
       }
 
-      // Calendario sugerido de pagos basado en primer_pago y pagos_subsecuentes (solo si fraccionado y hay monto)
-      if (datosConCliente.tipo_pago === 'Fraccionado' && datosConCliente.frecuenciaPago && datosConCliente.inicio_vigencia) {
-        try {
-          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
-          const mesesSalto = CONSTANTS.MESES_POR_FRECUENCIA[datosConCliente.frecuenciaPago] || 0;
-          const inicio = new Date(datosConCliente.inicio_vigencia);
-          const pagos = [];
-          for (let i = 0; i < numeroPagos; i++) {
-            const fechaPago = new Date(inicio);
-            fechaPago.setMonth(fechaPago.getMonth() + i * mesesSalto);
-            pagos.push({
-              numero: i + 1,
-              fecha: fechaPago.toISOString().split('T')[0],
-              monto: i === 0 ? datosConCliente.primer_pago || '' : datosConCliente.pagos_subsecuentes || datosConCliente.primer_pago || '',
-              estado: '' // Se calculará después en interfaz
-            });
-          }
-          datosConCliente.calendario_pagos_sugerido = pagos;
-        } catch (e) {
-          console.warn('No se pudo generar calendario de pagos sugerido:', e);
-        }
-      }
+      // ⚠️ NOTA: El calendario de pagos NO se genera aquí.
+      // El formulario principal tiene funciones dedicadas que:
+      //   1. Calculan fechas de pago con periodo de gracia (calcularProximoPago)
+      //   2. Determinan estados (pagado, vencido, por vencer)
+      //   3. Generan el calendario visual completo (CalendarioPagos component)
+      // Solo pasamos los datos básicos: tipo_pago, frecuenciaPago, primer_pago, pagos_subsecuentes
+      
+      console.log('📋 Datos de pago para formulario:', {
+        tipo_pago: datosConCliente.tipo_pago,
+        frecuenciaPago: datosConCliente.frecuenciaPago,
+        primer_pago: datosConCliente.primer_pago,
+        pagos_subsecuentes: datosConCliente.pagos_subsecuentes
+      });
+
+      // Log financiero para verificar que todos los campos lleguen (aun en 0.00)
+      console.log('📋 Desglose financiero (preview) - 6 campos en orden:');
+      console.log('─────────────────────────────────────────────────');
+      console.log('1. Prima Neta:                          $', datosConCliente.prima_pagada || '0.00');
+      console.log('2. Otros Descuentos:                    $', datosConCliente.otros_descuentos || '0.00');
+      console.log('3. Financiamiento por pago fraccionado: $', datosConCliente.cargo_pago_fraccionado || '0.00');
+      console.log('4. Gastos de expedición:                $', datosConCliente.gastos_expedicion || '0.00');
+      console.log('5. I.V.A.:                              $', datosConCliente.iva || '0.00');
+      console.log('6. Total a pagar:                       $', datosConCliente.total || '0.00');
+      console.log('─────────────────────────────────────────────────');
 
       // ================== CAMPOS ADICIONALES POLIZA (Uso/Servicio/Movimiento) ==================
       // Si existen y el formulario espera camelCase, mantenerlos así.
@@ -2054,11 +1583,87 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       if (datosConCliente.servicio) datosConCliente.servicio_poliza = datosConCliente.servicio;
       if (datosConCliente.movimiento) datosConCliente.movimiento_poliza = datosConCliente.movimiento;
       
+      // ================== TIPO DE COBERTURA / PLAN ==================
+      // Si viene "plan" del extractor (ej: INTEGRAL de Chubb), usarlo como tipo_cobertura
+      if (datosConCliente.plan && !datosConCliente.tipo_cobertura) {
+        // Normalizar el plan a formato title case para que coincida con el select
+        const planNormalizado = datosConCliente.plan.charAt(0).toUpperCase() + datosConCliente.plan.slice(1).toLowerCase();
+        datosConCliente.tipo_cobertura = planNormalizado;
+        console.log('📋 Tipo de cobertura asignado desde plan:', planNormalizado);
+      } else if (datosConCliente.tipo_cobertura) {
+        // Normalizar tipo_cobertura si ya viene
+        datosConCliente.tipo_cobertura = datosConCliente.tipo_cobertura.charAt(0).toUpperCase() + datosConCliente.tipo_cobertura.slice(1).toLowerCase();
+      }
+      
+      // ================== FECHA LÍMITE DE PAGO ==================
+      // Si el extractor trae fecha_limite_pago (como Chubb), usarla como fecha_vencimiento_pago
+      if (datosConCliente.fecha_limite_pago) {
+        datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
+        datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
+        console.log('📅 Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
+      }
+      
+      // ================== PERÍODO DE GRACIA ==================
+      // Si no viene del PDF, usar valores sugeridos por aseguradora
+      if (!datosConCliente.periodo_gracia) {
+        const aseguradora = (datosConCliente.compania || '').toLowerCase();
+        if (aseguradora.includes('qualitas')) {
+          datosConCliente.periodo_gracia = 14; // Qualitas: 14 días
+        } else if (aseguradora) {
+          datosConCliente.periodo_gracia = 30; // Otras: 30 días
+        }
+        console.log('📆 Período de gracia sugerido:', datosConCliente.periodo_gracia, 'días');
+      }
+      
+      // ================== ESTATUS DE PAGO INICIAL ==================
+      // Calcular el estatus de pago basado en la fecha de vencimiento
+      if (datosConCliente.fecha_vencimiento_pago) {
+        const fechaVencimiento = new Date(datosConCliente.fecha_vencimiento_pago);
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        fechaVencimiento.setHours(0, 0, 0, 0);
+        
+        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+        
+        if (diasRestantes < 0) {
+          datosConCliente.estatusPago = 'Vencido';
+        } else if (diasRestantes <= 15) {
+          datosConCliente.estatusPago = 'Por Vencer';
+        } else {
+          datosConCliente.estatusPago = 'Pendiente';
+        }
+        console.log('💳 Estatus de pago calculado:', datosConCliente.estatusPago, '(días restantes:', diasRestantes, ')');
+      } else {
+        // Si no hay fecha de vencimiento, el pago está pendiente
+        datosConCliente.estatusPago = 'Pendiente';
+        console.log('💳 Estatus de pago por defecto: Pendiente (sin fecha de vencimiento)');
+      }
+      
+      // ✨ Agregar bandera para identificar que fue capturado con extractor PDF
+      datosConCliente._capturado_con_extractor_pdf = true;
+      datosConCliente._nombre_archivo_pdf = archivo?.name || informacionArchivo?.nombre || 'PDF importado';
+      
+      // 🔍 Guardar "huella digital" de los datos originales del PDF para detectar cambios manuales
+      datosConCliente._datos_originales_pdf = {
+        numero_poliza: datosConCliente.numero_poliza,
+        compania: datosConCliente.compania,
+        producto: datosConCliente.producto,
+        cliente_id: datosConCliente.cliente_id,
+        prima_pagada: datosConCliente.prima_pagada,
+        total: datosConCliente.total,
+        fecha_emision: datosConCliente.fecha_emision,
+        inicio_vigencia: datosConCliente.inicio_vigencia,
+        termino_vigencia: datosConCliente.termino_vigencia,
+        etapa_activa: datosConCliente.etapa_activa,
+        tipo_pago: datosConCliente.tipo_pago,
+        agente: datosConCliente.agente
+      };
+      
       console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
       onDataExtracted(datosConCliente);
       onClose();
     }
-  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose]);
+  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose, archivo, informacionArchivo]);
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -2076,27 +1681,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             ></button>
           </div>
           
+          {/* Input file oculto que se activa automáticamente */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/pdf"
+            onChange={handleFileUpload}
+            style={{ display: 'none' }}
+          />
+          
           <div className="modal-body">
-            {estado === 'esperando' && (
-              <div className="text-center py-5">
-                <Upload size={48} className="text-muted mb-3" />
-                <h6 className="mb-3">Seleccione el archivo PDF de la póliza</h6>
-                <p className="text-muted mb-4">
-                  Sistema de extracción inteligente optimizado para pólizas mexicanas
-                </p>
-                <label className="btn btn-primary btn-lg">
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleFileUpload}
-                    className="d-none"
-                  />
-                  <Upload className="me-2" size={20} />
-                  Seleccionar Póliza PDF
-                </label>
-              </div>
-            )}
-
             {estado === 'procesando' && (
               <div className="text-center py-5">
                 <div className="spinner-border text-primary mb-3" role="status">
@@ -2134,12 +1728,19 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                           }
                         </p>
                       </div>
-                      {datosExtraidos.rfc && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">RFC:</strong>
+                      <div className="col-md-6">
+                        <strong className="d-block mb-1">RFC:</strong>
+                        {datosExtraidos.rfc ? (
                           <p className="mb-0">{datosExtraidos.rfc}</p>
-                        </div>
-                      )}
+                        ) : (
+                          <div className="d-flex align-items-center">
+                            <span className="badge bg-warning text-dark me-2">
+                              <i className="bi bi-exclamation-triangle me-1"></i>
+                              RFC no encontrado en PDF
+                            </span>
+                          </div>
+                        )}
+                      </div>
                       {datosExtraidos.domicilio && (
                         <div className="col-12">
                           <strong className="d-block mb-1">Dirección:</strong>
@@ -2731,6 +2332,11 @@ const ListaExpedientes = React.memo(({
   agentes,
   limpiarFormulario,
   setVistaActual,
+  setModoEdicion,
+  mostrarModalMetodoCaptura,
+  setMostrarModalMetodoCaptura,
+  mostrarExtractorPDF,
+  setMostrarExtractorPDF,
   aplicarPago,
   puedeAvanzarEstado,
   avanzarEstado,
@@ -2744,21 +2350,192 @@ const ListaExpedientes = React.memo(({
   clientesMap,
   abrirModalCompartir
 }) => {
-  const paginacion = usePaginacion(expedientes, 10);
+  // Estado para carpeta/categoría seleccionada
+  const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('todas');
+  
+  // Filtrar expedientes según la carpeta seleccionada
+  const expedientesFiltrados = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    switch (carpetaSeleccionada) {
+      case 'en_proceso':
+        // Pólizas pendientes de pago (nuevas o renovaciones)
+        // Incluye: En cotización, Emitida, Renovación en Proceso, etc. que NO estén pagadas
+        return expedientes.filter(exp => {
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
+        });
+      
+      case 'vigentes':
+        // Pólizas NUEVAS pagadas que aún no necesitan renovación
+        // Criterio: Pagadas + hoy < fecha_aviso_renovacion + etapa NO es Renovada
+        return expedientes.filter(exp => {
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Renovada') return false; // Renovadas van a su propia carpeta
+          
+          // Si no tiene fecha_aviso_renovacion, mostrar en vigentes (fallback)
+          if (!exp.fecha_aviso_renovacion) return true;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+        });
+      
+      case 'renovadas':
+        // Pólizas RENOVADAS pagadas que aún no necesitan renovarse otra vez
+        // Criterio: etapa = Renovada + hoy < fecha_aviso_renovacion
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa !== 'Renovada') return false;
+          
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          if (estatusPago !== 'pagado') return false;
+          
+          // Si no tiene fecha_aviso_renovacion, mostrar aquí (fallback)
+          if (!exp.fecha_aviso_renovacion) return true;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+        });
+      
+      case 'por_renovar':
+        // Pólizas (nuevas o renovadas) que ya llegaron a su fecha de aviso de renovación
+        // Criterio: hoy >= fecha_aviso_renovacion && hoy < termino_vigencia
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+          
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          const fechaTermino = new Date(exp.termino_vigencia);
+          
+          return hoy >= fechaAviso && hoy < fechaTermino;
+        });
+      
+      case 'vencidas':
+        // Pólizas vencidas (termino_vigencia < hoy)
+        return expedientes.filter(exp => {
+          if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+          const fechaVencimiento = new Date(exp.termino_vigencia);
+          return fechaVencimiento < hoy;
+        });
+      
+      case 'canceladas':
+        return expedientes.filter(exp => exp.etapa_activa === 'Cancelada');
+      
+      case 'todas':
+      default:
+        return expedientes;
+    }
+  }, [expedientes, carpetaSeleccionada]);
+  
+  // Contadores para cada carpeta
+  const contadores = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    return {
+      todas: expedientes.length,
+      
+      en_proceso: expedientes.filter(exp => {
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
+      }).length,
+      
+      vigentes: expedientes.filter(exp => {
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        if (!exp.fecha_aviso_renovacion) return true;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        return hoy < fechaAviso;
+      }).length,
+      
+      renovadas: expedientes.filter(exp => {
+        if (exp.etapa_activa !== 'Renovada') return false;
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        if (estatusPago !== 'pagado') return false;
+        if (!exp.fecha_aviso_renovacion) return true;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        return hoy < fechaAviso;
+      }).length,
+      
+      por_renovar: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        const fechaTermino = new Date(exp.termino_vigencia);
+        return hoy >= fechaAviso && hoy < fechaTermino;
+      }).length,
+      
+      vencidas: expedientes.filter(exp => {
+        if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
+        const fechaVencimiento = new Date(exp.termino_vigencia);
+        return fechaVencimiento < hoy;
+      }).length,
+      
+      canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
+    };
+  }, [expedientes]);
+  
+  const paginacion = usePaginacion(expedientesFiltrados, 10);
 
-  // Detectar pólizas duplicadas
-  const polizasDuplicadas = React.useMemo(() => {
-    const grupos = {};
-    expedientes.forEach(exp => {
-      if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
-        const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
-        if (!grupos[clave]) {
-          grupos[clave] = [];
+  // Detectar 3 tipos de duplicados
+  const analisisDuplicados = React.useMemo(() => {
+    const polizasDuplicadas = [];
+    const vinsDuplicados = [];
+    const polizasVinDistinto = [];
+
+    expedientes.forEach((exp, index) => {
+      // Solo analizar si tiene número de póliza
+      if (!exp.numero_poliza) return;
+
+      const vin = exp.numero_serie?.trim() || '';
+
+      // Buscar otros expedientes
+      expedientes.forEach((otro, otroIndex) => {
+        if (index >= otroIndex || !otro.numero_poliza) return;
+
+        const otroVin = otro.numero_serie?.trim() || '';
+
+        // Regla 1: Misma póliza + mismo VIN (duplicada completa)
+        if (exp.numero_poliza === otro.numero_poliza &&
+            exp.compania === otro.compania &&
+            vin !== '' && otroVin !== '' &&
+            vin === otroVin) {
+          if (!polizasDuplicadas.find(d => d.id === exp.id)) {
+            polizasDuplicadas.push({ id: exp.id, tipo: 'completa', poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasDuplicadas.find(d => d.id === otro.id)) {
+            polizasDuplicadas.push({ id: otro.id, tipo: 'completa', poliza: otro.numero_poliza, vin: otroVin });
+          }
         }
-        grupos[clave].push(exp);
-      }
+        // Regla 2: Mismo VIN, diferente póliza
+        else if (vin !== '' && otroVin !== '' &&
+                 vin === otroVin &&
+                 exp.numero_poliza !== otro.numero_poliza) {
+          if (!vinsDuplicados.find(d => d.id === exp.id)) {
+            vinsDuplicados.push({ id: exp.id, vin, poliza: exp.numero_poliza });
+          }
+          if (!vinsDuplicados.find(d => d.id === otro.id)) {
+            vinsDuplicados.push({ id: otro.id, vin: otroVin, poliza: otro.numero_poliza });
+          }
+        }
+        // Regla 3: Misma póliza, diferente VIN
+        else if (exp.numero_poliza === otro.numero_poliza &&
+                 exp.compania === otro.compania &&
+                 vin !== '' && otroVin !== '' &&
+                 vin !== otroVin) {
+          if (!polizasVinDistinto.find(d => d.id === exp.id)) {
+            polizasVinDistinto.push({ id: exp.id, poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasVinDistinto.find(d => d.id === otro.id)) {
+            polizasVinDistinto.push({ id: otro.id, poliza: otro.numero_poliza, vin: otroVin });
+          }
+        }
+      });
     });
-    return Object.entries(grupos).filter(([_, exps]) => exps.length > 1);
+
+    return { polizasDuplicadas, vinsDuplicados, polizasVinDistinto };
   }, [expedientes]);
 
   return (
@@ -2767,8 +2544,7 @@ const ListaExpedientes = React.memo(({
         <h3 className="mb-0">Gestión de Pólizas</h3>
         <button
           onClick={() => {
-            limpiarFormulario();
-            setVistaActual('formulario');
+            setMostrarModalMetodoCaptura(true);
           }}
           className="btn btn-primary"
         >
@@ -2777,23 +2553,185 @@ const ListaExpedientes = React.memo(({
         </button>
       </div>
 
-      {polizasDuplicadas.length > 0 && (
-        <div className="alert alert-warning mb-3" role="alert">
-          <strong>⚠️ Atención:</strong> Se encontraron {polizasDuplicadas.length} póliza(s) duplicada(s).
-          Las filas están marcadas en amarillo.
-          <details className="mt-2">
-            <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
-              Ver detalles de duplicados
-            </summary>
-            <ul className="mt-2 mb-0">
-              {polizasDuplicadas.map(([clave, exps]) => (
-                <li key={clave}>
-                  <strong>{exps[0].numero_poliza}</strong> - {exps[0].compania} - Vigencia: {exps[0].inicio_vigencia}
-                  <span className="text-muted"> ({exps.length} registros)</span>
-                </li>
-              ))}
-            </ul>
-          </details>
+      {/* Layout: Sidebar + Contenido */}
+      <div className="row g-2">
+        {/* Sidebar - Carpetas */}
+        <div className="col-auto" style={{ minWidth: '160px', maxWidth: '180px' }}>
+          <div className="card">
+            <div className="card-header bg-light py-2 px-2">
+              <h6 className="mb-0" style={{ fontSize: '0.85rem' }}>📂 Carpetas</h6>
+            </div>
+            <div className="list-group list-group-flush">
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'todas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('todas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>📋 Todas</span>
+                <span className={`badge ${carpetaSeleccionada === 'todas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.todas}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'en_proceso' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('en_proceso')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>📝 En Proceso</span>
+                <span className={`badge ${carpetaSeleccionada === 'en_proceso' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.en_proceso}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vigentes' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('vigentes')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>✅ Vigentes</span>
+                <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-primary' : 'bg-success'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.vigentes}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'renovadas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('renovadas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>🔄 Renovadas</span>
+                <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-primary' : 'bg-info'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.renovadas}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'por_renovar' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('por_renovar')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>⏰ Por Renovar</span>
+                <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-primary' : 'bg-warning'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.por_renovar}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vencidas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('vencidas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>⚠️ Vencidas</span>
+                <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-primary' : 'bg-danger'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.vencidas}
+                </span>
+              </button>
+              <button
+                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'canceladas' ? 'active' : ''}`}
+                onClick={() => setCarpetaSeleccionada('canceladas')}
+                style={{ fontSize: '0.8rem' }}
+              >
+                <span>🚫 Canceladas</span>
+                <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
+                  {contadores.canceladas}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Contenido principal */}
+        <div className="col">
+
+      {/* Alertas de duplicados */}
+      {(analisisDuplicados.polizasDuplicadas.length > 0 || 
+        analisisDuplicados.vinsDuplicados.length > 0 || 
+        analisisDuplicados.polizasVinDistinto.length > 0) && (
+        <div className="mb-3">
+          {analisisDuplicados.polizasDuplicadas.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas Duplicadas:</strong> {analisisDuplicados.polizasDuplicadas.length} registro(s) con misma póliza y mismo VIN
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas duplicadas
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasDuplicadas.forEach(d => {
+                      const clave = `${d.poliza}-${d.vin}`;
+                      if (!grupos[clave]) grupos[clave] = [];
+                      grupos[clave].push(d);
+                    });
+                    return Object.entries(grupos).map(([clave, items]) => (
+                      <li key={clave} className="mb-1">
+                        <strong>Póliza: {items[0].poliza}</strong> | VIN: {items[0].vin} 
+                        <span className="text-muted"> ({items.length} registros)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.vinsDuplicados.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert" style={{borderLeft: '4px solid #fd7e14'}}>
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ VINs Duplicados:</strong> {analisisDuplicados.vinsDuplicados.length} registro(s) con VIN repetido en diferentes pólizas
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver VINs duplicados - revisar
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.vinsDuplicados.forEach(d => {
+                      if (!grupos[d.vin]) grupos[d.vin] = [];
+                      grupos[d.vin].push(d);
+                    });
+                    return Object.entries(grupos).map(([vin, items]) => (
+                      <li key={vin} className="mb-1">
+                        <strong>VIN: {vin}</strong> aparece en pólizas: {items.map(i => i.poliza).join(', ')}
+                        <span className="text-muted"> ({items.length} pólizas)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.polizasVinDistinto.length > 0 && (
+            <div className="alert alert-danger mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas con VIN Distinto:</strong> {analisisDuplicados.polizasVinDistinto.length} registro(s) con mismo número de póliza pero VIN diferente
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas con VIN distinto - revisar urgente
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasVinDistinto.forEach(d => {
+                      if (!grupos[d.poliza]) grupos[d.poliza] = [];
+                      grupos[d.poliza].push(d);
+                    });
+                    return Object.entries(grupos).map(([poliza, items]) => (
+                      <li key={poliza} className="mb-1">
+                        <strong>Póliza: {poliza}</strong> tiene VINs: {items.map(i => i.vin).join(', ')}
+                        <span className="text-muted"> ({items.length} VINs diferentes)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
         </div>
       )}
 
@@ -2857,23 +2795,34 @@ const ListaExpedientes = React.memo(({
                   {paginacion.itemsPaginados.map((expediente) => {
                     const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
                     
-                    // Detectar si esta póliza está duplicada
-                    const esDuplicada = expedientes.filter(exp => 
-                      exp.numero_poliza === expediente.numero_poliza &&
-                      exp.compania === expediente.compania &&
-                      exp.inicio_vigencia === expediente.inicio_vigencia &&
-                      expediente.numero_poliza // Solo si tiene número de póliza
-                    ).length > 1;
+                    // Detectar tipo de duplicado para este expediente
+                    const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
+                    const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
+                    const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
                     
                     return (
-                      <tr key={expediente.id} className={esDuplicada ? 'table-warning' : ''} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
+                      <tr key={expediente.id} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
                         <td style={{ verticalAlign: 'middle' }}>
                           <div>
                             <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
-                            {esDuplicada && (
+                            {esDuplicadaCompleta && (
                               <div>
-                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada">
+                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada (misma póliza + mismo VIN)">
                                   ⚠️ Duplicada
+                                </span>
+                              </div>
+                            )}
+                            {esVinDuplicado && (
+                              <div>
+                                <span className="badge" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
+                                  ⚠️ VIN Duplicado
+                                </span>
+                              </div>
+                            )}
+                            {esPolizaVinDistinto && (
+                              <div>
+                                <span className="badge bg-danger" style={{ fontSize: '0.7rem' }} title="Mismo número de póliza con VIN diferente - Revisar urgente">
+                                  ⚠️ Póliza VIN Distinto
                                 </span>
                               </div>
                             )}
@@ -2883,6 +2832,15 @@ const ListaExpedientes = React.memo(({
                             {expediente.inciso && (
                               <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Inc: {expediente.inciso}</small></div>
                             )}
+                            {/* Fechas de captura y emisión */}
+                            <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '4px', lineHeight: '1.3' }}>
+                              {expediente.created_at && (
+                                <div>📝 Cap: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                              )}
+                              {expediente.fecha_emision && (
+                                <div>📄 Emi: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                              )}
+                            </div>
                           </div>
                         </td>
                         <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
@@ -2942,71 +2900,80 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td>
-                          <div className="d-flex gap-1 flex-wrap align-items-start">
-                            {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
-                              <button
-                                onClick={() => abrirModalCompartir(expediente)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Compartir"
-                              >
-                                <Share2 size={12} />
-                              </button>
-                            )}
-
-                            {(() => {
-                              // Permitir aplicar pago en estas etapas
-                              const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-                              const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
-                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                              const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
-                              
-                              return etapaValida && noPagado ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
+                            <div className="d-flex gap-1 align-items-center">
+                              {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
                                 <button
-                                  onClick={() => aplicarPago(expediente.id)}
+                                  onClick={() => abrirModalCompartir(expediente)}
                                   className="btn btn-success btn-sm"
                                   style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Aplicar Pago"
+                                  title="Compartir"
                                 >
-                                  <DollarSign size={12} />
+                                  <Share2 size={12} />
                                 </button>
-                              ) : null;
-                            })()}
+                              )}
 
-                            
-                            {expediente.etapa_activa !== 'Cancelada' && (
+                              {(() => {
+                                // Permitir aplicar pago en estas etapas
+                                const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
+                                const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
+                                const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                                const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
+                                
+                                return etapaValida && noPagado ? (
+                                  <button
+                                    onClick={() => aplicarPago(expediente.id)}
+                                    className="btn btn-success btn-sm"
+                                    style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                    title="Aplicar Pago"
+                                  >
+                                    <DollarSign size={12} />
+                                  </button>
+                                ) : null;
+                              })()}
+
+                              
+                              {expediente.etapa_activa !== 'Cancelada' && (
+                                <button
+                                  onClick={() => iniciarCancelacion(expediente)}
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                  title="Cancelar Póliza"
+                                >
+                                  <XCircle size={12} />
+                                </button>
+                              )}
+                              
                               <button
-                                onClick={() => iniciarCancelacion(expediente)}
-                                className="btn btn-danger btn-sm"
+                                onClick={() => verDetalles(expediente)}
+                                className="btn btn-outline-primary btn-sm"
                                 style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Cancelar Póliza"
+                                title="Ver detalles"
                               >
-                                <XCircle size={12} />
+                                <Eye size={12} />
                               </button>
-                            )}
+                            </div>
                             
-                            <button
-                              onClick={() => verDetalles(expediente)}
-                              className="btn btn-outline-primary btn-sm"
-                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                              title="Ver detalles"
-                            >
-                              <Eye size={12} />
-                            </button>
-                            <button
-                              onClick={() => editarExpediente(expediente)}
-                              className="btn btn-outline-secondary btn-sm"
-                              title="Editar"
-                            >
-                              <Edit size={14} />
-                            </button>
-                            <button
-                              onClick={() => eliminarExpediente(expediente.id)}
-                              className="btn btn-outline-danger btn-sm"
-                              title="Eliminar"
-                            >
-                              <Trash2 size={14} />
-                            </button>
+                            {/* Fila 2: Editar, Eliminar */}
+                            <div className="d-flex gap-1 align-items-center">
+                              <button
+                                onClick={() => editarExpediente(expediente)}
+                                className="btn btn-outline-secondary btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Editar"
+                              >
+                                <Edit size={12} />
+                              </button>
+                              <button
+                                onClick={() => eliminarExpediente(expediente.id)}
+                                className="btn btn-outline-danger btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Eliminar"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -3026,6 +2993,147 @@ const ListaExpedientes = React.memo(({
             )}
           </>
         )}
+      </div>
+
+      {/* Modal de Selección de Método de Captura */}
+      {mostrarModalMetodoCaptura && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header border-0 pb-0">
+                <h5 className="modal-title w-100 text-center">
+                  📋 Selecciona el Método de Captura
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close"
+                  onClick={() => setMostrarModalMetodoCaptura(false)}
+                ></button>
+              </div>
+              
+              <div className="modal-body pt-2">
+                <p className="text-center text-muted mb-4">
+                  ¿Cómo deseas agregar la nueva póliza?
+                </p>
+
+                {/* Input file oculto para PDF */}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  id="pdfFileInput"
+                  ref={(input) => {
+                    if (input) {
+                      input.onclick = () => {
+                        // Guardar referencia para poder procesar el archivo después
+                        window._pdfInputForExtractor = input;
+                      };
+                    }
+                  }}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                      // Cerrar modal de selección
+                      setMostrarModalMetodoCaptura(false);
+                      // Cambiar a vista formulario
+                      setVistaActual('formulario');
+                      setModoEdicion(false);
+                      limpiarFormulario();
+                      // Guardar archivo temporalmente y abrir el extractor
+                      window._selectedPDFFile = file;
+                      setTimeout(() => {
+                        setMostrarExtractorPDF(true);
+                      }, 100);
+                    }
+                    // NO resetear el input todavía
+                  }}
+                />
+
+                <div className="row g-3">
+                  {/* Opción Captura Manual */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-primary text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        setMostrarModalMetodoCaptura(false);
+                        setVistaActual('formulario');
+                        setModoEdicion(false);
+                        limpiarFormulario();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(13,110,253,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          ✍️
+                        </div>
+                        <h5 className="card-title text-primary mb-2">Captura Manual</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Llena el formulario campo por campo
+                        </p>
+                        <button 
+                          className="btn btn-primary w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarModalMetodoCaptura(false);
+                            setVistaActual('formulario');
+                            setModoEdicion(false);
+                            limpiarFormulario();
+                          }}
+                        >
+                          Captura Manual
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opción Extractor PDF */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-success text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        document.getElementById('pdfFileInput')?.click();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,135,84,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          📄
+                        </div>
+                        <h5 className="card-title text-success mb-2">Extractor PDF</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Importa datos automáticamente desde el PDF
+                        </p>
+                        <button 
+                          className="btn btn-success w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('pdfFileInput')?.click();
+                          }}
+                        >
+                          <Upload size={16} className="me-2" />
+                          Importar PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="alert alert-info mt-4 mb-0">
+                  <small>
+                    <strong>💡 Recomendación:</strong> Usa el extractor PDF para mayor velocidad y precisión. 
+                    La captura manual es útil cuando no tienes el PDF de la póliza.
+                  </small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+        </div>
       </div>
     </div>
   );
@@ -3057,9 +3165,11 @@ const Formulario = React.memo(({
   handleSeleccionarPDF,
   archivoSeleccionado,
   subiendoPDF,
-  subirPDFPoliza
+  subirPDFPoliza,
+  mostrarExtractorPDF,
+  setMostrarExtractorPDF
 }) => {
-  const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
+  // Estados movidos al componente padre
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
   const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
@@ -3239,36 +3349,15 @@ const Formulario = React.memo(({
         setTimeout(() => {
           setFormulario(prev => {
             const formularioConCalculos = actualizarCalculosAutomaticos(prev);
+            // ✅ SOLO aplicar los cálculos automáticos, NO sobrescribir datos del PDF
+            // Los datos del PDF ya están en 'prev' del setFormulario anterior
             return {
               ...prev,
-              ...formularioConCalculos,
-              // Preservar datos importantes que no deben cambiar
-              compania: datosExtraidos.compania,
-              producto: datosExtraidos.producto,
-              agente: agenteCodigo || '',
-              // Preservar datos del vehículo
-            marca: datosExtraidos.marca,
-            modelo: datosExtraidos.modelo,
-            anio: datosExtraidos.anio,
-            numero_serie: datosExtraidos.numero_serie,
-            motor: datosExtraidos.motor,
-            placas: datosExtraidos.placas,
-            color: datosExtraidos.color,
-            tipo_vehiculo: datosExtraidos.tipo_vehiculo,
-            tipo_cobertura: datosExtraidos.tipo_cobertura,
-            codigo_vehiculo: datosExtraidos.codigo_vehiculo,
-            // Preservar campos adicionales de pago y póliza
-            tipo_pago: datosExtraidos.tipo_pago,
-            frecuenciaPago: datosExtraidos.frecuenciaPago,
-            primer_pago: datosExtraidos.primer_pago,
-            pagos_subsecuentes: datosExtraidos.pagos_subsecuentes,
-            forma_pago: datosExtraidos.forma_pago,
-            uso: datosExtraidos.uso,
-            servicio: datosExtraidos.servicio,
-            movimiento: datosExtraidos.movimiento
-          };
+              ...formularioConCalculos
+              // NO sobrescribir nada más - los datos del PDF ya están en 'prev'
+            };
           });
-          console.log('✅ Cálculos automáticos aplicados');
+          console.log('✅ Cálculos automáticos aplicados (preservando datos del PDF)');
         }, 150);
       } else {
         // FORZAR la actualización después de un pequeño delay
@@ -3351,19 +3440,6 @@ const Formulario = React.memo(({
           {modoEdicion ? 'Editar Expediente' : 'Nuevo Expediente'}
         </h3>
         <div className="d-flex gap-2">
-          {!modoEdicion && (
-            <button
-              onClick={() => {
-                console.log('🔵 Abriendo extractor PDF...');
-                setMostrarExtractorPDF(true);
-              }}
-              className="btn btn-outline-primary"
-              title="Extraer datos automáticamente desde una póliza PDF"
-            >
-              <Upload size={16} className="me-2" />
-              Importar PDF
-            </button>
-          )}
           <button
             onClick={() => setVistaActual('lista')}
             className="btn btn-outline-secondary"
@@ -3871,6 +3947,61 @@ const Formulario = React.memo(({
                     ))}
                   </select>
                 </div>
+                <div className="col-md-4">
+                  <label className="form-label">Número de Motor</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.motor || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, motor: e.target.value.toUpperCase() }))}
+                    placeholder="Número de motor"
+                  />
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Uso</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.uso || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      uso: e.target.value, 
+                      uso_poliza: e.target.value 
+                    }))}
+                    placeholder="Ej: PARTICULAR"
+                  />
+                  <small className="form-text text-muted">Uso del vehículo según póliza</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Servicio</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.servicio || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      servicio: e.target.value,
+                      servicio_poliza: e.target.value
+                    }))}
+                    placeholder="Ej: PRIVADO"
+                  />
+                  <small className="form-text text-muted">Servicio del vehículo</small>
+                </div>
+                <div className="col-md-4">
+                  <label className="form-label">Movimiento</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.movimiento || ''}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      movimiento: e.target.value,
+                      movimiento_poliza: e.target.value
+                    }))}
+                    placeholder="Ej: NACIONAL"
+                  />
+                  <small className="form-text text-muted">Movimiento permitido</small>
+                </div>
               </div>
             </div>
           )}
@@ -3930,52 +4061,6 @@ const Formulario = React.memo(({
                       step="0.01"
                     />
                   </div>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Uso</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.uso || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      uso: e.target.value, 
-                      // Mantener alias para backend si lo utiliza
-                      uso_poliza: e.target.value 
-                    }))}
-                    placeholder="Ej: PARTICULAR"
-                  />
-                  <small className="form-text text-muted">Uso del vehículo según póliza</small>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Servicio</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.servicio || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      servicio: e.target.value,
-                      servicio_poliza: e.target.value
-                    }))}
-                    placeholder="Ej: PRIVADO"
-                  />
-                  <small className="form-text text-muted">Servicio del vehículo</small>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Movimiento</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formulario.movimiento || ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      movimiento: e.target.value,
-                      movimiento_poliza: e.target.value
-                    }))}
-                    placeholder="Ej: NACIONAL"
-                  />
-                  <small className="form-text text-muted">Movimiento permitido</small>
                 </div>
               </div>
             </div>
@@ -4163,7 +4248,7 @@ const Formulario = React.memo(({
           <div className="mb-4">
             <h5 className="card-title border-bottom pb-2">Fechas y Vigencia</h5>
             <div className="row g-3">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <label className="form-label">Fecha de Emisión</label>
                 <input
                   type="date"
@@ -4175,7 +4260,19 @@ const Formulario = React.memo(({
                   Fecha en que se emitió la póliza
                 </small>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
+                <label className="form-label">Fecha de Captura</label>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={formulario.fecha_captura || new Date().toISOString().split('T')[0]}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, fecha_captura: e.target.value }))}
+                />
+                <small className="form-text text-muted">
+                  Fecha de registro en el sistema
+                </small>
+              </div>
+              <div className="col-md-3">
                 <label className="form-label">Inicio de Vigencia</label>
                 <input
                   type="date"
@@ -4188,7 +4285,7 @@ const Formulario = React.memo(({
                   }}
                 />
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <CampoFechaCalculada
                   label="Término de Vigencia"
                   value={formulario.termino_vigencia}
@@ -4200,6 +4297,18 @@ const Formulario = React.memo(({
                   disabled={!formulario.inicio_vigencia}
                   helpText="La vigencia siempre es de 1 año"
                 />
+              </div>
+              <div className="col-md-3">
+                <label className="form-label">📅 Aviso de Renovación</label>
+                <input
+                  type="date"
+                  className="form-control bg-light"
+                  value={formulario.fecha_aviso_renovacion || ''}
+                  readOnly
+                  disabled
+                  style={{ cursor: 'not-allowed' }}
+                />
+                <small className="text-muted">Se calcula automáticamente (Término - 30 días)</small>
               </div>
             </div>
           </div>
@@ -4214,10 +4323,13 @@ const Formulario = React.memo(({
                   className="form-select"
                   value={formulario.tipo_pago ?? ''}
                   onChange={(e) => {
+                    const tipo = e.target.value;
+                    const esAnual = tipo === 'Anual' || /pago\s+unico|pago\s+único/i.test(tipo);
                     const nuevoFormulario = {
-                      ...formulario, 
-                      tipo_pago: e.target.value,
-                      frecuenciaPago: e.target.value === 'Anual' ? '' : formulario.frecuenciaPago
+                      ...formulario,
+                      tipo_pago: tipo,
+                      // Forzar frecuenciaPago = 'Anual' para tipo anual o pago único
+                      frecuenciaPago: esAnual ? 'Anual' : formulario.frecuenciaPago
                     };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                     setFormulario(formularioActualizado);
@@ -4248,6 +4360,19 @@ const Formulario = React.memo(({
                   </select>
                 </div>
               )}
+              {formulario.tipo_pago && formulario.tipo_pago !== 'Fraccionado' && (
+                <div className="col-md-3 d-flex flex-column">
+                  <label className="form-label">Frecuencia de Pago</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={formulario.frecuenciaPago || 'Anual'}
+                    readOnly
+                    disabled
+                  />
+                  <small className="text-muted">Frecuencia fija para pago {formulario.tipo_pago === 'Anual' ? 'Anual' : 'Único'}.</small>
+                </div>
+              )}
               
               <div className="col-md-3">
                 <label className="form-label">Período de Gracia</label>
@@ -4258,10 +4383,44 @@ const Formulario = React.memo(({
                     value={formulario.periodo_gracia ?? ''}
                     onChange={(e) => {
                       const valor = e.target.value;
-                      const numero = valor === '' ? '' : Math.max(0, parseInt(valor, 10) || 0);
-                      const nuevoFormulario = { ...formulario, periodo_gracia: numero };
-                      const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
-                      setFormulario(formularioActualizado);
+                      const diasGracia = valor === '' ? 0 : Math.max(0, parseInt(valor, 10) || 0);
+                      
+                      setFormulario(prev => {
+                        // Si tiene inicio_vigencia, recalcular fecha_pago
+                        let nuevaFechaPago = prev.fecha_vencimiento_pago || prev.fecha_pago;
+                        
+                        if (prev.inicio_vigencia) {
+                          const fechaInicio = new Date(prev.inicio_vigencia);
+                          fechaInicio.setDate(fechaInicio.getDate() + diasGracia);
+                          nuevaFechaPago = fechaInicio.toISOString().split('T')[0];
+                        }
+                        
+                        // Calcular estatus de pago inline
+                        let nuevoEstatus = prev.estatusPago;
+                        if (nuevoEstatus !== 'Pagado' && nuevaFechaPago) {
+                          const fechaPago = new Date(nuevaFechaPago);
+                          const hoy = new Date();
+                          hoy.setHours(0, 0, 0, 0);
+                          fechaPago.setHours(0, 0, 0, 0);
+                          const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
+                          
+                          if (diasRestantes < 0) {
+                            nuevoEstatus = 'Vencido';
+                          } else if (diasRestantes <= 15) {
+                            nuevoEstatus = 'Por Vencer';
+                          } else {
+                            nuevoEstatus = 'Pendiente';
+                          }
+                        }
+                        
+                        return {
+                          ...prev,
+                          periodo_gracia: diasGracia,
+                          fecha_vencimiento_pago: nuevaFechaPago,
+                          fecha_pago: nuevaFechaPago,
+                          estatusPago: nuevoEstatus
+                        };
+                      });
                     }}
                     min={0}
                   />
@@ -4274,7 +4433,7 @@ const Formulario = React.memo(({
                     ? 'Sugerido Qualitas: 14 días' 
                     : formulario.compania 
                       ? 'Sugerido otras aseguradoras: 30 días'
-                      : 'Seleccione una compañía'}
+                      : 'Editable para pruebas'}
                 </small>
               </div>
               
@@ -4286,17 +4445,53 @@ const Formulario = React.memo(({
                   value={formulario.fecha_vencimiento_pago || ''}
                   onChange={(e) => {
                     const nuevaFecha = e.target.value;
+                    
                     setFormulario(prev => {
-                      const nuevoEstatus = calcularEstatusPago(nuevaFecha, prev.estatusPago);
+                      // Calcular periodo de gracia basado en la diferencia con inicio_vigencia
+                      let nuevoPeriodoGracia = prev.periodo_gracia || 0;
+                      
+                      if (prev.inicio_vigencia && nuevaFecha) {
+                        const fechaInicio = new Date(prev.inicio_vigencia);
+                        const fechaPago = new Date(nuevaFecha);
+                        fechaInicio.setHours(0, 0, 0, 0);
+                        fechaPago.setHours(0, 0, 0, 0);
+                        
+                        const diferenciaDias = Math.ceil((fechaPago - fechaInicio) / (1000 * 60 * 60 * 24));
+                        nuevoPeriodoGracia = Math.max(0, diferenciaDias);
+                      }
+                      
+                      // Calcular estatus de pago inline
+                      let nuevoEstatus = prev.estatusPago;
+                      if (nuevoEstatus !== 'Pagado' && nuevaFecha) {
+                        const fechaPago = new Date(nuevaFecha);
+                        const hoy = new Date();
+                        hoy.setHours(0, 0, 0, 0);
+                        fechaPago.setHours(0, 0, 0, 0);
+                        const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
+                        
+                        if (diasRestantes < 0) {
+                          nuevoEstatus = 'Vencido';
+                        } else if (diasRestantes <= 15) {
+                          nuevoEstatus = 'Por Vencer';
+                        } else {
+                          nuevoEstatus = 'Pendiente';
+                        }
+                      }
+                      
                       return {
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
                         fecha_pago: nuevaFecha,
-                        estatusPago: nuevoEstatus
+                        periodo_gracia: nuevoPeriodoGracia,
+                        estatusPago: nuevoEstatus,
+                        _fechaManual: true // Bandera para evitar recálculo automático
                       };
                     });
                   }}
                 />
+                <small className="text-muted">
+                  Editable - Recalcula periodo de gracia
+                </small>
               </div>
               
               <div className="col-md-6">
@@ -4719,37 +4914,46 @@ const ModuloExpedientes = () => {
         setClientes(clientesData);
         setClientesMap(mapa);
         
-        // 4. Calcular estatusPago en los expedientes basándose en la fecha de vencimiento
+        // 4. Normalizar estatusPago respetando el valor de la BD
         const expedientesProcesados = expedientesData.map(exp => {
-          let estatusPagoCalculado = exp.estatusPago || exp.estatus_pago;
+          // ✅ RESPETAR EL ESTATUS QUE VIENE DE LA BASE DE DATOS
+          let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
           
           // Normalizar para comparación (case-insensitive)
           const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
           
-          // Si el estatus es 'Pagado' (cualquier variación), mantenerlo
+          // Normalizar variaciones a formato estándar
           if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-            console.log('✅ Póliza pagada encontrada:', exp.numero_poliza, '- Manteniendo estatus:', estatusPagoCalculado);
-            return {
-              ...exp,
-              estatusPago: 'Pagado'  // Normalizar a "Pagado" con mayúscula
-            };
-          }
-          
-          // Para cualquier otro estatus, recalcular basándose en la fecha
-          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-          if (fechaVencimiento) {
-            const fechaVenc = new Date(fechaVencimiento);
-            const hoy = new Date();
-            hoy.setHours(0, 0, 0, 0);
-            fechaVenc.setHours(0, 0, 0, 0);
-            
-            if (fechaVenc < hoy) {
-              estatusPagoCalculado = 'Vencido';
+            estatusPagoCalculado = 'Pagado';
+          } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+            estatusPagoCalculado = 'Cancelado';
+          } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+            estatusPagoCalculado = 'Vencido';
+          } else if (estatusNormalizado === 'por vencer') {
+            estatusPagoCalculado = 'Por Vencer';
+          } else if (estatusNormalizado === 'pendiente') {
+            estatusPagoCalculado = 'Pendiente';
+          } else if (estatusPagoCalculado) {
+            // Si tiene algún valor que no reconocemos, mantenerlo y solo normalizar capitalización
+            estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
+            console.log(`⚠️ Estatus no reconocido pero preservado: "${estatusPagoCalculado}" en póliza ${exp.numero_poliza}`);
+          } else {
+            // Solo si NO viene ningún estatus, calcular basándose en la fecha
+            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+            if (fechaVencimiento) {
+              const fechaVenc = new Date(fechaVencimiento);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              if (fechaVenc < hoy) {
+                estatusPagoCalculado = 'Vencido';
+              } else {
+                estatusPagoCalculado = 'Pendiente';
+              }
             } else {
               estatusPagoCalculado = 'Pendiente';
             }
-          } else {
-            estatusPagoCalculado = 'Pendiente';
           }
           
           return {
@@ -4800,6 +5004,8 @@ const ModuloExpedientes = () => {
   const [mostrarModalCancelacion, setMostrarModalCancelacion] = useState(false);
   const [motivoCancelacion, setMotivoCancelacion] = useState('');
   const [expedienteACancelar, setExpedienteACancelar] = useState(null);
+  const [mostrarModalMetodoCaptura, setMostrarModalMetodoCaptura] = useState(false);
+  const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   
     // Estados para manejo de PDFs
     const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
@@ -4918,7 +5124,10 @@ const ModuloExpedientes = () => {
     'En proceso emisión',
     'Emitida',
     'Enviada al Cliente',
+    'En Vigencia',
+    'Renovación en Proceso',
     'Renovada',
+    'Vencida',
     'Cancelada'
   ], []);
 
@@ -4926,7 +5135,7 @@ const ModuloExpedientes = () => {
   const tiposPago = useMemo(() => ['Anual', 'Fraccionado'], []);
   const frecuenciasPago = useMemo(() => Object.keys(CONSTANTS.PAGOS_POR_FRECUENCIA).sort(), []);
   const periodosGracia = useMemo(() => [14, 30], []);
-  const estatusPago = useMemo(() => ['Pendiente', 'Por Vencer', 'Vencido', 'Pagado'], []);
+  const estatusPago = useMemo(() => ['Pendiente', 'Por Vencer', 'Vencido', 'Pagado', 'Cancelado'], []);
   const motivosCancelacion = useMemo(() => [
     'Cliente desistió',
     'Documentación incompleta',
@@ -4937,7 +5146,7 @@ const ModuloExpedientes = () => {
   ], []);
 
   const tiposVehiculo = useMemo(() => ['Deportivo', 'Hatchback', 'Pickup', 'Sedán', 'SUV', 'Vagoneta', 'Otro'].sort(), []);
-  const tiposCobertura = useMemo(() => ['Amplia', 'Limitada', 'RC (Responsabilidad Civil)'].sort(), []);
+  const tiposCobertura = useMemo(() => ['Amplia', 'Limitada', 'RC (Responsabilidad Civil)', 'Integral'].sort(), []);
   const marcasVehiculo = useMemo(() => [
     'Audi', 'BMW', 'Chevrolet', 'Chrysler', 'Dodge', 'Fiat', 'Ford', 
     'Honda', 'Hyundai', 'Jeep', 'Kia', 'Mazda', 'Mercedes-Benz', 
@@ -5209,6 +5418,18 @@ const estadoInicialFormulario = {
     
     console.log('🔧 actualizarCalculosAutomaticos - Periodo de gracia:', periodoGracia, '| Del formulario:', formularioActual.periodo_gracia, '| Tipo:', typeof formularioActual.periodo_gracia);
     
+    // ⚠️ Si la fecha fue editada manualmente, NO recalcular
+    if (formularioActual._fechaManual) {
+      console.log('⏭️ Saltando recálculo automático - Fecha editada manualmente');
+      const resultado = {
+        ...formularioActual,
+        termino_vigencia,
+        periodo_gracia: periodoGracia
+      };
+      delete resultado._fechaManual; // Limpiar bandera temporal
+      return resultado;
+    }
+    
     // Calcular proximoPago según el tipo de pago
     let proximoPago = '';
     
@@ -5238,6 +5459,14 @@ const estadoInicialFormulario = {
     const fechaParaCalculo = formularioActual.fecha_vencimiento_pago || proximoPago;
     const estatusPago = calcularEstatusPago(fechaParaCalculo, formularioActual.estatusPago);
     
+    // ✨ Calcular fecha_aviso_renovacion (30 días antes del término de vigencia)
+    let fechaAvisoRenovacion = null;
+    if (termino_vigencia) {
+      const fechaTermino = new Date(termino_vigencia);
+      fechaTermino.setDate(fechaTermino.getDate() - 30);
+      fechaAvisoRenovacion = fechaTermino.toISOString().split('T')[0];
+    }
+    
     // Retornar con todos los campos sincronizados
     const resultado = { 
       ...formularioActual, 
@@ -5246,7 +5475,8 @@ const estadoInicialFormulario = {
       fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
       fecha_vencimiento_pago: proximoPago, // Asegurar que fecha_vencimiento_pago esté sincronizada
       estatusPago, 
-      periodo_gracia: periodoGracia 
+      periodo_gracia: periodoGracia,
+      fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
     };
     
     // 🚨 DEBUG: Verificar campos problemáticos al SALIR de actualizarCalculosAutomaticos
@@ -5289,6 +5519,14 @@ const estadoInicialFormulario = {
         fecha_actualizacion: new Date().toISOString().split('T')[0]
       };
       
+      // ✅ IMPORTANTE: Si se cancela la póliza, asignar fecha_cancelacion Y cambiar estatus de pago
+      if (nuevoEstado === 'Cancelada') {
+        datosActualizacion.fecha_cancelacion = new Date().toISOString().split('T')[0];
+        datosActualizacion.estatus_pago = 'Cancelado';
+        console.log('📅 Asignando fecha_cancelacion:', datosActualizacion.fecha_cancelacion);
+        console.log('💳 Cambiando estatus_pago a: Cancelado');
+      }
+      
       if (motivo) {
         datosActualizacion.motivoCancelacion = motivo;
       }
@@ -5310,26 +5548,68 @@ const estadoInicialFormulario = {
 
       // ✨ NUEVO: Registrar cambio de etapa en historial de trazabilidad
       try {
-        let descripcion = motivo ? `Cambio de etapa. Motivo: ${motivo}` : undefined;
+        // Determinar el tipo de evento según el cambio de etapa
+        let tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS; // Default
+        let descripcion = motivo ? `Motivo: ${motivo}` : undefined;
+        
+        // Mapear etapas a eventos específicos
+        // TODO: Cuando implementemos módulo de cotizaciones, agregar aquí:
+        // - Botón "Enviar cotización" → cambia a 'Cotización enviada' + COTIZACION_ENVIADA
+        // - Botón "Autorizar" → cambia a 'Autorizado' + COTIZACION_AUTORIZADA
+        // - Botón "Iniciar emisión" → cambia a 'En proceso emisión' + EMISION_INICIADA
+        
+        if (nuevoEstado === 'Cotización enviada' && etapaAnterior === 'En cotización') {
+          tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_ENVIADA;
+          descripcion = 'Cotización enviada al cliente para revisión';
+        } else if (nuevoEstado === 'Autorizado' && etapaAnterior === 'Cotización enviada') {
+          tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_AUTORIZADA;
+          descripcion = 'Cotización autorizada por el cliente';
+        } else if (nuevoEstado === 'En proceso emisión') {
+          tipoEvento = historialService.TIPOS_EVENTO.EMISION_INICIADA;
+          descripcion = 'Proceso de emisión de póliza iniciado';
+        } else if (nuevoEstado === 'Emitida' && etapaAnterior !== 'Enviada al Cliente') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
+          descripcion = 'Póliza emitida correctamente';
+        } else if (nuevoEstado === 'Renovación en Proceso') {
+          tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_INICIADA;
+          descripcion = 'Renovación de póliza iniciada - pendiente de pago';
+        } else if (nuevoEstado === 'Renovada') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_RENOVADA;
+          descripcion = 'Póliza renovada exitosamente - pago aplicado';
+        } else if (nuevoEstado === 'Cancelada') {
+          tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
+          descripcion = motivo ? `Motivo: ${motivo}` : 'Póliza cancelada sin especificar motivo';
+        }
+        
         await historialService.registrarCambioEtapa(
           expedienteId,
           expedienteActual?.cliente_id,
           etapaAnterior,
           nuevoEstado,
           'Sistema', // TODO: Obtener nombre del usuario actual
-          descripcion
+          descripcion,
+          tipoEvento
         );
-        console.log('✅ Cambio de etapa registrado en historial de trazabilidad');
+        console.log(`✅ Evento "${tipoEvento}" registrado en historial de trazabilidad`);
       } catch (error) {
         console.error('⚠️ Error al registrar cambio de etapa en historial:', error);
       }
 
       // Actualizar localmente
-      setExpedientes(prev => prev.map(exp => 
-        exp.id === expedienteId 
-          ? { ...exp, ...datosActualizacion }
-          : exp
-      ));
+      setExpedientes(prev => prev.map(exp => {
+        if (exp.id === expedienteId) {
+          // Combinar los datos actualizados y normalizar nombres de campos
+          const expedienteActualizado = { ...exp, ...datosActualizacion };
+          
+          // Si se actualizó estatus_pago, también actualizar estatusPago para el frontend
+          if (datosActualizacion.estatus_pago) {
+            expedienteActualizado.estatusPago = datosActualizacion.estatus_pago;
+          }
+          
+          return expedienteActualizado;
+        }
+        return exp;
+      }));
     } catch (error) {
       console.error('❌ Error al cambiar etapa:', error);
   toast.error('Error al actualizar: ' + error.message);
@@ -5356,6 +5636,18 @@ const estadoInicialFormulario = {
       setExpedienteACancelar(null);
     }
   }, [motivoCancelacion, expedienteACancelar, cambiarEstadoExpediente]);
+
+  // ✨ Verificar vigencias y registrar eventos automáticos
+  const verificarVigenciasAutomaticas = useCallback(async (expedientesLista) => {
+    // TODO: Implementar como job programado en el backend
+    // Por ahora solo registra eventos si detecta cambios
+    console.log('🔍 Verificación de vigencias pendiente (implementar en backend)');
+    
+    // La lógica ya existe en:
+    // - utils.calcularDiasRestantes() para calcular días
+    // - useEstatusExpediente para calcular estatus de pago
+    // Solo falta conectar con eventos de historial cuando se implemente job automático
+  }, []);
 
   // ✨ NUEVO: Manejar guardado de contacto faltante
   const handleGuardarContactoFaltante = useCallback(async (valorContacto) => {
@@ -5858,6 +6150,12 @@ const estadoInicialFormulario = {
         fecha_ultimo_pago: fechaActual,
         proximo_pago: proximoPago
       };
+      
+      // Si está completamente pagado, cambiar etapa a "En Vigencia"
+      if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.etapa_activa !== 'En Vigencia') {
+        datosActualizacion.etapa_activa = 'En Vigencia';
+        console.log('✅ Cambiando etapa a "En Vigencia" porque póliza está completamente pagada');
+      }
 
       console.log('💰 Aplicando pago:', { 
         expedienteId: expedienteParaPago.id, 
@@ -5907,6 +6205,23 @@ const estadoInicialFormulario = {
             }
           });
           console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad');
+          
+          // Si la póliza está completamente pagada, registrar evento "En Vigencia"
+          if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.inicio_vigencia) {
+            await historialService.registrarEvento({
+              expediente_id: expedienteParaPago.id,
+              cliente_id: expedienteParaPago.cliente_id,
+              tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
+              usuario_nombre: 'Sistema',
+              descripcion: `Póliza en vigencia desde ${new Date(expedienteParaPago.inicio_vigencia).toLocaleDateString('es-MX')} hasta ${new Date(expedienteParaPago.termino_vigencia).toLocaleDateString('es-MX')}`,
+              datos_adicionales: {
+                numero_poliza: expedienteParaPago.numero_poliza,
+                inicio_vigencia: expedienteParaPago.inicio_vigencia,
+                termino_vigencia: expedienteParaPago.termino_vigencia
+              }
+            });
+            console.log('✅ Evento POLIZA_EN_VIGENCIA agregado a historial');
+          }
         } catch (errorRegistroPago) {
           console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
         }
@@ -6029,46 +6344,86 @@ const estadoInicialFormulario = {
       return false;
     }
 
-    // Validar póliza duplicada (solo si NO estamos editando)
+    // Validar duplicados (solo si NO estamos editando)
     if (!modoEdicion && formulario.numero_poliza) {
+      const vinFormulario = formulario.numero_serie?.trim() || '';
       
-      const polizaDuplicada = expedientes.find(exp => {
-        // Normalizar fechas para comparación (solo YYYY-MM-DD)
-        const fechaFormulario = formulario.inicio_vigencia ? formulario.inicio_vigencia.split('T')[0] : '';
-        const fechaExpediente = exp.inicio_vigencia ? exp.inicio_vigencia.split('T')[0] : '';
-        
-        const coincide = exp.numero_poliza === formulario.numero_poliza &&
-                        exp.compania === formulario.compania &&
-                        fechaExpediente === fechaFormulario;
-        
-        if (coincide) {
-          // duplicado encontrado
-        }
-        return coincide;
-      });
+      // Buscar duplicados con las 3 reglas
+      const polizaDuplicadaCompleta = expedientes.find(exp => 
+        exp.numero_poliza === formulario.numero_poliza &&
+        exp.compania === formulario.compania &&
+        exp.numero_serie === vinFormulario &&
+        vinFormulario !== ''
+      );
       
-      if (polizaDuplicada) {
+      const vinDuplicado = vinFormulario !== '' && expedientes.find(exp => 
+        exp.numero_serie === vinFormulario &&
+        exp.numero_poliza !== formulario.numero_poliza
+      );
+      
+      const polizaDuplicadaVinDistinto = expedientes.find(exp => 
+        exp.numero_poliza === formulario.numero_poliza &&
+        exp.compania === formulario.compania &&
+        exp.numero_serie !== vinFormulario &&
+        (exp.numero_serie?.trim() || '') !== ''
+      );
+      
+      // Prioridad de alertas: 1) Póliza completa, 2) VIN duplicado, 3) Póliza VIN distinto
+      if (polizaDuplicadaCompleta) {
         const mensaje = 
           '⚠️ ATENCIÓN: PÓLIZA DUPLICADA DETECTADA\n\n' +
           'Ya existe un registro en el sistema con estos datos:\n\n' +
-          '📋 Póliza: ' + polizaDuplicada.numero_poliza + '\n' +
-          '🏢 Compañía: ' + polizaDuplicada.compania + '\n' +
-          '📅 Inicio Vigencia: ' + polizaDuplicada.inicio_vigencia.split('T')[0] + '\n' +
-          '👤 Cliente: ' + polizaDuplicada.nombre + ' ' + polizaDuplicada.apellido_paterno + '\n' +
-          '📊 Etapa: ' + polizaDuplicada.etapa_activa + '\n\n' +
+          '📋 Póliza: ' + polizaDuplicadaCompleta.numero_poliza + '\n' +
+          '🏢 Compañía: ' + polizaDuplicadaCompleta.compania + '\n' +
+          '🚗 VIN: ' + (polizaDuplicadaCompleta.numero_serie || 'N/A') + '\n' +
+          '👤 Cliente: ' + polizaDuplicadaCompleta.nombre + ' ' + polizaDuplicadaCompleta.apellido_paterno + '\n' +
+          '📊 Etapa: ' + polizaDuplicadaCompleta.etapa_activa + '\n\n' +
           '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
           'Presione ACEPTAR para continuar con el guardado\n' +
-          '(Podrá ver las pólizas duplicadas marcadas en el listado)\n\n' +
+          '(Se marcará como duplicada en el listado)\n\n' +
           'Presione CANCELAR para regresar al formulario';
         
         const confirmar = window.confirm(mensaje);
-        
         if (!confirmar) {
           toast('Operación cancelada. La póliza no fue guardada');
           return false;
         }
-      } else {
-        // no duplicados
+      } else if (vinDuplicado) {
+        const mensaje = 
+          '⚠️ ATENCIÓN: VIN DUPLICADO DETECTADO\n\n' +
+          'Este VIN ya está registrado en otra póliza:\n\n' +
+          '🚗 VIN: ' + vinFormulario + '\n' +
+          '📋 Póliza existente: ' + vinDuplicado.numero_poliza + '\n' +
+          '🏢 Compañía: ' + vinDuplicado.compania + '\n' +
+          '👤 Cliente: ' + vinDuplicado.nombre + ' ' + vinDuplicado.apellido_paterno + '\n\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+          'Presione ACEPTAR para continuar con el guardado\n' +
+          '(Se marcará como VIN duplicado para revisión)\n\n' +
+          'Presione CANCELAR para regresar al formulario';
+        
+        const confirmar = window.confirm(mensaje);
+        if (!confirmar) {
+          toast('Operación cancelada. La póliza no fue guardada');
+          return false;
+        }
+      } else if (polizaDuplicadaVinDistinto) {
+        const mensaje = 
+          '⚠️ ADVERTENCIA: PÓLIZA DUPLICADA CON VIN DISTINTO\n\n' +
+          'Esta póliza ya existe con un VIN diferente:\n\n' +
+          '📋 Póliza: ' + formulario.numero_poliza + '\n' +
+          '🚗 VIN actual: ' + vinFormulario + '\n' +
+          '🚗 VIN existente: ' + (polizaDuplicadaVinDistinto.numero_serie || 'N/A') + '\n' +
+          '🏢 Compañía: ' + formulario.compania + '\n\n' +
+          '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+          'Presione ACEPTAR para continuar con el guardado\n' +
+          '(Se marcará para revisión en el listado)\n\n' +
+          'Presione CANCELAR para regresar al formulario';
+        
+        const confirmar = window.confirm(mensaje);
+        if (!confirmar) {
+          toast('Operación cancelada. La póliza no fue guardada');
+          return false;
+        }
       }
     }
 
@@ -6339,6 +6694,7 @@ const estadoInicialFormulario = {
       // Forzar estos campos específicos sin conversión compleja
       cargo_pago_fraccionado: formularioConCalculos.cargo_pago_fraccionado || '',
       gastos_expedicion: formularioConCalculos.gastos_expedicion || '',
+      estatus_pago: formularioConCalculos.estatusPago || 'Pendiente', // ✅ FORZAR estatus_pago
     };
     
     // Solo hacer conversión básica de campos que no sean problemáticos
@@ -6362,6 +6718,10 @@ const estadoInicialFormulario = {
         resultado.termino_vigencia = resultado.terminoVigencia;
         delete resultado.terminoVigencia;
       }
+      if (resultado.estatusPago) {
+        resultado.estatus_pago = resultado.estatusPago;
+        delete resultado.estatusPago;
+      }
       
       return resultado;
     };
@@ -6371,9 +6731,13 @@ const estadoInicialFormulario = {
     // ✅ GARANTIZAR que estos campos problemáticos estén presentes
     expedientePayload.cargo_pago_fraccionado = formularioConCalculos.cargo_pago_fraccionado || '';
     expedientePayload.gastos_expedicion = formularioConCalculos.gastos_expedicion || '';
+    expedientePayload.estatus_pago = formularioConCalculos.estatusPago || 'Pendiente'; // ✅ GARANTIZAR estatus_pago
+    expedientePayload.fecha_aviso_renovacion = formularioConCalculos.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     
     console.log('🚨 [PAYLOAD SIMPLE] cargo_pago_fraccionado FORZADO:', expedientePayload.cargo_pago_fraccionado);
     console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
+    console.log('🚨 [PAYLOAD SIMPLE] estatus_pago FORZADO:', expedientePayload.estatus_pago);
+    console.log('📅 [PAYLOAD SIMPLE] fecha_aviso_renovacion:', expedientePayload.fecha_aviso_renovacion);
     
     // Limpiar campos innecesarios
     delete expedientePayload.__pdf_file;
@@ -6483,29 +6847,77 @@ const estadoInicialFormulario = {
             const expedienteId = formularioConCalculos.id;
             const expedienteAnterior = expedientes.find(exp => exp.id === expedienteId);
             
-            // Verificar si hubo cambio de etapa para registrar evento específico
-            if (expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa) {
-              await historialService.registrarCambioEtapa(
-                expedienteId,
-                formularioConCalculos.cliente_id,
-                expedienteAnterior.etapa_activa,
-                formularioConCalculos.etapa_activa,
-                'Sistema', // TODO: usuario actual
-                'Cambio manual desde formulario de edición'
-              );
-            } else {
-              // Si NO hubo cambio de etapa, registrar actualización genérica
+            // Detectar cambios en campos importantes
+            const camposModificados = [];
+            
+            if (expedienteAnterior) {
+              // Lista de campos a verificar con sus labels
+              const camposAComparar = [
+                { key: 'numero_poliza', label: 'Número de póliza' },
+                { key: 'compania', label: 'Aseguradora' },
+                { key: 'producto', label: 'Producto' },
+                { key: 'prima_pagada', label: 'Prima', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
+                { key: 'total', label: 'Total', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
+                { key: 'fecha_emision', label: 'Fecha de emisión' },
+                { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
+                { key: 'termino_vigencia', label: 'Término de vigencia' },
+                { key: 'tipo_pago', label: 'Tipo de pago' },
+                { key: 'periodo_gracia', label: 'Periodo de gracia', formatter: (v) => `${v || 0} días` },
+                { key: 'fecha_vencimiento_pago', label: 'Fecha de vencimiento' },
+                { key: 'estatusPago', label: 'Estatus de pago' },
+                { key: 'agente', label: 'Agente' },
+                { key: 'uso', label: 'Uso' },
+                { key: 'servicio', label: 'Servicio' },
+                { key: 'movimiento', label: 'Movimiento' }
+              ];
+              
+              camposAComparar.forEach(({ key, label, formatter }) => {
+                const valorAnterior = String(expedienteAnterior[key] || '').trim();
+                const valorNuevo = String(formularioConCalculos[key] || '').trim();
+                
+                if (valorAnterior !== valorNuevo) {
+                  const valorAnteriorFormateado = formatter ? formatter(expedienteAnterior[key]) : (valorAnterior || 'vacío');
+                  const valorNuevoFormateado = formatter ? formatter(formularioConCalculos[key]) : (valorNuevo || 'vacío');
+                  camposModificados.push(`${label}: ${valorAnteriorFormateado} → ${valorNuevoFormateado}`);
+                }
+              });
+            }
+            
+            // Solo registrar evento si hubo cambios reales
+            if (camposModificados.length > 0) {
+              // Verificar si cambió la etapa
+              const cambioEtapa = expedienteAnterior && expedienteAnterior.etapa_activa !== formularioConCalculos.etapa_activa;
+              
+              if (cambioEtapa) {
+                // Registrar cambio de etapa con evento específico
+                await historialService.registrarCambioEtapa(
+                  expedienteId,
+                  formularioConCalculos.cliente_id,
+                  expedienteAnterior.etapa_activa,
+                  formularioConCalculos.etapa_activa,
+                  'Sistema', // TODO: usuario actual
+                  'Cambio de etapa desde edición'
+                );
+              }
+              
+              // Registrar los cambios de datos
               await historialService.registrarEvento({
                 expediente_id: expedienteId,
                 cliente_id: formularioConCalculos.cliente_id,
                 tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
                 usuario_nombre: 'Sistema', // TODO: usuario actual
-                descripcion: `Expediente actualizado: ${formularioConCalculos.compania} - ${formularioConCalculos.producto}`,
+                descripcion: `Póliza editada - ${camposModificados.length} campo(s) modificado(s)`,
                 datos_adicionales: {
                   numero_poliza: formularioConCalculos.numero_poliza,
-                  campos_modificados: true // marcador simple; idealmente diferencias
+                  compania: formularioConCalculos.compania,
+                  producto: formularioConCalculos.producto,
+                  campos_modificados: camposModificados,
+                  cantidad_cambios: camposModificados.length
                 }
               });
+              console.log(`✅ Evento "Edición" registrado con ${camposModificados.length} cambios`);
+            } else {
+              console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');
             }
           } catch (e) {
             console.warn('⚠️ No se pudo registrar evento de actualización:', e);
@@ -6558,42 +6970,64 @@ const estadoInicialFormulario = {
           try {
             const nuevoId = data?.id || data?.data?.id;
             if (nuevoId) {
-              // Determinar tipo de evento según la etapa actual
               const etapaActual = expedientePayload.etapa_activa || 'En cotización';
-              let tipoEvento = historialService.TIPOS_EVENTO.COTIZACION_CREADA;
-              let descripcionEvento = `Cotización creada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+              const capturadoConExtractorPDF = formularioConCalculos._capturado_con_extractor_pdf === true;
+              const nombreArchivoPDF = formularioConCalculos._nombre_archivo_pdf || 'PDF importado';
               
-              // Si se crea directo en etapa "Emitida", registrar como póliza emitida
-              if (etapaActual === 'Emitida') {
-                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
-                descripcionEvento = `Póliza emitida y capturada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
-              } else if (etapaActual === 'Enviada al Cliente') {
-                tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL;
-                descripcionEvento = `Póliza capturada como enviada: ${expedientePayload.compania} - ${expedientePayload.producto}`;
+              // 🔍 Detectar si hubo modificaciones manuales después del extractor
+              let huboModificacionesManuales = false;
+              const camposModificados = [];
+              
+              if (capturadoConExtractorPDF && formularioConCalculos._datos_originales_pdf) {
+                const originales = formularioConCalculos._datos_originales_pdf;
+                const camposAComparar = [
+                  { key: 'numero_poliza', label: 'Número de póliza' },
+                  { key: 'compania', label: 'Aseguradora' },
+                  { key: 'producto', label: 'Producto' },
+                  { key: 'prima_pagada', label: 'Prima' },
+                  { key: 'total', label: 'Total' },
+                  { key: 'fecha_emision', label: 'Fecha de emisión' },
+                  { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
+                  { key: 'termino_vigencia', label: 'Término de vigencia' },
+                  { key: 'etapa_activa', label: 'Etapa' },
+                  { key: 'tipo_pago', label: 'Tipo de pago' },
+                  { key: 'agente', label: 'Agente' }
+                ];
+                
+                camposAComparar.forEach(({ key, label }) => {
+                  const valorOriginal = String(originales[key] || '').trim();
+                  const valorActual = String(formularioConCalculos[key] || '').trim();
+                  
+                  if (valorOriginal && valorActual && valorOriginal !== valorActual) {
+                    huboModificacionesManuales = true;
+                    camposModificados.push(`${label}: "${valorOriginal}" → "${valorActual}"`);
+                  }
+                });
               }
               
-              await historialService.registrarEvento({
+              // 🎯 EVENTO CAPTURA: Registrar en notificaciones (tabla que SÍ tiene endpoint)
+              const metodCaptura = capturadoConExtractorPDF ? 'Extractor PDF' : 'Captura Manual';
+              const aseguradoraNombre = expedientePayload.compania || 'Aseguradora';
+              const fechaCaptura = new Date().toISOString().split('T')[0];
+              
+              await registrarNotificacion({
                 expediente_id: nuevoId,
                 cliente_id: expedientePayload.cliente_id,
-                tipo_evento: tipoEvento,
-                etapa_nueva: etapaActual,
-                usuario_nombre: 'Sistema', // TODO: Obtener usuario actual
-                descripcion: descripcionEvento,
-                datos_adicionales: {
-                  numero_poliza: expedientePayload.numero_poliza,
-                  compania: expedientePayload.compania,
-                  producto: expedientePayload.producto,
-                  origen: 'captura_manual'
-                }
+                tipo_notificacion: 'sistema',
+                tipo_mensaje: 'captura',
+                asunto: `Póliza capturada: ${metodCaptura}`,
+                mensaje: `Captura de póliza mediante ${metodCaptura}`,
+                numero_poliza: expedientePayload.numero_poliza,
+                compania: aseguradoraNombre,
+                producto: expedientePayload.producto || '',
+                enviado_por_nombre: 'Sistema',
+                fecha_envio: fechaCaptura
               });
-              console.log(`✅ Evento ${tipoEvento} registrado en historial`);
+              
+              console.log(`✅ Captura registrada: ${metodCaptura} - ${aseguradoraNombre}`);
             }
           } catch (error) {
-            console.warn('⚠️ Historial no disponible (backend endpoint pendiente):', error.message);
-            toast('⚠️ Expediente creado correctamente. Historial temporal no disponible hasta que se implemente el backend.', {
-              duration: 4000,
-              icon: 'ℹ️'
-            });
+            console.warn('⚠️ Error al registrar captura:', error.message);
           }
 
           try {
@@ -6657,6 +7091,40 @@ const estadoInicialFormulario = {
             exp.coberturas = null;
           }
         }
+        
+        // ✅ NORMALIZAR ESTATUS DE PAGO (igual que en cargarDatos)
+        let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
+        const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
+        
+        if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
+          estatusPagoCalculado = 'Pagado';
+        } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+          estatusPagoCalculado = 'Cancelado';
+        } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+          estatusPagoCalculado = 'Vencido';
+        } else if (estatusNormalizado === 'por vencer') {
+          estatusPagoCalculado = 'Por Vencer';
+        } else if (estatusNormalizado === 'pendiente') {
+          estatusPagoCalculado = 'Pendiente';
+        } else if (estatusPagoCalculado) {
+          // Preservar valores no reconocidos
+          estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
+        } else {
+          // Solo calcular si viene vacío
+          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
+          if (fechaVencimiento) {
+            const fechaVenc = new Date(fechaVencimiento);
+            const hoy = new Date();
+            hoy.setHours(0, 0, 0, 0);
+            fechaVenc.setHours(0, 0, 0, 0);
+            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
+          } else {
+            estatusPagoCalculado = 'Pendiente';
+          }
+        }
+        
+        exp.estatusPago = estatusPagoCalculado;
+        
         // Normalizar alias para que edición y detalle los tengan listos
         exp.uso = exp.uso || exp.uso_poliza || exp.Uso || exp.usoVehiculo || '';
         exp.servicio = exp.servicio || exp.servicio_poliza || exp.Servicio || exp.servicioVehiculo || '';
@@ -6874,6 +7342,11 @@ const estadoInicialFormulario = {
       movimiento_poliza: expedienteCompleto.movimiento || expedienteCompleto.movimiento_poliza || expedienteCompleto.Movimiento || ''
     };
 
+    // 🔄 Forzar frecuenciaPago='Anual' para tipo de pago Anual o Pago Único si no viene
+    if (formularioBase.tipo_pago && (formularioBase.tipo_pago === 'Anual' || /PAGO\s+ÚNICO|PAGO\s+UNICO/i.test(formularioBase.tipo_pago))) {
+      formularioBase.frecuenciaPago = 'Anual';
+    }
+
     // Si hay inicio de vigencia, recalcular automáticamente proximoPago/fecha_pago/estatus
     const formularioConCalculos = formularioBase.inicio_vigencia
       ? actualizarCalculosAutomaticos(formularioBase)
@@ -6987,6 +7460,11 @@ const eliminarExpediente = useCallback((id) => {
             agentes={agentes}
             limpiarFormulario={limpiarFormulario}
             setVistaActual={setVistaActual}
+            setModoEdicion={setModoEdicion}
+            mostrarModalMetodoCaptura={mostrarModalMetodoCaptura}
+            setMostrarModalMetodoCaptura={setMostrarModalMetodoCaptura}
+            mostrarExtractorPDF={mostrarExtractorPDF}
+            setMostrarExtractorPDF={setMostrarExtractorPDF}
             aplicarPago={aplicarPago}
             puedeAvanzarEstado={puedeAvanzarEstado}
             avanzarEstado={avanzarEstado}
@@ -7030,6 +7508,8 @@ const eliminarExpediente = useCallback((id) => {
             archivoSeleccionado={archivoSeleccionado}
             subiendoPDF={subiendoPDF}
             subirPDFPoliza={subirPDFPoliza}
+            mostrarExtractorPDF={mostrarExtractorPDF}
+            setMostrarExtractorPDF={setMostrarExtractorPDF}
           />
         )}
         

@@ -15,6 +15,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { obtenerNotificacionesPorExpediente } from '../services/notificacionesService';
+import * as historialService from '../services/historialExpedienteService';
 
 const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const [historial, setHistorial] = useState([]);
@@ -33,90 +34,76 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
       setCargando(true);
       setError(null);
       
-      // Cargar notificaciones desde el backend (YA EXISTE)
-      const notificaciones = await obtenerNotificacionesPorExpediente(expedienteId);
-      console.log('📋 Notificaciones cargadas:', notificaciones);
-      
-      // Convertir notificaciones a formato timeline
-      const eventosTimeline = notificaciones.map(notif => ({
-        id: notif.id,
-        expediente_id: notif.expediente_id,
-        cliente_id: notif.cliente_id,
-        tipo_evento: mapearTipoNotificacionAEvento(notif.tipo_notificacion, notif.tipo_mensaje),
-        fecha_evento: notif.fecha_envio || notif.created_at,
-        usuario_nombre: notif.enviado_por_nombre || 'Sistema',
-        descripcion: notif.mensaje || notif.asunto || '',
-        metodo_contacto: mapearTipoNotificacion(notif.tipo_notificacion),
-        destinatario_nombre: notif.destinatario_nombre,
-        destinatario_contacto: notif.destinatario_contacto,
-        documento_url: notif.pdf_url,
-        datos_adicionales: {
-          numero_poliza: notif.numero_poliza,
-          compania: notif.compania,
-          producto: notif.producto,
-          estatus_pago: notif.estatus_pago,
-          estado_envio: notif.estado_envio
-        }
-      }));
-      
-      // Agregar eventos sintéticos basados en fechas del expediente
-      if (expedienteData) {
-        console.log('📅 Fechas del expediente:', {
-          fecha_creacion: expedienteData.fecha_creacion,
-          created_at: expedienteData.created_at,
-          fecha_emision: expedienteData.fecha_emision,
-          fecha_pago: expedienteData.fecha_pago,
-          estatusPago: expedienteData.estatusPago,
-          inicio_vigencia: expedienteData.inicio_vigencia
-        });
-
-        // 1. Fecha de CAPTURA (cuando se registró en el sistema)
-        // Usar created_at o fecha_creacion (son lo mismo)
-        const fechaCaptura = expedienteData.created_at || expedienteData.fecha_creacion;
-        if (fechaCaptura) {
-          eventosTimeline.push({
-            id: 'captura-sintetico',
-            expediente_id: expedienteData.id,
-            cliente_id: expedienteData.cliente_id,
-            tipo_evento: 'poliza_emitida',
-            fecha_evento: fechaCaptura,
-            usuario_nombre: expedienteData.usuario_nombre || 'Sistema',
-            descripcion: `📝 Póliza capturada en el sistema`,
-            datos_adicionales: {
-              numero_poliza: expedienteData.numero_poliza,
-              compania: expedienteData.compania,
-              producto: expedienteData.producto,
-              _es_sintetico: true,
-              _tipo: 'captura'
-            }
-          });
-        }
+      // 🎯 PRIORIDAD 1: Intentar cargar desde el nuevo sistema de historial
+      try {
+        const eventosHistorial = await historialService.obtenerHistorialExpediente(expedienteId);
+        console.log('📋 Historial cargado desde nuevo sistema:', eventosHistorial);
         
-        // 2. Fecha de PAGO - Solo si realmente se aplicó el pago
-        // Verificar que estatusPago sea "Pagado" o "Completado" y que fecha_pago exista
-        const pagoAplicado = expedienteData.estatusPago === 'Pagado' || 
-                             expedienteData.estatusPago === 'Completado' ||
-                             expedienteData.estatusPago === 'pagado';
-        
-        if (expedienteData.fecha_pago && pagoAplicado) {
-          eventosTimeline.push({
-            id: 'pago-sintetico',
-            expediente_id: expedienteData.id,
-            cliente_id: expedienteData.cliente_id,
-            tipo_evento: 'pago_registrado',
-            fecha_evento: expedienteData.fecha_pago,
-            usuario_nombre: 'Sistema',
-            descripcion: `💰 Pago registrado${expedienteData.total ? ': $' + expedienteData.total.toLocaleString('es-MX') : ''}`,
-            datos_adicionales: {
-              numero_poliza: expedienteData.numero_poliza,
-              monto: expedienteData.total,
-              tipo_pago: expedienteData.tipo_pago,
-              _es_sintetico: true,
-              _tipo: 'pago'
-            }
-          });
+        if (eventosHistorial && eventosHistorial.length > 0) {
+          setHistorial(eventosHistorial);
+          setCargando(false);
+          return; // ✅ Usar el nuevo sistema si está disponible
         }
+      } catch (errorHistorial) {
+        console.warn('⚠️ Sistema de historial no disponible, usando notificaciones:', errorHistorial.message);
       }
+      
+      // 🔄 FALLBACK: Usar tabla de notificaciones (sistema legacy)
+      const notificaciones = await obtenerNotificacionesPorExpediente(expedienteId);
+      console.log('📋 Notificaciones cargadas (fallback):', notificaciones);
+      
+      // Si tampoco hay notificaciones, crear evento sintético de captura
+      if (!notificaciones || notificaciones.length === 0) {
+        // Crear evento temporal de captura si es un expediente nuevo
+        const eventoCaptura = {
+          id: 'temp-captura-' + expedienteId,
+          expediente_id: expedienteId,
+          tipo_evento: 'CAPTURA_MANUAL',
+          fecha_evento: new Date().toISOString(),
+          usuario_nombre: 'Sistema',
+          descripcion: '⚠️ Historial temporal no disponible. Backend pendiente de implementación.',
+          es_temporal: true
+        };
+        setHistorial([eventoCaptura]);
+        setCargando(false);
+        return;
+      }
+      
+      // Convertir notificaciones a formato timeline (sin URLs en descripción)
+      const eventosTimeline = notificaciones.map(notif => {
+        // Limpiar descripción: quitar URLs largas
+        let descripcionLimpia = '';
+        if (notif.tipo_notificacion === 'whatsapp' || notif.tipo_notificacion === 'email') {
+          // Para envíos, mostrar solo metadata relevante
+          descripcionLimpia = `Póliza emitida • ${notif.compania || 'Aseguradora'}: ${notif.producto || 'Producto'} • Póliza #${notif.numero_poliza || 'N/A'}`;
+        } else {
+          descripcionLimpia = notif.mensaje || notif.asunto || '';
+        }
+        
+        return {
+          id: notif.id,
+          expediente_id: notif.expediente_id,
+          cliente_id: notif.cliente_id,
+          tipo_evento: mapearTipoNotificacionAEvento(notif.tipo_notificacion, notif.tipo_mensaje),
+          fecha_evento: notif.fecha_envio || notif.created_at,
+          usuario_nombre: notif.enviado_por_nombre || 'Sistema',
+          descripcion: descripcionLimpia,
+          metodo_contacto: mapearTipoNotificacion(notif.tipo_notificacion),
+          destinatario_nombre: notif.destinatario_nombre,
+          destinatario_contacto: notif.destinatario_contacto,
+          documento_url: notif.pdf_url,
+          datos_adicionales: {
+            numero_poliza: notif.numero_poliza,
+            compania: notif.compania,
+            producto: notif.producto,
+            estatus_pago: notif.estatus_pago,
+            estado_envio: notif.estado_envio
+          }
+        };
+      });
+      
+      // ✅ Ya NO agregamos eventos sintéticos
+      // Los eventos reales (captura, emisión, pago) vienen del sistema de historial
       
       // Ordenar por fecha descendente (más reciente primero)
       eventosTimeline.sort((a, b) => new Date(b.fecha_evento) - new Date(a.fecha_evento));
@@ -144,59 +131,28 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const mapearTipoNotificacionAEvento = (tipoNotif, tipoMensaje) => {
     // Mapeo basado en tipo_mensaje
     const mapaMensajes = {
-      'emision': tipoNotif === 'whatsapp' ? 'poliza_enviada_whatsapp' : 'poliza_enviada_email',
-      'recordatorio_pago': 'recordatorio_pago_enviado',
-      'pago_vencido': 'pago_vencido',
-      'pago_recibido': 'pago_registrado',
-      'renovacion': 'poliza_renovada',
-      'cancelacion': 'poliza_cancelada',
-      'modificacion': 'endoso_aplicado',
-      'otro': 'nota_agregada'
+      'captura': 'CAPTURA_MANUAL', // Evento de captura
+      'emision': tipoNotif === 'whatsapp' ? 'POLIZA_ENVIADA_WHATSAPP' : 'POLIZA_ENVIADA_EMAIL',
+      'recordatorio_pago': 'RECORDATORIO_PAGO_ENVIADO',
+      'pago_vencido': 'PAGO_VENCIDO',
+      'pago_recibido': 'PAGO_REGISTRADO',
+      'renovacion': 'POLIZA_RENOVADA',
+      'cancelacion': 'POLIZA_CANCELADA',
+      'modificacion': 'ENDOSO_APLICADO',
+      'otro': 'NOTA_AGREGADA'
     };
     
-    return mapaMensajes[tipoMensaje] || 'documento_enviado';
+    return mapaMensajes[tipoMensaje] || 'DOCUMENTO_ENVIADO';
   };
 
   // Obtener estilo (icono y color) para cada tipo de evento
   const obtenerEstiloEvento = (tipoEvento) => {
-    const estilos = {
-      'cotizacion_creada': { icon: '📝', color: '#17a2b8', bgColor: '#d1ecf1' },
-      'cotizacion_enviada': { icon: '📧', color: '#ffc107', bgColor: '#fff3cd' },
-      'poliza_emitida': { icon: '📄', color: '#007bff', bgColor: '#cce5ff' },
-      'poliza_enviada_email': { icon: '📨', color: '#28a745', bgColor: '#d4edda' },
-      'poliza_enviada_whatsapp': { icon: '💬', color: '#25d366', bgColor: '#d4f4dd' },
-      'pago_registrado': { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
-      'pago_vencido': { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
-      'recordatorio_pago_enviado': { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
-      'poliza_renovada': { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
-      'poliza_cancelada': { icon: '🚫', color: '#dc3545', bgColor: '#f8d7da' },
-      'endoso_aplicado': { icon: '📝', color: '#007bff', bgColor: '#cce5ff' },
-      'documento_enviado': { icon: '📤', color: '#28a745', bgColor: '#d4edda' },
-      'nota_agregada': { icon: '📌', color: '#6c757d', bgColor: '#e2e3e5' }
-    };
-    
-    return estilos[tipoEvento] || { icon: '📋', color: '#6c757d', bgColor: '#e2e3e5' };
+    return historialService.obtenerEstiloEvento(tipoEvento);
   };
 
   // Obtener título legible para cada tipo de evento
   const obtenerTituloEvento = (tipoEvento) => {
-    const titulos = {
-      'cotizacion_creada': 'Cotización Creada',
-      'cotizacion_enviada': 'Cotización Enviada al Cliente',
-      'poliza_emitida': 'Póliza Emitida',
-      'poliza_enviada_email': 'Póliza Enviada por Email',
-      'poliza_enviada_whatsapp': 'Póliza Enviada por WhatsApp',
-      'pago_registrado': 'Pago Registrado',
-      'pago_vencido': 'Pago Vencido',
-      'recordatorio_pago_enviado': 'Recordatorio de Pago Enviado',
-      'poliza_renovada': 'Póliza Renovada',
-      'poliza_cancelada': 'Póliza Cancelada',
-      'endoso_aplicado': 'Endoso Aplicado',
-      'documento_enviado': 'Documento Enviado',
-      'nota_agregada': 'Nota Agregada'
-    };
-    
-    return titulos[tipoEvento] || tipoEvento.replace(/_/g, ' ').toUpperCase();
+    return historialService.obtenerTituloEvento(tipoEvento);
   };
 
   // Filtrar historial
@@ -205,7 +161,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     : historial.filter(evento => {
         const tipo = evento.tipo_evento || '';
         if (filtroTipo === 'Emisión') {
-          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion');
+          return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion') || tipo.includes('captura_extractor_pdf') || tipo.includes('captura_manual') || tipo.includes('emision_iniciada');
         }
         if (filtroTipo === 'Pagos') {
           return tipo.includes('pago');
@@ -218,32 +174,20 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
 
   // Formatear fecha
   const formatearFecha = (fechaISO) => {
+    if (!fechaISO) return 'Sin fecha';
     const fecha = new Date(fechaISO);
+    if (isNaN(fecha.getTime())) return fechaISO; // Fallback si formato raro
     const hoy = new Date();
-    const ayer = new Date(hoy);
-    ayer.setDate(ayer.getDate() - 1);
-    
+    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
     const esMismoDia = fecha.toDateString() === hoy.toDateString();
     const esAyer = fecha.toDateString() === ayer.toDateString();
-    
-    const hora = fecha.toLocaleTimeString('es-MX', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
-    
-    if (esMismoDia) {
-      return `Hoy ${hora}`;
-    } else if (esAyer) {
-      return `Ayer ${hora}`;
-    } else {
-      return fecha.toLocaleString('es-MX', { 
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    }
+    const hora = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+    const segundos = fecha.getSeconds();
+    // Mostrar minutos siempre y segundos si no son 0 para diagnósticos
+    const horaDetallada = segundos ? fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : hora;
+    if (esMismoDia) return `Hoy ${horaDetallada}`;
+    if (esAyer) return `Ayer ${horaDetallada}`;
+    return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + horaDetallada;
   };
 
   // Exportar historial
@@ -387,41 +331,52 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                 <div className="card-body py-2 px-3">
                   <div className="d-flex justify-content-between align-items-start">
                     <div className="flex-grow-1">
+                      {/* Línea 1: Título del evento */}
                       <div className="d-flex align-items-center gap-2 mb-1">
-                        <strong style={{ color: estilo.color, fontSize: '0.9rem' }}>
+                        <strong style={{ color: estilo.color, fontSize: '0.95rem' }}>
                           {titulo}
                         </strong>
-                        <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-                          {formatearFecha(evento.fecha_evento)}
-                        </span>
                       </div>
                       
+                      {/* Línea 2: Descripción */}
                       {evento.descripcion && (
-                        <p className="text-muted mb-1" style={{ fontSize: '0.85rem' }}>
+                        <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
                           {evento.descripcion}
                         </p>
                       )}
                       
-                      {/* Información adicional compacta */}
-                      <div style={{ fontSize: '0.75rem' }}>
-                        {evento.etapa_anterior && evento.etapa_nueva && (
-                          <span className="text-muted me-2">
-                            📊 {evento.etapa_anterior} → {evento.etapa_nueva}
+                      {/* Línea 3: Metadata (fecha, usuario, destinatario) */}
+                      <div className="d-flex flex-wrap gap-2 align-items-center" style={{ fontSize: '0.75rem' }}>
+                        {/* Fecha/Hora */}
+                        <span className="text-muted">
+                          🕐 {formatearFecha(evento.fecha_evento)}
+                        </span>
+                        
+                        {/* Usuario que realizó la acción */}
+                        {evento.usuario_nombre && (
+                          <span className="text-muted">
+                            • ✍️ {evento.usuario_nombre}
                           </span>
                         )}
+                        
+                        {/* Destinatario (para envíos) */}
                         {evento.destinatario_nombre && (
-                          <span className="text-muted me-2">
-                            👤 {evento.destinatario_nombre}
+                          <span className="text-muted">
+                            • 👤 {evento.destinatario_nombre}
                           </span>
                         )}
+                        
+                        {/* Canal de envío */}
                         {evento.metodo_contacto && (
-                          <span className="badge bg-secondary bg-opacity-10 text-secondary me-2" style={{ fontSize: '0.7rem' }}>
+                          <span className="badge bg-secondary bg-opacity-10 text-secondary" style={{ fontSize: '0.7rem' }}>
                             {evento.metodo_contacto}
                           </span>
                         )}
-                        {evento.usuario_nombre && (
+                        
+                        {/* Cambio de etapa */}
+                        {evento.etapa_anterior && evento.etapa_nueva && (
                           <span className="text-muted">
-                            ✍️ {evento.usuario_nombre}
+                            • 📊 {evento.etapa_anterior} → {evento.etapa_nueva}
                           </span>
                         )}
                       </div>
