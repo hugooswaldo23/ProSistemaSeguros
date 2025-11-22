@@ -1667,13 +1667,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-lg">
+      <div className="modal-dialog modal-xl" style={{ maxWidth: '1100px' }}>
         <div className="modal-content">
-          <div className="modal-header">
-            <h5 className="modal-title">
-              <FileText className="me-2" size={20} />
+          <div className="modal-header py-1">
+            <small className="modal-title mb-0 fw-semibold">
+              <FileText className="me-2" size={14} />
               Extractor Inteligente de Pólizas PDF
-            </h5>
+            </small>
             <button 
               type="button" 
               className="btn-close"
@@ -1692,49 +1692,49 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           
           <div className="modal-body">
             {estado === 'procesando' && (
-              <div className="text-center py-5">
-                <div className="spinner-border text-primary mb-3" role="status">
+              <div className="text-center py-3">
+                <div className="spinner-border text-primary mb-2" role="status" style={{ width: '2rem', height: '2rem' }}>
                   <span className="visually-hidden">Procesando...</span>
                 </div>
-                <h6 className="mb-3">Procesando PDF...</h6>
-                <p className="text-muted">Extrayendo información de la póliza</p>
+                <p className="mb-1 fw-semibold">Procesando PDF...</p>
+                <small className="text-muted">Extrayendo información de la póliza</small>
               </div>
             )}
 
             {/* PASO 1: VALIDACIÓN DE CLIENTE */}
             {estado === 'validando-cliente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
+              <div className="py-1">
+                <div className="text-center mb-2">
+                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '35px', height: '35px', fontSize: '0.75rem' }}>
                     <strong>1/3</strong>
                   </div>
-                  <h5 className="mt-3">Validación de Cliente</h5>
+                  <small className="d-block mt-1 fw-semibold">Validación de Cliente</small>
                 </div>
 
-                <div className="card mb-4">
-                  <div className="card-header bg-light">
-                    <h6 className="mb-0">👤 Datos del Cliente Extraídos</h6>
+                <div className="card mb-2">
+                  <div className="card-header bg-light py-1">
+                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>👤 Datos del Cliente Extraídos</small>
                   </div>
-                  <div className="card-body">
-                    <div className="row g-3">
-                      <div className="col-12">
-                        <strong className="d-block mb-1">
+                  <div className="card-body p-2">
+                    <div className="row g-2">
+                      <div className="col-md-6">
+                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>
                           {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social:' : 'Nombre Completo:'}
-                        </strong>
-                        <p className="mb-0">
+                        </small>
+                        <small className="mb-0" style={{ fontSize: '0.75rem' }}>
                           {datosExtraidos.tipo_persona === 'Moral' 
                             ? datosExtraidos.razonSocial 
                             : `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim()
                           }
-                        </p>
+                        </small>
                       </div>
-                      <div className="col-md-6">
-                        <strong className="d-block mb-1">RFC:</strong>
+                      <div className="col-md-3">
+                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>RFC:</small>
                         {datosExtraidos.rfc ? (
-                          <p className="mb-0">{datosExtraidos.rfc}</p>
+                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.rfc}</small>
                         ) : (
                           <div className="d-flex align-items-center">
-                            <span className="badge bg-warning text-dark me-2">
+                            <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>
                               <i className="bi bi-exclamation-triangle me-1"></i>
                               RFC no encontrado en PDF
                             </span>
@@ -1742,15 +1742,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         )}
                       </div>
                       {datosExtraidos.domicilio && (
-                        <div className="col-12">
-                          <strong className="d-block mb-1">Dirección:</strong>
-                          <p className="mb-0">{datosExtraidos.domicilio}</p>
+                        <div className="col-md-6">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Dirección:</small>
+                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.domicilio}</small>
                         </div>
                       )}
                       {datosExtraidos.email && (
-                        <div className="col-md-6">
-                          <strong className="d-block mb-1">Email:</strong>
-                          <p className="mb-0">{datosExtraidos.email}</p>
+                        <div className="col-md-3">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Email:</small>
+                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.email}</small>
                         </div>
                       )}
                     </div>
@@ -1758,71 +1758,71 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
 
                 {clienteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Cliente ENCONTRADO en base de datos</strong>
+                  <div className="alert alert-success py-2 mb-2">
+                    <div className="d-flex align-items-center mb-2">
+                      <CheckCircle className="me-2" size={18} />
+                      <small className="mb-0 fw-semibold">✅ Cliente ENCONTRADO en base de datos</small>
                     </div>
                     
                     <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Base de Datos</h6>
+                      <div className="card-body p-2">
+                        <small className="card-subtitle mb-2 text-success fw-semibold d-block" style={{ fontSize: '0.8rem' }}>Datos en Base de Datos</small>
                         
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">ID Cliente</small>
-                            <strong>{clienteEncontrado.codigo || clienteEncontrado.id}</strong>
+                        <div className="row g-2">
+                          <div className="col-md-3">
+                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>ID Cliente</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.codigo || clienteEncontrado.id}</small>
                           </div>
                           
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Fecha de Registro</small>
-                            <strong>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</strong>
+                          <div className="col-md-3">
+                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Fecha de Registro</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</small>
                           </div>
 
-                          <div className="col-12">
-                            <small className="text-muted d-block">
+                          <div className="col-md-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
                               {clienteEncontrado.tipoPersona === 'Persona Moral' ? 'Razón Social' : 'Nombre Completo'}
                             </small>
-                            <strong>
+                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>
                               {clienteEncontrado.tipoPersona === 'Persona Moral' 
                                 ? (clienteEncontrado.razonSocial || clienteEncontrado.nombre || 'N/A')
                                 : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} ${clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}`.trim()
                               }
-                            </strong>
+                            </small>
                           </div>
 
                           {clienteEncontrado.rfc && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">RFC</small>
-                              <strong>{clienteEncontrado.rfc}</strong>
+                            <div className="col-md-3">
+                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>RFC</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.rfc}</small>
                             </div>
                           )}
 
                           {clienteEncontrado.curp && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">CURP</small>
-                              <strong>{clienteEncontrado.curp}</strong>
+                            <div className="col-md-3">
+                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>CURP</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.curp}</small>
                             </div>
                           )}
 
                           {clienteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{clienteEncontrado.email}</strong>
+                            <div className="col-md-3">
+                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Email</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.email}</small>
                             </div>
                           )}
 
                           {clienteEncontrado.telefono_movil && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Móvil</small>
-                              <strong>{clienteEncontrado.telefono_movil}</strong>
+                            <div className="col-md-3">
+                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Móvil</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_movil}</small>
                             </div>
                           )}
 
                           {clienteEncontrado.telefono_fijo && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono Fijo</small>
-                              <strong>{clienteEncontrado.telefono_fijo}</strong>
+                            <div className="col-md-3">
+                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Fijo</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_fijo}</small>
                             </div>
                           )}
 

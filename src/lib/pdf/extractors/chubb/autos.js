@@ -825,7 +825,7 @@ export async function extraer(ctx) {
     estado,
     codigo_postal,
     pais: 'MEXICO',
-    email: extraerDato(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i, textoCompleto),
+
     
     // Póliza (Página 1)
     compania: 'Chubb',
