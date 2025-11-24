@@ -49,7 +49,14 @@ export async function extraer(ctx) {
   };
   
   // ==================== RFC Y TIPO DE PERSONA ====================
-  const rfcMatch = textoQualitas.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
+  // Buscar primero en textoCompleto (incluye página 1 donde suele estar el RFC)
+  let rfcMatch = textoCompleto.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
+  
+  // Si no se encuentra, intentar en textoPagina1 específicamente
+  if (!rfcMatch) {
+    rfcMatch = textoPagina1.match(/R\.?\s*F\.?\s*C\.?\s*[:.\s]*([A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3})/i);
+  }
+  
   let rfcExtraido = rfcMatch ? rfcMatch[1] : '';
   
   if (!rfcExtraido || rfcExtraido.trim() === '') {
@@ -96,20 +103,61 @@ export async function extraer(ctx) {
   }
   
   // ==================== UBICACIÓN ====================
-  const domicilioMatch = textoQualitas.match(/Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#\-]+?)(?=\s*R\.F\.C\.|C\.P\.|Estado:|\n\n)/i);
-  const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
+  // En Qualitas, textoPagina2 tiene los labels pero NO los valores (están en otra capa del PDF)
+  // Necesitamos buscar en textoCompleto pero identificar cuál domicilio es del asegurado
+  // El domicilio del ASEGURADO viene DESPUÉS de su nombre y ANTES de "DESCRIPCION DEL VEHICULO"
+  console.log('📍 Buscando dirección del ASEGURADO...');
   
-  const cpMatch = textoQualitas.match(/C\.P\.:\s*(\d{5})/i);
-  const municipioMatch = textoQualitas.match(/Municipio:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Estado:|\n)/i);
-  const estadoMatch = textoQualitas.match(/Estado:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Colonia:|\n)/i);
-  const coloniaMatch = textoQualitas.match(/Colonia:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
-  const paisMatch = textoQualitas.match(/Pa[ií]s:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s|$|\n)/i);
+  // Estrategia: buscar la primera aparición de "Domicilio:" que viene después del nombre del asegurado
+  // y que tenga datos (no vacío como "Domicilio: R.F.C.:")
+  
+  // Buscar todos los domicilios en el texto completo
+  const domiciliosRegex = /Domicilio:\s*([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\s,\.#ºª\-]+?)(?=\s*(?:R\.F\.C\.|C\.P\.?:|$))/gi;
+  const domiciliosEncontrados = [];
+  let match;
+  
+  while ((match = domiciliosRegex.exec(textoCompleto)) !== null) {
+    const domicilioTexto = match[1].trim();
+    // Filtrar domicilios válidos (que tengan al menos 10 caracteres y no sean solo "R.F.C.:")
+    if (domicilioTexto.length > 10 && !domicilioTexto.includes('R.F.C.')) {
+      domiciliosEncontrados.push(domicilioTexto);
+    }
+  }
+  
+  console.log('🏠 Domicilios encontrados:', domiciliosEncontrados);
+  
+  // El primer domicilio válido suele ser del asegurado (página 2), el segundo del riesgo (página 1)
+  // Pero en este PDF está al revés, así que tomamos el que tenga formato de dirección completa
+  let domicilio = '';
+  for (const dom of domiciliosEncontrados) {
+    // El domicilio del asegurado tiene formato: "CALLE No. EXT. ### No. INT. ##"
+    // El domicilio del riesgo tiene formato: "AV. NOMBRE NO. ####" (más corto)
+    if (dom.includes('No. EXT.') || dom.includes('NO. EXT.') || dom.length > 30) {
+      domicilio = dom;
+      break;
+    }
+  }
+  
+  // Si no encontramos con ese patrón, tomar el primero válido
+  if (!domicilio && domiciliosEncontrados.length > 0) {
+    domicilio = domiciliosEncontrados[0];
+  }
+  
+  console.log('🏠 Domicilio ASEGURADO seleccionado:', domicilio || '❌ VACÍO');
+  
+  // Buscar C.P., Municipio, Estado, Colonia - pueden estar en cualquier parte cerca del domicilio
+  const cpMatches = textoCompleto.match(/C\.P\.?:\s*(\d{5})/gi);
+  const cpMatch = cpMatches && cpMatches.length > 0 ? cpMatches[0].match(/(\d{5})/) : null;
+  
+  const municipioMatch = textoCompleto.match(/Municipio:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Estado:)/i);
+  const estadoMatch = textoCompleto.match(/Estado:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s+Colonia:)/i);
+  const coloniaMatch = textoCompleto.match(/Colonia:\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:\n|DESCRIPCION))/i);
   
   const codigo_postal = cpMatch ? cpMatch[1] : '';
   const municipio = municipioMatch ? municipioMatch[1].trim() : '';
   const estado = estadoMatch ? estadoMatch[1].trim() : '';
   const colonia = coloniaMatch ? coloniaMatch[1].trim() : '';
-  const pais = paisMatch ? paisMatch[1].trim() : 'MEXICO';
+  const pais = 'MEXICO';
   
   // ==================== AGENTE ====================
   let agente = '';

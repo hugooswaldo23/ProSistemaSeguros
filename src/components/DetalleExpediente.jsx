@@ -22,6 +22,16 @@ const DetalleExpediente = ({
   const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(false);
   const [openHistorial, setOpenHistorial] = useState(true);
 
+  // 🔍 DEBUG: Ver qué datos llegan
+  console.log('🔍 DetalleExpediente - datos recibidos:', {
+    numero_poliza: datos?.numero_poliza,
+    tiene_fecha_aviso: !!datos?.fecha_aviso_renovacion,
+    fecha_aviso_renovacion: datos?.fecha_aviso_renovacion,
+    fechaAvisoRenovacion: datos?.fechaAvisoRenovacion,
+    inicio_vigencia: datos?.inicio_vigencia,
+    termino_vigencia: datos?.termino_vigencia
+  });
+
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
   const tipoRiesgo = useMemo(() => {
     const texto = `${datos?.producto || ''} ${datos?.tipo_de_poliza || ''}`.toLowerCase();
@@ -158,7 +168,15 @@ const DetalleExpediente = ({
           <div className="row g-2">
             {renderCampo('Inicio', datos?.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-')}
             {renderCampo('Fin', datos?.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-')}
-            {renderCampo('Aviso de Renovación', datos?.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-', 'text-warning')}
+            {/* Siempre mostrar Aviso de Renovación, incluso si está vacío */}
+            <div className="col-md-3 mb-2 text-warning">
+              <small className="text-muted" style={{ fontSize: '0.7rem' }}>🔔 Aviso de Renovación:</small>
+              <div>
+                <strong style={{ fontSize: '0.8rem' }}>
+                  {datos?.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-'}
+                </strong>
+              </div>
+            </div>
             {renderCampo('Fecha de Emisión', datos?.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-')}
             {renderCampo('Fecha de Captura', datos?.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-')}
           </div>
@@ -305,15 +323,19 @@ const DetalleExpediente = ({
               <div className="p-2 bg-success bg-opacity-10 rounded mb-2">
                 <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
                 <div className="row g-1">
-                  <div className="col-md-3">
+                  <div className="col-md-2">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
-                  <div className="col-md-3">
+                  <div className="col-md-2">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
+                    <small className="text-warning" style={{ fontSize: '0.7rem' }}>🔔 Aviso de Renovación:</small>
+                    <div><strong className="text-warning" style={{ fontSize: '0.8rem' }}>{datos.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                  </div>
+                  <div className="col-md-2">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Emisión:</small>
                     <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>

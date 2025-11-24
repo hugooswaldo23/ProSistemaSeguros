@@ -157,8 +157,23 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
 
   // Filtrar historial
   const historialFiltrado = filtroTipo === 'todos' 
-    ? historial
+    ? historial.filter(evento => {
+        // Omitir eventos de "datos actualizados" si solo es cambio de etapa sin modificaciones relevantes
+        if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
+          // Solo mostrar si tiene cambios significativos en datos_adicionales
+          const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
+          return cambios > 0;
+        }
+        return true; // Mostrar todos los demás eventos
+      })
     : historial.filter(evento => {
+        // Primero aplicar el filtro de eventos irrelevantes
+        if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
+          const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
+          if (cambios === 0) return false;
+        }
+        
+        // Luego aplicar filtro por categoría
         const tipo = evento.tipo_evento || '';
         if (filtroTipo === 'Emisión') {
           return tipo.includes('poliza_emitida') || tipo.includes('poliza_enviada') || tipo.includes('cotizacion') || tipo.includes('captura_extractor_pdf') || tipo.includes('captura_manual') || tipo.includes('emision_iniciada');
@@ -338,48 +353,97 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                         </strong>
                       </div>
                       
-                      {/* Línea 2: Descripción */}
-                      {evento.descripcion && (
-                        <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
-                          {evento.descripcion}
-                        </p>
+                      {/* Vista mejorada para eventos de captura */}
+                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf') ? (
+                        <div className="mb-1">
+                          {/* Línea principal: nombre del archivo o método */}
+                          {evento.datos_adicionales?.nombre_archivo_pdf ? (
+                            <div className="mb-1">
+                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
+                                📄 {evento.datos_adicionales.nombre_archivo_pdf}
+                              </span>
+                              {evento.datos_adicionales?.modificaciones_manuales && (
+                                <span className="badge bg-warning bg-opacity-10 text-warning ms-2" style={{ fontSize: '0.75rem' }}>
+                                  ✏️ {evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) editado(s)
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="mb-1">
+                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
+                                ✍️ Captura manual del sistema
+                              </span>
+                            </div>
+                          )}
+                          
+                          {/* Información de fechas en formato vertical compacto */}
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {evento.datos_adicionales?.fecha_emision && evento.datos_adicionales.fecha_emision !== 'No especificada' && (
+                              <div className="text-muted">
+                                📅 Fecha emisión: <strong className="text-dark">{evento.datos_adicionales.fecha_emision}</strong>
+                              </div>
+                            )}
+                            {evento.datos_adicionales?.inicio_vigencia && evento.datos_adicionales.inicio_vigencia !== 'No especificada' && (
+                              <div className="text-muted">
+                                🔖 Inicio vigencia: <strong className="text-dark">{evento.datos_adicionales.inicio_vigencia}</strong>
+                              </div>
+                            )}
+                            <div className="text-muted">
+                              🕐 Fecha captura: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                            {evento.usuario_nombre && (
+                              <div className="text-muted">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {/* Vista estándar para otros eventos */}
+                          {evento.descripcion && (
+                            <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
+                              {evento.descripcion}
+                            </p>
+                          )}
+                          
+                          {/* Metadata estándar (fecha, usuario, destinatario) */}
+                          <div className="d-flex flex-wrap gap-2 align-items-center" style={{ fontSize: '0.75rem' }}>
+                            {/* Fecha/Hora */}
+                            <span className="text-muted">
+                              🕐 {formatearFecha(evento.fecha_evento)}
+                            </span>
+                            
+                            {/* Usuario que realizó la acción */}
+                            {evento.usuario_nombre && (
+                              <span className="text-muted">
+                                • ✍️ {evento.usuario_nombre}
+                              </span>
+                            )}
+                            
+                            {/* Destinatario (para envíos) */}
+                            {evento.destinatario_nombre && (
+                              <span className="text-muted">
+                                • 👤 {evento.destinatario_nombre}
+                              </span>
+                            )}
+                            
+                            {/* Canal de envío */}
+                            {evento.metodo_contacto && (
+                              <span className="badge bg-secondary bg-opacity-10 text-secondary" style={{ fontSize: '0.7rem' }}>
+                                {evento.metodo_contacto}
+                              </span>
+                            )}
+                            
+                            {/* Cambio de etapa */}
+                            {evento.etapa_anterior && evento.etapa_nueva && (
+                              <span className="text-muted">
+                                • 📊 {evento.etapa_anterior} → {evento.etapa_nueva}
+                              </span>
+                            )}
+                          </div>
+                        </>
                       )}
-                      
-                      {/* Línea 3: Metadata (fecha, usuario, destinatario) */}
-                      <div className="d-flex flex-wrap gap-2 align-items-center" style={{ fontSize: '0.75rem' }}>
-                        {/* Fecha/Hora */}
-                        <span className="text-muted">
-                          🕐 {formatearFecha(evento.fecha_evento)}
-                        </span>
-                        
-                        {/* Usuario que realizó la acción */}
-                        {evento.usuario_nombre && (
-                          <span className="text-muted">
-                            • ✍️ {evento.usuario_nombre}
-                          </span>
-                        )}
-                        
-                        {/* Destinatario (para envíos) */}
-                        {evento.destinatario_nombre && (
-                          <span className="text-muted">
-                            • 👤 {evento.destinatario_nombre}
-                          </span>
-                        )}
-                        
-                        {/* Canal de envío */}
-                        {evento.metodo_contacto && (
-                          <span className="badge bg-secondary bg-opacity-10 text-secondary" style={{ fontSize: '0.7rem' }}>
-                            {evento.metodo_contacto}
-                          </span>
-                        )}
-                        
-                        {/* Cambio de etapa */}
-                        {evento.etapa_anterior && evento.etapa_nueva && (
-                          <span className="text-muted">
-                            • 📊 {evento.etapa_anterior} → {evento.etapa_nueva}
-                          </span>
-                        )}
-                      </div>
                     </div>
                     
                     {/* Botón expandir solo si hay datos adicionales */}
@@ -397,10 +461,31 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                   {/* Detalles expandibles */}
                   {expandido && evento.datos_adicionales && (
                     <div className="mt-2 pt-2 border-top">
-                      <small className="text-muted d-block mb-1"><strong>Datos adicionales:</strong></small>
-                      <pre className="bg-light p-2 rounded mb-0" style={{ fontSize: '0.7rem', maxHeight: '150px', overflow: 'auto' }}>
-                        {JSON.stringify(evento.datos_adicionales, null, 2)}
-                      </pre>
+                      {/* Vista mejorada para eventos de "Datos Actualizados" */}
+                      {(evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') && 
+                       evento.datos_adicionales.campos_modificados && 
+                       Array.isArray(evento.datos_adicionales.campos_modificados) ? (
+                        <div>
+                          <small className="text-muted d-block mb-2">
+                            <strong>✏️ Campos modificados ({evento.datos_adicionales.campos_modificados.length}):</strong>
+                          </small>
+                          <div className="d-flex flex-column gap-1">
+                            {evento.datos_adicionales.campos_modificados.map((cambio, idx) => (
+                              <div key={idx} className="text-dark" style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>
+                                <span className="text-muted">•</span> {cambio}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Vista estándar JSON para otros eventos */
+                        <>
+                          <small className="text-muted d-block mb-1"><strong>Datos adicionales:</strong></small>
+                          <pre className="bg-light p-2 rounded mb-0" style={{ fontSize: '0.7rem', maxHeight: '150px', overflow: 'auto' }}>
+                            {JSON.stringify(evento.datos_adicionales, null, 2)}
+                          </pre>
+                        </>
+                      )}
                     </div>
                   )}
 

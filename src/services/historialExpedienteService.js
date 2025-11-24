@@ -165,38 +165,43 @@ export const registrarEvento = async (datos) => {
   try {
     console.log('📝 Registrando evento en historial:', datos);
     
+    const payload = {
+      expediente_id: datos.expediente_id,
+      cliente_id: datos.cliente_id || null,
+      tipo_evento: datos.tipo_evento,
+      etapa_anterior: datos.etapa_anterior || null,
+      etapa_nueva: datos.etapa_nueva || null,
+      usuario_id: datos.usuario_id || obtenerUsuarioActual().id || null,
+      usuario_nombre: datos.usuario_nombre || obtenerUsuarioActual().nombre || 'Sistema',
+      descripcion: datos.descripcion || '',
+      datos_adicionales: datos.datos_adicionales ? JSON.stringify(datos.datos_adicionales) : null,
+      metodo_contacto: datos.metodo_contacto || null,
+      destinatario_nombre: datos.destinatario_nombre || null,
+      destinatario_contacto: datos.destinatario_contacto || null,
+      documento_url: datos.documento_url || null,
+      documento_tipo: datos.documento_tipo || null,
+      fecha_evento: datos.fecha_evento || new Date().toISOString()
+    };
+    
+    console.log('📤 Payload final enviado al backend:', payload);
+    
     const response = await fetch(`${API_URL}/api/historial-expedientes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        expediente_id: datos.expediente_id,
-        cliente_id: datos.cliente_id || null,
-        tipo_evento: datos.tipo_evento,
-        etapa_anterior: datos.etapa_anterior || null,
-        etapa_nueva: datos.etapa_nueva || null,
-  // Usuario que ejecuta la acción (soporta id/nombre). Fallback 'Sistema'.
-  usuario_id: datos.usuario_id || obtenerUsuarioActual().id || null,
-  usuario_nombre: datos.usuario_nombre || obtenerUsuarioActual().nombre || 'Sistema',
-        descripcion: datos.descripcion || '',
-        datos_adicionales: datos.datos_adicionales || null,
-        metodo_contacto: datos.metodo_contacto || null,
-        destinatario_nombre: datos.destinatario_nombre || null,
-        destinatario_contacto: datos.destinatario_contacto || null,
-        documento_url: datos.documento_url || null,
-        documento_tipo: datos.documento_tipo || null,
-        fecha_evento: datos.fecha_evento || new Date().toISOString()
-      })
+      body: JSON.stringify(payload)
     });
     
     if (!response.ok) {
-      throw new Error(`Error HTTP: ${response.status}`);
+      const errorBody = await response.text();
+      console.error('❌ Error del backend:', response.status, errorBody);
+      throw new Error(`Error HTTP: ${response.status} - ${errorBody}`);
     }
     
-    const resultado = await response.json();
-    console.log('✅ Evento registrado exitosamente:', resultado);
-    return resultado;
+    const data = await response.json();
+    console.log('✅ Evento registrado exitosamente:', data);
+    return data;
     
   } catch (error) {
     console.error('❌ Error al registrar evento:', error);
@@ -235,9 +240,14 @@ export const obtenerHistorialExpediente = async (expedienteId) => {
       throw new Error(`Error HTTP: ${response.status}`);
     }
     
-    const historial = await response.json();
-    console.log(`✅ Historial obtenido: ${historial.length} eventos`);
-    return historial;
+    const result = await response.json();
+    console.log('📦 Respuesta del backend:', result);
+    
+    // Manejar diferentes formatos de respuesta del backend
+    const historial = result.data || result;
+    console.log(`✅ Historial obtenido: ${Array.isArray(historial) ? historial.length : 0} eventos`, historial);
+    
+    return Array.isArray(historial) ? historial : [];
     
   } catch (error) {
     console.error('❌ Error al obtener historial:', error);
