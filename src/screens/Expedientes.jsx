@@ -54,7 +54,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import BuscadorCliente from '../components/BuscadorCliente';
 import ModalCapturarContacto from '../components/ModalCapturarContacto';
@@ -772,8 +772,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
-          console.log('🔍 Buscando cliente con:', { rfc, curp, nombre, apellidoPaterno, apellidoMaterno });
-          
           const response = await fetch(`${API_URL}/api/clientes`);
           if (!response.ok) {
             console.error('❌ Error al obtener clientes:', response.status);
@@ -781,42 +779,27 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           }
           
           const clientes = await response.json();
-          console.log(`📊 Total de clientes en BD: ${clientes.length}`);
           
           // 1. PRIORIDAD 1: Buscar por RFC (más confiable)
           if (rfc && rfc.trim() !== '') {
             const rfcBusqueda = rfc.trim().toUpperCase();
-            console.log(`🔍 Buscando por RFC: "${rfcBusqueda}"`);
-            
             const clientePorRFC = clientes.find(c => {
               const rfcCliente = (c.rfc || '').trim().toUpperCase();
               return rfcCliente === rfcBusqueda;
             });
             
-            if (clientePorRFC) {
-              console.log('✅ Cliente encontrado por RFC:', clientePorRFC.id, clientePorRFC.nombre);
-              return clientePorRFC;
-            } else {
-              console.log('⚠️ No se encontró cliente con RFC:', rfcBusqueda);
-            }
+            if (clientePorRFC) return clientePorRFC;
           }
           
           // 2. PRIORIDAD 2: Buscar por CURP (si no hay RFC)
           if (curp && curp.trim() !== '') {
             const curpBusqueda = curp.trim().toUpperCase();
-            console.log(`🔍 Buscando por CURP: "${curpBusqueda}"`);
-            
             const clientePorCURP = clientes.find(c => {
               const curpCliente = (c.curp || '').trim().toUpperCase();
               return curpCliente === curpBusqueda;
             });
             
-            if (clientePorCURP) {
-              console.log('✅ Cliente encontrado por CURP:', clientePorCURP.id, clientePorCURP.nombre);
-              return clientePorCURP;
-            } else {
-              console.log('⚠️ No se encontró cliente con CURP:', curpBusqueda);
-            }
+            if (clientePorCURP) return clientePorCURP;
           }
           
           // 3. PRIORIDAD 3: Buscar por nombre completo (último recurso)
@@ -841,15 +824,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               return coincideNombre && coincidePaterno && coincideMaterno;
             });
             
-            if (clientePorNombre) {
-              console.log('✅ Cliente encontrado por nombre:', clientePorNombre.id, clientePorNombre.nombre);
-              return clientePorNombre;
-            } else {
-              console.log('⚠️ No se encontró cliente con ese nombre');
-            }
+            if (clientePorNombre) return clientePorNombre;
           }
           
-          console.log('❌ Cliente NO encontrado con ningún criterio');
           return null;
         } catch (error) {
           console.error('❌ Error buscando cliente:', error);
@@ -858,8 +835,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       };
 
       // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
-      console.log('🎯 Iniciando proceso de extracción modular...');
-      
       let datosExtraidos = {};
       
       try {
@@ -867,20 +842,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const { loadExtractor } = await import('../lib/pdf/extractors/registry.js');
         
         const deteccion = detectarAseguradoraYProducto(textoPagina1);
-        console.log('🏢 Detección:', deteccion);
-        
         const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
         
         if (moduloExtractor && moduloExtractor.extraer) {
-          console.log(`✅ Extractor encontrado para ${deteccion.aseguradora} - ${deteccion.producto}`);
-          
-          console.log('📄 DEBUG antes de extraer:');
-          console.log('   - textoPagina1 length:', textoPagina1?.length);
-          console.log('   - textoAvisoDeCobro length:', textoAvisoDeCobro?.length);
-          console.log('   - textoPaginaCaratula length:', textoPaginaCaratula?.length);
-          console.log('   - textoCompleto length:', textoCompleto?.length);
-          console.log('   - Total páginas extraídas:', todasLasPaginas?.length);
-          
           datosExtraidos = await moduloExtractor.extraer({
             textoCompleto,
             textoPagina1,
@@ -888,8 +852,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             textoAvisoDeCobro,
             todasLasPaginas
           });
-          
-          console.log('📊 Datos extraídos:', datosExtraidos);
         } else {
           console.error('❌ No se encontró extractor para:', deteccion);
           setEstado('error');
@@ -990,7 +952,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               mensaje: 'El primer pago y los pagos subsecuentes son iguales; normalmente deben diferir (primer pago incluye gastos iniciales).',
               detalle: { primer, subsecuentes }
             });
-            console.warn('⚠️ Validación pagos: primer pago y subsecuentes son iguales.', { primer, subsecuentes });
           }
         }
 
@@ -1017,9 +978,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 tolerancia
               }
             });
-            console.warn('⚠️ Validación pagos: total no coincide con suma de fraccionados.', validacion_pagos);
-          } else {
-            console.log('✅ Validación pagos: total consistente con fraccionados.', validacion_pagos);
           }
         }
 
@@ -1437,7 +1395,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           productosAseguradoras: []
         };
         
-        const { crearMiembroEquipo } = await import('../services/equipoDeTrabajoService');
+        const { crearMiembroEquipo, guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
         const resultado = await crearMiembroEquipo(nuevoAgente);
         
         if (resultado.success) {
@@ -1445,6 +1403,84 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('✅ Agente creado:', resultado.data.nombre);
           const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
           toast.success(`Agente creado: ${nombreMostrar}`);
+          
+          // VINCULAR AGENTE CON ASEGURADORA Y PRODUCTO
+          // Buscar aseguradora por nombre (ej: "Qualitas")
+          const companiaExtraida = datosExtraidos.compania;
+          const productoExtraido = datosExtraidos.producto;
+          
+          if (companiaExtraida && productoExtraido && aseguradoras.length > 0 && tiposProductos.length > 0) {
+            // Buscar aseguradora - Intentar varios métodos
+            let aseguradoraMatch = aseguradoras.find(aseg => 
+              aseg.nombre && aseg.nombre.toLowerCase() === companiaExtraida.toLowerCase()
+            );
+            
+            // Si no encontró exacto, buscar que contenga
+            if (!aseguradoraMatch) {
+              aseguradoraMatch = aseguradoras.find(aseg => 
+                aseg.nombre && aseg.nombre.toLowerCase().includes(companiaExtraida.toLowerCase())
+              );
+            }
+            
+            // Si aún no encontró, buscar al revés (que la extraída contenga el nombre de BD)
+            if (!aseguradoraMatch) {
+              aseguradoraMatch = aseguradoras.find(aseg => 
+                aseg.nombre && companiaExtraida.toLowerCase().includes(aseg.nombre.toLowerCase())
+              );
+            }
+            
+            console.log('🔍 Resultado búsqueda aseguradora:', aseguradoraMatch);
+            
+            if (aseguradoraMatch) {
+              // Los productos son genéricos (no tienen aseguradora_id)
+              // Buscar directamente por nombre del producto
+              let productoMatch = tiposProductos.find(prod =>
+                prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
+              );
+              
+              // Si no encontró, intentar al revés (que el producto contenga parte del extraído)
+              if (!productoMatch) {
+                productoMatch = tiposProductos.find(prod =>
+                  prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+                );
+              }
+              
+              // Si no encontró, intentar palabras clave
+              if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
+                productoMatch = tiposProductos.find(prod => 
+                  prod.nombre && prod.nombre.toLowerCase().includes('auto')
+                );
+              }
+              
+              if (productoMatch) {
+                // Guardar la asociación agente-aseguradora-producto-clave
+                try {
+                  const asignacion = {
+                    usuarioId: resultado.data.id,
+                    aseguradoraId: aseguradoraMatch.id, // ID de Qualitas
+                    productoId: productoMatch.id,
+                    ejecutivoId: resultado.data.id,
+                    clave: codigo, // La clave del PDF (25576, etc.)
+                    comisionPersonalizada: 0
+                  };
+                  
+                  const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
+                  
+                  if (resultadoAsignacion.success) {
+                    console.log('✅ Agente vinculado con aseguradora y producto');
+                  } else {
+                    console.warn('⚠️ No se pudo vincular agente con producto:', resultadoAsignacion.error);
+                  }
+                } catch (errorAsignacion) {
+                  console.error('❌ Error al vincular agente:', errorAsignacion);
+                }
+              } else {
+                console.warn('⚠️ No se encontró producto matching para:', productoExtraido);
+              }
+            } else {
+              console.warn('⚠️ No se encontró aseguradora matching para:', companiaExtraida);
+            }
+          }
         } else {
           throw new Error(resultado.error);
         }
@@ -2374,11 +2410,19 @@ const ListaExpedientes = React.memo(({
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false; // Renovadas van a su propia carpeta
+          if (!exp.termino_vigencia) return true; // Sin término, mantener en vigentes
           
-          // Si no tiene fecha_aviso_renovacion, mostrar en vigentes (fallback)
-          if (!exp.fecha_aviso_renovacion) return true;
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           return hoy < fechaAviso; // Aún no llegó el aviso de renovación
         });
       
@@ -2390,11 +2434,19 @@ const ListaExpedientes = React.memo(({
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           if (estatusPago !== 'pagado') return false;
+          if (!exp.termino_vigencia) return true; // Sin término, mantener en renovadas
           
-          // Si no tiene fecha_aviso_renovacion, mostrar aquí (fallback)
-          if (!exp.fecha_aviso_renovacion) return true;
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           return hoy < fechaAviso; // Aún no llegó el aviso de renovación
         });
       
@@ -2403,10 +2455,19 @@ const ListaExpedientes = React.memo(({
         // Criterio: hoy >= fecha_aviso_renovacion && hoy < termino_vigencia
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
-          if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+          if (!exp.termino_vigencia) return false;
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           const fechaTermino = new Date(exp.termino_vigencia);
+          
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
           return hoy >= fechaAviso && hoy < fechaTermino;
         });
@@ -2445,8 +2506,17 @@ const ListaExpedientes = React.memo(({
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
-        if (!exp.fecha_aviso_renovacion) return true;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy < fechaAviso;
       }).length,
       
@@ -2454,16 +2524,34 @@ const ListaExpedientes = React.memo(({
         if (exp.etapa_activa !== 'Renovada') return false;
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         if (estatusPago !== 'pagado') return false;
-        if (!exp.fecha_aviso_renovacion) return true;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy < fechaAviso;
       }).length,
       
       por_renovar: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
-        if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return false;
+        
         const fechaTermino = new Date(exp.termino_vigencia);
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy >= fechaAviso && hoy < fechaTermino;
       }).length,
       
@@ -2903,23 +2991,81 @@ const ListaExpedientes = React.memo(({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
                             <div className="d-flex gap-1 align-items-center">
-                              {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
-                                <button
-                                  onClick={() => abrirModalCompartir(expediente)}
-                                  className="btn btn-success btn-sm"
-                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Compartir"
-                                >
-                                  <Share2 size={12} />
-                                </button>
-                              )}
+                              {/* === BOTONES DE RENOVACIÓN === */}
+                              {(() => {
+                                const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                                
+                                if (!estaPorRenovar) return null;
+                                
+                                const etapaActual = expediente.etapa_activa || '';
+                                
+                                // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
+                                const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                                !etapaActual.includes('Cotización') && 
+                                                                !etapaActual.includes('Enviada') &&
+                                                                !etapaActual.includes('Pendiente de Emisión');
+                                
+                                const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                               etapaActual === 'Renovación Enviada';
+                                
+                                const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                                
+                                return (
+                                  <>
+                                    {puedeIniciarCotizacion && (
+                                      <button
+                                        onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                        className="btn btn-primary btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Cotizar Renovación"
+                                      >
+                                        <FileText size={12} />
+                                      </button>
+                                    )}
+                                    
+                                    {puedeMarcarAutorizado && (
+                                      <button
+                                        onClick={() => marcarRenovacionAutorizada(expediente)}
+                                        className="btn btn-success btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Marcar como Autorizado"
+                                      >
+                                        <CheckCircle size={12} />
+                                      </button>
+                                    )}
+                                    
+                                    {puedeAgregarRenovada && (
+                                      <button
+                                        onClick={() => abrirModalPolizaRenovada(expediente)}
+                                        className="btn btn-info btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Agregar Póliza Renovada"
+                                      >
+                                        <RefreshCw size={12} />
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()}
+
+                              <button
+                                onClick={() => abrirModalCompartir(expediente)}
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Compartir"
+                              >
+                                <Share2 size={12} />
+                              </button>
 
                               {(() => {
-                                // Permitir aplicar pago en estas etapas
-                                const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-                                const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
+                                // ✅ El botón de pago debe estar disponible independientemente de la etapa
+                                // Solo se oculta si ya está pagado o si la póliza está cancelada
+                                const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                                // ✅ Verificar estatus_pago tanto en camelCase como snake_case
+                                const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
                                 const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                                const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
+                                // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
+                                const noPagado = estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado';
                                 
                                 return etapaValida && noPagado ? (
                                   <button
@@ -3148,6 +3294,8 @@ const Formulario = React.memo(({
   guardarExpediente,
   companias,
   productos,
+  aseguradoras,
+  tiposProductos,
   etapasActivas,
   agentes,
   tiposPago,
@@ -4663,8 +4811,8 @@ const Formulario = React.memo(({
             onDataExtracted={handleDataExtracted}
             onClose={() => setMostrarExtractorPDF(false)}
             agentes={agentes}
-            aseguradoras={companias}
-            tiposProductos={productos}
+            aseguradoras={aseguradoras}
+            tiposProductos={tiposProductos}
           />
         </>
       )}
@@ -4763,7 +4911,7 @@ const DetallesExpediente = React.memo(({
       <h3 className="mb-0">Detalles del Expediente</h3>
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
-         ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(expedienteSeleccionado.etapa_activa) && 
+         ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida'].includes(expedienteSeleccionado.etapa_activa) && 
          ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
           <button
             onClick={() => {
@@ -4791,9 +4939,7 @@ const DetallesExpediente = React.memo(({
           </button>
         )}
 
-        {expedienteSeleccionado && 
-         (expedienteSeleccionado.etapa_activa === 'Emitida' || 
-          expedienteSeleccionado.etapa_activa === 'Enviada al Cliente') && (
+        {expedienteSeleccionado && (
           <button
             onClick={() => abrirModalCompartir(expedienteSeleccionado)}
             className="btn btn-success d-flex align-items-center"
@@ -4877,6 +5023,22 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  
+  // Estados para flujo de renovación
+  const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
+  const [mostrarModalAutorizarRenovacion, setMostrarModalAutorizarRenovacion] = useState(false);
+  const [mostrarModalPolizaRenovada, setMostrarModalPolizaRenovada] = useState(false);
+  const [expedienteParaRenovacion, setExpedienteParaRenovacion] = useState(null);
+  const [datosRenovacion, setDatosRenovacion] = useState({
+    numeroPolizaNueva: '',
+    primaNueva: '',
+    totalNuevo: '',
+    fechaEmisionNueva: '',
+    inicioVigenciaNueva: '',
+    terminoVigenciaNueva: '',
+    observaciones: ''
+  });
+  
   useEffect(() => {
     const fetchAgentes = async () => {
       const resultado = await obtenerAgentesEquipo();
@@ -5243,7 +5405,15 @@ const estadoInicialFormulario = {
   const snapshotPendiente = useRef(false); // Flag para capturar snapshot cuando esté listo
 
   // 📸 Capturar snapshot cuando el formulario esté completamente cargado en modo edición
+  // ⚠️ DESHABILITADO: Ahora se captura INMEDIATAMENTE en editarExpediente para evitar sobrescritura
   useEffect(() => {
+    // Limpiar flag cuando se sale de edición
+    if (!modoEdicion) {
+      snapshotPendiente.current = false;
+    }
+    
+    // ⚠️ COMENTADO: Ya no necesitamos capturar aquí, se hace inmediatamente en editarExpediente
+    /*
     if (snapshotPendiente.current && modoEdicion && formulario.id) {
       // Verificar que los datos de contacto están cargados
       const tieneContacto = formulario.contacto_nombre || formulario.contacto_email || formulario.contacto_telefono_fijo;
@@ -5252,18 +5422,16 @@ const estadoInicialFormulario = {
         console.log('📸 Capturando snapshot del formulario con datos completos:', {
           id: formulario.id,
           contacto_nombre: formulario.contacto_nombre,
-          contacto_email: formulario.contacto_email
+          contacto_email: formulario.contacto_email,
+          estatusPago: formulario.estatusPago,
+          estatus_pago: formulario.estatus_pago
         });
         setFormularioOriginal(JSON.parse(JSON.stringify(formulario)));
         snapshotPendiente.current = false;
       }
     }
-    
-    // Limpiar flag cuando se sale de edición
-    if (!modoEdicion) {
-      snapshotPendiente.current = false;
-    }
-  }, [modoEdicion, formulario, clienteSeleccionado]);
+    */
+  }, [modoEdicion]);
 
   // Debug solicitado: imprimir TODOS los campos visibles del editor con su valor actual
   useEffect(() => {
@@ -5852,6 +6020,15 @@ const estadoInicialFormulario = {
       // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
       const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
       
+      // ✅ VALIDAR que el número tenga al menos 10 dígitos y solo contenga números
+      if (!/^\d{10,15}$/.test(telefonoLimpio)) {
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp.\n\nDebe contener entre 10 y 15 dígitos.\n\nPor favor, actualiza el teléfono del cliente.`);
+        console.error('❌ Número de teléfono inválido:', telefono, '→', telefonoLimpio);
+        return;
+      }
+      
+      console.log('✅ Número de teléfono válido:', telefonoLimpio);
+      
       // Obtener URL firmada del PDF si existe
       let pdfUrl = null;
       let pdfExpiracion = null;
@@ -5873,10 +6050,21 @@ const estadoInicialFormulario = {
         pdfUrl
       );
 
-      // Obtener nombre del cliente
+      // Obtener nombre del cliente (empresa o persona física)
       const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
         ? cliente.razonSocial || cliente.razon_social
         : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+
+      // Obtener nombre del contacto principal (si existe)
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+
+      // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
 
       // Crear la URL de WhatsApp
       const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
@@ -5891,7 +6079,7 @@ const estadoInicialFormulario = {
           cliente_id: expediente.cliente_id,
           tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
           tipo_mensaje: tipoMensaje,
-          destinatario_nombre: nombreCliente,
+          destinatario_nombre: nombreDestinatario,
           destinatario_contacto: telefono,
           mensaje: mensaje,
           numero_poliza: expediente.numero_poliza,
@@ -5915,7 +6103,7 @@ const estadoInicialFormulario = {
           expediente.id,
           expediente.cliente_id,
           'WhatsApp',
-          { nombre: nombreCliente, contacto: telefono },
+          { nombre: nombreDestinatario, contacto: telefono },
           mensaje,
           pdfUrl
         );
@@ -5976,10 +6164,21 @@ const estadoInicialFormulario = {
         // Generar mensaje dinámico según el estado
         const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl);
 
-        // Obtener nombre del cliente
+        // Obtener nombre del cliente (empresa o persona física)
         const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
           ? cliente.razonSocial || cliente.razon_social
           : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+
+        // Obtener nombre del contacto principal (si existe)
+        const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+        const nombreContactoPrincipal = tieneContactoPrincipal
+          ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+          : '';
+
+        // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
+        const nombreDestinatario = nombreContactoPrincipal 
+          ? `${nombreCliente} (${nombreContactoPrincipal})`
+          : nombreCliente;
 
         // Opción 1: Usar mailto (cliente de correo local)
         const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
@@ -5992,7 +6191,7 @@ const estadoInicialFormulario = {
             cliente_id: expediente.cliente_id,
             tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
             tipo_mensaje: tipoMensaje,
-            destinatario_nombre: nombreCliente,
+            destinatario_nombre: nombreDestinatario,
             destinatario_contacto: email,
             asunto: asunto,
             mensaje: cuerpo,
@@ -6016,7 +6215,7 @@ const estadoInicialFormulario = {
             expediente.id,
             expediente.cliente_id,
             'Email',
-            { nombre: nombreCliente, contacto: email },
+            { nombre: nombreDestinatario, contacto: email },
             cuerpo,
             pdfUrl
           );
@@ -6276,9 +6475,17 @@ const estadoInicialFormulario = {
 
       // 2. Agregar comentario al historial con información del comprobante
       try {
-        const comentario = proximoPago && proximoPago.trim() !== ''
-          ? `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`
-          : `💰 Pago aplicado. Comprobante: ${comprobantePago.name}. Póliza completamente pagada`;
+        // Construir descripción consolidada con formato en columna
+        const etapaFinal = datosActualizacion.etapa_activa || expedienteParaPago.etapa_activa;
+        
+        let comentario;
+        if (proximoPago && proximoPago.trim() !== '') {
+          // Hay siguiente pago pendiente
+          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
+        } else {
+          // Póliza completamente pagada
+          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n📂 Movida a carpeta: Vigentes Pagadas`;
+        }
 
         // Registrar evento estructurado de pago en historial trazabilidad
         try {
@@ -6295,27 +6502,11 @@ const estadoInicialFormulario = {
               monto_total: expedienteParaPago.total || null,
               comprobante_nombre: comprobantePago.name,
               siguiente_vencimiento: proximoPago || null,
-              estatus_pago_nuevo: nuevoEstatusPago
+              estatus_pago_nuevo: nuevoEstatusPago,
+              etapa_activa: etapaFinal
             }
           });
-          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad');
-          
-          // Si la póliza está completamente pagada, registrar evento "En Vigencia"
-          if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.inicio_vigencia) {
-            await historialService.registrarEvento({
-              expediente_id: expedienteParaPago.id,
-              cliente_id: expedienteParaPago.cliente_id,
-              tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
-              usuario_nombre: 'Sistema',
-              descripcion: `Póliza en vigencia desde ${new Date(expedienteParaPago.inicio_vigencia).toLocaleDateString('es-MX')} hasta ${new Date(expedienteParaPago.termino_vigencia).toLocaleDateString('es-MX')}`,
-              datos_adicionales: {
-                numero_poliza: expedienteParaPago.numero_poliza,
-                inicio_vigencia: expedienteParaPago.inicio_vigencia,
-                termino_vigencia: expedienteParaPago.termino_vigencia
-              }
-            });
-            console.log('✅ Evento POLIZA_EN_VIGENCIA agregado a historial');
-          }
+          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad (con etapa consolidada)');
         } catch (errorRegistroPago) {
           console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
         }
@@ -6324,31 +6515,36 @@ const estadoInicialFormulario = {
         // No bloquear el proceso si falla el historial
       }
 
-      // 3. Actualizar el expediente en el estado local
-      setExpedientes(prev => prev.map(exp => {
-        if (exp.id === expedienteParaPago.id) {
-          return {
-            ...exp,
-            estatusPago: nuevoEstatusPago,
+      // 🔍 VERIFICAR estado de vigencia solo si NO se cambió la etapa a "En Vigencia"
+      // Esto evita logs redundantes cuando el pago completa la póliza
+      if (!(nuevoEstatusPago === 'Pagado' && datosActualizacion.etapa_activa === 'En Vigencia')) {
+        try {
+          await verificarYRegistrarEstadoVigencia({
+            ...expedienteParaPago,
             estatus_pago: nuevoEstatusPago,
-            fecha_vencimiento_pago: nuevaFechaVencimiento,
-            proximoPago: proximoPago,
-            proximo_pago: proximoPago,
-            fechaUltimoPago: fechaActual,
-            fecha_ultimo_pago: fechaActual,
-            fecha_pago: fechaActual
-          };
+            fecha_vencimiento_pago: nuevaFechaVencimiento
+          });
+        } catch (errorVigencia) {
+          console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
         }
-        return exp;
-      }));
+      }
 
+      // 🔄 RECARGAR expedientes desde BD para reflejar cambios en etapa_activa
+      await recargarExpedientes();
+      console.log('✅ Expedientes recargados desde BD');
+      
       toast.success('✅ Pago aplicado correctamente');
       
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
       
-      console.log('✅ Lista actualizada localmente de forma inmediata');
+      // 🔄 Refrescar página completa para mostrar cambios
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+      console.log('✅ Pago aplicado - Refrescando página');
     } catch (error) {
       console.error('❌ Error al aplicar pago:', error);
       toast.error('Error al aplicar el pago: ' + error.message);
@@ -6576,6 +6772,143 @@ const estadoInicialFormulario = {
 
     return true;
   }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
+
+  // 📍 Función para verificar y registrar el estado de vigencia de una póliza
+  // Esta función determina en qué carpeta debe estar (Vencida, Por Renovar, En Vigencia)
+  // y registra el evento correspondiente SI NO EXISTE ya en el historial
+  // ⭐ ADEMÁS actualiza la etapa_activa en BD para mantener coherencia
+  const verificarYRegistrarEstadoVigencia = useCallback(async (expediente, historialActual = null) => {
+    try {
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      
+      const inicio = expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia) : null;
+      const termino = expediente.termino_vigencia ? new Date(expediente.termino_vigencia) : null;
+      const fechaAviso = expediente.fecha_aviso_renovacion ? new Date(expediente.fecha_aviso_renovacion) : null;
+      
+      if (inicio) inicio.setHours(0, 0, 0, 0);
+      if (termino) termino.setHours(0, 0, 0, 0);
+      if (fechaAviso) fechaAviso.setHours(0, 0, 0, 0);
+      
+      // Si no tenemos historial, intentar obtenerlo
+      let historial = historialActual;
+      if (!historial) {
+        try {
+          const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`);
+          if (response.ok) {
+            const data = await response.json();
+            historial = data?.data || data || [];
+            // ✅ VALIDAR que historial sea un array
+            if (!Array.isArray(historial)) {
+              console.warn('⚠️ Historial no es un array, convirtiendo:', historial);
+              historial = [];
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ No se pudo obtener historial para verificar eventos existentes');
+          historial = [];
+        }
+      }
+      
+      // ✅ Asegurar que historial sea un array
+      if (!Array.isArray(historial)) {
+        console.warn('⚠️ Historial no es un array, convirtiendo:', historial);
+        historial = [];
+      }
+      
+      console.log('🔍 [VIGENCIA] Verificando estado de vigencia para expediente:', expediente.id);
+      console.log('🔍 [VIGENCIA] Historial cargado:', historial.length, 'eventos');
+      
+      // 1️⃣ VENCIDA (mayor prioridad)
+      if (termino && termino < hoy) {
+        // ⭐ Solo actualizar etapa_activa a "Vencida" (el evento se integra en log de edición)
+        if (expediente.etapa_activa !== 'Vencida') {
+          try {
+            await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ etapa_activa: 'Vencida' })
+            });
+            console.log('✅ Etapa actualizada a "Vencida" (el evento se integra en log de edición)');
+          } catch (e) {
+            console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+          }
+        }
+        return;
+      }
+      
+      // 2️⃣ POR RENOVAR (30 días antes de vencer)
+      if (fechaAviso && termino && fechaAviso <= hoy && termino >= hoy) {
+        // ⭐ Solo actualizar etapa_activa a "Por Renovar" (el evento se integra en log de edición)
+        if (expediente.etapa_activa !== 'Por Renovar') {
+          try {
+            await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ etapa_activa: 'Por Renovar' })
+            });
+            console.log('✅ Etapa actualizada a "Por Renovar" (el evento se integra en log de edición)');
+          } catch (e) {
+            console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+          }
+        }
+        return;
+      }
+      
+      // 3️⃣ EN VIGENCIA (dentro del periodo, sin estar próxima a renovar)
+      // ⚠️ IMPORTANTE: Solo si está PAGADA
+      if (inicio && termino && inicio <= hoy && termino >= hoy) {
+        const estaPagada = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase() === 'pagado';
+        
+        // Solo registrar evento y actualizar etapa si está pagada
+        if (estaPagada) {
+          const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA);
+          
+          if (!yaRegistrado) {
+            await historialService.registrarEvento({
+              expediente_id: expediente.id,
+              cliente_id: expediente.cliente_id,
+              tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
+              usuario_nombre: 'Sistema',
+              descripcion: `Póliza en vigencia desde ${expediente.inicio_vigencia} hasta ${expediente.termino_vigencia} (Estatus pago: Pagado)`,
+              datos_adicionales: {
+                numero_poliza: expediente.numero_poliza,
+                compania: expediente.compania,
+                inicio_vigencia: expediente.inicio_vigencia,
+                termino_vigencia: expediente.termino_vigencia,
+                estatus_pago: 'Pagado'
+              }
+            });
+            console.log('✅ Evento "Póliza en Vigencia" registrado');
+          } else {
+            console.log('ℹ️ Evento "Póliza en Vigencia" ya existe en historial');
+          }
+          
+          // ⭐ Actualizar etapa_activa a "En Vigencia"
+          if (expediente.etapa_activa !== 'En Vigencia') {
+            try {
+              await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ etapa_activa: 'En Vigencia' })
+              });
+              console.log('✅ Etapa actualizada a "En Vigencia"');
+            } catch (e) {
+              console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+            }
+          }
+        } else {
+          console.log('ℹ️ Póliza en rango de vigencia pero NO pagada. No se actualiza a "En Vigencia"');
+        }
+        return;
+      }
+      
+      console.log('ℹ️ Póliza no cumple condiciones para eventos automáticos de vigencia');
+      
+    } catch (error) {
+      console.error('❌ Error al verificar y registrar estado de vigencia:', error);
+    }
+  }, []);
 
   const guardarExpediente = useCallback(async () => {
     // 🚨 DEBUG: Estado del formulario al hacer click en guardar
@@ -6839,7 +7172,8 @@ const estadoInicialFormulario = {
     // ✅ GARANTIZAR que estos campos problemáticos estén presentes
     expedientePayload.cargo_pago_fraccionado = formularioParaGuardar.cargo_pago_fraccionado || '';
     expedientePayload.gastos_expedicion = formularioParaGuardar.gastos_expedicion || '';
-    expedientePayload.estatus_pago = formularioParaGuardar.estatusPago || 'Pendiente'; // ✅ GARANTIZAR estatus_pago
+    // ✅ CRÍTICO: Usar 'formulario' (estado actual) para estatus_pago, no 'formularioParaGuardar'
+    expedientePayload.estatus_pago = formulario.estatusPago || formulario.estatus_pago || 'Pendiente';
     expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     
     // 🎯 CRÍTICO: GARANTIZAR que las fechas estén en el payload (segunda vez por seguridad)
@@ -6932,12 +7266,101 @@ const estadoInicialFormulario = {
         expedientePayload.gastos_expedicion = formularioParaGuardar.gastos_expedicion || '';
       }
       
+      // 💰 VALIDAR cambios en fechas de pago - Preguntar si mantener estatus actual
+      let estatusRecalculado = null; // Para detectar cambios automáticos de estatus
+      
+      if (formularioOriginal) {
+        const fechasOriginal = {
+          inicio_vigencia: formularioOriginal.inicio_vigencia,
+          termino_vigencia: formularioOriginal.termino_vigencia,
+          fecha_vencimiento_pago: formularioOriginal.fecha_vencimiento_pago
+        };
+        
+        const fechasNuevas = {
+          inicio_vigencia: formularioParaGuardar.inicio_vigencia,
+          termino_vigencia: formularioParaGuardar.termino_vigencia,
+          fecha_vencimiento_pago: formularioParaGuardar.fecha_vencimiento_pago
+        };
+        
+        const cambiaronFechasPago = 
+          fechasOriginal.inicio_vigencia !== fechasNuevas.inicio_vigencia ||
+          fechasOriginal.termino_vigencia !== fechasNuevas.termino_vigencia ||
+          fechasOriginal.fecha_vencimiento_pago !== fechasNuevas.fecha_vencimiento_pago;
+        
+        const estatusOriginal = formularioOriginal.estatusPago || formularioOriginal.estatus_pago || 'Pendiente';
+        const estatusActual = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Pendiente';
+        
+        // Si cambiaron fechas Y el usuario NO cambió manualmente el estatus
+        if (cambiaronFechasPago && estatusOriginal === estatusActual) {
+          const mantenerEstatus = window.confirm(
+            `🔄 Has modificado fechas de vigencia o pago.\n\n` +
+            `Estatus de pago actual: "${estatusActual}"\n\n` +
+            `¿Deseas MANTENER el estatus de pago actual?\n\n` +
+            `• Presiona "Aceptar" para mantener: "${estatusActual}"\n` +
+            `• Presiona "Cancelar" para recalcular automáticamente según la fecha de vencimiento`
+          );
+          
+          if (!mantenerEstatus) {
+            // Recalcular estatus basado en fecha_vencimiento_pago usando la misma lógica
+            if (fechasNuevas.fecha_vencimiento_pago) {
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const fechaVenc = new Date(fechasNuevas.fecha_vencimiento_pago);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+              
+              // Usar la misma lógica que calcularEstatusPago
+              let nuevoEstatus;
+              if (diasRestantes < 0) {
+                nuevoEstatus = 'Vencido';
+              } else if (diasRestantes <= 15) {
+                nuevoEstatus = 'Por Vencer';
+              } else {
+                nuevoEstatus = 'Pendiente';
+              }
+              
+              expedientePayload.estatus_pago = nuevoEstatus;
+              expedientePayload.estatusPago = nuevoEstatus;
+              
+              // ✅ Guardar para detectar cambio más adelante
+              estatusRecalculado = { anterior: estatusOriginal, nuevo: nuevoEstatus };
+              
+              // ✅ CRÍTICO: Actualizar también el estado 'formulario' para que se detecte el cambio
+              setFormulario(prev => ({
+                ...prev,
+                estatus_pago: nuevoEstatus,
+                estatusPago: nuevoEstatus
+              }));
+              
+              console.log(`📊 Estatus de pago recalculado: ${estatusOriginal} → ${nuevoEstatus} (${diasRestantes} días restantes)`);
+            }
+          } else {
+            console.log(`📊 Manteniendo estatus de pago: ${estatusActual}`);
+          }
+        }
+      }
+      
       // 🚨 DEBUG CRÍTICO: Verificar el JSON exacto que se enviará
       console.log('🚨 [FETCH PUT] FINAL VERIFICADO:');
       console.log('🚨 cargo_pago_fraccionado:', expedientePayload.cargo_pago_fraccionado);
       console.log('🚨 gastos_expedicion:', expedientePayload.gastos_expedicion);
+      console.log('🚨 estatus_pago:', expedientePayload.estatus_pago);
       console.log('🚨 [FETCH PUT] JSON.stringify del payload:');
       console.log(JSON.stringify(expedientePayload, null, 2));
+      
+      // ✅ Si el estatus cambió a "Pagado", actualizar etapa a "En Vigencia"
+      const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
+      const estatusBD = expedienteEnBD?.estatus_pago || expedienteEnBD?.estatusPago;
+      const estatusNuevo = expedientePayload.estatus_pago;
+      
+      if (estatusBD && estatusNuevo && 
+          estatusBD.toLowerCase() !== 'pagado' && 
+          estatusNuevo.toLowerCase() === 'pagado' &&
+          expedientePayload.etapa_activa !== 'En Vigencia') {
+        expedientePayload.etapa_activa = 'En Vigencia';
+        console.log('✅ Cambiando etapa a "En Vigencia" porque estatus cambió a Pagado');
+      }
       
       fetch(`${API_URL}/api/expedientes/${formularioParaGuardar.id}`, {
         method: 'PUT',
@@ -6965,22 +7388,43 @@ const estadoInicialFormulario = {
           try {
             const expedienteId = formularioParaGuardar.id;
             
-            // Usar el snapshot del formulario original (capturado al abrir edición)
-            // en lugar del array de expedientes que puede estar desactualizado
-            const expedienteAnterior = formularioOriginal;
+            // 🔧 Helper para comparar valores, manejando null/undefined/empty
+            // ⚠️ IMPORTANTE: Definir ANTES de usar para que esté disponible en todo el scope
+            const normalizar = (valor, esFecha = false) => {
+              if (valor === null || valor === undefined || valor === '') return '';
+              if (typeof valor === 'object') return JSON.stringify(valor);
+              
+              // Normalizar fechas eliminando la parte de hora para comparación
+              if (esFecha && valor) {
+                try {
+                  // Si es una fecha ISO con hora, extraer solo la fecha
+                  if (valor.includes('T') || valor.includes(':')) {
+                    return new Date(valor).toISOString().split('T')[0];
+                  }
+                  return String(valor).trim();
+                } catch (e) {
+                  return String(valor).trim();
+                }
+              }
+              
+              return String(valor).trim();
+            };
             
-            // Detectar cambios comparando contra el estado original del formulario
+            // ✅ SOLUCIÓN DEFINITIVA: Comparar BD actual vs lo que se va a guardar
+            // Ignorar todo lo que pasó en el formulario (auto-fills, cálculos, etc.)
+            const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
+            
+            // 🔍 Obtener datos actuales del cliente desde la tabla de clientes
+            let clienteActual = null;
+            if (formularioParaGuardar.cliente_id && clientesMap[formularioParaGuardar.cliente_id]) {
+              clienteActual = clientesMap[formularioParaGuardar.cliente_id];
+              console.log('🔍 [COMPARACIÓN] Cliente actual desde BD:', clienteActual);
+            }
+            
+            // Detectar cambios REALES comparando BD vs payload que se guardará
             const camposModificados = [];
             
-            if (expedienteAnterior) {
-              // Helper para comparar valores, manejando null/undefined/empty
-              const normalizar = (valor) => {
-                if (valor === null || valor === undefined || valor === '') return '';
-                if (typeof valor === 'object') return JSON.stringify(valor);
-                return String(valor).trim();
-              };
-              
-              // Lista COMPLETA de campos a verificar
+            if (expedienteEnBD) {
               const camposAComparar = [
                 // Datos básicos de póliza
                 { key: 'numero_poliza', label: 'Número de póliza' },
@@ -6989,11 +7433,11 @@ const estadoInicialFormulario = {
                 { key: 'tipo_seguro', label: 'Tipo de seguro' },
                 { key: 'etapa_activa', label: 'Etapa' },
                 
-                // Fechas
-                { key: 'fecha_emision', label: 'Fecha de emisión' },
-                { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
-                { key: 'termino_vigencia', label: 'Término de vigencia' },
-                { key: 'fecha_vencimiento_pago', label: 'Vencimiento de pago' },
+                // Fechas (marcar como esFecha para normalización correcta)
+                { key: 'fecha_emision', label: 'Fecha de emisión', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
+                { key: 'inicio_vigencia', label: 'Inicio de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
+                { key: 'termino_vigencia', label: 'Término de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
+                { key: 'fecha_vencimiento_pago', label: 'Vencimiento de pago', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 
                 // Montos
                 { key: 'prima_pagada', label: 'Prima', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
@@ -7027,6 +7471,15 @@ const estadoInicialFormulario = {
                 { key: 'servicio', label: 'Servicio' },
                 { key: 'movimiento', label: 'Movimiento' },
                 
+                // Datos del cliente
+                { key: 'nombre', label: 'Nombre' },
+                { key: 'apellido_paterno', label: 'Apellido paterno' },
+                { key: 'apellido_materno', label: 'Apellido materno' },
+                { key: 'email', label: 'Email' },
+                { key: 'telefono_fijo', label: 'Teléfono fijo' },
+                { key: 'telefono_movil', label: 'Teléfono móvil' },
+                { key: 'rfc', label: 'RFC' },
+                
                 // Contactos principales (campos planos)
                 { key: 'contacto_nombre', label: 'Nombre del contacto' },
                 { key: 'contacto_apellido_paterno', label: 'Apellido paterno del contacto' },
@@ -7040,56 +7493,330 @@ const estadoInicialFormulario = {
               ];
               
               // Comparar campos simples
-              camposAComparar.forEach(({ key, label, formatter }) => {
-                const valorAnterior = normalizar(expedienteAnterior[key]);
-                const valorNuevo = normalizar(formularioParaGuardar[key]);
+              camposAComparar.forEach(({ key, label, formatter, esFecha }) => {
+                // ⚠️ EXCLUIR campos que se calculan automáticamente O están en solo lectura
+                const camposExcluidos = [
+                  'agente', 
+                  'tipo_pago', 
+                  'fecha_vencimiento_pago', 
+                  'proximoPago',
+                  'estatusPago', // Se maneja por separado
+                  'estatus_pago', // Se maneja por separado
+                  // 🔒 EXCLUIR campos del cliente en SOLO LECTURA (nunca se pueden editar desde el formulario)
+                  'nombre',
+                  'apellido_paterno',
+                  'apellido_materno',
+                  'rfc'
+                ];
+                if (camposExcluidos.includes(key)) return;
                 
-                if (valorAnterior !== valorNuevo && !(valorAnterior === '' && valorNuevo === '')) {
-                  const valorAnteriorFormateado = formatter && expedienteAnterior[key] 
-                    ? formatter(expedienteAnterior[key]) 
+                // 🔍 CAMPOS EDITABLES DEL CLIENTE: email, teléfonos
+                // Comparar contra tabla de clientes para detectar cambios reales
+                const camposClienteEditables = ['email', 'telefono_fijo', 'telefono_movil'];
+                
+                // Campos del contacto adicional/gestor (siempre editables)
+                const camposContacto = [
+                  'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
+                  'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
+                ];
+                
+                let valorAnterior, valorNuevo;
+                
+                if (camposClienteEditables.includes(key) || camposContacto.includes(key)) {
+                  // Comparar contra datos actuales del cliente en la BD
+                  if (!clienteActual) return; // No podemos comparar sin datos del cliente
+                  
+                  // Mapear nombres de campos del expediente a nombres en tabla clientes
+                  const mapeoCliente = {
+                    'telefono_fijo': 'telefonoFijo',
+                    'telefono_movil': 'telefonoMovil'
+                  };
+                  const keyCliente = mapeoCliente[key] || key;
+                  
+                  valorAnterior = normalizar(clienteActual[keyCliente], esFecha);
+                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
+                } else {
+                  // Comparar campos de póliza normalmente (contra expediente anterior)
+                  valorAnterior = normalizar(expedienteEnBD[key], esFecha);
+                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
+                }
+                
+                // Solo registrar cambios REALES (ignorar cambios entre valores vacíos: null, undefined, '')
+                if (valorAnterior !== valorNuevo) {
+                  // Ambos valores están vacíos -> NO es un cambio real
+                  if ((valorAnterior === '' || !valorAnterior) && (valorNuevo === '' || !valorNuevo)) {
+                    return; // Skip - no es cambio real
+                  }
+                  
+                  const valorAnteriorFormateado = formatter && expedienteEnBD[key] 
+                    ? formatter(expedienteEnBD[key]) 
                     : (valorAnterior || 'vacío');
                   const valorNuevoFormateado = formatter && formularioParaGuardar[key]
                     ? formatter(formularioParaGuardar[key]) 
                     : (valorNuevo || 'vacío');
                   
-                  camposModificados.push(`${label}: "${valorAnteriorFormateado}" → "${valorNuevoFormateado}"`);
+                  camposModificados.push(`• ${label}: "${valorAnteriorFormateado}" → "${valorNuevoFormateado}"`);
                 }
               });
+              
+              // ✅ Agregar estatus_pago si fue recalculado automáticamente
+              if (estatusRecalculado && estatusRecalculado.anterior !== estatusRecalculado.nuevo) {
+                camposModificados.push(`• Estatus de pago: "${estatusRecalculado.anterior}" → "${estatusRecalculado.nuevo}" (recalculado automáticamente)`);
+              }
             }
             
-            // Solo registrar evento si hubo cambios reales
-            if (camposModificados.length > 0) {
-              // Verificar si cambió la etapa
-              const cambioEtapa = expedienteAnterior && expedienteAnterior.etapa_activa !== formularioParaGuardar.etapa_activa;
+            // 💰 DETECTAR cambio manual en estatus de pago para agregarlo a camposModificados
+            let cambioEstatusPago = null;
+            let etapaAfectadaPorPago = null;
+            
+            if (expedienteEnBD) {
+              console.log('🔍 [PAGO LOG] Verificando cambio en estatus de pago...');
+              console.log('🔍 [PAGO LOG] expedienteEnBD:', expedienteEnBD);
+              console.log('🔍 [PAGO LOG] expedientePayload:', expedientePayload);
+              console.log('🔍 [PAGO LOG] estatusRecalculado:', estatusRecalculado);
               
-              if (cambioEtapa) {
-                // Registrar cambio de etapa con evento específico
-                await historialService.registrarCambioEtapa(
-                  expedienteId,
-                  formularioParaGuardar.cliente_id,
-                  expedienteAnterior.etapa_activa,
-                  formularioParaGuardar.etapa_activa,
-                  'Sistema', // TODO: usuario actual
-                  'Cambio de etapa desde edición'
-                );
+              // Comparar BD actual vs lo que se va a guardar
+              // USAR formularioParaGuardar en lugar de expedientePayload
+              const estatusPagoAnterior = estatusRecalculado 
+                ? normalizar(estatusRecalculado.anterior)
+                : normalizar(expedienteEnBD.estatusPago || expedienteEnBD.estatus_pago);
+              const estatusPagoNuevo = estatusRecalculado
+                ? normalizar(estatusRecalculado.nuevo)
+                : normalizar(formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago);
+              
+              console.log('🔍 [PAGO LOG] estatusPagoAnterior (normalizado):', estatusPagoAnterior);
+              console.log('🔍 [PAGO LOG] estatusPagoNuevo (normalizado):', estatusPagoNuevo);
+              console.log('🔍 [PAGO LOG] Son diferentes?:', estatusPagoAnterior !== estatusPagoNuevo);
+              console.log('🔍 [PAGO LOG] Ambos tienen valor?:', !!(estatusPagoAnterior && estatusPagoNuevo));
+              
+              if (estatusPagoAnterior !== estatusPagoNuevo && estatusPagoAnterior && estatusPagoNuevo) {
+                const pagoAplicado = estatusPagoNuevo.toLowerCase() === 'pagado';
+                const pagoRemovido = estatusPagoAnterior.toLowerCase() === 'pagado' && estatusPagoNuevo.toLowerCase() !== 'pagado';
+                
+                // Si se removió el pago y estaba "En Vigencia", revertir a "Emitida"
+                if (pagoRemovido && expedienteEnBD.etapa_activa === 'En Vigencia') {
+                  try {
+                    await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ etapa_activa: 'Emitida' })
+                    });
+                    etapaAfectadaPorPago = 'Emitida';
+                    console.log('✅ Etapa revertida de "En Vigencia" → "Emitida"');
+                  } catch (e) {
+                    console.warn('⚠️ No se pudo revertir etapa:', e);
+                  }
+                }
+                
+                // Guardar info del cambio para incluir en el log consolidado
+                cambioEstatusPago = {
+                  anterior: estatusPagoAnterior,
+                  nuevo: estatusPagoNuevo,
+                  pagoAplicado,
+                  pagoRemovido
+                };
+                
+                // ⚠️ NO agregar a camposModificados aquí - se mostrará en el badge destacado
+                // Solo agregamos si es un cambio entre estados no-pagado (ej: Pendiente → Vencido)
+                if (!pagoAplicado && !pagoRemovido) {
+                  camposModificados.push(`• Estatus de pago: "${estatusPagoAnterior}" → "${estatusPagoNuevo}"`);
+                }
+              }
+            }
+            
+            // Registrar evento consolidado si hubo cambios O si hubo cambio de pago manual
+            if (camposModificados.length > 0 || cambioEstatusPago) {
+              // 🔍 PRIMERO: Ejecutar verificación de vigencia para obtener la etapa FINAL
+              let etapaFinalReal = formularioParaGuardar.etapa_activa;
+              
+              if (!cambioEstatusPago || (!cambioEstatusPago.pagoAplicado && !cambioEstatusPago.pagoRemovido)) {
+                try {
+                  const expedienteActualizado = {
+                    ...formularioParaGuardar,
+                    estatus_pago: formulario.estatusPago || formulario.estatus_pago,
+                    estatusPago: formulario.estatusPago || formulario.estatus_pago
+                  };
+                  await verificarYRegistrarEstadoVigencia(expedienteActualizado, data?.historial);
+                  
+                  // Recargar el expediente para obtener la etapa_activa REAL después de la verificación
+                  const respuestaFresh = await fetch(`${API_URL}/api/expedientes/${expedienteId}`);
+                  if (respuestaFresh.ok) {
+                    const datosFresh = await respuestaFresh.json();
+                    const expFresh = datosFresh.data || datosFresh;
+                    etapaFinalReal = expFresh.etapa_activa;
+                    console.log('✅ Etapa final obtenida después de verificación:', etapaFinalReal);
+                  }
+                } catch (errorVigencia) {
+                  console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
+                }
               }
               
-              // Registrar los cambios de datos
+              // Verificar si cambió la etapa (comparar BD vs etapa FINAL REAL)
+              const cambioEtapa = expedienteEnBD && expedienteEnBD.etapa_activa !== etapaFinalReal;
+              const etapaFinal = etapaAfectadaPorPago || etapaFinalReal;
+              
+              // 🔍 Detectar si el cambio de etapa fue automático por vigencia
+              const cambioAutomaticoPorVigencia = cambioEtapa && !etapaAfectadaPorPago && 
+                (etapaFinalReal === 'Por Renovar' || etapaFinalReal === 'Vencida');
+              
+              // Construir descripción consolidada con destacado de pago/vigencia si aplica
+              let descripcion = '';
+              
+              // 🎯 DESTACAR cambios automáticos importantes al inicio
+              if (cambioEstatusPago) {
+                if (cambioEstatusPago.pagoAplicado) {
+                  descripcion = '🟢 PAGO APLICADO MANUALMENTE';
+                } else if (cambioEstatusPago.pagoRemovido) {
+                  descripcion = '⚠️ PAGO REMOVIDO';
+                  // Si además cambió a vencida automáticamente, agregar ese badge también
+                  if (cambioAutomaticoPorVigencia && etapaFinalReal === 'Vencida') {
+                    descripcion += '\n🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
+                  }
+                }
+              } else if (cambioAutomaticoPorVigencia) {
+                if (etapaFinalReal === 'Por Renovar') {
+                  descripcion = '⏰ PÓLIZA PRÓXIMA A VENCER\n(Automático: 30 días antes del vencimiento)';
+                } else if (etapaFinalReal === 'Vencida') {
+                  descripcion = '🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
+                }
+              }
+              
+              // Solo mostrar resumen de campos si hay cambios adicionales
+              if (camposModificados.length > 0) {
+                if (descripcion) descripcion += '\n\n'; // Separador solo si hay badge
+                descripcion += `Póliza editada - ${camposModificados.length} campo(s) modificado(s)\n\nCampos modificados:\n${camposModificados.join('\n')}`;
+              }
+              
+              // 📂 SIEMPRE agregar información de carpeta y estatus de pago
+              if (descripcion) descripcion += '\n\n';
+              
+              // Mostrar movimiento de carpeta o carpeta actual
+              if (cambioEtapa || etapaAfectadaPorPago) {
+                // Hubo movimiento de carpeta
+                descripcion += `📂 Póliza movida a: ${etapaFinal}`;
+              } else {
+                // No hubo movimiento - mostrar carpeta actual
+                descripcion += `📂 Carpeta actual: ${formularioParaGuardar.etapa_activa}`;
+              }
+              
+              // 💳 SIEMPRE agregar estatus de pago FINAL (después de todos los cambios)
+              // Usar el estatus que se guardó en la BD, no el del formulario original
+              let estatusPagoFinal;
+              if (cambioEstatusPago) {
+                estatusPagoFinal = cambioEstatusPago.nuevo; // Usar el nuevo estatus después del cambio
+              } else {
+                estatusPagoFinal = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Sin estatus';
+              }
+              descripcion += `\n💳 Estatus de pago: ${estatusPagoFinal}`;
+              
+              // Registrar los cambios de datos (consolidado)
               await historialService.registrarEvento({
                 expediente_id: expedienteId,
                 cliente_id: formularioParaGuardar.cliente_id,
                 tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
                 usuario_nombre: 'Sistema', // TODO: usuario actual
-                descripcion: `Póliza editada - ${camposModificados.length} campo(s) modificado(s)`,
+                descripcion,
                 datos_adicionales: {
                   numero_poliza: formularioParaGuardar.numero_poliza,
                   compania: formularioParaGuardar.compania,
                   producto: formularioParaGuardar.producto,
                   campos_modificados: camposModificados,
-                  cantidad_cambios: camposModificados.length
+                  cantidad_cambios: camposModificados.length,
+                  ...(cambioEtapa && {
+                    etapa_anterior: expedienteEnBD.etapa_activa,
+                    etapa_nueva: formularioParaGuardar.etapa_activa
+                  }),
+                  ...(cambioEstatusPago && {
+                    cambio_pago: {
+                      anterior: cambioEstatusPago.anterior,
+                      nuevo: cambioEstatusPago.nuevo,
+                      tipo: cambioEstatusPago.pagoAplicado ? 'aplicado_manual' : cambioEstatusPago.pagoRemovido ? 'removido_manual' : 'cambio_estatus'
+                    }
+                  })
                 }
               });
-              console.log(`✅ Evento "Edición" registrado con ${camposModificados.length} cambios`);
+              console.log(`✅ Evento consolidado "Edición" registrado con ${camposModificados.length} cambios${cambioEtapa ? ' (incluye cambio de etapa)' : ''}${cambioEstatusPago ? ' (incluye cambio de pago)' : ''}`);
+              
+              // 🎯 Detectar cambios automáticos de vigencia/renovación por edición de fechas
+              if (expedienteAnterior) {
+                const hoy = new Date();
+                hoy.setHours(0, 0, 0, 0);
+                
+                // ⚠️ PENDIENTE: Flujo completo de renovación con módulo de cotizaciones
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                // CONTEXTO: Cuando se habilite el módulo de cotizaciones, completar el
+                // flujo de renovación con los siguientes estados y eventos:
+                //
+                // CARPETAS Y FLUJO:
+                // ─────────────────────────────────────────────────────────────────
+                // 📂 "Por Renovar" o "Vencidas" → Usuario hace clic en botón "Cotizar"
+                //    ↓
+                // 📂 "En Proceso" (desde que inicia cotización hasta que se paga)
+                //    ↓
+                // 📂 "Renovadas" (cuando se aplica el pago)
+                //
+                // EVENTOS Y ESTADOS:
+                // ─────────────────────────────────────────────────────────────────
+                // 1. ⏰ POLIZA_PROXIMA_VENCER - Ya implementado ✅
+                //    └─> Automático: fecha_aviso_renovacion <= hoy
+                //    └─> Carpeta: "Por Renovar"
+                //    └─> Estado: etapa_activa sin cambios
+                //
+                // 2. ❌ POLIZA_VENCIDA - Ya implementado ✅
+                //    └─> Automático: termino_vigencia < hoy
+                //    └─> Carpeta: "Vencidas"
+                //    └─> Estado: etapa_activa = "Vencida" (opcional)
+                //
+                // 3. 📝 COTIZACION_RENOVACION_INICIADA - Pendiente
+                //    └─> Trigger: Botón "Cotizar" en listado (carpetas Por Renovar/Vencidas)
+                //    └─> Acción: Abrir modal/formulario de cotización
+                //    └─> Cambio: etapa_activa = "En Cotización - Renovación"
+                //    └─> Carpeta: "En Proceso"
+                //
+                // 4. 📧 COTIZACION_RENOVACION_ENVIADA - Pendiente
+                //    └─> Trigger: Se envía cotización de renovación al cliente
+                //    └─> Cambio: etapa_activa = "Renovación Enviada"
+                //    └─> Carpeta: "En Proceso"
+                //    └─> Registrar: destinatario, monto, PDF, fecha de envío
+                //
+                // 5. ⏳ RENOVACION_PENDIENTE_EMISION - Pendiente
+                //    └─> Trigger: Cliente autoriza cotización
+                //    └─> Cambio: etapa_activa = "Pendiente de Emisión - Renovación"
+                //    └─> Carpeta: "En Proceso"
+                //
+                // 6. 📄 RENOVACION_EMITIDA - Pendiente
+                //    └─> Trigger: Aseguradora emite la póliza renovada
+                //    └─> Cambio: etapa_activa = "Renovación Emitida"
+                //    └─> Carpeta: "En Proceso"
+                //    └─> Actualizar: nuevo numero_poliza (si aplica), nuevas vigencias
+                //
+                // 7. 💰 PAGO_RENOVACION_REGISTRADO - Pendiente
+                //    └─> Trigger: Se registra pago de la renovación
+                //    └─> Cambio: estatus_pago = "Pagado"
+                //    └─> Registrar: monto, método, comprobante
+                //
+                // 8. 🔁 RENOVACION_VIGENTE - Pendiente
+                //    └─> Trigger: Pago completado (automático tras registrar pago)
+                //    └─> Cambio: etapa_activa = "Renovada"
+                //    └─> Carpeta: "Renovadas" (NO va a "Vigentes", va a carpeta especial)
+                //    └─> Actualizar: inicio_vigencia (nuevo inicio)
+                //    └─> Actualizar: termino_vigencia (nuevo inicio + 1 año)
+                //    └─> Actualizar: fecha_aviso_renovacion (nuevo término - 30 días)
+                //    └─> Nota: tipo_movimiento = "renovacion" (para distinguir de nuevas)
+                //
+                // CONSIDERACIONES TÉCNICAS:
+                // ─────────────────────────────────────────────────────────────────
+                // - Crear eventos específicos para renovación (COTIZACION_RENOVACION_*, etc.)
+                //   para mantener claridad en el historial y poder filtrar/analizar renovaciones
+                // - El campo tipo_movimiento = "renovacion" permite diferenciar en reportes
+                // - La carpeta "Renovadas" mantiene pólizas renovadas separadas de nuevas
+                // - Considerar si crear nueva fila en BD o actualizar la existente
+                //   (Recomendado: actualizar existente y mantener historial en tabla de eventos)
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                
+                // ✅ La verificación de vigencia ya se ejecutó ANTES de registrar el log
+                // (Ver líneas arriba, se ejecuta antes de generar el log para obtener etapa_activa FINAL)
+              }
             } else {
               console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');
             }
@@ -7374,6 +8101,180 @@ const estadoInicialFormulario = {
       console.error('Error al recargar expedientes:', err);
     }
   }, []);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // FUNCIONES PARA FLUJO DE RENOVACIÓN
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * 1. Iniciar Cotización de Renovación
+   */
+  const iniciarCotizacionRenovacion = useCallback(async (expediente) => {
+    try {
+      setExpedienteParaRenovacion(expediente);
+      setMostrarModalCotizarRenovacion(true);
+    } catch (error) {
+      console.error('Error al abrir modal de cotización:', error);
+      toast.error('Error al iniciar cotización de renovación');
+    }
+  }, []);
+
+  const guardarCotizacionRenovacion = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      await cambiarEstadoExpediente(expedienteParaRenovacion.id, 'En Cotización - Renovación');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA,
+        usuario_nombre: 'Sistema',
+        descripcion: 'Cotización de renovación iniciada',
+        datos_adicionales: {
+          numero_poliza: expedienteParaRenovacion.numero_poliza,
+          compania: expedienteParaRenovacion.compania
+        }
+      });
+      
+      toast.success('Cotización de renovación iniciada');
+      setMostrarModalCotizarRenovacion(false);
+      setExpedienteParaRenovacion(null);
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al guardar cotización:', error);
+      toast.error('Error al guardar cotización de renovación');
+    }
+  }, [cambiarEstadoExpediente, recargarExpedientes]);
+
+  /**
+   * 2. Marcar como Autorizado
+   */
+  const marcarRenovacionAutorizada = useCallback(async (expediente) => {
+    try {
+      setExpedienteParaRenovacion(expediente);
+      setMostrarModalAutorizarRenovacion(true);
+    } catch (error) {
+      console.error('Error al abrir modal autorizar:', error);
+      toast.error('Error al marcar renovación como autorizada');
+    }
+  }, []);
+
+  const confirmarRenovacionAutorizada = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      await cambiarEstadoExpediente(expedienteParaRenovacion.id, 'Pendiente de Emisión - Renovación');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION,
+        usuario_nombre: 'Sistema',
+        descripcion: 'Cliente autorizó la renovación - Pendiente de emisión',
+        datos_adicionales: {
+          numero_poliza: expedienteParaRenovacion.numero_poliza,
+          compania: expedienteParaRenovacion.compania
+        }
+      });
+      
+      toast.success('Renovación marcada como autorizada');
+      setMostrarModalAutorizarRenovacion(false);
+      setExpedienteParaRenovacion(null);
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al marcar como autorizada:', error);
+      toast.error('Error al marcar renovación como autorizada');
+    }
+  }, [cambiarEstadoExpediente, recargarExpedientes]);
+
+  /**
+   * 3. Agregar Póliza Renovada
+   */
+  const abrirModalPolizaRenovada = useCallback((expediente) => {
+    setExpedienteParaRenovacion(expediente);
+    
+    const hoy = new Date();
+    const inicioVigencia = new Date(hoy);
+    const terminoVigencia = new Date(inicioVigencia);
+    terminoVigencia.setFullYear(terminoVigencia.getFullYear() + 1);
+    
+    setDatosRenovacion({
+      numeroPolizaNueva: expediente.numero_poliza || '',
+      primaNueva: expediente.prima_pagada || '',
+      totalNuevo: expediente.total || '',
+      fechaEmisionNueva: hoy.toISOString().split('T')[0],
+      inicioVigenciaNueva: inicioVigencia.toISOString().split('T')[0],
+      terminoVigenciaNueva: terminoVigencia.toISOString().split('T')[0],
+      observaciones: ''
+    });
+    
+    setMostrarModalPolizaRenovada(true);
+  }, []);
+
+  const guardarPolizaRenovada = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      const terminoVigencia = new Date(datosRenovacion.terminoVigenciaNueva);
+      const fechaAviso = new Date(terminoVigencia);
+      fechaAviso.setDate(fechaAviso.getDate() - 30);
+      
+      const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          numero_poliza: datosRenovacion.numeroPolizaNueva,
+          prima_pagada: parseFloat(datosRenovacion.primaNueva) || 0,
+          total: parseFloat(datosRenovacion.totalNuevo) || 0,
+          fecha_emision: datosRenovacion.fechaEmisionNueva,
+          inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
+          termino_vigencia: datosRenovacion.terminoVigenciaNueva,
+          fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
+          etapa_activa: 'Renovación Emitida',
+          tipo_movimiento: 'renovacion'
+        })
+      });
+      
+      if (!response.ok) throw new Error('Error al actualizar expediente');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_EMITIDA,
+        usuario_nombre: 'Sistema',
+        descripcion: `Póliza renovada emitida - Nueva vigencia: ${datosRenovacion.inicioVigenciaNueva} a ${datosRenovacion.terminoVigenciaNueva}`,
+        datos_adicionales: {
+          numero_poliza: datosRenovacion.numeroPolizaNueva,
+          compania: expedienteParaRenovacion.compania,
+          prima_nueva: datosRenovacion.primaNueva,
+          total_nuevo: datosRenovacion.totalNuevo,
+          observaciones: datosRenovacion.observaciones
+        }
+      });
+      
+      toast.success('Póliza renovada registrada exitosamente');
+      setMostrarModalPolizaRenovada(false);
+      setExpedienteParaRenovacion(null);
+      setDatosRenovacion({
+        numeroPolizaNueva: '',
+        primaNueva: '',
+        totalNuevo: '',
+        fechaEmisionNueva: '',
+        inicioVigenciaNueva: '',
+        terminoVigenciaNueva: '',
+        observaciones: ''
+      });
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al guardar póliza renovada:', error);
+      toast.error('Error al guardar póliza renovada');
+    }
+  }, [recargarExpedientes]);
+  
   // ✅ FUNCIÓN para convertir snake_case a camelCase
   const snakeToCamel = (str) => {
     return str.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
@@ -7485,6 +8386,16 @@ const estadoInicialFormulario = {
             fecha_emision: datosConvertidos.fecha_emision,
             inicio_vigencia: datosConvertidos.inicio_vigencia,
             termino_vigencia: datosConvertidos.termino_vigencia
+          });
+          
+          console.log('💰 [EDITAR] Estatus de pago RAW desde API:', {
+            estatus_pago: desdeApi.estatus_pago,
+            estatusPago: desdeApi.estatusPago
+          });
+          
+          console.log('💰 [EDITAR] Estatus de pago DESPUÉS de convertir:', {
+            estatus_pago: datosConvertidos.estatus_pago,
+            estatusPago: datosConvertidos.estatusPago
           });
           
           // ✅ IMPORTANTE: Datos de API tienen prioridad sobre datos en memoria
@@ -7600,24 +8511,36 @@ const estadoInicialFormulario = {
       termino_vigencia: formularioBase.termino_vigencia
     });
 
-    // 🎯 CRÍTICO: NO recalcular fechas al cargar datos guardados
-    // Solo recalcular estatusPago para mostrar si está vencido
+    // 🎯 CRÍTICO: NO recalcular fechas ni estatus al cargar datos guardados
+    // SIEMPRE respetar el estatus_pago de la base de datos
     let formularioConCalculos = { ...formularioBase };
     
-    // Recalcular SOLO el estatus de pago (no las fechas)
-    if (formularioBase.fecha_vencimiento_pago) {
-      const hoy = new Date();
-      hoy.setHours(0, 0, 0, 0);
-      const fechaVenc = new Date(formularioBase.fecha_vencimiento_pago);
-      fechaVenc.setHours(0, 0, 0, 0);
-      
-      formularioConCalculos.estatusPago = fechaVenc < hoy ? 'Vencido' : 'Al Corriente';
-    }
+    // ✅ IMPORTANTE: Cargar el estatus de pago TAL CUAL está en la BD (sin recalcular)
+    // Esto permite al usuario tener control manual del estatus sin interferencia automática
+    // Priorizar estatus_pago (snake_case de BD) sobre estatusPago (camelCase convertido)
+    const estatusPagoDesdeBD = formularioBase.estatus_pago || formularioBase.estatusPago || 'Pendiente';
+    formularioConCalculos.estatusPago = estatusPagoDesdeBD;
+    formularioConCalculos.estatus_pago = estatusPagoDesdeBD;
+    
+    console.log('📊 [EDITAR] Estatus de pago cargado desde BD:', {
+      estatus_pago_bd: formularioBase.estatus_pago,
+      estatusPago_bd: formularioBase.estatusPago,
+      valor_final: estatusPagoDesdeBD
+    });
 
     console.log('📅 DESPUÉS de actualizarCalculosAutomaticos:', {
       inicio_vigencia: formularioConCalculos.inicio_vigencia,
       termino_vigencia: formularioConCalculos.termino_vigencia
     });
+
+    // 📸 CAPTURAR SNAPSHOT INMEDIATAMENTE con los datos de BD (antes de cualquier useEffect)
+    // Esto asegura que el snapshot tenga exactamente lo que está en la base de datos
+    console.log('📸 [SNAPSHOT] Capturando snapshot INMEDIATO con datos de BD:', {
+      id: formularioConCalculos.id,
+      estatusPago: formularioConCalculos.estatusPago,
+      estatus_pago: formularioConCalculos.estatus_pago
+    });
+    setFormularioOriginal(JSON.parse(JSON.stringify(formularioConCalculos)));
 
     // Aplicar al estado en un solo set para evitar inconsistencias por batching
     setFormulario(formularioConCalculos);
@@ -7694,8 +8617,8 @@ const estadoInicialFormulario = {
     setModoEdicion(true);
     setVistaActual('formulario');
     
-    // Activar flag para que el useEffect capture el snapshot cuando esté listo
-    snapshotPendiente.current = true;
+    // ⚠️ COMENTADO: Ya no usamos el flag porque capturamos el snapshot inmediatamente
+    // snapshotPendiente.current = true;
   }, [clientesMap, actualizarCalculosAutomaticos]);
 
 const eliminarExpediente = useCallback((id) => {
@@ -7763,6 +8686,8 @@ const eliminarExpediente = useCallback((id) => {
             guardarExpediente={guardarExpediente}
             companias={companias}
             productos={productos}
+            aseguradoras={aseguradoras}
+            tiposProductos={tiposProductos}
             etapasActivas={etapasActivas}
             agentes={agentes}
             tiposPago={tiposPago}
@@ -8022,6 +8947,303 @@ const eliminarExpediente = useCallback((id) => {
                       Confirmar Pago
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          MODALES DE RENOVACIÓN
+          ═══════════════════════════════════════════════════════════════ */}
+
+      {/* Modal 1: Iniciar Cotización de Renovación */}
+      {mostrarModalCotizarRenovacion && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-primary text-white">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Iniciar Cotización de Renovación
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalCotizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <h6 className="mb-2">
+                    <strong>Póliza:</strong> {expedienteParaRenovacion.numero_poliza || 'Sin número'}
+                  </h6>
+                  <p className="mb-1"><strong>Cliente:</strong> {expedienteParaRenovacion.nombre_cliente || 'N/A'}</p>
+                  <p className="mb-0"><strong>Compañía:</strong> {expedienteParaRenovacion.compania || 'N/A'}</p>
+                </div>
+                
+                <p className="text-muted">
+                  Se iniciará el proceso de cotización para la renovación de esta póliza. 
+                  El expediente se moverá a la carpeta <strong>"En Proceso"</strong> con estado 
+                  <strong>"En Cotización - Renovación"</strong>.
+                </p>
+                
+                <p className="text-muted mb-0">
+                  <strong>Próximos pasos:</strong>
+                </p>
+                <ol className="text-muted small">
+                  <li>Preparar cotización con la aseguradora</li>
+                  <li>Enviar cotización al cliente</li>
+                  <li>Esperar autorización del cliente</li>
+                </ol>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalCotizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary"
+                  onClick={guardarCotizacionRenovacion}
+                >
+                  <FileText size={16} className="me-2" />
+                  Iniciar Cotización
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Marcar como Autorizado */}
+      {mostrarModalAutorizarRenovacion && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-sm modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">
+                  <CheckCircle size={20} className="me-2" />
+                  Confirmar Autorización
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalAutorizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <p className="mb-0">
+                  ¿Confirmas que el cliente <strong>autorizó</strong> la cotización de renovación?
+                </p>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalAutorizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-success"
+                  onClick={confirmarRenovacionAutorizada}
+                >
+                  <CheckCircle size={16} className="me-2" />
+                  Sí, Autorizado
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Agregar Póliza Renovada */}
+      {mostrarModalPolizaRenovada && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-lg modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-info text-white">
+                <h5 className="modal-title">
+                  <RefreshCw size={20} className="me-2" />
+                  Registrar Póliza Renovada
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalPolizaRenovada(false);
+                    setExpedienteParaRenovacion(null);
+                    setDatosRenovacion({
+                      numeroPolizaNueva: '',
+                      primaNueva: '',
+                      totalNuevo: '',
+                      fechaEmisionNueva: '',
+                      inicioVigenciaNueva: '',
+                      terminoVigenciaNueva: '',
+                      observaciones: ''
+                    });
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <p className="mb-1"><strong>Póliza Original:</strong> {expedienteParaRenovacion.numero_poliza}</p>
+                  <p className="mb-0"><strong>Compañía:</strong> {expedienteParaRenovacion.compania}</p>
+                </div>
+                
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Número de Póliza Renovada *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={datosRenovacion.numeroPolizaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, numeroPolizaNueva: e.target.value }))}
+                      placeholder="Número de póliza renovada"
+                    />
+                    <small className="text-muted">Puede ser el mismo o un nuevo número</small>
+                  </div>
+                  
+                  <div className="col-md-3">
+                    <label className="form-label">Prima *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={datosRenovacion.primaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, primaNueva: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  
+                  <div className="col-md-3">
+                    <label className="form-label">Total *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={datosRenovacion.totalNuevo}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, totalNuevo: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Fecha Emisión *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.fechaEmisionNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, fechaEmisionNueva: e.target.value }))}
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Inicio Vigencia *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.inicioVigenciaNueva}
+                      onChange={(e) => {
+                        const inicio = e.target.value;
+                        if (inicio) {
+                          const fechaInicio = new Date(inicio);
+                          const fechaTermino = new Date(fechaInicio);
+                          fechaTermino.setFullYear(fechaTermino.getFullYear() + 1);
+                          setDatosRenovacion(prev => ({ 
+                            ...prev, 
+                            inicioVigenciaNueva: inicio,
+                            terminoVigenciaNueva: fechaTermino.toISOString().split('T')[0]
+                          }));
+                        } else {
+                          setDatosRenovacion(prev => ({ ...prev, inicioVigenciaNueva: inicio }));
+                        }
+                      }}
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Término Vigencia *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.terminoVigenciaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, terminoVigenciaNueva: e.target.value }))}
+                    />
+                    <small className="text-muted">Auto-calculado (1 año)</small>
+                  </div>
+                  
+                  <div className="col-12">
+                    <label className="form-label">Observaciones</label>
+                    <textarea
+                      className="form-control"
+                      rows="2"
+                      value={datosRenovacion.observaciones}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, observaciones: e.target.value }))}
+                      placeholder="Comentarios sobre la renovación..."
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalPolizaRenovada(false);
+                    setExpedienteParaRenovacion(null);
+                    setDatosRenovacion({
+                      numeroPolizaNueva: '',
+                      primaNueva: '',
+                      totalNuevo: '',
+                      fechaEmisionNueva: '',
+                      inicioVigenciaNueva: '',
+                      terminoVigenciaNueva: '',
+                      observaciones: ''
+                    });
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-info"
+                  onClick={guardarPolizaRenovada}
+                  disabled={
+                    !datosRenovacion.numeroPolizaNueva ||
+                    !datosRenovacion.primaNueva ||
+                    !datosRenovacion.totalNuevo ||
+                    !datosRenovacion.fechaEmisionNueva ||
+                    !datosRenovacion.inicioVigenciaNueva ||
+                    !datosRenovacion.terminoVigenciaNueva
+                  }
+                >
+                  <RefreshCw size={16} className="me-2" />
+                  Guardar Póliza Renovada
                 </button>
               </div>
             </div>

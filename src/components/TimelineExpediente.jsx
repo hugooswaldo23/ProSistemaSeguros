@@ -160,9 +160,10 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     ? historial.filter(evento => {
         // Omitir eventos de "datos actualizados" si solo es cambio de etapa sin modificaciones relevantes
         if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
-          // Solo mostrar si tiene cambios significativos en datos_adicionales
+          // Mostrar si tiene cambios significativos O si hay cambio de pago
           const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
-          return cambios > 0;
+          const tieneCambioPago = evento.datos_adicionales?.cambio_pago || false;
+          return cambios > 0 || tieneCambioPago;
         }
         return true; // Mostrar todos los demás eventos
       })
@@ -170,7 +171,8 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
         // Primero aplicar el filtro de eventos irrelevantes
         if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
           const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
-          if (cambios === 0) return false;
+          const tieneCambioPago = evento.datos_adicionales?.cambio_pago || false;
+          if (cambios === 0 && !tieneCambioPago) return false;
         }
         
         // Luego aplicar filtro por categoría
@@ -190,19 +192,25 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   // Formatear fecha
   const formatearFecha = (fechaISO) => {
     if (!fechaISO) return 'Sin fecha';
+    
+    // El backend envía la hora correcta del servidor en zona horaria México
     const fecha = new Date(fechaISO);
-    if (isNaN(fecha.getTime())) return fechaISO; // Fallback si formato raro
+    
+    if (isNaN(fecha.getTime())) return fechaISO;
+    
     const hoy = new Date();
-    const ayer = new Date(hoy); ayer.setDate(ayer.getDate() - 1);
+    const ayer = new Date(hoy); 
+    ayer.setDate(ayer.getDate() - 1);
+    
     const esMismoDia = fecha.toDateString() === hoy.toDateString();
     const esAyer = fecha.toDateString() === ayer.toDateString();
+    
     const hora = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-    const segundos = fecha.getSeconds();
-    // Mostrar minutos siempre y segundos si no son 0 para diagnósticos
-    const horaDetallada = segundos ? fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : hora;
-    if (esMismoDia) return `Hoy ${horaDetallada}`;
-    if (esAyer) return `Ayer ${horaDetallada}`;
-    return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + horaDetallada;
+    
+    if (esMismoDia) return `Hoy ${hora}`;
+    if (esAyer) return `Ayer ${hora}`;
+    
+    return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + hora;
   };
 
   // Exportar historial
@@ -398,11 +406,57 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             )}
                           </div>
                         </div>
+                      ) : (evento.tipo_evento === 'poliza_enviada_whatsapp' || evento.tipo_evento === 'poliza_enviada_email') ? (
+                        /* Vista vertical para eventos de envío (WhatsApp/Email) */
+                        <div className="mb-1">
+                          {/* Información en formato vertical compacto */}
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Empresa/Cliente */}
+                            {evento.destinatario_nombre && (
+                              <div className="text-muted">
+                                🏢 Cliente: <strong className="text-dark">{evento.destinatario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Contacto (teléfono o email) */}
+                            {evento.destinatario_contacto && (
+                              <div className="text-muted">
+                                {evento.metodo_contacto === 'WhatsApp' ? '📱' : '📧'} Contacto: <strong className="text-dark">{evento.destinatario_contacto}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Canal de envío */}
+                            {evento.metodo_contacto && (
+                              <div className="text-muted">
+                                📤 Canal: <strong className="text-dark">{evento.metodo_contacto}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Usuario que realizó el envío */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha y hora del envío */}
+                            <div className="text-muted">
+                              🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                            
+                            {/* Cambio de etapa (si aplica) */}
+                            {evento.etapa_anterior && evento.etapa_nueva && (
+                              <div className="text-muted">
+                                📊 Etapa: <strong className="text-dark">{evento.etapa_anterior} → {evento.etapa_nueva}</strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       ) : (
                         <>
                           {/* Vista estándar para otros eventos */}
                           {evento.descripcion && (
-                            <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4' }}>
+                            <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4', whiteSpace: 'pre-line' }}>
                               {evento.descripcion}
                             </p>
                           )}
@@ -417,14 +471,14 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             {/* Usuario que realizó la acción */}
                             {evento.usuario_nombre && (
                               <span className="text-muted">
-                                • ✍️ {evento.usuario_nombre}
+                                • 👤 {evento.usuario_nombre}
                               </span>
                             )}
                             
                             {/* Destinatario (para envíos) */}
                             {evento.destinatario_nombre && (
                               <span className="text-muted">
-                                • 👤 {evento.destinatario_nombre}
+                                • ✍️ {evento.destinatario_nombre}
                               </span>
                             )}
                             

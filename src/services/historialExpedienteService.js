@@ -33,11 +33,21 @@ export const TIPOS_EVENTO = {
   PAGO_REGISTRADO: 'pago_registrado',
   PAGO_VENCIDO: 'pago_vencido',
   RECORDATORIO_PAGO_ENVIADO: 'recordatorio_pago_enviado',
+  PAGO_APLICADO_MANUALMENTE: 'pago_aplicado_manualmente',
+  PAGO_REMOVIDO: 'pago_removido',
   
   // Renovaciones
   RENOVACION_INICIADA: 'renovacion_iniciada',
   POLIZA_RENOVADA: 'poliza_renovada',
   RECORDATORIO_RENOVACION_ENVIADO: 'recordatorio_renovacion_enviado',
+  
+  // 🆕 NUEVOS EVENTOS DE RENOVACIÓN (Flujo completo)
+  COTIZACION_RENOVACION_INICIADA: 'cotizacion_renovacion_iniciada',
+  COTIZACION_RENOVACION_ENVIADA: 'cotizacion_renovacion_enviada',
+  RENOVACION_PENDIENTE_EMISION: 'renovacion_pendiente_emision',
+  RENOVACION_EMITIDA: 'renovacion_emitida',
+  PAGO_RENOVACION_REGISTRADO: 'pago_renovacion_registrado',
+  RENOVACION_VIGENTE: 'renovacion_vigente',
   
   // Vigencia y vencimientos
   POLIZA_EN_VIGENCIA: 'poliza_en_vigencia',
@@ -84,10 +94,20 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.PAGO_REGISTRADO]: { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.PAGO_VENCIDO]: { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
     [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE]: { icon: '✏️', color: '#17a2b8', bgColor: '#d1ecf1' },
+    [TIPOS_EVENTO.PAGO_REMOVIDO]: { icon: '🔙', color: '#fd7e14', bgColor: '#ffe5d0' },
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: { icon: '🔄', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.POLIZA_RENOVADA]: { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    
+    // 🆕 NUEVOS ESTILOS DE RENOVACIÓN
+    [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: { icon: '📝', color: '#3b82f6', bgColor: '#dbeafe' },
+    [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: { icon: '📧', color: '#10b981', bgColor: '#d1fae5' },
+    [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: { icon: '⏳', color: '#f59e0b', bgColor: '#fef3c7' },
+    [TIPOS_EVENTO.RENOVACION_EMITIDA]: { icon: '📄', color: '#8b5cf6', bgColor: '#ede9fe' },
+    [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: { icon: '💰', color: '#10b981', bgColor: '#d1fae5' },
+    [TIPOS_EVENTO.RENOVACION_VIGENTE]: { icon: '🔁', color: '#059669', bgColor: '#d1fae5' },
     
     [TIPOS_EVENTO.POLIZA_EN_VIGENCIA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.POLIZA_PROXIMA_VENCER]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
@@ -137,6 +157,14 @@ export const obtenerTituloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.POLIZA_RENOVADA]: 'Póliza Renovada',
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: 'Recordatorio de Renovación Enviado',
     
+    // 🆕 NUEVOS TÍTULOS DE RENOVACIÓN
+    [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: 'Cotización de Renovación Iniciada',
+    [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: 'Cotización de Renovación Enviada',
+    [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: 'Renovación Pendiente de Emisión',
+    [TIPOS_EVENTO.RENOVACION_EMITIDA]: 'Renovación Emitida',
+    [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: 'Pago de Renovación Registrado',
+    [TIPOS_EVENTO.RENOVACION_VIGENTE]: 'Renovación Vigente',
+    
     [TIPOS_EVENTO.POLIZA_EN_VIGENCIA]: 'Póliza en Vigencia',
     [TIPOS_EVENTO.POLIZA_PROXIMA_VENCER]: 'Póliza Próxima a Vencer',
     [TIPOS_EVENTO.POLIZA_VENCIDA]: 'Póliza Vencida',
@@ -179,8 +207,8 @@ export const registrarEvento = async (datos) => {
       destinatario_nombre: datos.destinatario_nombre || null,
       destinatario_contacto: datos.destinatario_contacto || null,
       documento_url: datos.documento_url || null,
-      documento_tipo: datos.documento_tipo || null,
-      fecha_evento: datos.fecha_evento || new Date().toISOString()
+      documento_tipo: datos.documento_tipo || null
+      // ✅ NO enviamos fecha_evento - el backend la genera con su hora del servidor
     };
     
     console.log('📤 Payload final enviado al backend:', payload);
@@ -402,7 +430,6 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     datos_adicionales: {
       // ✅ NO guardamos el mensaje completo, solo metadata esencial
       canal: canal,
-      fecha_envio: new Date().toISOString(),
       tiene_documento: !!documentoUrl
     }
   });
