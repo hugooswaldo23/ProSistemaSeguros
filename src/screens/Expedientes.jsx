@@ -1395,7 +1395,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           productosAseguradoras: []
         };
         
-        const { crearMiembroEquipo } = await import('../services/equipoDeTrabajoService');
+        const { crearMiembroEquipo, guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
         const resultado = await crearMiembroEquipo(nuevoAgente);
         
         if (resultado.success) {
@@ -1403,6 +1403,84 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('✅ Agente creado:', resultado.data.nombre);
           const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
           toast.success(`Agente creado: ${nombreMostrar}`);
+          
+          // VINCULAR AGENTE CON ASEGURADORA Y PRODUCTO
+          // Buscar aseguradora por nombre (ej: "Qualitas")
+          const companiaExtraida = datosExtraidos.compania;
+          const productoExtraido = datosExtraidos.producto;
+          
+          if (companiaExtraida && productoExtraido && aseguradoras.length > 0 && tiposProductos.length > 0) {
+            // Buscar aseguradora - Intentar varios métodos
+            let aseguradoraMatch = aseguradoras.find(aseg => 
+              aseg.nombre && aseg.nombre.toLowerCase() === companiaExtraida.toLowerCase()
+            );
+            
+            // Si no encontró exacto, buscar que contenga
+            if (!aseguradoraMatch) {
+              aseguradoraMatch = aseguradoras.find(aseg => 
+                aseg.nombre && aseg.nombre.toLowerCase().includes(companiaExtraida.toLowerCase())
+              );
+            }
+            
+            // Si aún no encontró, buscar al revés (que la extraída contenga el nombre de BD)
+            if (!aseguradoraMatch) {
+              aseguradoraMatch = aseguradoras.find(aseg => 
+                aseg.nombre && companiaExtraida.toLowerCase().includes(aseg.nombre.toLowerCase())
+              );
+            }
+            
+            console.log('🔍 Resultado búsqueda aseguradora:', aseguradoraMatch);
+            
+            if (aseguradoraMatch) {
+              // Los productos son genéricos (no tienen aseguradora_id)
+              // Buscar directamente por nombre del producto
+              let productoMatch = tiposProductos.find(prod =>
+                prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
+              );
+              
+              // Si no encontró, intentar al revés (que el producto contenga parte del extraído)
+              if (!productoMatch) {
+                productoMatch = tiposProductos.find(prod =>
+                  prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+                );
+              }
+              
+              // Si no encontró, intentar palabras clave
+              if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
+                productoMatch = tiposProductos.find(prod => 
+                  prod.nombre && prod.nombre.toLowerCase().includes('auto')
+                );
+              }
+              
+              if (productoMatch) {
+                // Guardar la asociación agente-aseguradora-producto-clave
+                try {
+                  const asignacion = {
+                    usuarioId: resultado.data.id,
+                    aseguradoraId: aseguradoraMatch.id, // ID de Qualitas
+                    productoId: productoMatch.id,
+                    ejecutivoId: resultado.data.id,
+                    clave: codigo, // La clave del PDF (25576, etc.)
+                    comisionPersonalizada: 0
+                  };
+                  
+                  const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
+                  
+                  if (resultadoAsignacion.success) {
+                    console.log('✅ Agente vinculado con aseguradora y producto');
+                  } else {
+                    console.warn('⚠️ No se pudo vincular agente con producto:', resultadoAsignacion.error);
+                  }
+                } catch (errorAsignacion) {
+                  console.error('❌ Error al vincular agente:', errorAsignacion);
+                }
+              } else {
+                console.warn('⚠️ No se encontró producto matching para:', productoExtraido);
+              }
+            } else {
+              console.warn('⚠️ No se encontró aseguradora matching para:', companiaExtraida);
+            }
+          }
         } else {
           throw new Error(resultado.error);
         }
@@ -3216,6 +3294,8 @@ const Formulario = React.memo(({
   guardarExpediente,
   companias,
   productos,
+  aseguradoras,
+  tiposProductos,
   etapasActivas,
   agentes,
   tiposPago,
@@ -4731,8 +4811,8 @@ const Formulario = React.memo(({
             onDataExtracted={handleDataExtracted}
             onClose={() => setMostrarExtractorPDF(false)}
             agentes={agentes}
-            aseguradoras={companias}
-            tiposProductos={productos}
+            aseguradoras={aseguradoras}
+            tiposProductos={tiposProductos}
           />
         </>
       )}
@@ -8606,6 +8686,8 @@ const eliminarExpediente = useCallback((id) => {
             guardarExpediente={guardarExpediente}
             companias={companias}
             productos={productos}
+            aseguradoras={aseguradoras}
+            tiposProductos={tiposProductos}
             etapasActivas={etapasActivas}
             agentes={agentes}
             tiposPago={tiposPago}
