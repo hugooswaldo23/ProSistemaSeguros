@@ -54,7 +54,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import BuscadorCliente from '../components/BuscadorCliente';
 import ModalCapturarContacto from '../components/ModalCapturarContacto';
@@ -2374,11 +2374,19 @@ const ListaExpedientes = React.memo(({
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false; // Renovadas van a su propia carpeta
+          if (!exp.termino_vigencia) return true; // Sin término, mantener en vigentes
           
-          // Si no tiene fecha_aviso_renovacion, mostrar en vigentes (fallback)
-          if (!exp.fecha_aviso_renovacion) return true;
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           return hoy < fechaAviso; // Aún no llegó el aviso de renovación
         });
       
@@ -2390,11 +2398,19 @@ const ListaExpedientes = React.memo(({
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           if (estatusPago !== 'pagado') return false;
+          if (!exp.termino_vigencia) return true; // Sin término, mantener en renovadas
           
-          // Si no tiene fecha_aviso_renovacion, mostrar aquí (fallback)
-          if (!exp.fecha_aviso_renovacion) return true;
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           return hoy < fechaAviso; // Aún no llegó el aviso de renovación
         });
       
@@ -2403,10 +2419,19 @@ const ListaExpedientes = React.memo(({
         // Criterio: hoy >= fecha_aviso_renovacion && hoy < termino_vigencia
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
-          if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
+          if (!exp.termino_vigencia) return false;
           
-          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
           const fechaTermino = new Date(exp.termino_vigencia);
+          
+          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            // Fallback: calcular 30 días antes del término
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
           
           return hoy >= fechaAviso && hoy < fechaTermino;
         });
@@ -2445,8 +2470,17 @@ const ListaExpedientes = React.memo(({
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
-        if (!exp.fecha_aviso_renovacion) return true;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy < fechaAviso;
       }).length,
       
@@ -2454,16 +2488,34 @@ const ListaExpedientes = React.memo(({
         if (exp.etapa_activa !== 'Renovada') return false;
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         if (estatusPago !== 'pagado') return false;
-        if (!exp.fecha_aviso_renovacion) return true;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy < fechaAviso;
       }).length,
       
       por_renovar: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
-        if (!exp.fecha_aviso_renovacion || !exp.termino_vigencia) return false;
-        const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        if (!exp.termino_vigencia) return false;
+        
         const fechaTermino = new Date(exp.termino_vigencia);
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
         return hoy >= fechaAviso && hoy < fechaTermino;
       }).length,
       
@@ -2903,6 +2955,61 @@ const ListaExpedientes = React.memo(({
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
                             <div className="d-flex gap-1 align-items-center">
+                              {/* === BOTONES DE RENOVACIÓN === */}
+                              {(() => {
+                                const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                                
+                                if (!estaPorRenovar) return null;
+                                
+                                const etapaActual = expediente.etapa_activa || '';
+                                
+                                const puedeIniciarCotizacion = !etapaActual.includes('Cotización') && 
+                                                                !etapaActual.includes('Renovación') &&
+                                                                !etapaActual.includes('Pendiente de Emisión');
+                                
+                                const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                               etapaActual === 'Renovación Enviada';
+                                
+                                const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                                
+                                return (
+                                  <>
+                                    {puedeIniciarCotizacion && (
+                                      <button
+                                        onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                        className="btn btn-primary btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Cotizar Renovación"
+                                      >
+                                        <FileText size={12} />
+                                      </button>
+                                    )}
+                                    
+                                    {puedeMarcarAutorizado && (
+                                      <button
+                                        onClick={() => marcarRenovacionAutorizada(expediente)}
+                                        className="btn btn-success btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Marcar como Autorizado"
+                                      >
+                                        <CheckCircle size={12} />
+                                      </button>
+                                    )}
+                                    
+                                    {puedeAgregarRenovada && (
+                                      <button
+                                        onClick={() => abrirModalPolizaRenovada(expediente)}
+                                        className="btn btn-info btn-sm"
+                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                        title="Agregar Póliza Renovada"
+                                      >
+                                        <RefreshCw size={12} />
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()}
+
                               {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
                                 <button
                                   onClick={() => abrirModalCompartir(expediente)}
@@ -2915,11 +3022,14 @@ const ListaExpedientes = React.memo(({
                               )}
 
                               {(() => {
-                                // Permitir aplicar pago en estas etapas
-                                const etapasValidasParaPago = ['Emitida', 'Renovada', 'Enviada al Cliente'];
-                                const etapaValida = etapasValidasParaPago.includes(expediente.etapa_activa);
+                                // ✅ El botón de pago debe estar disponible independientemente de la etapa
+                                // Solo se oculta si ya está pagado o si la póliza está cancelada
+                                const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                                // ✅ Verificar estatus_pago tanto en camelCase como snake_case
+                                const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
                                 const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                                const noPagado = estatusPagoNorm !== 'pagado' && estatusPagoNorm !== 'pagada';
+                                // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
+                                const noPagado = estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado';
                                 
                                 return etapaValida && noPagado ? (
                                   <button
@@ -4877,6 +4987,22 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  
+  // Estados para flujo de renovación
+  const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
+  const [mostrarModalAutorizarRenovacion, setMostrarModalAutorizarRenovacion] = useState(false);
+  const [mostrarModalPolizaRenovada, setMostrarModalPolizaRenovada] = useState(false);
+  const [expedienteParaRenovacion, setExpedienteParaRenovacion] = useState(null);
+  const [datosRenovacion, setDatosRenovacion] = useState({
+    numeroPolizaNueva: '',
+    primaNueva: '',
+    totalNuevo: '',
+    fechaEmisionNueva: '',
+    inicioVigenciaNueva: '',
+    terminoVigenciaNueva: '',
+    observaciones: ''
+  });
+  
   useEffect(() => {
     const fetchAgentes = async () => {
       const resultado = await obtenerAgentesEquipo();
@@ -5243,7 +5369,15 @@ const estadoInicialFormulario = {
   const snapshotPendiente = useRef(false); // Flag para capturar snapshot cuando esté listo
 
   // 📸 Capturar snapshot cuando el formulario esté completamente cargado en modo edición
+  // ⚠️ DESHABILITADO: Ahora se captura INMEDIATAMENTE en editarExpediente para evitar sobrescritura
   useEffect(() => {
+    // Limpiar flag cuando se sale de edición
+    if (!modoEdicion) {
+      snapshotPendiente.current = false;
+    }
+    
+    // ⚠️ COMENTADO: Ya no necesitamos capturar aquí, se hace inmediatamente en editarExpediente
+    /*
     if (snapshotPendiente.current && modoEdicion && formulario.id) {
       // Verificar que los datos de contacto están cargados
       const tieneContacto = formulario.contacto_nombre || formulario.contacto_email || formulario.contacto_telefono_fijo;
@@ -5252,18 +5386,16 @@ const estadoInicialFormulario = {
         console.log('📸 Capturando snapshot del formulario con datos completos:', {
           id: formulario.id,
           contacto_nombre: formulario.contacto_nombre,
-          contacto_email: formulario.contacto_email
+          contacto_email: formulario.contacto_email,
+          estatusPago: formulario.estatusPago,
+          estatus_pago: formulario.estatus_pago
         });
         setFormularioOriginal(JSON.parse(JSON.stringify(formulario)));
         snapshotPendiente.current = false;
       }
     }
-    
-    // Limpiar flag cuando se sale de edición
-    if (!modoEdicion) {
-      snapshotPendiente.current = false;
-    }
-  }, [modoEdicion, formulario, clienteSeleccionado]);
+    */
+  }, [modoEdicion]);
 
   // Debug solicitado: imprimir TODOS los campos visibles del editor con su valor actual
   useEffect(() => {
@@ -5873,10 +6005,21 @@ const estadoInicialFormulario = {
         pdfUrl
       );
 
-      // Obtener nombre del cliente
+      // Obtener nombre del cliente (empresa o persona física)
       const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
         ? cliente.razonSocial || cliente.razon_social
         : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+
+      // Obtener nombre del contacto principal (si existe)
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+
+      // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
 
       // Crear la URL de WhatsApp
       const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
@@ -5891,7 +6034,7 @@ const estadoInicialFormulario = {
           cliente_id: expediente.cliente_id,
           tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
           tipo_mensaje: tipoMensaje,
-          destinatario_nombre: nombreCliente,
+          destinatario_nombre: nombreDestinatario,
           destinatario_contacto: telefono,
           mensaje: mensaje,
           numero_poliza: expediente.numero_poliza,
@@ -5915,7 +6058,7 @@ const estadoInicialFormulario = {
           expediente.id,
           expediente.cliente_id,
           'WhatsApp',
-          { nombre: nombreCliente, contacto: telefono },
+          { nombre: nombreDestinatario, contacto: telefono },
           mensaje,
           pdfUrl
         );
@@ -5976,10 +6119,21 @@ const estadoInicialFormulario = {
         // Generar mensaje dinámico según el estado
         const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl);
 
-        // Obtener nombre del cliente
+        // Obtener nombre del cliente (empresa o persona física)
         const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
           ? cliente.razonSocial || cliente.razon_social
           : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+
+        // Obtener nombre del contacto principal (si existe)
+        const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+        const nombreContactoPrincipal = tieneContactoPrincipal
+          ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+          : '';
+
+        // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
+        const nombreDestinatario = nombreContactoPrincipal 
+          ? `${nombreCliente} (${nombreContactoPrincipal})`
+          : nombreCliente;
 
         // Opción 1: Usar mailto (cliente de correo local)
         const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
@@ -5992,7 +6146,7 @@ const estadoInicialFormulario = {
             cliente_id: expediente.cliente_id,
             tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
             tipo_mensaje: tipoMensaje,
-            destinatario_nombre: nombreCliente,
+            destinatario_nombre: nombreDestinatario,
             destinatario_contacto: email,
             asunto: asunto,
             mensaje: cuerpo,
@@ -6016,7 +6170,7 @@ const estadoInicialFormulario = {
             expediente.id,
             expediente.cliente_id,
             'Email',
-            { nombre: nombreCliente, contacto: email },
+            { nombre: nombreDestinatario, contacto: email },
             cuerpo,
             pdfUrl
           );
@@ -6302,6 +6456,9 @@ const estadoInicialFormulario = {
           
           // Si la póliza está completamente pagada, registrar evento "En Vigencia"
           if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.inicio_vigencia) {
+            // ⚠️ DEPRECADO: Ya no registramos aquí, usamos verificarYRegistrarEstadoVigencia
+            // que maneja toda la lógica de vigencia de forma centralizada
+            /*
             await historialService.registrarEvento({
               expediente_id: expedienteParaPago.id,
               cliente_id: expedienteParaPago.cliente_id,
@@ -6315,6 +6472,7 @@ const estadoInicialFormulario = {
               }
             });
             console.log('✅ Evento POLIZA_EN_VIGENCIA agregado a historial');
+            */
           }
         } catch (errorRegistroPago) {
           console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
@@ -6324,23 +6482,21 @@ const estadoInicialFormulario = {
         // No bloquear el proceso si falla el historial
       }
 
-      // 3. Actualizar el expediente en el estado local
-      setExpedientes(prev => prev.map(exp => {
-        if (exp.id === expedienteParaPago.id) {
-          return {
-            ...exp,
-            estatusPago: nuevoEstatusPago,
-            estatus_pago: nuevoEstatusPago,
-            fecha_vencimiento_pago: nuevaFechaVencimiento,
-            proximoPago: proximoPago,
-            proximo_pago: proximoPago,
-            fechaUltimoPago: fechaActual,
-            fecha_ultimo_pago: fechaActual,
-            fecha_pago: fechaActual
-          };
-        }
-        return exp;
-      }));
+      // 🔍 VERIFICAR y registrar estado de vigencia (Vencida, Por Renovar, En Vigencia)
+      // Esto se hace después de aplicar el pago para mantener el historial completo
+      try {
+        await verificarYRegistrarEstadoVigencia({
+          ...expedienteParaPago,
+          estatus_pago: nuevoEstatusPago,
+          fecha_vencimiento_pago: nuevaFechaVencimiento
+        });
+      } catch (errorVigencia) {
+        console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
+      }
+
+      // 🔄 RECARGAR expedientes desde BD para reflejar cambios en etapa_activa
+      await recargarExpedientes();
+      console.log('✅ Expedientes recargados desde BD');
 
       toast.success('✅ Pago aplicado correctamente');
       
@@ -6576,6 +6732,177 @@ const estadoInicialFormulario = {
 
     return true;
   }, [formulario, clienteSeleccionado, modoEdicion, expedientes]);
+
+  // 📍 Función para verificar y registrar el estado de vigencia de una póliza
+  // Esta función determina en qué carpeta debe estar (Vencida, Por Renovar, En Vigencia)
+  // y registra el evento correspondiente SI NO EXISTE ya en el historial
+  // ⭐ ADEMÁS actualiza la etapa_activa en BD para mantener coherencia
+  const verificarYRegistrarEstadoVigencia = useCallback(async (expediente, historialActual = null) => {
+    try {
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      
+      const inicio = expediente.inicio_vigencia ? new Date(expediente.inicio_vigencia) : null;
+      const termino = expediente.termino_vigencia ? new Date(expediente.termino_vigencia) : null;
+      const fechaAviso = expediente.fecha_aviso_renovacion ? new Date(expediente.fecha_aviso_renovacion) : null;
+      
+      if (inicio) inicio.setHours(0, 0, 0, 0);
+      if (termino) termino.setHours(0, 0, 0, 0);
+      if (fechaAviso) fechaAviso.setHours(0, 0, 0, 0);
+      
+      // Si no tenemos historial, intentar obtenerlo
+      let historial = historialActual;
+      if (!historial) {
+        try {
+          const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`);
+          if (response.ok) {
+            const data = await response.json();
+            historial = data?.data || data || [];
+            // ✅ VALIDAR que historial sea un array
+            if (!Array.isArray(historial)) {
+              console.warn('⚠️ Historial no es un array, convirtiendo:', historial);
+              historial = [];
+            }
+          }
+        } catch (e) {
+          console.warn('⚠️ No se pudo obtener historial para verificar eventos existentes');
+          historial = [];
+        }
+      }
+      
+      // ✅ Asegurar que historial sea un array
+      if (!Array.isArray(historial)) {
+        console.warn('⚠️ Historial no es un array, convirtiendo:', historial);
+        historial = [];
+      }
+      
+      console.log('🔍 [VIGENCIA] Verificando estado de vigencia para expediente:', expediente.id);
+      console.log('🔍 [VIGENCIA] Historial cargado:', historial.length, 'eventos');
+      
+      // 1️⃣ VENCIDA (mayor prioridad)
+      if (termino && termino < hoy) {
+        const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_VENCIDA);
+        
+        if (!yaRegistrado) {
+          await historialService.registrarEvento({
+            expediente_id: expediente.id,
+            cliente_id: expediente.cliente_id,
+            tipo_evento: historialService.TIPOS_EVENTO.POLIZA_VENCIDA,
+            usuario_nombre: 'Sistema',
+            descripcion: `Póliza vencida - Término de vigencia: ${expediente.termino_vigencia}`,
+            datos_adicionales: {
+              numero_poliza: expediente.numero_poliza,
+              compania: expediente.compania,
+              termino_vigencia: expediente.termino_vigencia
+            }
+          });
+          console.log('✅ Evento "Póliza Vencida" registrado');
+        } else {
+          console.log('ℹ️ Evento "Póliza Vencida" ya existe en historial');
+        }
+        
+        // ⭐ Actualizar etapa_activa a "Vencida"
+        if (expediente.etapa_activa !== 'Vencida') {
+          try {
+            await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ etapa_activa: 'Vencida' })
+            });
+            console.log('✅ Etapa actualizada a "Vencida"');
+          } catch (e) {
+            console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+          }
+        }
+        return;
+      }
+      
+      // 2️⃣ POR RENOVAR (30 días antes de vencer)
+      if (fechaAviso && termino && fechaAviso <= hoy && termino >= hoy) {
+        const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER);
+        
+        if (!yaRegistrado) {
+          const diasParaVencer = Math.ceil((termino - hoy) / (1000 * 60 * 60 * 24));
+          await historialService.registrarEvento({
+            expediente_id: expediente.id,
+            cliente_id: expediente.cliente_id,
+            tipo_evento: historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER,
+            usuario_nombre: 'Sistema',
+            descripcion: `Póliza próxima a vencer en ${diasParaVencer} días - Iniciar renovación (30 días antes del vencimiento del ${expediente.termino_vigencia})`,
+            datos_adicionales: {
+              numero_poliza: expediente.numero_poliza,
+              compania: expediente.compania,
+              fecha_aviso_renovacion: expediente.fecha_aviso_renovacion,
+              termino_vigencia: expediente.termino_vigencia,
+              dias_para_vencer: diasParaVencer
+            }
+          });
+          console.log('✅ Evento "Póliza Próxima a Vencer" registrado');
+        } else {
+          console.log('ℹ️ Evento "Póliza Próxima a Vencer" ya existe en historial');
+        }
+        
+        // ⭐ Actualizar etapa_activa a "Por Renovar"
+        if (expediente.etapa_activa !== 'Por Renovar') {
+          try {
+            await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ etapa_activa: 'Por Renovar' })
+            });
+            console.log('✅ Etapa actualizada a "Por Renovar"');
+          } catch (e) {
+            console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+          }
+        }
+        return;
+      }
+      
+      // 3️⃣ EN VIGENCIA (dentro del periodo, sin estar próxima a renovar)
+      if (inicio && termino && inicio <= hoy && termino >= hoy) {
+        const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA);
+        
+        if (!yaRegistrado) {
+          await historialService.registrarEvento({
+            expediente_id: expediente.id,
+            cliente_id: expediente.cliente_id,
+            tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
+            usuario_nombre: 'Sistema',
+            descripcion: `Póliza en vigencia desde ${expediente.inicio_vigencia} hasta ${expediente.termino_vigencia}`,
+            datos_adicionales: {
+              numero_poliza: expediente.numero_poliza,
+              compania: expediente.compania,
+              inicio_vigencia: expediente.inicio_vigencia,
+              termino_vigencia: expediente.termino_vigencia
+            }
+          });
+          console.log('✅ Evento "Póliza en Vigencia" registrado');
+        } else {
+          console.log('ℹ️ Evento "Póliza en Vigencia" ya existe en historial');
+        }
+        
+        // ⭐ Actualizar etapa_activa a "En Vigencia"
+        if (expediente.etapa_activa !== 'En Vigencia') {
+          try {
+            await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ etapa_activa: 'En Vigencia' })
+            });
+            console.log('✅ Etapa actualizada a "En Vigencia"');
+          } catch (e) {
+            console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
+          }
+        }
+        return;
+      }
+      
+      console.log('ℹ️ Póliza no cumple condiciones para eventos automáticos de vigencia');
+      
+    } catch (error) {
+      console.error('❌ Error al verificar y registrar estado de vigencia:', error);
+    }
+  }, []);
 
   const guardarExpediente = useCallback(async () => {
     // 🚨 DEBUG: Estado del formulario al hacer click en guardar
@@ -6932,10 +7259,62 @@ const estadoInicialFormulario = {
         expedientePayload.gastos_expedicion = formularioParaGuardar.gastos_expedicion || '';
       }
       
+      // 💰 VALIDAR cambios en fechas de pago - Preguntar si mantener estatus actual
+      if (formularioOriginal) {
+        const fechasOriginal = {
+          inicio_vigencia: formularioOriginal.inicio_vigencia,
+          termino_vigencia: formularioOriginal.termino_vigencia,
+          fecha_vencimiento_pago: formularioOriginal.fecha_vencimiento_pago
+        };
+        
+        const fechasNuevas = {
+          inicio_vigencia: formularioParaGuardar.inicio_vigencia,
+          termino_vigencia: formularioParaGuardar.termino_vigencia,
+          fecha_vencimiento_pago: formularioParaGuardar.fecha_vencimiento_pago
+        };
+        
+        const cambiaronFechasPago = 
+          fechasOriginal.inicio_vigencia !== fechasNuevas.inicio_vigencia ||
+          fechasOriginal.termino_vigencia !== fechasNuevas.termino_vigencia ||
+          fechasOriginal.fecha_vencimiento_pago !== fechasNuevas.fecha_vencimiento_pago;
+        
+        const estatusOriginal = formularioOriginal.estatusPago || formularioOriginal.estatus_pago || 'Pendiente';
+        const estatusActual = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Pendiente';
+        
+        // Si cambiaron fechas Y el usuario NO cambió manualmente el estatus
+        if (cambiaronFechasPago && estatusOriginal === estatusActual) {
+          const mantenerEstatus = window.confirm(
+            `🔄 Has modificado fechas de vigencia o pago.\n\n` +
+            `Estatus de pago actual: "${estatusActual}"\n\n` +
+            `¿Deseas MANTENER el estatus de pago actual?\n\n` +
+            `• Presiona "Aceptar" para mantener: "${estatusActual}"\n` +
+            `• Presiona "Cancelar" para recalcular automáticamente según la fecha de vencimiento`
+          );
+          
+          if (!mantenerEstatus) {
+            // Recalcular estatus basado en fecha_vencimiento_pago
+            if (fechasNuevas.fecha_vencimiento_pago) {
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const fechaVenc = new Date(fechasNuevas.fecha_vencimiento_pago);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              const nuevoEstatus = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
+              expedientePayload.estatus_pago = nuevoEstatus;
+              expedientePayload.estatusPago = nuevoEstatus;
+              console.log(`📊 Estatus de pago recalculado: ${nuevoEstatus}`);
+            }
+          } else {
+            console.log(`📊 Manteniendo estatus de pago: ${estatusActual}`);
+          }
+        }
+      }
+      
       // 🚨 DEBUG CRÍTICO: Verificar el JSON exacto que se enviará
       console.log('🚨 [FETCH PUT] FINAL VERIFICADO:');
       console.log('🚨 cargo_pago_fraccionado:', expedientePayload.cargo_pago_fraccionado);
       console.log('🚨 gastos_expedicion:', expedientePayload.gastos_expedicion);
+      console.log('🚨 estatus_pago:', expedientePayload.estatus_pago);
       console.log('🚨 [FETCH PUT] JSON.stringify del payload:');
       console.log(JSON.stringify(expedientePayload, null, 2));
       
@@ -6965,6 +7344,14 @@ const estadoInicialFormulario = {
           try {
             const expedienteId = formularioParaGuardar.id;
             
+            // 🔧 Helper para comparar valores, manejando null/undefined/empty
+            // ⚠️ IMPORTANTE: Definir ANTES de usar para que esté disponible en todo el scope
+            const normalizar = (valor) => {
+              if (valor === null || valor === undefined || valor === '') return '';
+              if (typeof valor === 'object') return JSON.stringify(valor);
+              return String(valor).trim();
+            };
+            
             // Usar el snapshot del formulario original (capturado al abrir edición)
             // en lugar del array de expedientes que puede estar desactualizado
             const expedienteAnterior = formularioOriginal;
@@ -6973,12 +7360,6 @@ const estadoInicialFormulario = {
             const camposModificados = [];
             
             if (expedienteAnterior) {
-              // Helper para comparar valores, manejando null/undefined/empty
-              const normalizar = (valor) => {
-                if (valor === null || valor === undefined || valor === '') return '';
-                if (typeof valor === 'object') return JSON.stringify(valor);
-                return String(valor).trim();
-              };
               
               // Lista COMPLETA de campos a verificar
               const camposAComparar = [
@@ -7041,6 +7422,10 @@ const estadoInicialFormulario = {
               
               // Comparar campos simples
               camposAComparar.forEach(({ key, label, formatter }) => {
+                // ⚠️ EXCLUIR campos que se calculan automáticamente (estatusPago se maneja por separado)
+                const camposExcluidos = ['agente', 'tipo_pago', 'fecha_vencimiento_pago', 'proximoPago'];
+                if (camposExcluidos.includes(key)) return;
+                
                 const valorAnterior = normalizar(expedienteAnterior[key]);
                 const valorNuevo = normalizar(formularioParaGuardar[key]);
                 
@@ -7057,7 +7442,85 @@ const estadoInicialFormulario = {
               });
             }
             
-            // Solo registrar evento si hubo cambios reales
+            // 💰 DETECTAR cambio específico en estatus de pago para registro especial
+            // ⚠️ IMPORTANTE: Esto debe estar FUERA del bloque de camposModificados
+            // porque el cambio de estatus puede ser el ÚNICO cambio
+            if (expedienteAnterior) {
+              console.log('🔍 [PAGO LOG] Verificando cambio en estatus de pago...');
+              console.log('🔍 [PAGO LOG] expedienteAnterior existe:', !!expedienteAnterior);
+              console.log('🔍 [PAGO LOG] expedienteAnterior.estatusPago:', expedienteAnterior.estatusPago);
+              console.log('🔍 [PAGO LOG] expedienteAnterior.estatus_pago:', expedienteAnterior.estatus_pago);
+              console.log('🔍 [PAGO LOG] formulario.estatusPago:', formulario.estatusPago);
+              console.log('🔍 [PAGO LOG] formulario.estatus_pago:', formulario.estatus_pago);
+              
+              // ✅ CRÍTICO: Usar el estado 'formulario' en lugar de 'formularioParaGuardar'
+              // porque este último tiene campos eliminados (delete expedientePayload.estatusPago)
+              const estatusPagoAnterior = normalizar(expedienteAnterior.estatusPago || expedienteAnterior.estatus_pago);
+              const estatusPagoNuevo = normalizar(formulario.estatusPago || formulario.estatus_pago);
+              
+              console.log('🔍 [PAGO LOG] estatusPagoAnterior (normalizado):', estatusPagoAnterior);
+              console.log('🔍 [PAGO LOG] estatusPagoNuevo (normalizado):', estatusPagoNuevo);
+              console.log('🔍 [PAGO LOG] Son diferentes?:', estatusPagoAnterior !== estatusPagoNuevo);
+              
+              if (estatusPagoAnterior !== estatusPagoNuevo && estatusPagoAnterior && estatusPagoNuevo) {
+                // Determinar si se aplicó o removió el pago
+                const pagoAplicado = estatusPagoNuevo.toLowerCase() === 'pagado';
+                const pagoRemovido = estatusPagoAnterior.toLowerCase() === 'pagado' && estatusPagoNuevo.toLowerCase() !== 'pagado';
+                
+                if (pagoAplicado) {
+                  await historialService.registrarEvento({
+                    expediente_id: expedienteId,
+                    cliente_id: formularioParaGuardar.cliente_id,
+                    tipo_evento: historialService.TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE,
+                    usuario_nombre: 'Sistema', // TODO: usuario actual
+                    descripcion: `Estatus de pago cambiado manualmente a "Pagado" (sin comprobante)`,
+                    datos_adicionales: {
+                      numero_poliza: formularioParaGuardar.numero_poliza,
+                      compania: formularioParaGuardar.compania,
+                      estatus_anterior: estatusPagoAnterior,
+                      estatus_nuevo: estatusPagoNuevo,
+                      nota: '⚠️ Cambio manual sin subir comprobante de pago'
+                    }
+                  });
+                  console.log('✅ Evento "PAGO_APLICADO_MANUALMENTE" registrado');
+                } else if (pagoRemovido) {
+                  await historialService.registrarEvento({
+                    expediente_id: expedienteId,
+                    cliente_id: formularioParaGuardar.cliente_id,
+                    tipo_evento: historialService.TIPOS_EVENTO.PAGO_REMOVIDO,
+                    usuario_nombre: 'Sistema', // TODO: usuario actual
+                    descripcion: `Estatus de pago revertido de "Pagado" a "${estatusPagoNuevo}"`,
+                    datos_adicionales: {
+                      numero_poliza: formularioParaGuardar.numero_poliza,
+                      compania: formularioParaGuardar.compania,
+                      estatus_anterior: estatusPagoAnterior,
+                      estatus_nuevo: estatusPagoNuevo,
+                      alerta: '⚠️ Pago previamente aplicado fue removido - Verificar motivo'
+                    }
+                  });
+                  console.log('✅ Evento "PAGO_REMOVIDO" registrado');
+                } else {
+                  // Cambio entre estados no-pagado (ej: Pendiente → Vencido)
+                  await historialService.registrarEvento({
+                    expediente_id: expedienteId,
+                    cliente_id: formularioParaGuardar.cliente_id,
+                    tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
+                    usuario_nombre: 'Sistema', // TODO: usuario actual
+                    descripcion: `Estatus de pago modificado: "${estatusPagoAnterior}" → "${estatusPagoNuevo}"`,
+                    datos_adicionales: {
+                      numero_poliza: formularioParaGuardar.numero_poliza,
+                      compania: formularioParaGuardar.compania,
+                      campo_modificado: 'Estatus de pago',
+                      estatus_anterior: estatusPagoAnterior,
+                      estatus_nuevo: estatusPagoNuevo
+                    }
+                  });
+                  console.log('✅ Evento de cambio de estatus de pago registrado');
+                }
+              }
+            }
+            
+            // Solo registrar evento general si hubo cambios en otros campos
             if (camposModificados.length > 0) {
               // Verificar si cambió la etapa
               const cambioEtapa = expedienteAnterior && expedienteAnterior.etapa_activa !== formularioParaGuardar.etapa_activa;
@@ -7090,6 +7553,207 @@ const estadoInicialFormulario = {
                 }
               });
               console.log(`✅ Evento "Edición" registrado con ${camposModificados.length} cambios`);
+              
+              // 🎯 Detectar cambios automáticos de vigencia/renovación por edición de fechas
+              if (expedienteAnterior) {
+                const hoy = new Date();
+                hoy.setHours(0, 0, 0, 0);
+                
+                // ⚠️ PENDIENTE: Flujo completo de renovación con módulo de cotizaciones
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                // CONTEXTO: Cuando se habilite el módulo de cotizaciones, completar el
+                // flujo de renovación con los siguientes estados y eventos:
+                //
+                // CARPETAS Y FLUJO:
+                // ─────────────────────────────────────────────────────────────────
+                // 📂 "Por Renovar" o "Vencidas" → Usuario hace clic en botón "Cotizar"
+                //    ↓
+                // 📂 "En Proceso" (desde que inicia cotización hasta que se paga)
+                //    ↓
+                // 📂 "Renovadas" (cuando se aplica el pago)
+                //
+                // EVENTOS Y ESTADOS:
+                // ─────────────────────────────────────────────────────────────────
+                // 1. ⏰ POLIZA_PROXIMA_VENCER - Ya implementado ✅
+                //    └─> Automático: fecha_aviso_renovacion <= hoy
+                //    └─> Carpeta: "Por Renovar"
+                //    └─> Estado: etapa_activa sin cambios
+                //
+                // 2. ❌ POLIZA_VENCIDA - Ya implementado ✅
+                //    └─> Automático: termino_vigencia < hoy
+                //    └─> Carpeta: "Vencidas"
+                //    └─> Estado: etapa_activa = "Vencida" (opcional)
+                //
+                // 3. 📝 COTIZACION_RENOVACION_INICIADA - Pendiente
+                //    └─> Trigger: Botón "Cotizar" en listado (carpetas Por Renovar/Vencidas)
+                //    └─> Acción: Abrir modal/formulario de cotización
+                //    └─> Cambio: etapa_activa = "En Cotización - Renovación"
+                //    └─> Carpeta: "En Proceso"
+                //
+                // 4. 📧 COTIZACION_RENOVACION_ENVIADA - Pendiente
+                //    └─> Trigger: Se envía cotización de renovación al cliente
+                //    └─> Cambio: etapa_activa = "Renovación Enviada"
+                //    └─> Carpeta: "En Proceso"
+                //    └─> Registrar: destinatario, monto, PDF, fecha de envío
+                //
+                // 5. ⏳ RENOVACION_PENDIENTE_EMISION - Pendiente
+                //    └─> Trigger: Cliente autoriza cotización
+                //    └─> Cambio: etapa_activa = "Pendiente de Emisión - Renovación"
+                //    └─> Carpeta: "En Proceso"
+                //
+                // 6. 📄 RENOVACION_EMITIDA - Pendiente
+                //    └─> Trigger: Aseguradora emite la póliza renovada
+                //    └─> Cambio: etapa_activa = "Renovación Emitida"
+                //    └─> Carpeta: "En Proceso"
+                //    └─> Actualizar: nuevo numero_poliza (si aplica), nuevas vigencias
+                //
+                // 7. 💰 PAGO_RENOVACION_REGISTRADO - Pendiente
+                //    └─> Trigger: Se registra pago de la renovación
+                //    └─> Cambio: estatus_pago = "Pagado"
+                //    └─> Registrar: monto, método, comprobante
+                //
+                // 8. 🔁 RENOVACION_VIGENTE - Pendiente
+                //    └─> Trigger: Pago completado (automático tras registrar pago)
+                //    └─> Cambio: etapa_activa = "Renovada"
+                //    └─> Carpeta: "Renovadas" (NO va a "Vigentes", va a carpeta especial)
+                //    └─> Actualizar: inicio_vigencia (nuevo inicio)
+                //    └─> Actualizar: termino_vigencia (nuevo inicio + 1 año)
+                //    └─> Actualizar: fecha_aviso_renovacion (nuevo término - 30 días)
+                //    └─> Nota: tipo_movimiento = "renovacion" (para distinguir de nuevas)
+                //
+                // CONSIDERACIONES TÉCNICAS:
+                // ─────────────────────────────────────────────────────────────────
+                // - Crear eventos específicos para renovación (COTIZACION_RENOVACION_*, etc.)
+                //   para mantener claridad en el historial y poder filtrar/analizar renovaciones
+                // - El campo tipo_movimiento = "renovacion" permite diferenciar en reportes
+                // - La carpeta "Renovadas" mantiene pólizas renovadas separadas de nuevas
+                // - Considerar si crear nueva fila en BD o actualizar la existente
+                //   (Recomendado: actualizar existente y mantener historial en tabla de eventos)
+                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                
+                // 🔍 VERIFICAR y registrar estado de vigencia usando función centralizada
+                // Esto reemplaza toda la lógica antigua de detectar vencidas/por renovar/vigentes
+                try {
+                  await verificarYRegistrarEstadoVigencia(formularioParaGuardar, data?.historial);
+                } catch (errorVigencia) {
+                  console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
+                }
+                
+                // ⚠️ DEPRECADO: Lógica antigua comentada, ahora usamos verificarYRegistrarEstadoVigencia
+                /*
+                // Detectar si la póliza cambió a VENCIDA
+                const terminoAnterior = expedienteAnterior.termino_vigencia ? new Date(expedienteAnterior.termino_vigencia) : null;
+                const terminoNuevo = formularioParaGuardar.termino_vigencia ? new Date(formularioParaGuardar.termino_vigencia) : null;
+                const inicioNuevo = formularioParaGuardar.inicio_vigencia ? new Date(formularioParaGuardar.inicio_vigencia) : null;
+                // ⚠️ DEPRECADO: Lógica antigua comentada, ahora usamos verificarYRegistrarEstadoVigencia
+                /*
+                // Detectar si la póliza cambió a VENCIDA
+                const terminoAnterior = expedienteAnterior.termino_vigencia ? new Date(expedienteAnterior.termino_vigencia) : null;
+                const terminoNuevo = formularioParaGuardar.termino_vigencia ? new Date(formularioParaGuardar.termino_vigencia) : null;
+                const inicioNuevo = formularioParaGuardar.inicio_vigencia ? new Date(formularioParaGuardar.inicio_vigencia) : null;
+                
+                if (terminoAnterior && terminoNuevo) {
+                  terminoAnterior.setHours(0, 0, 0, 0);
+                  terminoNuevo.setHours(0, 0, 0, 0);
+                  if (inicioNuevo) inicioNuevo.setHours(0, 0, 0, 0);
+                  
+                  const estabaVigente = terminoAnterior >= hoy;
+                  const ahoraVencida = terminoNuevo < hoy;
+                  const ahoraVigente = inicioNuevo && inicioNuevo <= hoy && terminoNuevo >= hoy;
+                  
+                  if (estabaVigente && ahoraVencida) {
+                    // La póliza acaba de vencer por la edición de fecha
+                    await historialService.registrarEvento({
+                      expediente_id: expedienteId,
+                      cliente_id: formularioParaGuardar.cliente_id,
+                      tipo_evento: historialService.TIPOS_EVENTO.POLIZA_VENCIDA,
+                      usuario_nombre: 'Sistema',
+                      descripcion: `Póliza vencida - Término de vigencia: ${formularioParaGuardar.termino_vigencia}`,
+                      datos_adicionales: {
+                        numero_poliza: formularioParaGuardar.numero_poliza,
+                        termino_vigencia: formularioParaGuardar.termino_vigencia,
+                        motivo: 'Detectado al editar fechas'
+                      }
+                    });
+                    console.log('✅ Evento "Póliza Vencida" registrado');
+                  }
+                  
+                  // ✅ NUEVO: Detectar si la póliza está en VIGENCIA (sin estar próxima a vencer)
+                  if (ahoraVigente) {
+                    const fechaAvisoNueva = formularioParaGuardar.fecha_aviso_renovacion ? new Date(formularioParaGuardar.fecha_aviso_renovacion) : null;
+                    if (fechaAvisoNueva) fechaAvisoNueva.setHours(0, 0, 0, 0);
+                    
+                    const noEstaPorRenovar = !fechaAvisoNueva || fechaAvisoNueva > hoy;
+                    
+                    // Verificar si ya existe evento de vigencia
+                    const yaRegistradoVigencia = (data?.historial || []).some(h => 
+                      h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA
+                    );
+                    
+                    if (noEstaPorRenovar && !yaRegistradoVigencia) {
+                      await historialService.registrarEvento({
+                        expediente_id: expedienteId,
+                        cliente_id: formularioParaGuardar.cliente_id,
+                        tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
+                        usuario_nombre: 'Sistema',
+                        descripcion: `Póliza en vigencia desde ${formularioParaGuardar.inicio_vigencia} hasta ${formularioParaGuardar.termino_vigencia}`,
+                        datos_adicionales: {
+                          numero_poliza: formularioParaGuardar.numero_poliza,
+                          inicio_vigencia: formularioParaGuardar.inicio_vigencia,
+                          termino_vigencia: formularioParaGuardar.termino_vigencia,
+                          motivo: 'Detectado al guardar cambios'
+                        }
+                      });
+                      console.log('✅ Evento "Póliza en Vigencia" registrado');
+                    }
+                  }
+                }
+                
+                // Detectar si la póliza entró en período de RENOVACIÓN (30 días antes)
+                const fechaAvisoAnterior = expedienteAnterior.fecha_aviso_renovacion ? new Date(expedienteAnterior.fecha_aviso_renovacion) : null;
+                const fechaAvisoNueva = formularioParaGuardar.fecha_aviso_renovacion ? new Date(formularioParaGuardar.fecha_aviso_renovacion) : null;
+                
+                if (fechaAvisoNueva && terminoNuevo) {
+                  fechaAvisoNueva.setHours(0, 0, 0, 0);
+                  
+                  // Verificar si la póliza está en período de renovación
+                  const estaPorRenovar = fechaAvisoNueva <= hoy && terminoNuevo >= hoy;
+                  
+                  // Detectar si cambió la fecha de aviso o término de vigencia
+                  const cambioFechaAviso = fechaAvisoAnterior && fechaAvisoAnterior.getTime() !== fechaAvisoNueva.getTime();
+                  const cambioTermino = terminoAnterior && terminoAnterior.getTime() !== terminoNuevo.getTime();
+                  
+                  // ✅ MEJORADO: Verificar si ya existe un evento de "Próxima a Vencer" para evitar duplicados
+                  const yaRegistrado = (data?.historial || []).some(h => 
+                    h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER
+                  );
+                  
+                  // Registrar evento si:
+                  // 1. La póliza AHORA está por renovar (fecha_aviso <= hoy < termino_vigencia)
+                  // 2. Y (hubo cambio en fechas O es la primera vez que se detecta)
+                  if (estaPorRenovar && !yaRegistrado) {
+                    const diasParaVencer = Math.ceil((terminoNuevo - hoy) / (1000 * 60 * 60 * 24));
+                    await historialService.registrarEvento({
+                      expediente_id: expedienteId,
+                      cliente_id: formularioParaGuardar.cliente_id,
+                      tipo_evento: historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER,
+                      usuario_nombre: 'Sistema',
+                      descripcion: `Póliza próxima a vencer en ${diasParaVencer} días - Iniciar renovación (30 días antes del vencimiento del ${formularioParaGuardar.termino_vigencia})`,
+                      datos_adicionales: {
+                        numero_poliza: formularioParaGuardar.numero_poliza,
+                        fecha_aviso_renovacion: formularioParaGuardar.fecha_aviso_renovacion,
+                        termino_vigencia: formularioParaGuardar.termino_vigencia,
+                        dias_para_vencer: diasParaVencer,
+                        motivo: cambioFechaAviso || cambioTermino ? 'Detectado al editar fechas' : 'Detectado al guardar cambios'
+                      }
+                    });
+                    console.log('✅ Evento "Póliza Próxima a Vencer" registrado');
+                  } else if (estaPorRenovar && yaRegistrado) {
+                    console.log('ℹ️ Póliza está por renovar pero evento ya fue registrado previamente');
+                  }
+                }
+                */
+              }
             } else {
               console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');
             }
@@ -7374,6 +8038,180 @@ const estadoInicialFormulario = {
       console.error('Error al recargar expedientes:', err);
     }
   }, []);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // FUNCIONES PARA FLUJO DE RENOVACIÓN
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * 1. Iniciar Cotización de Renovación
+   */
+  const iniciarCotizacionRenovacion = useCallback(async (expediente) => {
+    try {
+      setExpedienteParaRenovacion(expediente);
+      setMostrarModalCotizarRenovacion(true);
+    } catch (error) {
+      console.error('Error al abrir modal de cotización:', error);
+      toast.error('Error al iniciar cotización de renovación');
+    }
+  }, []);
+
+  const guardarCotizacionRenovacion = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      await cambiarEstadoExpediente(expedienteParaRenovacion.id, 'En Cotización - Renovación');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA,
+        usuario_nombre: 'Sistema',
+        descripcion: 'Cotización de renovación iniciada',
+        datos_adicionales: {
+          numero_poliza: expedienteParaRenovacion.numero_poliza,
+          compania: expedienteParaRenovacion.compania
+        }
+      });
+      
+      toast.success('Cotización de renovación iniciada');
+      setMostrarModalCotizarRenovacion(false);
+      setExpedienteParaRenovacion(null);
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al guardar cotización:', error);
+      toast.error('Error al guardar cotización de renovación');
+    }
+  }, [cambiarEstadoExpediente, recargarExpedientes]);
+
+  /**
+   * 2. Marcar como Autorizado
+   */
+  const marcarRenovacionAutorizada = useCallback(async (expediente) => {
+    try {
+      setExpedienteParaRenovacion(expediente);
+      setMostrarModalAutorizarRenovacion(true);
+    } catch (error) {
+      console.error('Error al abrir modal autorizar:', error);
+      toast.error('Error al marcar renovación como autorizada');
+    }
+  }, []);
+
+  const confirmarRenovacionAutorizada = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      await cambiarEstadoExpediente(expedienteParaRenovacion.id, 'Pendiente de Emisión - Renovación');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION,
+        usuario_nombre: 'Sistema',
+        descripcion: 'Cliente autorizó la renovación - Pendiente de emisión',
+        datos_adicionales: {
+          numero_poliza: expedienteParaRenovacion.numero_poliza,
+          compania: expedienteParaRenovacion.compania
+        }
+      });
+      
+      toast.success('Renovación marcada como autorizada');
+      setMostrarModalAutorizarRenovacion(false);
+      setExpedienteParaRenovacion(null);
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al marcar como autorizada:', error);
+      toast.error('Error al marcar renovación como autorizada');
+    }
+  }, [cambiarEstadoExpediente, recargarExpedientes]);
+
+  /**
+   * 3. Agregar Póliza Renovada
+   */
+  const abrirModalPolizaRenovada = useCallback((expediente) => {
+    setExpedienteParaRenovacion(expediente);
+    
+    const hoy = new Date();
+    const inicioVigencia = new Date(hoy);
+    const terminoVigencia = new Date(inicioVigencia);
+    terminoVigencia.setFullYear(terminoVigencia.getFullYear() + 1);
+    
+    setDatosRenovacion({
+      numeroPolizaNueva: expediente.numero_poliza || '',
+      primaNueva: expediente.prima_pagada || '',
+      totalNuevo: expediente.total || '',
+      fechaEmisionNueva: hoy.toISOString().split('T')[0],
+      inicioVigenciaNueva: inicioVigencia.toISOString().split('T')[0],
+      terminoVigenciaNueva: terminoVigencia.toISOString().split('T')[0],
+      observaciones: ''
+    });
+    
+    setMostrarModalPolizaRenovada(true);
+  }, []);
+
+  const guardarPolizaRenovada = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion) return;
+      
+      const terminoVigencia = new Date(datosRenovacion.terminoVigenciaNueva);
+      const fechaAviso = new Date(terminoVigencia);
+      fechaAviso.setDate(fechaAviso.getDate() - 30);
+      
+      const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          numero_poliza: datosRenovacion.numeroPolizaNueva,
+          prima_pagada: parseFloat(datosRenovacion.primaNueva) || 0,
+          total: parseFloat(datosRenovacion.totalNuevo) || 0,
+          fecha_emision: datosRenovacion.fechaEmisionNueva,
+          inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
+          termino_vigencia: datosRenovacion.terminoVigenciaNueva,
+          fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
+          etapa_activa: 'Renovación Emitida',
+          tipo_movimiento: 'renovacion'
+        })
+      });
+      
+      if (!response.ok) throw new Error('Error al actualizar expediente');
+      
+      await historialService.registrarEvento({
+        expediente_id: expedienteParaRenovacion.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_EMITIDA,
+        usuario_nombre: 'Sistema',
+        descripcion: `Póliza renovada emitida - Nueva vigencia: ${datosRenovacion.inicioVigenciaNueva} a ${datosRenovacion.terminoVigenciaNueva}`,
+        datos_adicionales: {
+          numero_poliza: datosRenovacion.numeroPolizaNueva,
+          compania: expedienteParaRenovacion.compania,
+          prima_nueva: datosRenovacion.primaNueva,
+          total_nuevo: datosRenovacion.totalNuevo,
+          observaciones: datosRenovacion.observaciones
+        }
+      });
+      
+      toast.success('Póliza renovada registrada exitosamente');
+      setMostrarModalPolizaRenovada(false);
+      setExpedienteParaRenovacion(null);
+      setDatosRenovacion({
+        numeroPolizaNueva: '',
+        primaNueva: '',
+        totalNuevo: '',
+        fechaEmisionNueva: '',
+        inicioVigenciaNueva: '',
+        terminoVigenciaNueva: '',
+        observaciones: ''
+      });
+      await recargarExpedientes();
+      
+    } catch (error) {
+      console.error('Error al guardar póliza renovada:', error);
+      toast.error('Error al guardar póliza renovada');
+    }
+  }, [recargarExpedientes]);
+  
   // ✅ FUNCIÓN para convertir snake_case a camelCase
   const snakeToCamel = (str) => {
     return str.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
@@ -7485,6 +8323,16 @@ const estadoInicialFormulario = {
             fecha_emision: datosConvertidos.fecha_emision,
             inicio_vigencia: datosConvertidos.inicio_vigencia,
             termino_vigencia: datosConvertidos.termino_vigencia
+          });
+          
+          console.log('💰 [EDITAR] Estatus de pago RAW desde API:', {
+            estatus_pago: desdeApi.estatus_pago,
+            estatusPago: desdeApi.estatusPago
+          });
+          
+          console.log('💰 [EDITAR] Estatus de pago DESPUÉS de convertir:', {
+            estatus_pago: datosConvertidos.estatus_pago,
+            estatusPago: datosConvertidos.estatusPago
           });
           
           // ✅ IMPORTANTE: Datos de API tienen prioridad sobre datos en memoria
@@ -7600,24 +8448,36 @@ const estadoInicialFormulario = {
       termino_vigencia: formularioBase.termino_vigencia
     });
 
-    // 🎯 CRÍTICO: NO recalcular fechas al cargar datos guardados
-    // Solo recalcular estatusPago para mostrar si está vencido
+    // 🎯 CRÍTICO: NO recalcular fechas ni estatus al cargar datos guardados
+    // SIEMPRE respetar el estatus_pago de la base de datos
     let formularioConCalculos = { ...formularioBase };
     
-    // Recalcular SOLO el estatus de pago (no las fechas)
-    if (formularioBase.fecha_vencimiento_pago) {
-      const hoy = new Date();
-      hoy.setHours(0, 0, 0, 0);
-      const fechaVenc = new Date(formularioBase.fecha_vencimiento_pago);
-      fechaVenc.setHours(0, 0, 0, 0);
-      
-      formularioConCalculos.estatusPago = fechaVenc < hoy ? 'Vencido' : 'Al Corriente';
-    }
+    // ✅ IMPORTANTE: Cargar el estatus de pago TAL CUAL está en la BD (sin recalcular)
+    // Esto permite al usuario tener control manual del estatus sin interferencia automática
+    // Priorizar estatus_pago (snake_case de BD) sobre estatusPago (camelCase convertido)
+    const estatusPagoDesdeBD = formularioBase.estatus_pago || formularioBase.estatusPago || 'Pendiente';
+    formularioConCalculos.estatusPago = estatusPagoDesdeBD;
+    formularioConCalculos.estatus_pago = estatusPagoDesdeBD;
+    
+    console.log('📊 [EDITAR] Estatus de pago cargado desde BD:', {
+      estatus_pago_bd: formularioBase.estatus_pago,
+      estatusPago_bd: formularioBase.estatusPago,
+      valor_final: estatusPagoDesdeBD
+    });
 
     console.log('📅 DESPUÉS de actualizarCalculosAutomaticos:', {
       inicio_vigencia: formularioConCalculos.inicio_vigencia,
       termino_vigencia: formularioConCalculos.termino_vigencia
     });
+
+    // 📸 CAPTURAR SNAPSHOT INMEDIATAMENTE con los datos de BD (antes de cualquier useEffect)
+    // Esto asegura que el snapshot tenga exactamente lo que está en la base de datos
+    console.log('📸 [SNAPSHOT] Capturando snapshot INMEDIATO con datos de BD:', {
+      id: formularioConCalculos.id,
+      estatusPago: formularioConCalculos.estatusPago,
+      estatus_pago: formularioConCalculos.estatus_pago
+    });
+    setFormularioOriginal(JSON.parse(JSON.stringify(formularioConCalculos)));
 
     // Aplicar al estado en un solo set para evitar inconsistencias por batching
     setFormulario(formularioConCalculos);
@@ -7694,8 +8554,8 @@ const estadoInicialFormulario = {
     setModoEdicion(true);
     setVistaActual('formulario');
     
-    // Activar flag para que el useEffect capture el snapshot cuando esté listo
-    snapshotPendiente.current = true;
+    // ⚠️ COMENTADO: Ya no usamos el flag porque capturamos el snapshot inmediatamente
+    // snapshotPendiente.current = true;
   }, [clientesMap, actualizarCalculosAutomaticos]);
 
 const eliminarExpediente = useCallback((id) => {
@@ -8022,6 +8882,303 @@ const eliminarExpediente = useCallback((id) => {
                       Confirmar Pago
                     </>
                   )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          MODALES DE RENOVACIÓN
+          ═══════════════════════════════════════════════════════════════ */}
+
+      {/* Modal 1: Iniciar Cotización de Renovación */}
+      {mostrarModalCotizarRenovacion && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-primary text-white">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Iniciar Cotización de Renovación
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalCotizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <h6 className="mb-2">
+                    <strong>Póliza:</strong> {expedienteParaRenovacion.numero_poliza || 'Sin número'}
+                  </h6>
+                  <p className="mb-1"><strong>Cliente:</strong> {expedienteParaRenovacion.nombre_cliente || 'N/A'}</p>
+                  <p className="mb-0"><strong>Compañía:</strong> {expedienteParaRenovacion.compania || 'N/A'}</p>
+                </div>
+                
+                <p className="text-muted">
+                  Se iniciará el proceso de cotización para la renovación de esta póliza. 
+                  El expediente se moverá a la carpeta <strong>"En Proceso"</strong> con estado 
+                  <strong>"En Cotización - Renovación"</strong>.
+                </p>
+                
+                <p className="text-muted mb-0">
+                  <strong>Próximos pasos:</strong>
+                </p>
+                <ol className="text-muted small">
+                  <li>Preparar cotización con la aseguradora</li>
+                  <li>Enviar cotización al cliente</li>
+                  <li>Esperar autorización del cliente</li>
+                </ol>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalCotizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary"
+                  onClick={guardarCotizacionRenovacion}
+                >
+                  <FileText size={16} className="me-2" />
+                  Iniciar Cotización
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Marcar como Autorizado */}
+      {mostrarModalAutorizarRenovacion && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-sm modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">
+                  <CheckCircle size={20} className="me-2" />
+                  Confirmar Autorización
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalAutorizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <p className="mb-0">
+                  ¿Confirmas que el cliente <strong>autorizó</strong> la cotización de renovación?
+                </p>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalAutorizarRenovacion(false);
+                    setExpedienteParaRenovacion(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-success"
+                  onClick={confirmarRenovacionAutorizada}
+                >
+                  <CheckCircle size={16} className="me-2" />
+                  Sí, Autorizado
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Agregar Póliza Renovada */}
+      {mostrarModalPolizaRenovada && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-lg modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-info text-white">
+                <h5 className="modal-title">
+                  <RefreshCw size={20} className="me-2" />
+                  Registrar Póliza Renovada
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalPolizaRenovada(false);
+                    setExpedienteParaRenovacion(null);
+                    setDatosRenovacion({
+                      numeroPolizaNueva: '',
+                      primaNueva: '',
+                      totalNuevo: '',
+                      fechaEmisionNueva: '',
+                      inicioVigenciaNueva: '',
+                      terminoVigenciaNueva: '',
+                      observaciones: ''
+                    });
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <p className="mb-1"><strong>Póliza Original:</strong> {expedienteParaRenovacion.numero_poliza}</p>
+                  <p className="mb-0"><strong>Compañía:</strong> {expedienteParaRenovacion.compania}</p>
+                </div>
+                
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Número de Póliza Renovada *</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={datosRenovacion.numeroPolizaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, numeroPolizaNueva: e.target.value }))}
+                      placeholder="Número de póliza renovada"
+                    />
+                    <small className="text-muted">Puede ser el mismo o un nuevo número</small>
+                  </div>
+                  
+                  <div className="col-md-3">
+                    <label className="form-label">Prima *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={datosRenovacion.primaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, primaNueva: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  
+                  <div className="col-md-3">
+                    <label className="form-label">Total *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={datosRenovacion.totalNuevo}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, totalNuevo: e.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Fecha Emisión *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.fechaEmisionNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, fechaEmisionNueva: e.target.value }))}
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Inicio Vigencia *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.inicioVigenciaNueva}
+                      onChange={(e) => {
+                        const inicio = e.target.value;
+                        if (inicio) {
+                          const fechaInicio = new Date(inicio);
+                          const fechaTermino = new Date(fechaInicio);
+                          fechaTermino.setFullYear(fechaTermino.getFullYear() + 1);
+                          setDatosRenovacion(prev => ({ 
+                            ...prev, 
+                            inicioVigenciaNueva: inicio,
+                            terminoVigenciaNueva: fechaTermino.toISOString().split('T')[0]
+                          }));
+                        } else {
+                          setDatosRenovacion(prev => ({ ...prev, inicioVigenciaNueva: inicio }));
+                        }
+                      }}
+                    />
+                  </div>
+                  
+                  <div className="col-md-4">
+                    <label className="form-label">Término Vigencia *</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={datosRenovacion.terminoVigenciaNueva}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, terminoVigenciaNueva: e.target.value }))}
+                    />
+                    <small className="text-muted">Auto-calculado (1 año)</small>
+                  </div>
+                  
+                  <div className="col-12">
+                    <label className="form-label">Observaciones</label>
+                    <textarea
+                      className="form-control"
+                      rows="2"
+                      value={datosRenovacion.observaciones}
+                      onChange={(e) => setDatosRenovacion(prev => ({ ...prev, observaciones: e.target.value }))}
+                      placeholder="Comentarios sobre la renovación..."
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalPolizaRenovada(false);
+                    setExpedienteParaRenovacion(null);
+                    setDatosRenovacion({
+                      numeroPolizaNueva: '',
+                      primaNueva: '',
+                      totalNuevo: '',
+                      fechaEmisionNueva: '',
+                      inicioVigenciaNueva: '',
+                      terminoVigenciaNueva: '',
+                      observaciones: ''
+                    });
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-info"
+                  onClick={guardarPolizaRenovada}
+                  disabled={
+                    !datosRenovacion.numeroPolizaNueva ||
+                    !datosRenovacion.primaNueva ||
+                    !datosRenovacion.totalNuevo ||
+                    !datosRenovacion.fechaEmisionNueva ||
+                    !datosRenovacion.inicioVigenciaNueva ||
+                    !datosRenovacion.terminoVigenciaNueva
+                  }
+                >
+                  <RefreshCw size={16} className="me-2" />
+                  Guardar Póliza Renovada
                 </button>
               </div>
             </div>

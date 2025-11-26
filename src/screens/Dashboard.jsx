@@ -208,8 +208,10 @@ const DashboardComponent = () => {
           // Filtrar por mes de vencimiento
           if (periodo === 'mesActual') return estaEnRango(ref, inicioMesActual, finMesActual);
           if (periodo === 'mesAnterior') {
-            // Meses anteriores del año: desde enero hasta fin del mes anterior
-            return estaEnRango(ref, inicioAnioActual, finMesAnterior);
+            // Meses anteriores: todas las que vencieron ANTES del mes actual
+            const fechaVenc = new Date(ref);
+            fechaVenc.setHours(0, 0, 0, 0);
+            return fechaVenc < inicioMesActual;
           }
           // Si no se especifica periodo, mostrar todas las vencidas
           return true;
@@ -1066,7 +1068,7 @@ const DashboardComponent = () => {
                       ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasVencidas.mesActual.cantidad} pólizas • Mes actual
+                      {estadisticasFinancieras.primasVencidas.mesActual.cantidad} póliza{estadisticasFinancieras.primasVencidas.mesActual.cantidad !== 1 ? 's' : ''} • Mes actual
                     </small>
                   </div>
                 </div>
@@ -1082,7 +1084,7 @@ const DashboardComponent = () => {
                     onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      Mes anterior: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
+                      Meses anteriores: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
                     </span>
                     <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
                       ${estadisticasFinancieras.primasVencidas.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
