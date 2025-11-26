@@ -207,8 +207,8 @@ export const registrarEvento = async (datos) => {
       destinatario_nombre: datos.destinatario_nombre || null,
       destinatario_contacto: datos.destinatario_contacto || null,
       documento_url: datos.documento_url || null,
-      documento_tipo: datos.documento_tipo || null,
-      fecha_evento: datos.fecha_evento || new Date().toISOString()
+      documento_tipo: datos.documento_tipo || null
+      // ✅ NO enviamos fecha_evento - el backend la genera con su hora del servidor
     };
     
     console.log('📤 Payload final enviado al backend:', payload);
@@ -430,7 +430,6 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     datos_adicionales: {
       // ✅ NO guardamos el mensaje completo, solo metadata esencial
       canal: canal,
-      fecha_envio: new Date().toISOString(),
       tiene_documento: !!documentoUrl
     }
   });

@@ -413,18 +413,19 @@ const DashboardComponent = () => {
     console.log('─────────────────────────────────────────────────────────────────');
     console.log('⏰ TARJETA 3: PRIMAS POR VENCER');
     console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Campo fecha: fecha_vencimiento_pago (o proximo_pago)');
-    console.log('📌 Rango: Solo mes actual');
-    console.log('📌 Condición: Fecha >= HOY (aún no vencida)');
+    console.log('📌 Filtro: estatus_pago = "Por Vencer" Y fecha_vencimiento del mes actual');
     console.log('');
 
-    // Filtrar por fecha_vencimiento_pago en mes actual Y que sea futura
+    // Filtrar: estatus = "Por Vencer" Y fecha_vencimiento en mes actual
     const polizasPorVencer = expedientes.filter(p => {
+      const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+      if (estatus !== 'por vencer') return false;
+      
       const ref = p.fecha_vencimiento_pago || p.proximo_pago;
       if (!ref) return false;
-      const fechaRef = new Date(ref);
-      fechaRef.setHours(0, 0, 0, 0);
-      return estaEnRango(ref, inicioMesActual, finMesActual) && fechaRef >= hoy;
+      
+      // Solo mes actual
+      return estaEnRango(ref, inicioMesActual, finMesActual);
     });
     
     const primasPorVencer = polizasPorVencer.reduce((sum, p) => sum + resolverMonto(p), 0);
@@ -442,22 +443,19 @@ const DashboardComponent = () => {
     console.log('─────────────────────────────────────────────────────────────────');
     console.log('🚨 TARJETA 4: PRIMAS VENCIDAS');
     console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Campo fecha: fecha_vencimiento_pago');
-    console.log('📌 Condición: HOY > fecha_vencimiento (sin periodo de gracia)');
-    console.log('📌 Se divide en: Mes Actual + Meses Anteriores (acumulado)');
+    console.log('📌 Filtro: estatus_pago = "Vencido" (NO pagada, NO cancelada)');
+    console.log('📌 División: Mes Actual + Anteriores (acumulado histórico)');
     console.log('');
 
-    // Filtrar todas las pólizas vencidas (hoy > fecha_vencimiento)
+    // Filtrar: estatus_pago = "Vencido" (excluir pagadas y canceladas)
     const polizasVencidasTodas = expedientes.filter(p => {
       // Excluir canceladas
       if (p.etapa_activa === 'Cancelada') return false;
       
-      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-      if (!ref) return false;
-      const venc = new Date(ref);
-      venc.setHours(0, 0, 0, 0);
-      // Simple: si la fecha ya pasó, está vencida
-      return hoy > venc;
+      const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
+      
+      // Solo vencidas (excluye automáticamente pagadas, pendientes y por vencer)
+      return estatus === 'vencido';
     });
     
     // Separar por mes de vencimiento
@@ -1017,24 +1015,8 @@ const DashboardComponent = () => {
                     </small>
                   </div>
                 </div>
-                <div className="pt-2 border-top">
-                  <div 
-                    className="d-flex justify-content-between p-2 rounded" 
-                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      abrirDesglose('porVencer', 'mesAnterior');
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      Mes anterior: 0
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      $0
-                    </span>
-                  </div>
+                {/* Espacio para mantener altura uniforme con otras tarjetas */}
+                <div className="pt-2 border-top" style={{ minHeight: '44px' }}>
                 </div>
               </div>
             </div>
