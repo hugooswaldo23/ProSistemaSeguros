@@ -772,8 +772,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
-          console.log('🔍 Buscando cliente con:', { rfc, curp, nombre, apellidoPaterno, apellidoMaterno });
-          
           const response = await fetch(`${API_URL}/api/clientes`);
           if (!response.ok) {
             console.error('❌ Error al obtener clientes:', response.status);
@@ -781,42 +779,27 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           }
           
           const clientes = await response.json();
-          console.log(`📊 Total de clientes en BD: ${clientes.length}`);
           
           // 1. PRIORIDAD 1: Buscar por RFC (más confiable)
           if (rfc && rfc.trim() !== '') {
             const rfcBusqueda = rfc.trim().toUpperCase();
-            console.log(`🔍 Buscando por RFC: "${rfcBusqueda}"`);
-            
             const clientePorRFC = clientes.find(c => {
               const rfcCliente = (c.rfc || '').trim().toUpperCase();
               return rfcCliente === rfcBusqueda;
             });
             
-            if (clientePorRFC) {
-              console.log('✅ Cliente encontrado por RFC:', clientePorRFC.id, clientePorRFC.nombre);
-              return clientePorRFC;
-            } else {
-              console.log('⚠️ No se encontró cliente con RFC:', rfcBusqueda);
-            }
+            if (clientePorRFC) return clientePorRFC;
           }
           
           // 2. PRIORIDAD 2: Buscar por CURP (si no hay RFC)
           if (curp && curp.trim() !== '') {
             const curpBusqueda = curp.trim().toUpperCase();
-            console.log(`🔍 Buscando por CURP: "${curpBusqueda}"`);
-            
             const clientePorCURP = clientes.find(c => {
               const curpCliente = (c.curp || '').trim().toUpperCase();
               return curpCliente === curpBusqueda;
             });
             
-            if (clientePorCURP) {
-              console.log('✅ Cliente encontrado por CURP:', clientePorCURP.id, clientePorCURP.nombre);
-              return clientePorCURP;
-            } else {
-              console.log('⚠️ No se encontró cliente con CURP:', curpBusqueda);
-            }
+            if (clientePorCURP) return clientePorCURP;
           }
           
           // 3. PRIORIDAD 3: Buscar por nombre completo (último recurso)
@@ -841,15 +824,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               return coincideNombre && coincidePaterno && coincideMaterno;
             });
             
-            if (clientePorNombre) {
-              console.log('✅ Cliente encontrado por nombre:', clientePorNombre.id, clientePorNombre.nombre);
-              return clientePorNombre;
-            } else {
-              console.log('⚠️ No se encontró cliente con ese nombre');
-            }
+            if (clientePorNombre) return clientePorNombre;
           }
           
-          console.log('❌ Cliente NO encontrado con ningún criterio');
           return null;
         } catch (error) {
           console.error('❌ Error buscando cliente:', error);
@@ -858,8 +835,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       };
 
       // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
-      console.log('🎯 Iniciando proceso de extracción modular...');
-      
       let datosExtraidos = {};
       
       try {
@@ -867,20 +842,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const { loadExtractor } = await import('../lib/pdf/extractors/registry.js');
         
         const deteccion = detectarAseguradoraYProducto(textoPagina1);
-        console.log('🏢 Detección:', deteccion);
-        
         const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
         
         if (moduloExtractor && moduloExtractor.extraer) {
-          console.log(`✅ Extractor encontrado para ${deteccion.aseguradora} - ${deteccion.producto}`);
-          
-          console.log('📄 DEBUG antes de extraer:');
-          console.log('   - textoPagina1 length:', textoPagina1?.length);
-          console.log('   - textoAvisoDeCobro length:', textoAvisoDeCobro?.length);
-          console.log('   - textoPaginaCaratula length:', textoPaginaCaratula?.length);
-          console.log('   - textoCompleto length:', textoCompleto?.length);
-          console.log('   - Total páginas extraídas:', todasLasPaginas?.length);
-          
           datosExtraidos = await moduloExtractor.extraer({
             textoCompleto,
             textoPagina1,
@@ -888,8 +852,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             textoAvisoDeCobro,
             todasLasPaginas
           });
-          
-          console.log('📊 Datos extraídos:', datosExtraidos);
         } else {
           console.error('❌ No se encontró extractor para:', deteccion);
           setEstado('error');
@@ -990,7 +952,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               mensaje: 'El primer pago y los pagos subsecuentes son iguales; normalmente deben diferir (primer pago incluye gastos iniciales).',
               detalle: { primer, subsecuentes }
             });
-            console.warn('⚠️ Validación pagos: primer pago y subsecuentes son iguales.', { primer, subsecuentes });
           }
         }
 
@@ -1017,9 +978,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 tolerancia
               }
             });
-            console.warn('⚠️ Validación pagos: total no coincide con suma de fraccionados.', validacion_pagos);
-          } else {
-            console.log('✅ Validación pagos: total consistente con fraccionados.', validacion_pagos);
           }
         }
 
@@ -7778,121 +7736,6 @@ const estadoInicialFormulario = {
                 
                 // ✅ La verificación de vigencia ya se ejecutó ANTES de registrar el log
                 // (Ver líneas arriba, se ejecuta antes de generar el log para obtener etapa_activa FINAL)
-                
-                // ⚠️ DEPRECADO: Lógica antigua comentada, ahora usamos verificarYRegistrarEstadoVigencia
-                /*
-                // Detectar si la póliza cambió a VENCIDA
-                const terminoAnterior = expedienteAnterior.termino_vigencia ? new Date(expedienteAnterior.termino_vigencia) : null;
-                const terminoNuevo = formularioParaGuardar.termino_vigencia ? new Date(formularioParaGuardar.termino_vigencia) : null;
-                const inicioNuevo = formularioParaGuardar.inicio_vigencia ? new Date(formularioParaGuardar.inicio_vigencia) : null;
-                // ⚠️ DEPRECADO: Lógica antigua comentada, ahora usamos verificarYRegistrarEstadoVigencia
-                /*
-                // Detectar si la póliza cambió a VENCIDA
-                const terminoAnterior = expedienteAnterior.termino_vigencia ? new Date(expedienteAnterior.termino_vigencia) : null;
-                const terminoNuevo = formularioParaGuardar.termino_vigencia ? new Date(formularioParaGuardar.termino_vigencia) : null;
-                const inicioNuevo = formularioParaGuardar.inicio_vigencia ? new Date(formularioParaGuardar.inicio_vigencia) : null;
-                
-                if (terminoAnterior && terminoNuevo) {
-                  terminoAnterior.setHours(0, 0, 0, 0);
-                  terminoNuevo.setHours(0, 0, 0, 0);
-                  if (inicioNuevo) inicioNuevo.setHours(0, 0, 0, 0);
-                  
-                  const estabaVigente = terminoAnterior >= hoy;
-                  const ahoraVencida = terminoNuevo < hoy;
-                  const ahoraVigente = inicioNuevo && inicioNuevo <= hoy && terminoNuevo >= hoy;
-                  
-                  if (estabaVigente && ahoraVencida) {
-                    // La póliza acaba de vencer por la edición de fecha
-                    await historialService.registrarEvento({
-                      expediente_id: expedienteId,
-                      cliente_id: formularioParaGuardar.cliente_id,
-                      tipo_evento: historialService.TIPOS_EVENTO.POLIZA_VENCIDA,
-                      usuario_nombre: 'Sistema',
-                      descripcion: `Póliza vencida - Término de vigencia: ${formularioParaGuardar.termino_vigencia}`,
-                      datos_adicionales: {
-                        numero_poliza: formularioParaGuardar.numero_poliza,
-                        termino_vigencia: formularioParaGuardar.termino_vigencia,
-                        motivo: 'Detectado al editar fechas'
-                      }
-                    });
-                    console.log('✅ Evento "Póliza Vencida" registrado');
-                  }
-                  
-                  // ✅ NUEVO: Detectar si la póliza está en VIGENCIA (sin estar próxima a vencer)
-                  if (ahoraVigente) {
-                    const fechaAvisoNueva = formularioParaGuardar.fecha_aviso_renovacion ? new Date(formularioParaGuardar.fecha_aviso_renovacion) : null;
-                    if (fechaAvisoNueva) fechaAvisoNueva.setHours(0, 0, 0, 0);
-                    
-                    const noEstaPorRenovar = !fechaAvisoNueva || fechaAvisoNueva > hoy;
-                    
-                    // Verificar si ya existe evento de vigencia
-                    const yaRegistradoVigencia = (data?.historial || []).some(h => 
-                      h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA
-                    );
-                    
-                    if (noEstaPorRenovar && !yaRegistradoVigencia) {
-                      await historialService.registrarEvento({
-                        expediente_id: expedienteId,
-                        cliente_id: formularioParaGuardar.cliente_id,
-                        tipo_evento: historialService.TIPOS_EVENTO.POLIZA_EN_VIGENCIA,
-                        usuario_nombre: 'Sistema',
-                        descripcion: `Póliza en vigencia desde ${formularioParaGuardar.inicio_vigencia} hasta ${formularioParaGuardar.termino_vigencia}`,
-                        datos_adicionales: {
-                          numero_poliza: formularioParaGuardar.numero_poliza,
-                          inicio_vigencia: formularioParaGuardar.inicio_vigencia,
-                          termino_vigencia: formularioParaGuardar.termino_vigencia,
-                          motivo: 'Detectado al guardar cambios'
-                        }
-                      });
-                      console.log('✅ Evento "Póliza en Vigencia" registrado');
-                    }
-                  }
-                }
-                
-                // Detectar si la póliza entró en período de RENOVACIÓN (30 días antes)
-                const fechaAvisoAnterior = expedienteAnterior.fecha_aviso_renovacion ? new Date(expedienteAnterior.fecha_aviso_renovacion) : null;
-                const fechaAvisoNueva = formularioParaGuardar.fecha_aviso_renovacion ? new Date(formularioParaGuardar.fecha_aviso_renovacion) : null;
-                
-                if (fechaAvisoNueva && terminoNuevo) {
-                  fechaAvisoNueva.setHours(0, 0, 0, 0);
-                  
-                  // Verificar si la póliza está en período de renovación
-                  const estaPorRenovar = fechaAvisoNueva <= hoy && terminoNuevo >= hoy;
-                  
-                  // Detectar si cambió la fecha de aviso o término de vigencia
-                  const cambioFechaAviso = fechaAvisoAnterior && fechaAvisoAnterior.getTime() !== fechaAvisoNueva.getTime();
-                  const cambioTermino = terminoAnterior && terminoAnterior.getTime() !== terminoNuevo.getTime();
-                  
-                  // ✅ MEJORADO: Verificar si ya existe un evento de "Próxima a Vencer" para evitar duplicados
-                  const yaRegistrado = (data?.historial || []).some(h => 
-                    h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER
-                  );
-                  
-                  // Registrar evento si:
-                  // 1. La póliza AHORA está por renovar (fecha_aviso <= hoy < termino_vigencia)
-                  // 2. Y (hubo cambio en fechas O es la primera vez que se detecta)
-                  if (estaPorRenovar && !yaRegistrado) {
-                    const diasParaVencer = Math.ceil((terminoNuevo - hoy) / (1000 * 60 * 60 * 24));
-                    await historialService.registrarEvento({
-                      expediente_id: expedienteId,
-                      cliente_id: formularioParaGuardar.cliente_id,
-                      tipo_evento: historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER,
-                      usuario_nombre: 'Sistema',
-                      descripcion: `Póliza próxima a vencer en ${diasParaVencer} días - Iniciar renovación (30 días antes del vencimiento del ${formularioParaGuardar.termino_vigencia})`,
-                      datos_adicionales: {
-                        numero_poliza: formularioParaGuardar.numero_poliza,
-                        fecha_aviso_renovacion: formularioParaGuardar.fecha_aviso_renovacion,
-                        termino_vigencia: formularioParaGuardar.termino_vigencia,
-                        dias_para_vencer: diasParaVencer,
-                        motivo: cambioFechaAviso || cambioTermino ? 'Detectado al editar fechas' : 'Detectado al guardar cambios'
-                      }
-                    });
-                    console.log('✅ Evento "Póliza Próxima a Vencer" registrado');
-                  } else if (estaPorRenovar && yaRegistrado) {
-                    console.log('ℹ️ Póliza está por renovar pero evento ya fue registrado previamente');
-                  }
-                }
-                */
               }
             } else {
               console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');

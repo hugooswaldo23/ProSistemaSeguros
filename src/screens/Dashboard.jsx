@@ -276,11 +276,6 @@ const DashboardComponent = () => {
   // Estadísticas Financieras - Calculadas por RANGOS DE FECHAS (MES ACTUAL + MES ANTERIOR)
   // Estrategia simplificada: Cada tarjeta usa SU PROPIA fecha de referencia
   const estadisticasFinancieras = useMemo(() => {
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('📊 DASHBOARD FINANCIERO - CÁLCULO POR RANGOS DE FECHAS');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('📈 Total expedientes en BD:', expedientes.length);
-    
     // ==================== CALCULAR RANGOS DE FECHAS ====================
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
@@ -292,12 +287,6 @@ const DashboardComponent = () => {
     // Mes anterior: del 1 al último día del mes anterior
     const inicioMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
     const finMesAnterior = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59);
-    
-    console.log('');
-    console.log('📅 RANGOS DE FECHAS DEFINIDOS:');
-    console.log(`  • Mes Actual:   ${inicioMesActual.toLocaleDateString('es-MX')} → ${finMesActual.toLocaleDateString('es-MX')}`);
-    console.log(`  • Mes Anterior: ${inicioMesAnterior.toLocaleDateString('es-MX')} → ${finMesAnterior.toLocaleDateString('es-MX')}`);
-    console.log(`  • Hoy:          ${hoy.toLocaleDateString('es-MX')}`);
     
     // Helper: Verificar si una fecha está en un rango
     const estaEnRango = (fecha, inicio, fin) => {
@@ -319,39 +308,7 @@ const DashboardComponent = () => {
       return f >= inicio && f <= fin;
     };
     
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📋 RESUMEN DE DATOS EN BD');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('Total expedientes en BD:', expedientes.length);
-    console.log('');
-    
-    // Mostrar resumen de campos clave
-    console.log('🔍 CAMPOS CLAVE POR PÓLIZA:');
-    expedientes.forEach((p, index) => {
-      console.log(`\nPóliza ${index + 1}: ${p.numero_poliza || 'Sin número'}`);
-      console.log(`  • ID: ${p.id}`);
-      console.log(`  • Etapa Activa: ${p.etapa_activa || 'Sin etapa'}`);
-      console.log(`  • Estatus Pago: ${p.estatus_pago || p.estatusPago || 'Sin estatus'}`);
-      console.log(`  • Fecha Emisión: ${p.fecha_emision || 'Sin fecha'}`);
-      console.log(`  • Fecha Pago: ${p.fecha_pago || 'Sin fecha'}`);
-      console.log(`  • Fecha Vencimiento Pago: ${p.fecha_vencimiento_pago || 'Sin fecha'}`);
-      console.log(`  • Prima Pagada: ${p.prima_pagada || 0}`);
-      console.log(`  • Total: ${p.total || 0}`);
-      console.log(`  • Monto Calculado: ${resolverMonto(p)}`);
-      console.log(`  • Tipo Movimiento: ${p.tipo_movimiento || 'Sin tipo'}`);
-      console.log(`  • Producto: ${p.producto || 'Sin producto'}`);
-    });
-    
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('💰 TARJETA 1: PRIMAS EMITIDAS');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Campo fecha: fecha_emision');
-    console.log('📌 Rango: Mes actual + mes anterior');
-    console.log('📌 Filtro: NINGUNO - Emitido es emitido (incluye canceladas)');
-    console.log('');
-    
+    // ==================== TARJETA 1: PRIMAS EMITIDAS ====================
     // Filtrar SOLO por fecha_emision en rango de 2 meses (sin más filtros)
     const emitidasMesActual = expedientes.filter(p => 
       estaEnRango(p.fecha_emision, inicioMesActual, finMesActual)
@@ -364,23 +321,6 @@ const DashboardComponent = () => {
     const primasEmitidasMesActual = emitidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasEmitidasMesAnterior = emitidasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
-    
-    console.log(`✅ Mes Actual: ${emitidasMesActual.length} pólizas → $${primasEmitidasMesActual.toLocaleString('es-MX')}`);
-    emitidasMesActual.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_emision} | $${resolverMonto(p).toLocaleString()}`));
-    
-    console.log(`✅ Mes Anterior: ${emitidasMesAnterior.length} pólizas → $${primasEmitidasMesAnterior.toLocaleString('es-MX')}`);
-    emitidasMesAnterior.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_emision} | $${resolverMonto(p).toLocaleString()}`));
-    
-    console.log(`📊 TOTAL TARJETA: ${emitidasMesActual.length + emitidasMesAnterior.length} pólizas → $${primasEmitidasTotal.toLocaleString('es-MX')}`);
-
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('💳 TARJETA 2: PRIMAS PAGADAS');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Campo fecha: fecha_pago');
-    console.log('📌 Rango: Mes actual + mes anterior');
-    console.log('📌 Filtro adicional: estatus_pago = Pagado/Pagada');
-    console.log('');
 
     // Filtrar por fecha_pago en rango de 2 meses Y estatus = Pagado
     const pagadasMesActual = expedientes.filter(p => {
@@ -398,21 +338,6 @@ const DashboardComponent = () => {
     const primasPagadasMesActual = pagadasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasPagadasMesAnterior = pagadasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasPagadasTotal = primasPagadasMesActual + primasPagadasMesAnterior;
-    
-    console.log(`✅ Mes Actual: ${pagadasMesActual.length} pólizas → $${primasPagadasMesActual.toLocaleString('es-MX')}`);
-    pagadasMesActual.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_pago || 'SIN FECHA'} | Estatus: ${p.estatus_pago} | $${resolverMonto(p).toLocaleString()}`));
-    
-    console.log(`✅ Mes Anterior: ${pagadasMesAnterior.length} pólizas → $${primasPagadasMesAnterior.toLocaleString('es-MX')}`);
-    pagadasMesAnterior.forEach(p => console.log(`    ${p.numero_poliza} | ${p.fecha_pago || 'SIN FECHA'} | Estatus: ${p.estatus_pago} | $${resolverMonto(p).toLocaleString()}`));
-    
-    console.log(`📊 TOTAL TARJETA: ${pagadasMesActual.length + pagadasMesAnterior.length} pólizas → $${primasPagadasTotal.toLocaleString('es-MX')}`);
-
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('⏰ TARJETA 3: PRIMAS POR VENCER');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Filtro: estatus_pago = "Por Vencer" (el sistema ya calculó esto basado en fecha)');
-    console.log('');
 
     // Filtrar: estatus_pago = "Por Vencer" (sin filtros adicionales de fecha)
     const polizasPorVencer = expedientes.filter(p => {
@@ -426,23 +351,6 @@ const DashboardComponent = () => {
     });
     
     const primasPorVencer = polizasPorVencer.reduce((sum, p) => sum + resolverMonto(p), 0);
-    
-    console.log(`✅ Total: ${polizasPorVencer.length} pólizas → $${primasPorVencer.toLocaleString('es-MX')}`);
-    polizasPorVencer.forEach(p => {
-      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-      const diasRestantes = Math.ceil((new Date(ref) - hoy) / (1000 * 60 * 60 * 24));
-      console.log(`    ${p.numero_poliza} | Vence: ${ref} (en ${diasRestantes} días) | $${resolverMonto(p).toLocaleString()}`);
-    });
-    
-    console.log(`📊 TOTAL TARJETA: ${polizasPorVencer.length} pólizas → $${primasPorVencer.toLocaleString('es-MX')}`);
-
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('🚨 TARJETA 4: PRIMAS VENCIDAS');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Filtro: estatus_pago = "Vencido" (NO pagada, NO cancelada)');
-    console.log('📌 División: Mes Actual + Anteriores (acumulado histórico)');
-    console.log('');
 
     // Filtrar: estatus_pago = "Vencido" (excluir pagadas y canceladas)
     const polizasVencidasTodas = expedientes.filter(p => {
@@ -471,44 +379,6 @@ const DashboardComponent = () => {
     const primasVencidasMesActual = vencidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasVencidasAnteriores = vencidasAnteriores.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
-    
-    console.log(`✅ Mes Actual: ${vencidasMesActual.length} pólizas → $${primasVencidasMesActual.toLocaleString('es-MX')}`);
-    vencidasMesActual.forEach(p => {
-      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-      const fechaVenc = new Date(ref);
-      fechaVenc.setHours(0, 0, 0, 0);
-      const diasVencido = Math.ceil((hoy - fechaVenc) / (1000 * 60 * 60 * 24));
-      console.log(`    ${p.numero_poliza} | Vencida: ${ref} | Hace ${diasVencido} días | $${resolverMonto(p).toLocaleString()}`);
-    });
-    
-    console.log(`✅ Meses Anteriores: ${vencidasAnteriores.length} pólizas → $${primasVencidasAnteriores.toLocaleString('es-MX')}`);
-    vencidasAnteriores.slice(0, 5).forEach(p => { // Mostrar solo primeras 5
-      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-      const fechaVenc = new Date(ref);
-      fechaVenc.setHours(0, 0, 0, 0);
-      const diasVencido = Math.ceil((hoy - fechaVenc) / (1000 * 60 * 60 * 24));
-      console.log(`    ${p.numero_poliza} | Vencida: ${ref} | Hace ${diasVencido} días | $${resolverMonto(p).toLocaleString()}`);
-    });
-    if (vencidasAnteriores.length > 5) console.log(`    ... y ${vencidasAnteriores.length - 5} más`);
-    
-    console.log(`📊 TOTAL TARJETA: ${polizasVencidasTodas.length} pólizas → $${primasVencidasTotal.toLocaleString('es-MX')}`);
-
-    console.log('');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('❌ TARJETA 5: PRIMAS CANCELADAS');
-    console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Criterio: etapa_activa = "Cancelada" (por fecha_cancelacion)');
-    console.log('📌 Rango mes actual:', inicioMesActual.toLocaleDateString('es-MX'), 'a', finMesActual.toLocaleDateString('es-MX'));
-    console.log('📌 Rango mes anterior:', inicioMesAnterior.toLocaleDateString('es-MX'), 'a', finMesAnterior.toLocaleDateString('es-MX'));
-    console.log('');
-
-    // 🔍 DEBUG: Primero ver TODAS las canceladas sin filtro
-    const todasLasCanceladas = expedientes.filter(p => p.etapa_activa === 'Cancelada');
-    console.log(`🔍 DEBUG - Total pólizas con etapa_activa='Cancelada': ${todasLasCanceladas.length}`);
-    todasLasCanceladas.forEach(p => {
-      console.log(`    ${p.numero_poliza} | Etapa: ${p.etapa_activa} | fecha_cancelacion: ${p.fecha_cancelacion || 'SIN FECHA'} | $${resolverMonto(p).toLocaleString()}`);
-    });
-    console.log('');
 
     // Filtrar canceladas del mes actual
     // ⚠️ IMPORTANTE: Si no tienen fecha_cancelacion, asumimos que se cancelaron HOY (mes actual)
@@ -532,20 +402,6 @@ const DashboardComponent = () => {
     const primasCanceladasMesActual = canceladasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasCanceladasMesAnterior = canceladasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
     const primasCanceladasTotal = primasCanceladasMesActual + primasCanceladasMesAnterior;
-    
-    console.log(`📊 Mes actual: ${canceladasMesActual.length} pólizas → $${primasCanceladasMesActual.toLocaleString('es-MX')}`);
-    canceladasMesActual.slice(0, 5).forEach(p => {
-      console.log(`    ${p.numero_poliza} | Cancelada: ${p.fecha_cancelacion} | $${resolverMonto(p).toLocaleString()}`);
-    });
-    if (canceladasMesActual.length > 5) console.log(`    ... y ${canceladasMesActual.length - 5} más`);
-    
-    console.log(`📊 Mes anterior: ${canceladasMesAnterior.length} pólizas → $${primasCanceladasMesAnterior.toLocaleString('es-MX')}`);
-    canceladasMesAnterior.slice(0, 5).forEach(p => {
-      console.log(`    ${p.numero_poliza} | Cancelada: ${p.fecha_cancelacion} | $${resolverMonto(p).toLocaleString()}`);
-    });
-    if (canceladasMesAnterior.length > 5) console.log(`    ... y ${canceladasMesAnterior.length - 5} más`);
-    
-    console.log(`📊 TOTAL TARJETA: ${canceladasMesActual.length + canceladasMesAnterior.length} pólizas → $${primasCanceladasTotal.toLocaleString('es-MX')}`);
 
     
     // ==================== CONSTRUIR OBJETO DE ESTADÍSTICAS ====================
@@ -603,22 +459,6 @@ const DashboardComponent = () => {
         }
       }
     };
-    
-    console.log('');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('📋 RESUMEN FINAL - PANEL FINANCIERO');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('');
-    console.log('💰 TARJETAS DEL DASHBOARD (Cálculo por rangos de fechas):');
-    console.log(`  1️⃣ Emitidas:    ${stats.primasEmitidas.cantidad} pólizas → $${stats.primasEmitidas.monto.toLocaleString('es-MX')}`);
-    console.log(`  2️⃣ Pagadas:     ${stats.primasPagadas.cantidad} pólizas → $${stats.primasPagadas.monto.toLocaleString('es-MX')}`);
-    console.log(`  3️⃣ Por Vencer:  ${stats.primasPorVencer.cantidad} pólizas → $${stats.primasPorVencer.monto.toLocaleString('es-MX')}`);
-    console.log(`  4️⃣ Vencidas:    ${stats.primasVencidas.cantidad} pólizas → $${stats.primasVencidas.monto.toLocaleString('es-MX')}`);
-    console.log(`  5️⃣ Canceladas:  ${stats.primasCanceladas.cantidad} pólizas → $${stats.primasCanceladas.monto.toLocaleString('es-MX')}`);
-    console.log('');
-    console.log('✅ Estrategia: Filtros directos por rango de fechas (más simple y preciso)');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log('');
     
     return stats;
   }, [expedientes]);
