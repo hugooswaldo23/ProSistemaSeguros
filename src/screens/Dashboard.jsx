@@ -349,18 +349,16 @@ const DashboardComponent = () => {
     console.log('─────────────────────────────────────────────────────────────────');
     console.log('📌 Campo fecha: fecha_emision');
     console.log('📌 Rango: Mes actual + mes anterior');
-    console.log('📌 Filtro adicional: etapa_activa = Emitida/Renovada/Enviada al Cliente');
+    console.log('📌 Filtro: NINGUNO - Emitido es emitido (incluye canceladas)');
     console.log('');
     
-    // Filtrar por fecha_emision en rango de 2 meses
+    // Filtrar SOLO por fecha_emision en rango de 2 meses (sin más filtros)
     const emitidasMesActual = expedientes.filter(p => 
-      estaEnRango(p.fecha_emision, inicioMesActual, finMesActual) &&
-      ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(p.etapa_activa)
+      estaEnRango(p.fecha_emision, inicioMesActual, finMesActual)
     );
     
     const emitidasMesAnterior = expedientes.filter(p => 
-      estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior) &&
-      ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(p.etapa_activa)
+      estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior)
     );
     
     const primasEmitidasMesActual = emitidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
@@ -413,19 +411,18 @@ const DashboardComponent = () => {
     console.log('─────────────────────────────────────────────────────────────────');
     console.log('⏰ TARJETA 3: PRIMAS POR VENCER');
     console.log('─────────────────────────────────────────────────────────────────');
-    console.log('📌 Filtro: estatus_pago = "Por Vencer" Y fecha_vencimiento del mes actual');
+    console.log('📌 Filtro: estatus_pago = "Por Vencer" (el sistema ya calculó esto basado en fecha)');
     console.log('');
 
-    // Filtrar: estatus = "Por Vencer" Y fecha_vencimiento en mes actual
+    // Filtrar: estatus_pago = "Por Vencer" (sin filtros adicionales de fecha)
     const polizasPorVencer = expedientes.filter(p => {
+      // Excluir canceladas
+      if (p.etapa_activa === 'Cancelada') return false;
+      
       const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
-      if (estatus !== 'por vencer') return false;
       
-      const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-      if (!ref) return false;
-      
-      // Solo mes actual
-      return estaEnRango(ref, inicioMesActual, finMesActual);
+      // Solo las que tienen estatus "Por Vencer"
+      return estatus === 'por vencer';
     });
     
     const primasPorVencer = polizasPorVencer.reduce((sum, p) => sum + resolverMonto(p), 0);

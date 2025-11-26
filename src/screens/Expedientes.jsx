@@ -2963,8 +2963,10 @@ const ListaExpedientes = React.memo(({
                                 
                                 const etapaActual = expediente.etapa_activa || '';
                                 
-                                const puedeIniciarCotizacion = !etapaActual.includes('Cotización') && 
-                                                                !etapaActual.includes('Renovación') &&
+                                // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
+                                const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                                !etapaActual.includes('Cotización') && 
+                                                                !etapaActual.includes('Enviada') &&
                                                                 !etapaActual.includes('Pendiente de Emisión');
                                 
                                 const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
@@ -3010,16 +3012,14 @@ const ListaExpedientes = React.memo(({
                                 );
                               })()}
 
-                              {(expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') && (
-                                <button
-                                  onClick={() => abrirModalCompartir(expediente)}
-                                  className="btn btn-success btn-sm"
-                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Compartir"
-                                >
-                                  <Share2 size={12} />
-                                </button>
-                              )}
+                              <button
+                                onClick={() => abrirModalCompartir(expediente)}
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Compartir"
+                              >
+                                <Share2 size={12} />
+                              </button>
 
                               {(() => {
                                 // ✅ El botón de pago debe estar disponible independientemente de la etapa
@@ -4873,7 +4873,7 @@ const DetallesExpediente = React.memo(({
       <h3 className="mb-0">Detalles del Expediente</h3>
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
-         ['Emitida', 'Renovada', 'Enviada al Cliente'].includes(expedienteSeleccionado.etapa_activa) && 
+         ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida'].includes(expedienteSeleccionado.etapa_activa) && 
          ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
           <button
             onClick={() => {
@@ -4901,9 +4901,7 @@ const DetallesExpediente = React.memo(({
           </button>
         )}
 
-        {expedienteSeleccionado && 
-         (expedienteSeleccionado.etapa_activa === 'Emitida' || 
-          expedienteSeleccionado.etapa_activa === 'Enviada al Cliente') && (
+        {expedienteSeleccionado && (
           <button
             onClick={() => abrirModalCompartir(expedienteSeleccionado)}
             className="btn btn-success d-flex align-items-center"
@@ -5984,6 +5982,15 @@ const estadoInicialFormulario = {
       // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
       const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
       
+      // ✅ VALIDAR que el número tenga al menos 10 dígitos y solo contenga números
+      if (!/^\d{10,15}$/.test(telefonoLimpio)) {
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp.\n\nDebe contener entre 10 y 15 dígitos.\n\nPor favor, actualiza el teléfono del cliente.`);
+        console.error('❌ Número de teléfono inválido:', telefono, '→', telefonoLimpio);
+        return;
+      }
+      
+      console.log('✅ Número de teléfono válido:', telefonoLimpio);
+      
       // Obtener URL firmada del PDF si existe
       let pdfUrl = null;
       let pdfExpiracion = null;
@@ -6488,28 +6495,18 @@ const estadoInicialFormulario = {
       await recargarExpedientes();
       console.log('✅ Expedientes recargados desde BD');
       
-      // 🔄 Si estamos viendo el detalle, traer datos frescos directamente de la BD
-      if (vistaActual === 'detalle' && formulario?.id === expedienteParaPago.id) {
-        try {
-          const respuesta = await fetch(`${API_URL}/api/expedientes/${expedienteParaPago.id}`);
-          if (respuesta.ok) {
-            const datos = await respuesta.json();
-            const expedienteActualizado = datos.data || datos;
-            setFormulario({ ...expedienteActualizado });
-            console.log('✅ Detalle del expediente actualizado con datos frescos de BD');
-          }
-        } catch (error) {
-          console.warn('⚠️ No se pudo actualizar detalle:', error);
-        }
-      }
-
       toast.success('✅ Pago aplicado correctamente');
       
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
       
-      console.log('✅ Lista actualizada localmente de forma inmediata');
+      // 🔄 Refrescar página completa para mostrar cambios
+      setTimeout(() => {
+        window.location.reload();
+      }, 1000);
+      
+      console.log('✅ Pago aplicado - Refrescando página');
     } catch (error) {
       console.error('❌ Error al aplicar pago:', error);
       toast.error('Error al aplicar el pago: ' + error.message);
@@ -6786,29 +6783,7 @@ const estadoInicialFormulario = {
       
       // 1️⃣ VENCIDA (mayor prioridad)
       if (termino && termino < hoy) {
-        const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_VENCIDA);
-        
-        if (!yaRegistrado) {
-          const estatusPago = expediente.estatus_pago || expediente.estatusPago || 'No especificado';
-          await historialService.registrarEvento({
-            expediente_id: expediente.id,
-            cliente_id: expediente.cliente_id,
-            tipo_evento: historialService.TIPOS_EVENTO.POLIZA_VENCIDA,
-            usuario_nombre: 'Sistema',
-            descripcion: `Póliza vencida - Término de vigencia: ${expediente.termino_vigencia} (Estatus pago: ${estatusPago})`,
-            datos_adicionales: {
-              numero_poliza: expediente.numero_poliza,
-              compania: expediente.compania,
-              termino_vigencia: expediente.termino_vigencia,
-              estatus_pago: estatusPago
-            }
-          });
-          console.log('✅ Evento "Póliza Vencida" registrado');
-        } else {
-          console.log('ℹ️ Evento "Póliza Vencida" ya existe en historial');
-        }
-        
-        // ⭐ Actualizar etapa_activa a "Vencida"
+        // ⭐ Solo actualizar etapa_activa a "Vencida" (el evento se integra en log de edición)
         if (expediente.etapa_activa !== 'Vencida') {
           try {
             await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
@@ -6816,7 +6791,7 @@ const estadoInicialFormulario = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ etapa_activa: 'Vencida' })
             });
-            console.log('✅ Etapa actualizada a "Vencida"');
+            console.log('✅ Etapa actualizada a "Vencida" (el evento se integra en log de edición)');
           } catch (e) {
             console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
           }
@@ -6826,32 +6801,7 @@ const estadoInicialFormulario = {
       
       // 2️⃣ POR RENOVAR (30 días antes de vencer)
       if (fechaAviso && termino && fechaAviso <= hoy && termino >= hoy) {
-        const yaRegistrado = historial.some(h => h.tipo_evento === historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER);
-        
-        if (!yaRegistrado) {
-          const diasParaVencer = Math.ceil((termino - hoy) / (1000 * 60 * 60 * 24));
-          const estatusPago = expediente.estatus_pago || expediente.estatusPago || 'No especificado';
-          await historialService.registrarEvento({
-            expediente_id: expediente.id,
-            cliente_id: expediente.cliente_id,
-            tipo_evento: historialService.TIPOS_EVENTO.POLIZA_PROXIMA_VENCER,
-            usuario_nombre: 'Sistema',
-            descripcion: `Póliza próxima a vencer en ${diasParaVencer} días - Iniciar renovación (30 días antes del vencimiento del ${expediente.termino_vigencia}) (Estatus pago: ${estatusPago})`,
-            datos_adicionales: {
-              numero_poliza: expediente.numero_poliza,
-              compania: expediente.compania,
-              fecha_aviso_renovacion: expediente.fecha_aviso_renovacion,
-              termino_vigencia: expediente.termino_vigencia,
-              dias_para_vencer: diasParaVencer,
-              estatus_pago: estatusPago
-            }
-          });
-          console.log('✅ Evento "Póliza Próxima a Vencer" registrado');
-        } else {
-          console.log('ℹ️ Evento "Póliza Próxima a Vencer" ya existe en historial');
-        }
-        
-        // ⭐ Actualizar etapa_activa a "Por Renovar"
+        // ⭐ Solo actualizar etapa_activa a "Por Renovar" (el evento se integra en log de edición)
         if (expediente.etapa_activa !== 'Por Renovar') {
           try {
             await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
@@ -6859,7 +6809,7 @@ const estadoInicialFormulario = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ etapa_activa: 'Por Renovar' })
             });
-            console.log('✅ Etapa actualizada a "Por Renovar"');
+            console.log('✅ Etapa actualizada a "Por Renovar" (el evento se integra en log de edición)');
           } catch (e) {
             console.warn('⚠️ No se pudo actualizar etapa_activa:', e);
           }
@@ -7426,6 +7376,13 @@ const estadoInicialFormulario = {
             // Ignorar todo lo que pasó en el formulario (auto-fills, cálculos, etc.)
             const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
             
+            // 🔍 Obtener datos actuales del cliente desde la tabla de clientes
+            let clienteActual = null;
+            if (formularioParaGuardar.cliente_id && clientesMap[formularioParaGuardar.cliente_id]) {
+              clienteActual = clientesMap[formularioParaGuardar.cliente_id];
+              console.log('🔍 [COMPARACIÓN] Cliente actual desde BD:', clienteActual);
+            }
+            
             // Detectar cambios REALES comparando BD vs payload que se guardará
             const camposModificados = [];
             
@@ -7499,22 +7456,52 @@ const estadoInicialFormulario = {
               
               // Comparar campos simples
               camposAComparar.forEach(({ key, label, formatter, esFecha }) => {
-                // ⚠️ EXCLUIR campos que se calculan automáticamente
+                // ⚠️ EXCLUIR campos que se calculan automáticamente O están en solo lectura
                 const camposExcluidos = [
                   'agente', 
                   'tipo_pago', 
                   'fecha_vencimiento_pago', 
                   'proximoPago',
                   'estatusPago', // Se maneja por separado
-                  'estatus_pago' // Se maneja por separado
+                  'estatus_pago', // Se maneja por separado
+                  // 🔒 EXCLUIR campos del cliente en SOLO LECTURA (nunca se pueden editar desde el formulario)
+                  'nombre',
+                  'apellido_paterno',
+                  'apellido_materno',
+                  'rfc'
                 ];
                 if (camposExcluidos.includes(key)) return;
                 
-                // Normalizar valores (usar flag esFecha para fechas)
-                // USAR formularioParaGuardar en lugar de expedientePayload porque este último
-                // tiene campos eliminados (contacto_*, etc.)
-                const valorAnterior = normalizar(expedienteEnBD[key], esFecha);
-                const valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
+                // 🔍 CAMPOS EDITABLES DEL CLIENTE: email, teléfonos
+                // Comparar contra tabla de clientes para detectar cambios reales
+                const camposClienteEditables = ['email', 'telefono_fijo', 'telefono_movil'];
+                
+                // Campos del contacto adicional/gestor (siempre editables)
+                const camposContacto = [
+                  'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
+                  'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
+                ];
+                
+                let valorAnterior, valorNuevo;
+                
+                if (camposClienteEditables.includes(key) || camposContacto.includes(key)) {
+                  // Comparar contra datos actuales del cliente en la BD
+                  if (!clienteActual) return; // No podemos comparar sin datos del cliente
+                  
+                  // Mapear nombres de campos del expediente a nombres en tabla clientes
+                  const mapeoCliente = {
+                    'telefono_fijo': 'telefonoFijo',
+                    'telefono_movil': 'telefonoMovil'
+                  };
+                  const keyCliente = mapeoCliente[key] || key;
+                  
+                  valorAnterior = normalizar(clienteActual[keyCliente], esFecha);
+                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
+                } else {
+                  // Comparar campos de póliza normalmente (contra expediente anterior)
+                  valorAnterior = normalizar(expedienteEnBD[key], esFecha);
+                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
+                }
                 
                 // Solo registrar cambios REALES (ignorar cambios entre valores vacíos: null, undefined, '')
                 if (valorAnterior !== valorNuevo) {
@@ -7601,19 +7588,58 @@ const estadoInicialFormulario = {
             
             // Registrar evento consolidado si hubo cambios O si hubo cambio de pago manual
             if (camposModificados.length > 0 || cambioEstatusPago) {
-              // Verificar si cambió la etapa (comparar BD vs formulario que se va a guardar)
-              const cambioEtapa = expedienteEnBD && expedienteEnBD.etapa_activa !== formularioParaGuardar.etapa_activa;
-              const etapaFinal = etapaAfectadaPorPago || formularioParaGuardar.etapa_activa;
+              // 🔍 PRIMERO: Ejecutar verificación de vigencia para obtener la etapa FINAL
+              let etapaFinalReal = formularioParaGuardar.etapa_activa;
               
-              // Construir descripción consolidada con destacado de pago si aplica
+              if (!cambioEstatusPago || (!cambioEstatusPago.pagoAplicado && !cambioEstatusPago.pagoRemovido)) {
+                try {
+                  const expedienteActualizado = {
+                    ...formularioParaGuardar,
+                    estatus_pago: formulario.estatusPago || formulario.estatus_pago,
+                    estatusPago: formulario.estatusPago || formulario.estatus_pago
+                  };
+                  await verificarYRegistrarEstadoVigencia(expedienteActualizado, data?.historial);
+                  
+                  // Recargar el expediente para obtener la etapa_activa REAL después de la verificación
+                  const respuestaFresh = await fetch(`${API_URL}/api/expedientes/${expedienteId}`);
+                  if (respuestaFresh.ok) {
+                    const datosFresh = await respuestaFresh.json();
+                    const expFresh = datosFresh.data || datosFresh;
+                    etapaFinalReal = expFresh.etapa_activa;
+                    console.log('✅ Etapa final obtenida después de verificación:', etapaFinalReal);
+                  }
+                } catch (errorVigencia) {
+                  console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
+                }
+              }
+              
+              // Verificar si cambió la etapa (comparar BD vs etapa FINAL REAL)
+              const cambioEtapa = expedienteEnBD && expedienteEnBD.etapa_activa !== etapaFinalReal;
+              const etapaFinal = etapaAfectadaPorPago || etapaFinalReal;
+              
+              // 🔍 Detectar si el cambio de etapa fue automático por vigencia
+              const cambioAutomaticoPorVigencia = cambioEtapa && !etapaAfectadaPorPago && 
+                (etapaFinalReal === 'Por Renovar' || etapaFinalReal === 'Vencida');
+              
+              // Construir descripción consolidada con destacado de pago/vigencia si aplica
               let descripcion = '';
               
-              // 🎯 DESTACAR cambio de pago al inicio si existe
+              // 🎯 DESTACAR cambios automáticos importantes al inicio
               if (cambioEstatusPago) {
                 if (cambioEstatusPago.pagoAplicado) {
                   descripcion = '🟢 PAGO APLICADO MANUALMENTE';
                 } else if (cambioEstatusPago.pagoRemovido) {
                   descripcion = '⚠️ PAGO REMOVIDO';
+                  // Si además cambió a vencida automáticamente, agregar ese badge también
+                  if (cambioAutomaticoPorVigencia && etapaFinalReal === 'Vencida') {
+                    descripcion += '\n🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
+                  }
+                }
+              } else if (cambioAutomaticoPorVigencia) {
+                if (etapaFinalReal === 'Por Renovar') {
+                  descripcion = '⏰ PÓLIZA PRÓXIMA A VENCER\n(Automático: 30 días antes del vencimiento)';
+                } else if (etapaFinalReal === 'Vencida') {
+                  descripcion = '🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
                 }
               }
               
@@ -7623,16 +7649,27 @@ const estadoInicialFormulario = {
                 descripcion += `Póliza editada - ${camposModificados.length} campo(s) modificado(s)\n\nCampos modificados:\n${camposModificados.join('\n')}`;
               }
               
-              // Agregar info de etapa/carpeta: SIEMPRE cuando hay cambio de pago manual, o cuando cambió de carpeta
+              // 📂 SIEMPRE agregar información de carpeta y estatus de pago
+              if (descripcion) descripcion += '\n\n';
+              
+              // Mostrar movimiento de carpeta o carpeta actual
               if (cambioEtapa || etapaAfectadaPorPago) {
                 // Hubo movimiento de carpeta
-                if (descripcion) descripcion += '\n\n';
                 descripcion += `📂 Póliza movida a: ${etapaFinal}`;
-              } else if (cambioEstatusPago) {
-                // No hubo movimiento pero sí cambio de pago - mostrar carpeta actual
-                if (descripcion) descripcion += '\n\n';
+              } else {
+                // No hubo movimiento - mostrar carpeta actual
                 descripcion += `📂 Carpeta actual: ${formularioParaGuardar.etapa_activa}`;
               }
+              
+              // 💳 SIEMPRE agregar estatus de pago FINAL (después de todos los cambios)
+              // Usar el estatus que se guardó en la BD, no el del formulario original
+              let estatusPagoFinal;
+              if (cambioEstatusPago) {
+                estatusPagoFinal = cambioEstatusPago.nuevo; // Usar el nuevo estatus después del cambio
+              } else {
+                estatusPagoFinal = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Sin estatus';
+              }
+              descripcion += `\n💳 Estatus de pago: ${estatusPagoFinal}`;
               
               // Registrar los cambios de datos (consolidado)
               await historialService.registrarEvento({
@@ -7739,21 +7776,8 @@ const estadoInicialFormulario = {
                 //   (Recomendado: actualizar existente y mantener historial en tabla de eventos)
                 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                 
-                // 🔍 VERIFICAR y registrar estado de vigencia usando función centralizada
-                // ⚠️ OMITIR si hubo cambio de pago manual (ya se registró en el log consolidado)
-                if (!cambioEstatusPago || (!cambioEstatusPago.pagoAplicado && !cambioEstatusPago.pagoRemovido)) {
-                  try {
-                    // ✅ CRÍTICO: Pasar el estado actualizado del estatus_pago desde 'formulario' (no formularioParaGuardar)
-                    const expedienteActualizado = {
-                      ...formularioParaGuardar,
-                      estatus_pago: formulario.estatusPago || formulario.estatus_pago,
-                      estatusPago: formulario.estatusPago || formulario.estatus_pago
-                    };
-                    await verificarYRegistrarEstadoVigencia(expedienteActualizado, data?.historial);
-                  } catch (errorVigencia) {
-                    console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
-                  }
-                }
+                // ✅ La verificación de vigencia ya se ejecutó ANTES de registrar el log
+                // (Ver líneas arriba, se ejecuta antes de generar el log para obtener etapa_activa FINAL)
                 
                 // ⚠️ DEPRECADO: Lógica antigua comentada, ahora usamos verificarYRegistrarEstadoVigencia
                 /*
