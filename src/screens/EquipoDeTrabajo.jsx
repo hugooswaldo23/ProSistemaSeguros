@@ -104,7 +104,9 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
           {productosAseguradoras.map((item, index) => {
             const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
             const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
-            
+            console.log('DEBUG item.aseguradoraId:', item.aseguradoraId);
+            console.log('DEBUG aseguradora encontrada:', aseguradora);
+            console.log('DEBUG aseguradoras disponibles:', aseguradoras.map(a => ({id: a.id, nombre: a.nombre})));
             return (
               <tr key={index}>
                   <td>
@@ -827,12 +829,16 @@ const SistemaGestionPersonal = () => {
 
         // Mapear asignaciones al formato productoAseguradora esperado
         const productosMapeados = asigns.map(a => {
-          // intentar deducir aseguradoraId a partir de aseguradoras.productos_disponibles
-          let aseguradoraId = null;
-          for (const as of aseguradoras) {
-            const lista = as.productos_disponibles || [];
-            const ids = lista.map(it => (typeof it === 'object' ? (it.producto_id || it.productoId || it.id) : it));
-            if (ids.map(String).includes(String(a.productoId))) { aseguradoraId = as.id; break; }
+          // Usar el aseguradoraId que viene de la base de datos, no recalcular
+          let aseguradoraId = a.aseguradoraId;
+          
+          // Solo como fallback, si no viene aseguradoraId, intentar deducir a partir de productos_disponibles
+          if (!aseguradoraId) {
+            for (const as of aseguradoras) {
+              const lista = as.productos_disponibles || [];
+              const ids = lista.map(it => (typeof it === 'object' ? (it.producto_id || it.productoId || it.id) : it));
+              if (ids.map(String).includes(String(a.productoId))) { aseguradoraId = as.id; break; }
+            }
           }
 
           return {
