@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
-import { LogOut } from 'lucide-react';
+import { LogOut, Menu, X } from 'lucide-react';
 import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2 } from 'lucide-react';
 import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
-const Sidebar = ({ onLogout }) =>  {
+const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = false, onToggleColapsar }) =>  {
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -19,59 +19,109 @@ const Sidebar = ({ onLogout }) =>  {
         { key: '/configuracion', nombre: 'Configuración', icono: Settings, activo: true }
     ], []);
 
+    const getWidth = () => {
+        if (esMobile) return '280px';
+        return colapsado ? '80px' : '280px';
+    };
+
+    const getTransform = () => {
+        if (esMobile) {
+            return abierto ? 'translateX(0)' : 'translateX(-100%)';
+        }
+        return 'translateX(0)';
+    };
+
     return (
         <div 
-            className="d-flex flex-column bg-dark text-white" 
+            className="d-flex flex-column bg-dark text-white sidebar-wrapper" 
             style={{ 
-                width: '280px', 
-                minWidth: '280px',
-                maxWidth: '280px',
+                width: getWidth(),
+                minWidth: getWidth(),
+                maxWidth: getWidth(),
                 minHeight: '100vh',
-                flexShrink: 0
+                flexShrink: 0,
+                transition: 'all 0.3s ease',
+                transform: getTransform(),
+                position: esMobile ? 'fixed' : 'relative',
+                left: 0,
+                top: 0,
+                zIndex: 1000,
+                boxShadow: esMobile && abierto ? '2px 0 8px rgba(0,0,0,0.3)' : 'none'
             }}
         >
             <div className="py-3 px-4 border-bottom border-secondary">
-                <h5 className="mb-0 text-center">
-                    <Shield className="me-2" size={24} />
-                    Sistema Seguros
-                </h5>
+                {colapsado && !esMobile ? (
+                    <div className="text-center">
+                        <Shield size={24} />
+                    </div>
+                ) : (
+                    <h5 className="mb-0 text-center">
+                        <Shield className="me-2" size={24} />
+                        Sistema Seguros
+                    </h5>
+                )}
+                {!esMobile && (
+                    <button
+                        onClick={onToggleColapsar}
+                        className="btn btn-sm btn-outline-light position-absolute"
+                        style={{ 
+                            top: '10px', 
+                            right: '10px',
+                            zIndex: 1001,
+                            padding: '4px 8px'
+                        }}
+                        title={colapsado ? 'Expandir menú' : 'Colapsar menú'}
+                    >
+                        {colapsado ? <Menu size={16} /> : <X size={16} />}
+                    </button>
+                )}
             </div>
         
             <nav className="flex-grow-1 py-3">
                 {modulos.map(modulo => {
                     const IconoModulo = modulo.icono;
                     const isActive = location.pathname === modulo.key;
+                    const mostrarTexto = esMobile ? true : !colapsado;
                     return (
                         <button
                             key={modulo.key}
                             onClick={() => navigate(modulo.key)}
-                            className={`btn w-100 text-start text-white d-flex align-items-center px-4 py-2 border-0 ${
+                            className={`btn w-100 text-white d-flex align-items-center py-2 border-0 ${
                                 isActive ? 'bg-primary' : 'bg-transparent'
                             } ${!modulo.activo ? 'opacity-50' : ''}`}
-                            style={{ borderRadius: '0' }}
+                            style={{ 
+                                borderRadius: '0',
+                                justifyContent: (colapsado && !esMobile) ? 'center' : 'flex-start',
+                                paddingLeft: (colapsado && !esMobile) ? '0' : '1.5rem',
+                                paddingRight: (colapsado && !esMobile) ? '0' : '1.5rem'
+                            }}
                             disabled={!modulo.activo}
+                            title={(colapsado && !esMobile) ? modulo.nombre : ''}
                         >
-                            <IconoModulo size={18} className="me-3" />
-                            {modulo.nombre}
+                            <IconoModulo size={18} className={mostrarTexto ? 'me-3' : ''} />
+                            {mostrarTexto && modulo.nombre}
                         </button>
                     );
                 })}
             </nav>
         
             <div className="border-top border-secondary p-3">
-                <div className="d-flex align-items-center mb-3">
-                    <User size={20} className="me-2" />
-                    <div>
-                        <small className="d-block">Admin Usuario</small>
-                        <small className="text-muted">Promotoria</small>
+                {(esMobile || !colapsado) && (
+                    <div className="d-flex align-items-center mb-3">
+                        <User size={20} className="me-2" />
+                        <div>
+                            <small className="d-block">Admin Usuario</small>
+                            <small className="text-muted">Promotoria</small>
+                        </div>
                     </div>
-                </div>
+                )}
                 <button
                     className="btn btn-danger w-100 d-flex align-items-center justify-content-center"
                     onClick={onLogout}
+                    title={(colapsado && !esMobile) ? 'Cerrar sesión' : ''}
                 >
-                    <LogOut size={18} className="me-2" />
-                    Cerrar sesión
+                    <LogOut size={18} className={(colapsado && !esMobile) ? '' : 'me-2'} />
+                    {(esMobile || !colapsado) && 'Cerrar sesión'}
                 </button>
             </div>
         </div>

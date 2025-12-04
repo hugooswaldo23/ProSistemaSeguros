@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Debug Coberturas El Potosí</title>
+  <script src="https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.min.mjs" type="module"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    pre { background: #f5f5f5; padding: 15px; border: 1px solid #ccc; white-space: pre-wrap; }
+    .section { margin: 20px 0; border: 2px solid #007bff; padding: 15px; }
+    button { padding: 10px 20px; margin: 10px 0; background: #007bff; color: white; border: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h2>Debug Coberturas - El Potosí</h2>
+  <input type="file" id="fileInput" accept="application/pdf">
+  
+  <div id="output"></div>
+
+  <script type="module">
+    const pdfjsLib = await import('https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.min.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
+
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let textoCompleto = '';
+      
+      for (let numPagina = 1; numPagina <= pdf.numPages; numPagina++) {
+        const page = await pdf.getPage(numPagina);
+        const textContent = await page.getTextContent();
+        textoCompleto += textContent.items.map(item => item.str).join(' ') + '\n';
+      }
+      
+      // Buscar la sección de coberturas
+      const seccionMatch = textoCompleto.match(/CONDICIONES\s+DEL\s+ASEGURAMIENTO[\s\S]{0,3000}/i);
+      
+      const output = document.getElementById('output');
+      output.innerHTML = '<div class="section"><h3>🔍 Sección CONDICIONES DEL ASEGURAMIENTO</h3><pre>' + 
+        (seccionMatch ? seccionMatch[0] : 'NO ENCONTRADA') + 
+        '</pre></div>';
+      
+      // Buscar coberturas manualmente
+      if (seccionMatch) {
+        const texto = seccionMatch[0];
+        const lineas = texto.split('\n');
+        
+        output.innerHTML += '<div class="section"><h3>📋 Líneas encontradas:</h3>';
+        lineas.forEach((linea, i) => {
+          if (linea.trim().length > 5) {
+            output.innerHTML += `<div><strong>Línea ${i}:</strong> ${linea}</div>`;
+          }
+        });
+        output.innerHTML += '</div>';
+        
+        // Buscar palabras clave de coberturas
+        const palabrasClave = ['DAÑOS', 'RESPONSABILIDAD', 'ROBO', 'ASISTENCIA', 'CRISTALES', 'MÉDICOS'];
+        output.innerHTML += '<div class="section"><h3>🛡️ Coberturas potenciales:</h3>';
+        
+        palabrasClave.forEach(palabra => {
+          const regex = new RegExp(palabra + '[\\s\\S]{0,300}', 'gi');
+          const matches = texto.match(regex);
+          if (matches) {
+            matches.forEach(match => {
+              output.innerHTML += `<div style="margin: 10px 0; padding: 10px; background: #e7f3ff;"><strong>${palabra}:</strong><br><pre>${match}</pre></div>`;
+            });
+          }
+        });
+        output.innerHTML += '</div>';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -445,6 +445,7 @@ const DetalleExpediente = ({
                     {renderCampo('Modelo', datos?.modelo)}
                     {renderCampo('Año', datos?.anio)}
                     {renderCampo('Serie (VIN)', datos?.numero_serie, { strong: false, className: 'col-md-6' })}
+                    {renderCampo('Número de Motor', datos?.numero_motor, { strong: false, className: 'col-md-6' })}
                     {renderCampo('Capacidad', datos?.capacidad)}
                     {renderCampo('Motor', datos?.motor)}
                     {renderCampo('Placas', datos?.placas)}

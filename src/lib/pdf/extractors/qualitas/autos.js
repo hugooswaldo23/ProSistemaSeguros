@@ -166,10 +166,14 @@ export async function extraer(ctx) {
   const agenteMatch1 = textoPagina1.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ0-9\s.,&()\-]+?)(?=\s*Teléfono|\s*Canal|$)/im);
   const agenteMatch2 = textoQualitas.match(/Agente:\s*(\d+)\s+([A-ZÁÉÍÓÚÑ0-9\s.,&()\-]+?)(?=\s*Teléfono|\s*Canal|$)/im);
   
+  let clave_agente = '';
+  
   if (agenteMatch1) {
-    agente = `${agenteMatch1[1]} - ${agenteMatch1[2].trim()}`;
+    clave_agente = agenteMatch1[1];
+    agente = agenteMatch1[2].trim();
   } else if (agenteMatch2) {
-    agente = `${agenteMatch2[1]} - ${agenteMatch2[2].trim()}`;
+    clave_agente = agenteMatch2[1];
+    agente = agenteMatch2[2].trim();
   }
   
   // ==================== PÓLIZA ====================
@@ -403,6 +407,7 @@ export async function extraer(ctx) {
     compania,
     producto: 'Autos Individual',
     etapa_activa: 'Emitida',
+    clave_agente,
     agente,
     sub_agente: '',
     numero_poliza: polizaNum,

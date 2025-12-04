@@ -668,30 +668,32 @@ const DashboardComponent = () => {
         {/* Header Ejecutivo Compacto */}
         <div style={{ background: 'white', borderBottom: '1px solid #E5E7EB' }} className="py-3 px-4">
           <div className="container-fluid">
-            <div className="d-flex justify-content-between align-items-center">
-              <div>
+            <div className="row align-items-center g-3">
+              <div className="col-12 col-md-6">
                 <h4 className="mb-0 fw-bold" style={{ color: '#111827' }}>Dashboard Ejecutivo</h4>
-                <small className="text-muted" style={{ fontSize: '12px' }}>
+                <small className="text-muted d-none d-md-block" style={{ fontSize: '12px' }}>
                   {new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                 </small>
               </div>
-              <div className="d-flex gap-2">
-                <button className="btn btn-sm" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
-                  <Download size={14} className="me-1" />
-                  Exportar
-                </button>
-                <button 
-                  className="btn btn-sm" 
-                  style={{ border: '1px solid #E5E7EB', background: 'white' }}
-                  onClick={recargarDatos}
-                  disabled={cargando}>
-                  <RefreshCw size={14} className={`me-1 ${cargando ? 'spinner-border spinner-border-sm' : ''}`} />
-                  Actualizar
-                </button>
-                <button className="btn btn-primary btn-sm">
-                  <Plus size={14} className="me-1" />
-                  Nueva Póliza
-                </button>
+              <div className="col-12 col-md-6">
+                <div className="d-flex gap-2 flex-wrap justify-content-md-end">
+                  <button className="btn btn-sm flex-fill flex-md-grow-0" style={{ border: '1px solid #E5E7EB', background: 'white' }}>
+                    <Download size={14} className="me-1" />
+                    <span className="d-none d-sm-inline">Exportar</span>
+                  </button>
+                  <button 
+                    className="btn btn-sm flex-fill flex-md-grow-0" 
+                    style={{ border: '1px solid #E5E7EB', background: 'white' }}
+                    onClick={recargarDatos}
+                    disabled={cargando}>
+                    <RefreshCw size={14} className={`me-1 ${cargando ? 'spinner-border spinner-border-sm' : ''}`} />
+                    <span className="d-none d-sm-inline">Actualizar</span>
+                  </button>
+                  <button className="btn btn-primary btn-sm flex-fill flex-md-grow-0">
+                    <Plus size={14} className="me-1" />
+                    <span className="d-none d-sm-inline">Nueva </span>Póliza
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -710,7 +712,7 @@ const DashboardComponent = () => {
 
           <div className="row g-3 mb-4">
             {/* Primas Emitidas */}
-            <div className="col-md-6 col-lg-4 col-xl">
+            <div className="col-12 col-sm-6 col-lg-4 col-xl">
               <div className="executive-card p-3">
                 <div 
                   className="d-flex align-items-center justify-content-between mb-3"
@@ -765,7 +767,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Pagadas */}
-            <div className="col-md-6 col-lg-4 col-xl">
+            <div className="col-12 col-sm-6 col-lg-4 col-xl">
               <div className="executive-card p-3">
                 <div 
                   className="d-flex align-items-center justify-content-between mb-3"
@@ -820,7 +822,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Por Vencer */}
-            <div className="col-md-6 col-lg-4 col-xl">
+            <div className="col-12 col-sm-6 col-lg-4 col-xl">
               <div className="executive-card p-3">
                 <div 
                   className="d-flex align-items-center justify-content-between mb-3"
@@ -914,7 +916,7 @@ const DashboardComponent = () => {
             </div>
 
             {/* Primas Canceladas */}
-            <div className="col-md-6 col-lg-6 col-xl">
+            <div className="col-12 col-sm-6 col-lg-6 col-xl">
               <div className="executive-card p-3">
                 <div 
                   className="d-flex align-items-center justify-content-between mb-3"
@@ -989,14 +991,14 @@ const DashboardComponent = () => {
           )}
 
           {/* Panel de Trámites */}
-          <div className="mb-3 mt-4 d-flex justify-content-between align-items-center">
+          <div className="mb-3 mt-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
             <h5 className="fw-bold mb-0" style={{ color: '#111827' }}>Panel de Trámites</h5>
             <button className="btn btn-sm btn-outline-primary" onClick={irATramites}>
               Ver todos
             </button>
           </div>
           <div className="row g-3 mb-3">
-            <div className="col-md-3">
+            <div className="col-6 col-md-3">
               <div className="executive-card p-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Pendientes</div>
@@ -1006,7 +1008,7 @@ const DashboardComponent = () => {
                 <small className="text-muted">en espera de atención</small>
               </div>
             </div>
-            <div className="col-md-3">
+            <div className="col-6 col-md-3">
               <div className="executive-card p-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>En Proceso</div>
@@ -1016,7 +1018,7 @@ const DashboardComponent = () => {
                 <small className="text-muted">gestión activa</small>
               </div>
             </div>
-            <div className="col-md-3">
+            <div className="col-6 col-md-3">
               <div className="executive-card p-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Vencidos</div>
@@ -1026,7 +1028,7 @@ const DashboardComponent = () => {
                 <small className="text-muted">superaron fecha límite</small>
               </div>
             </div>
-            <div className="col-md-3">
+            <div className="col-6 col-md-3">
               <div className="executive-card p-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Completados</div>
