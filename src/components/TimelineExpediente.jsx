@@ -29,6 +29,23 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     cargarHistorial();
   }, [expedienteId]);
 
+  // 🔄 Escuchar evento personalizado para recargar historial automáticamente
+  useEffect(() => {
+    const handleRecargarHistorial = (event) => {
+      // Solo recargar si el evento es para este expediente
+      if (event.detail?.expedienteId === expedienteId) {
+        console.log('🔄 Recargando historial automáticamente...');
+        cargarHistorial();
+      }
+    };
+
+    window.addEventListener('recargarHistorial', handleRecargarHistorial);
+    
+    return () => {
+      window.removeEventListener('recargarHistorial', handleRecargarHistorial);
+    };
+  }, [expedienteId]);
+
   const cargarHistorial = async () => {
     try {
       setCargando(true);
@@ -450,6 +467,75 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                 📊 Etapa: <strong className="text-dark">{evento.etapa_anterior} → {evento.etapa_nueva}</strong>
                               </div>
                             )}
+                          </div>
+                        </div>
+                      ) : (evento.tipo_evento === 'aviso_pago_enviado' || evento.tipo_evento === 'recordatorio_pago_enviado') ? (
+                        /* Vista vertical para eventos de aviso/recordatorio de pago */
+                        <div className="mb-1">
+                          {/* Información en formato vertical compacto */}
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Empresa/Cliente */}
+                            {evento.destinatario_nombre && (
+                              <div className="text-muted">
+                                🏢 Cliente: <strong className="text-dark">{evento.destinatario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Contacto (teléfono o email) */}
+                            {evento.destinatario_contacto && (
+                              <div className="text-muted">
+                                {evento.metodo_contacto === 'WhatsApp' ? '📱' : '📧'} Contacto: <strong className="text-dark">{evento.destinatario_contacto}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Canal de envío */}
+                            {evento.metodo_contacto && (
+                              <div className="text-muted">
+                                📤 Canal: <strong className="text-dark">{evento.metodo_contacto}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Información del pago */}
+                            {evento.datos_adicionales?.numero_pago && (
+                              <div className="text-muted">
+                                💰 Pago: <strong className="text-dark">
+                                  #{evento.datos_adicionales.numero_pago}
+                                  {evento.datos_adicionales?.total_pagos && ` de ${evento.datos_adicionales.total_pagos}`}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {evento.datos_adicionales?.fecha_pago && (
+                              <div className="text-muted">
+                                📅 Vencimiento: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_pago).toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+                              </div>
+                            )}
+                            
+                            {evento.datos_adicionales?.monto && (
+                              <div className="text-muted">
+                                💵 Monto: <strong className="text-dark">${evento.datos_adicionales.monto}</strong>
+                              </div>
+                            )}
+                            
+                            {evento.datos_adicionales?.estado_pago && (
+                              <div className="text-muted">
+                                📊 Estado: <strong className={`text-${evento.datos_adicionales.estado_pago === 'Vencido' ? 'danger' : evento.datos_adicionales.estado_pago === 'Pagado' ? 'success' : 'warning'}`}>
+                                  {evento.datos_adicionales.estado_pago}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* Usuario que realizó el envío */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha y hora del envío */}
+                            <div className="text-muted">
+                              🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
                           </div>
                         </div>
                       ) : (

@@ -20,7 +20,7 @@ const DetalleExpediente = ({
   // Estados controlados en React para no depender del JS de Bootstrap
   const [openGeneral, setOpenGeneral] = useState(false);
   const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(false);
-  const [openHistorial, setOpenHistorial] = useState(true);
+  const [openHistorial, setOpenHistorial] = useState(false);
 
   // 🔍 DEBUG: Ver qué datos llegan
   console.log('🔍 DetalleExpediente - datos recibidos:', {

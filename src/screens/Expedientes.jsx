@@ -54,7 +54,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw, Calendar } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import BuscadorCliente from '../components/BuscadorCliente';
 import ModalCapturarContacto from '../components/ModalCapturarContacto';
@@ -314,14 +314,19 @@ const CalendarioPagos = React.memo(({
   expediente, 
   calcularProximoPago, 
   mostrarResumen = true,
-  compacto = false 
+  compacto = false,
+  onEnviarAviso // Callback para enviar avisos de pago
 }) => {
+  // Normalizar campos (aceptar múltiples nombres)
+  const tipoPago = expediente.tipo_pago || expediente.forma_pago;
+  const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+  
   // Mostrar solo para tipo de pago Fraccionado y con datos básicos
-  if (expediente.tipo_pago !== 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicio_vigencia) {
+  if (tipoPago?.toUpperCase() !== 'FRACCIONADO' || !frecuencia || !expediente.inicio_vigencia) {
     return null;
   }
 
-  const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[expediente.frecuenciaPago] || 0;
+  const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
   const pagos = [];
   
   // 🔧 Obtener periodo de gracia del expediente o calcular según compañía (convertir a número)
@@ -332,16 +337,20 @@ const CalendarioPagos = React.memo(({
   console.log('📅 CALENDARIO - Periodo de gracia usado:', periodoGracia, '| Del expediente:', expediente.periodo_gracia, '| Tipo:', typeof expediente.periodo_gracia);
   
   // Determinar montos: usar primer_pago y pagos_subsecuentes si están disponibles, sino dividir el total
-  const usarMontosExactos = expediente.primer_pago && expediente.pagos_subsecuentes;
-  const primerPagoMonto = usarMontosExactos ? parseFloat(expediente.primer_pago) : null;
-  const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(expediente.pagos_subsecuentes) : null;
+  // 🔥 Compatibilidad con snake_case y camelCase
+  const primerPagoField = expediente.primer_pago || expediente.primerPago;
+  const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+  
+  const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
+  const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
+  const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
   const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
   
   for (let i = 1; i <= numeroPagos; i++) {
     const fechaPago = calcularProximoPago(
       expediente.inicio_vigencia,
-      expediente.tipo_pago,
-      expediente.frecuenciaPago,
+      tipoPago,
+      frecuencia,
       expediente.compania,
       i,
       periodoGracia  // 🔥 Pasar periodo de gracia del expediente
@@ -362,9 +371,13 @@ const CalendarioPagos = React.memo(({
     }
   }
 
-  const fechaUltimoPago = expediente.fechaUltimoPago ? new Date(expediente.fechaUltimoPago) : null;
+  const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago
+    ? new Date(expediente.fechaUltimoPago || expediente.fecha_ultimo_pago)
+    : null;
   let totalPagado = 0;
   let totalPendiente = 0;
+  let totalPorVencer = 0;
+  let totalVencido = 0;
   let pagosRealizados = 0;
 
   const pagosProcesados = pagos.map((pago) => {
@@ -379,10 +392,17 @@ const CalendarioPagos = React.memo(({
       pagosRealizados++;
       totalPagado += parseFloat(pago.monto) || 0;
     } else {
-      totalPendiente += parseFloat(pago.monto) || 0;
+      // Clasificar según estado
+      if (diasRestantes < 0) {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (diasRestantes <= 15) {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
     }
     
-    let estado = 'Por vencer';
+    let estado = 'Pendiente';
     let badgeClass = 'bg-secondary';
     
     if (pagado) {
@@ -394,15 +414,17 @@ const CalendarioPagos = React.memo(({
     } else if (diasRestantes === 0) {
       estado = 'Vence hoy';
       badgeClass = 'bg-danger';
-    } else if (diasRestantes <= 7) {
-      estado = `Vence en ${diasRestantes} días`;
+    } else if (diasRestantes <= 15) {
+      // Por vencer: cuando faltan 15 días o menos
+      estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por vencer';
       badgeClass = 'bg-warning';
-    } else if (diasRestantes <= 30) {
-      estado = 'Próximo';
-      badgeClass = 'bg-info';
+    } else {
+      // Pendiente: cuando falta más de 15 días
+      estado = 'Pendiente';
+      badgeClass = 'bg-secondary';
     }
     
-    return { ...pago, estado, badgeClass, pagado };
+    return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
   if (compacto) {
@@ -419,42 +441,63 @@ const CalendarioPagos = React.memo(({
     <div className="card border-primary">
       <div className="card-header bg-primary text-white">
         <h6 className="mb-0">
-          📅 Calendario de Pagos - {expediente.frecuenciaPago}
+          📅 Calendario de Pagos - {frecuencia}
           <small className="ms-2">({numeroPagos} pagos en el año)</small>
         </h6>
       </div>
       <div className="card-body p-3">
         {mostrarResumen && (
-          <div className="row mb-3">
-            <div className="col-md-3">
-              <div className="card bg-light">
+          <div className="row mb-3 g-2">
+            {/* Total Anual */}
+            <div className="col">
+              <div className="card bg-light h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Total Anual</h6>
-                  <h4 className="mb-0 text-primary">{utils.formatearMoneda(expediente.total)}</h4>
+                  <small className="text-muted d-block mb-1">Total Anual</small>
+                  <h5 className="mb-0 text-primary">{utils.formatearMoneda(expediente.total)}</h5>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-success text-white">
+            
+            {/* Pagado */}
+            <div className="col">
+              <div className="card bg-success text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Pagado</h6>
-                  <h4 className="mb-0">{utils.formatearMoneda(totalPagado)}</h4>
+                  <small className="d-block mb-1">✅ Pagado</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPagado)}</h5>
+                  <small className="d-block mt-1">{pagosRealizados} de {numeroPagos}</small>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-warning text-white">
+            
+            {/* Por Vencer */}
+            <div className="col">
+              <div className="card bg-warning text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Pendiente</h6>
-                  <h4 className="mb-0">{utils.formatearMoneda(totalPendiente)}</h4>
+                  <small className="d-block mb-1">⚠️ Por Vencer</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPorVencer)}</h5>
+                  <small className="d-block mt-1">≤ 15 días</small>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-info text-white">
+            
+            {/* Vencido */}
+            <div className="col">
+              <div className="card bg-danger text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Progreso</h6>
-                  <h4 className="mb-0">{pagosRealizados}/{numeroPagos}</h4>
+                  <small className="d-block mb-1">❌ Vencido</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalVencido)}</h5>
+                  <small className="d-block mt-1">Atrasado</small>
+                </div>
+              </div>
+            </div>
+            
+            {/* Pendiente */}
+            <div className="col">
+              <div className="card bg-secondary text-white h-100">
+                <div className="card-body text-center p-2">
+                  <small className="d-block mb-1">📅 Pendiente</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPendiente)}</h5>
+                  <small className="d-block mt-1">Sin riesgo</small>
                 </div>
               </div>
             </div>
@@ -469,6 +512,7 @@ const CalendarioPagos = React.memo(({
                 <th>Fecha de Pago</th>
                 <th>Monto</th>
                 <th width="150">Estado</th>
+                <th width="200">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -483,13 +527,39 @@ const CalendarioPagos = React.memo(({
                       {pago.estado}
                     </span>
                   </td>
+                  <td>
+                    {pago.pagado ? (
+                      // Botón para ver comprobante de pago
+                      <button 
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => {
+                          // TODO: Implementar visualización de comprobante
+                          toast.info('Función de ver comprobante próximamente');
+                        }}
+                        title="Ver comprobante de pago"
+                      >
+                        <FileText size={14} className="me-1" />
+                        Ver Comprobante
+                      </button>
+                    ) : (
+                      // Botón para enviar aviso/recordatorio
+                      <button 
+                        className={`btn btn-sm ${pago.estado === 'Vencido' ? 'btn-danger' : 'btn-outline-info'}`}
+                        onClick={() => onEnviarAviso && onEnviarAviso(pago, expediente)}
+                        title={pago.estado === 'Vencido' ? 'Enviar recordatorio de pago vencido' : 'Enviar aviso de pago'}
+                      >
+                        <Mail size={14} className="me-1" />
+                        {pago.estado === 'Vencido' ? 'Recordatorio' : 'Enviar Aviso'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
             {expediente.total && (
               <tfoot>
                 <tr className="table-info">
-                  <td colSpan="2" className="text-end"><strong>Total Anual:</strong></td>
+                  <td colSpan="3" className="text-end"><strong>Total Anual:</strong></td>
                   <td colSpan="2"><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
                 </tr>
               </tfoot>
@@ -3411,6 +3481,10 @@ const ListaExpedientes = React.memo(({
                       <div>Tipo</div>
                       <div>Estatus Pago</div>
                     </th>
+                    <th style={{ width: '140px' }}>
+                      <div>Progreso</div>
+                      <div>de Pagos</div>
+                    </th>
                     <th style={{ width: '100px' }}>
                       <div>Vigencia</div>
                       <div>Pago</div>
@@ -3507,11 +3581,79 @@ const ListaExpedientes = React.memo(({
                         <td style={{ fontSize: '0.75rem' }}>{agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente || '-'}</td>
                         <td>
                           <EstadoPago expediente={expediente} />
-                          <CalendarioPagos 
-                            expediente={expediente} 
-                            calcularProximoPago={calcularProximoPago}
-                            compacto={true}
-                          />
+                        </td>
+                        <td style={{ fontSize: '0.75rem' }}>
+                          {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
+                           (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
+                           expediente.inicio_vigencia ? (
+                            (() => {
+                              // Normalizar campos
+                              const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                              
+                              // Calcular progreso de pagos
+                              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                              const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
+                              
+                              let pagosRealizados = 0;
+                              if (fechaUltimoPago) {
+                                const fechaUltimo = new Date(fechaUltimoPago);
+                                const fechaInicio = new Date(expediente.inicio_vigencia);
+                                
+                                const mesesPorFrecuencia = {
+                                  'Mensual': 1,
+                                  'Trimestral': 3,
+                                  'Semestral': 6
+                                };
+                                
+                                const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                                const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
+                                                            (fechaUltimo.getMonth() - fechaInicio.getMonth());
+                                
+                                pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+                                pagosRealizados = Math.min(pagosRealizados, numeroPagos);
+                              }
+                              
+                              const progreso = numeroPagos > 0 ? (pagosRealizados / numeroPagos) * 100 : 0;
+                              const proximoPago = expediente.fecha_vencimiento_pago || expediente.proximo_pago;
+                              const diasHastaProximo = proximoPago ? utils.calcularDiasRestantes(proximoPago) : null;
+                              const proximoVencido = diasHastaProximo !== null && diasHastaProximo < 0;
+                              const proximoCerca = diasHastaProximo !== null && diasHastaProximo >= 0 && diasHastaProximo <= 15;
+                              
+                              return (
+                                <div>
+                                  {/* Barra de progreso */}
+                                  <div className="progress mb-1" style={{ height: '8px' }}>
+                                    <div 
+                                      className={`progress-bar ${progreso === 100 ? 'bg-success' : 'bg-primary'}`}
+                                      style={{ width: `${progreso}%` }}
+                                    ></div>
+                                  </div>
+                                  
+                                  {/* Info compacta */}
+                                  <div className="d-flex justify-content-between align-items-center">
+                                    <small className="text-muted">
+                                      {pagosRealizados}/{numeroPagos}
+                                    </small>
+                                    {proximoPago && pagosRealizados < numeroPagos && (
+                                      <span 
+                                        className={`badge ${proximoVencido ? 'bg-danger' : proximoCerca ? 'bg-warning' : 'bg-secondary'}`}
+                                        style={{ fontSize: '0.65rem' }}
+                                      >
+                                        {proximoVencido ? '⚠️ Vencido' : proximoCerca ? '⏰ Por vencer' : '📅 Próx'}
+                                      </span>
+                                    )}
+                                    {pagosRealizados === numeroPagos && (
+                                      <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>
+                                        ✅ Completo
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <small className="text-muted">-</small>
+                          )}
                         </td>
                         <td style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
                           <div>
@@ -5352,7 +5494,7 @@ const Formulario = React.memo(({
               </div>
               
               <div className="col-md-3">
-                <label className="form-label">Fecha de Pago</label>
+                <label className="form-label">Fecha Límite de Pago</label>
                 <input
                   type="date"
                   className="form-control"
@@ -5422,6 +5564,25 @@ const Formulario = React.memo(({
                   ))}
                 </select>
               </div>
+
+              {/* Campo de Fecha de Pago - Solo si está marcado como Pagado */}
+              {formulario.estatusPago === 'Pagado' && (
+                <div className="col-md-6">
+                  <label className="form-label">
+                    Fecha de Pago
+                    <small className="text-muted ms-2">(¿Cuándo se pagó?)</small>
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={formulario.fecha_ultimo_pago || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, fecha_ultimo_pago: e.target.value }))}
+                  />
+                  <small className="text-muted d-block mt-1">
+                    Si no se especifica, se usará la fecha de captura
+                  </small>
+                </div>
+              )}
 
               {formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicio_vigencia && (
                 <div className="col-12 mt-3">
@@ -5600,7 +5761,8 @@ const DetallesExpediente = React.memo(({
   calcularSiguientePago,
   calculartermino_vigencia,
   calcularProximoPago,
-  abrirModalCompartir
+  abrirModalCompartir,
+  enviarAvisoPago
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
   
@@ -5764,14 +5926,17 @@ const DetallesExpediente = React.memo(({
                 )}
               />
             </div>
-            {expedienteSeleccionado.tipo_pago === 'Fraccionado' && 
-             expedienteSeleccionado.frecuenciaPago && 
+            {/* Mostrar calendario si es fraccionado - buscar en múltiples campos */}
+            {((expedienteSeleccionado.tipo_pago === 'Fraccionado') || 
+              (expedienteSeleccionado.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
+             (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago) && 
              expedienteSeleccionado.inicio_vigencia && (
               <div className="col-12">
                 <CalendarioPagos 
                   expediente={expedienteSeleccionado}
                   calcularProximoPago={calcularProximoPago}
                   mostrarResumen={true}
+                  onEnviarAviso={enviarAvisoPago}
                 />
               </div>
             )}
@@ -5789,6 +5954,11 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  
+  // 💰 Estados para aviso/recordatorio de pago
+  const [pagoParaNotificar, setPagoParaNotificar] = useState(null);
+  const [expedienteDelPago, setExpedienteDelPago] = useState(null);
+  const [mostrarModalAvisoPago, setMostrarModalAvisoPago] = useState(false);
   
   // Estados para flujo de renovación
   const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
@@ -5941,6 +6111,19 @@ const ModuloExpedientes = () => {
     cargarDatos();
   }, []);
   
+  // 💰 Funciones para aviso/recordatorio de pago
+  const enviarAvisoPago = useCallback((pago, expediente) => {
+    setPagoParaNotificar(pago);
+    setExpedienteDelPago(expediente);
+    setMostrarModalAvisoPago(true);
+  }, []);
+  
+  const cerrarModalAvisoPago = useCallback(() => {
+    setMostrarModalAvisoPago(false);
+    setPagoParaNotificar(null);
+    setExpedienteDelPago(null);
+  }, []);
+  
   const [vistaActual, setVistaActual] = useState('lista');
   const [expedienteSeleccionado, setExpedienteSeleccionado] = useState(null);
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -5981,6 +6164,7 @@ const ModuloExpedientes = () => {
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
   const [comprobantePago, setComprobantePago] = useState(null);
   const [procesandoPago, setProcesandoPago] = useState(false);
+  const [fechaUltimoPago, setFechaUltimoPago] = useState(''); // Fecha en que realmente se pagó
   
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
@@ -7011,6 +7195,271 @@ const estadoInicialFormulario = {
       }
     }, [cambiarEstadoExpediente]);
 
+  // 💰 Enviar aviso de pago por WhatsApp
+  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
+    try {
+      // Obtener datos del cliente
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (!respCliente?.success) {
+        toast.error('No se pudo obtener la información del cliente');
+        return;
+      }
+      const cliente = respCliente.data;
+      
+      // Verificar que el cliente tenga teléfono móvil
+      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+      
+      if (!telefono) {
+        toast.error('El cliente no tiene teléfono móvil registrado');
+        return;
+      }
+
+      // Limpiar el número de teléfono
+      const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
+      
+      // Validar formato
+      if (!/^\d{10,15}$/.test(telefonoLimpio)) {
+        toast.error(`El número de teléfono "${telefono}" no es válido para WhatsApp`);
+        return;
+      }
+      
+      // Generar mensaje personalizado
+      const esVencido = pago.estado === 'Vencido';
+      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+        ? cliente.razonSocial || cliente.razon_social
+        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+      
+      const mensaje = `Hola ${nombreCliente},\n\n` +
+        `${esVencido ? '⚠️ *RECORDATORIO DE PAGO VENCIDO*' : '📋 *AVISO DE PAGO PRÓXIMO*'}\n\n` +
+        `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
+        `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
+        `*Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}*\n` +
+        `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
+        `Monto: *$${pago.monto}*\n` +
+        `Estado: ${pago.estado}\n\n` +
+        `${esVencido 
+          ? '⚠️ *IMPORTANTE:* Este pago está vencido. En caso de algún siniestro, *no tendremos cobertura de la compañía aseguradora*. Por favor, regulariza tu situación lo antes posible para reactivar tu protección.' 
+          : '📅 *IMPORTANTE:* Te recordamos que tu próximo pago está próximo a vencer. Es fundamental registrar tu pago a tiempo para *no perder la cobertura* de tu póliza y mantener tu protección activa.'
+        }\n\n` +
+        `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
+        `Saludos cordiales`;
+      
+      // Crear URL de WhatsApp
+      const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
+      
+      // Abrir WhatsApp
+      window.open(url, '_blank');
+      
+      // Obtener nombre del contacto principal
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+      
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
+      
+      // Registrar la notificación en el sistema de notificaciones
+      try {
+        await notificacionesService.registrarNotificacion({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
+          tipo_mensaje: esVencido 
+            ? notificacionesService.TIPOS_MENSAJE.PAGO_VENCIDO 
+            : notificacionesService.TIPOS_MENSAJE.RECORDATORIO_PAGO,
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: telefono,
+          mensaje: mensaje,
+          numero_poliza: expediente.numero_poliza,
+          compania: expediente.compania,
+          producto: expediente.producto,
+          estatus_pago: pago.estado,
+          estado_envio: 'enviado'
+        });
+        console.log('✅ Notificación de pago registrada');
+      } catch (error) {
+        console.error('⚠️ Error al registrar notificación (no crítico):', error);
+      }
+      
+      // Registrar evento en el historial de trazabilidad
+      try {
+        await historialService.registrarEvento({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_evento: esVencido 
+            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
+            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          usuario_nombre: 'Sistema',
+          descripcion: `Enviado a ${nombreDestinatario} por WhatsApp (${telefono})`,
+          metodo_contacto: 'WhatsApp',
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: telefono,
+          datos_adicionales: {
+            canal: 'WhatsApp',
+            numero_poliza: expediente.numero_poliza,
+            numero_pago: pago.numero,
+            total_pagos: pago.totalPagos || null,
+            fecha_pago: pago.fecha,
+            monto: pago.monto,
+            estado_pago: pago.estado,
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+          }
+        });
+        console.log('✅ Evento de pago registrado en trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+      }
+      
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por WhatsApp a ${nombreCliente}`);
+      cerrarModalAvisoPago();
+      
+      // 🔄 Recargar historial automáticamente después de 1.5 segundos
+      setTimeout(() => {
+        // Disparar evento personalizado para que TimelineExpediente recargue
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Error al enviar aviso por WhatsApp:', error);
+      toast.error('Error al enviar aviso por WhatsApp');
+    }
+  }, [cerrarModalAvisoPago]);
+
+  // 💰 Enviar aviso de pago por Email
+  const enviarAvisoPagoEmail = useCallback(async (pago, expediente) => {
+    try {
+      // Obtener datos del cliente
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (!respCliente?.success) {
+        toast.error('No se pudo obtener la información del cliente');
+        return;
+      }
+      const cliente = respCliente.data;
+      
+      // Verificar que el cliente tenga email
+      const email = cliente?.contacto_email || cliente?.email;
+      
+      if (!email) {
+        toast.error('El cliente no tiene email registrado');
+        return;
+      }
+      
+      // Generar mensaje personalizado
+      const esVencido = pago.estado === 'Vencido';
+      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+        ? cliente.razonSocial || cliente.razon_social
+        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+      
+      const asunto = esVencido 
+        ? `⚠️ Recordatorio: Pago Vencido - Póliza ${expediente.numero_poliza}`
+        : `📋 Aviso: Próximo Pago - Póliza ${expediente.numero_poliza}`;
+      
+      const cuerpo = `Estimado/a ${nombreCliente},\n\n` +
+        `${esVencido ? 'Le recordamos que tiene un pago vencido:' : 'Le notificamos sobre su próximo pago:'}\n\n` +
+        `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
+        `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
+        `Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}\n` +
+        `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
+        `Monto: $${pago.monto}\n` +
+        `Estado: ${pago.estado}\n\n` +
+        `${esVencido 
+          ? '⚠️ IMPORTANTE: Este pago está vencido. En caso de presentarse algún siniestro, NO TENDREMOS COBERTURA de la compañía aseguradora. Le solicitamos regularizar su situación lo antes posible para reactivar su protección y evitar inconvenientes.' 
+          : '📋 IMPORTANTE: Le recordamos que este pago está próximo a vencer. Es fundamental realizar su pago en tiempo y forma para NO PERDER LA COBERTURA de su póliza y mantener su protección activa sin interrupciones.'
+        }\n\n` +
+        `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
+        `Saludos cordiales`;
+      
+      // Obtener nombre del contacto principal
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+      
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
+      
+      // Registrar la notificación en el sistema de notificaciones
+      try {
+        await notificacionesService.registrarNotificacion({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
+          tipo_mensaje: esVencido 
+            ? notificacionesService.TIPOS_MENSAJE.PAGO_VENCIDO 
+            : notificacionesService.TIPOS_MENSAJE.RECORDATORIO_PAGO,
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: email,
+          asunto: asunto,
+          mensaje: cuerpo,
+          numero_poliza: expediente.numero_poliza,
+          compania: expediente.compania,
+          producto: expediente.producto,
+          estatus_pago: pago.estado,
+          estado_envio: 'enviado'
+        });
+        console.log('✅ Notificación de pago registrada');
+      } catch (error) {
+        console.error('⚠️ Error al registrar notificación (no crítico):', error);
+      }
+      
+      // Registrar evento en el historial de trazabilidad
+      try {
+        await historialService.registrarEvento({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_evento: esVencido 
+            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
+            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          usuario_nombre: 'Sistema',
+          descripcion: `Enviado a ${nombreDestinatario} por Email (${email})`,
+          metodo_contacto: 'Email',
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: email,
+          datos_adicionales: {
+            canal: 'Email',
+            asunto: asunto,
+            numero_poliza: expediente.numero_poliza,
+            numero_pago: pago.numero,
+            total_pagos: pago.totalPagos || null,
+            fecha_pago: pago.fecha,
+            monto: pago.monto,
+            estado_pago: pago.estado,
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+          }
+        });
+        console.log('✅ Evento de pago registrado en trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+      }
+      
+      // Abrir cliente de email con mailto
+      const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      window.location.href = mailtoUrl;
+      
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por Email a ${nombreCliente}`);
+      cerrarModalAvisoPago();
+      
+      // 🔄 Recargar historial automáticamente después de 1.5 segundos
+      setTimeout(() => {
+        // Disparar evento personalizado para que TimelineExpediente recargue
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Error al enviar aviso por Email:', error);
+      toast.error('Error al enviar aviso por Email');
+    }
+  }, [cerrarModalAvisoPago]);
+
     // Manejar selección de archivo PDF
     const handleSeleccionarPDF = useCallback((event) => {
       const file = event.target.files?.[0];
@@ -7169,8 +7618,14 @@ const estadoInicialFormulario = {
     const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
     if (!expedienteActual) return;
     
+    // Calcular fecha límite del pago pendiente (default para fecha de pago)
+    const fechaLimite = expedienteActual.fecha_vencimiento_pago || 
+                        expedienteActual.proximo_pago || 
+                        new Date().toISOString().split('T')[0];
+    
     setExpedienteParaPago(expedienteActual);
     setComprobantePago(null);
+    setFechaUltimoPago(fechaLimite); // Default: fecha límite del pago pendiente
     setMostrarModalPago(true);
   }, [expedientes]);
 
@@ -7208,8 +7663,7 @@ const estadoInicialFormulario = {
       const datosActualizacion = {
         estatus_pago: nuevoEstatusPago,
         fecha_vencimiento_pago: nuevaFechaVencimiento,
-        fecha_pago: fechaActual,
-        fecha_ultimo_pago: fechaActual,
+        fecha_ultimo_pago: fechaUltimoPago, // Fecha en que realmente se pagó (elegida por el usuario)
         proximo_pago: proximoPago
       };
       
@@ -7221,7 +7675,7 @@ const estadoInicialFormulario = {
 
       console.log('💰 Aplicando pago:', { 
         expedienteId: expedienteParaPago.id, 
-        fechaActual, 
+        fechaUltimoPago, 
         proximoPago,
         nuevoEstatusPago,
         nuevaFechaVencimiento,
@@ -7247,13 +7701,58 @@ const estadoInicialFormulario = {
         // Construir descripción consolidada con formato en columna
         const etapaFinal = datosActualizacion.etapa_activa || expedienteParaPago.etapa_activa;
         
+        // Calcular número de pago (basado en pagos previos)
+        const calcularNumeroPago = () => {
+          if (expedienteParaPago.tipo_pago === 'Anual') return 'Único';
+          
+          // Para pagos fraccionados, calcular cuántos pagos se han hecho
+          const inicio = new Date(expedienteParaPago.inicio_vigencia);
+          const fechaPago = new Date(fechaUltimoPago);
+          
+          const mesesPorFrecuencia = {
+            'Mensual': 1,
+            'Trimestral': 3,
+            'Semestral': 6
+          };
+          
+          const mesesPorPago = mesesPorFrecuencia[expedienteParaPago.frecuenciaPago] || 1;
+          const mesesTranscurridos = (fechaPago.getFullYear() - inicio.getFullYear()) * 12 + 
+                                      (fechaPago.getMonth() - inicio.getMonth());
+          
+          const numeroPago = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+          
+          // Calcular total de pagos
+          const totalPagos = Math.ceil(12 / mesesPorPago);
+          
+          return `${numeroPago} de ${totalPagos}`;
+        };
+        
+        const numeroPago = calcularNumeroPago();
+        const fechaPagoFormateada = new Date(fechaUltimoPago).toLocaleDateString('es-MX', { 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric' 
+        });
+        
         let comentario;
         if (proximoPago && proximoPago.trim() !== '') {
           // Hay siguiente pago pendiente
-          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
+          comentario = `💰 Pago Registrado\n` +
+                      `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📄 Recibo/Pago: ${numeroPago}\n` +
+                      `🧾 Comprobante: ${comprobantePago.name}\n` +
+                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                      `📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n` +
+                      `📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
         } else {
           // Póliza completamente pagada
-          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n📂 Movida a carpeta: Vigentes Pagadas`;
+          comentario = `💰 Pago Registrado (Final)\n` +
+                      `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📄 Recibo/Pago: ${numeroPago}\n` +
+                      `🧾 Comprobante: ${comprobantePago.name}\n` +
+                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                      `✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n` +
+                      `📂 Movida a carpeta: Vigentes Pagadas`;
         }
 
         // Registrar evento estructurado de pago en historial trazabilidad
@@ -7269,15 +7768,21 @@ const estadoInicialFormulario = {
               compania: expedienteParaPago.compania,
               producto: expedienteParaPago.producto,
               monto_total: expedienteParaPago.total || null,
+              monto_pagado: expedienteParaPago.total || null,
+              fecha_pago: fechaUltimoPago,
+              numero_pago: numeroPago,
               comprobante_nombre: comprobantePago.name,
               siguiente_vencimiento: proximoPago || null,
               estatus_pago_nuevo: nuevoEstatusPago,
-              etapa_activa: etapaFinal
+              etapa_activa: etapaFinal,
+              tipo_pago: expedienteParaPago.tipo_pago,
+              frecuencia_pago: expedienteParaPago.frecuenciaPago
             }
           });
-          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad (con etapa consolidada)');
+          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad (con detalles completos)');
         } catch (errorRegistroPago) {
-          console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
+          console.error('❌ Error al registrar pago en historial:', errorRegistroPago);
+          toast.error('⚠️ Pago aplicado pero no se pudo registrar en el historial: ' + errorRegistroPago.message);
         }
       } catch (errorHistorial) {
         console.error('⚠️ Error al agregar comentario al historial:', errorHistorial);
@@ -7899,6 +8404,10 @@ const estadoInicialFormulario = {
       cargo_pago_fraccionado: formularioParaGuardar.cargo_pago_fraccionado || '',
       gastos_expedicion: formularioParaGuardar.gastos_expedicion || '',
       estatus_pago: formularioParaGuardar.estatusPago || 'Pendiente', // ✅ FORZAR estatus_pago
+      frecuencia_pago: formularioParaGuardar.frecuenciaPago || formularioParaGuardar.frecuencia_pago || null, // ✅ FORZAR frecuencia_pago
+      // 💰 FORZAR montos de pagos fraccionados
+      primer_pago: formularioParaGuardar.primer_pago || formularioParaGuardar.primerPago || null,
+      pagos_subsecuentes: formularioParaGuardar.pagos_subsecuentes || formularioParaGuardar.pagosSubsecuentes || null,
       // 🎯 CRÍTICO: Forzar fechas en snake_case
       fecha_emision: formularioParaGuardar.fecha_emision,
       inicio_vigencia: formularioParaGuardar.inicio_vigencia,
@@ -7945,6 +8454,12 @@ const estadoInicialFormulario = {
     expedientePayload.estatus_pago = formulario.estatusPago || formulario.estatus_pago || 'Pendiente';
     expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     
+    // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
+    if (expedientePayload.estatus_pago === 'Pagado') {
+      expedientePayload.fecha_ultimo_pago = formularioParaGuardar.fecha_ultimo_pago || new Date().toISOString().split('T')[0];
+      console.log('💰 Póliza marcada como Pagado. Fecha de pago:', expedientePayload.fecha_ultimo_pago);
+    }
+    
     // 🎯 CRÍTICO: GARANTIZAR que las fechas estén en el payload (segunda vez por seguridad)
     expedientePayload.fecha_emision = formularioParaGuardar.fecha_emision;
     expedientePayload.inicio_vigencia = formularioParaGuardar.inicio_vigencia;
@@ -7981,6 +8496,9 @@ const estadoInicialFormulario = {
     delete expedientePayload.razonSocial;
     delete expedientePayload.tasaFinanciamiento;
     delete expedientePayload.subTotal;
+    delete expedientePayload.frecuenciaPago; // ✅ Eliminar camelCase, ya está como frecuencia_pago
+    delete expedientePayload.primerPago; // ✅ Eliminar camelCase, ya está como primer_pago
+    delete expedientePayload.pagosSubsecuentes; // ✅ Eliminar camelCase, ya está como pagos_subsecuentes
 
     
     // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
@@ -8445,6 +8963,7 @@ const estadoInicialFormulario = {
                   producto: formularioParaGuardar.producto,
                   campos_modificados: camposModificados,
                   cantidad_cambios: camposModificados.length,
+                  modificaciones_manuales: camposModificados.length > 0, // ✅ Marcar como modificación manual
                   ...(cambioEtapa && {
                     etapa_anterior: expedienteEnBD.etapa_activa,
                     etapa_nueva: formularioParaGuardar.etapa_activa
@@ -8691,6 +9210,47 @@ const estadoInicialFormulario = {
               await historialService.registrarEvento(eventoData);
               
               console.log(`✅ Captura registrada en historial: ${metodCaptura} - ${aseguradoraNombre}`);
+              
+              // 💰 REGISTRAR PAGO INICIAL si la póliza fue marcada como "Pagado" al momento de captura
+              const estatusPago = expedientePayload.estatus_pago || expedientePayload.estatusPago;
+              if (estatusPago === 'Pagado') {
+                console.log('💰 Detectado pago aplicado en captura inicial, registrando evento...');
+                try {
+                  const fechaPago = expedientePayload.fecha_ultimo_pago || expedientePayload.fecha_vencimiento_pago || new Date().toISOString().split('T')[0];
+                  const fechaPagoFormateada = new Date(fechaPago).toLocaleDateString('es-MX', { 
+                    day: 'numeric', 
+                    month: 'long', 
+                    year: 'numeric' 
+                  });
+                  
+                  const comentarioPago = `💰 Pago Registrado en Captura Inicial\n` +
+                    `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                    `💵 Monto: $${parseFloat(expedientePayload.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                    `✅ Póliza marcada como pagada desde la captura`;
+                  
+                  await historialService.registrarEvento({
+                    expediente_id: String(nuevoId),
+                    cliente_id: String(expedientePayload.cliente_id),
+                    tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
+                    usuario_nombre: 'Sistema',
+                    descripcion: comentarioPago,
+                    datos_adicionales: {
+                      numero_poliza: expedientePayload.numero_poliza,
+                      compania: aseguradoraNombre,
+                      producto: expedientePayload.producto || '',
+                      monto_total: expedientePayload.total || null,
+                      monto_pagado: expedientePayload.total || null,
+                      fecha_pago: fechaPago,
+                      tipo_pago: expedientePayload.tipo_pago,
+                      frecuencia_pago: expedientePayload.frecuenciaPago,
+                      aplicado_en_captura: true
+                    }
+                  });
+                  console.log('✅ Evento de pago inicial registrado en historial');
+                } catch (errorPagoInicial) {
+                  console.warn('⚠️ No se pudo registrar evento de pago inicial:', errorPagoInicial);
+                }
+              }
             }
           } catch (error) {
             console.warn('⚠️ Error al registrar captura:', error.message);
@@ -9106,6 +9666,19 @@ const estadoInicialFormulario = {
             estatusPago: datosConvertidos.estatusPago
           });
           
+          console.log('💰 [EDITAR] Montos de pagos fraccionados desde API:', {
+            primer_pago: desdeApi.primer_pago,
+            primerPago: desdeApi.primerPago,
+            pagos_subsecuentes: desdeApi.pagos_subsecuentes,
+            pagosSubsecuentes: desdeApi.pagosSubsecuentes,
+            convertidos: {
+              primer_pago: datosConvertidos.primer_pago,
+              primerPago: datosConvertidos.primerPago,
+              pagos_subsecuentes: datosConvertidos.pagos_subsecuentes,
+              pagosSubsecuentes: datosConvertidos.pagosSubsecuentes
+            }
+          });
+          
           // ✅ IMPORTANTE: Datos de API tienen prioridad sobre datos en memoria
           expedienteCompleto = { ...datosConvertidos };
           console.log('✅ Expediente recargado desde API con datos frescos');
@@ -9435,6 +10008,7 @@ const eliminarExpediente = useCallback((id) => {
             calculartermino_vigencia={calculartermino_vigencia}
             calcularProximoPago={calcularProximoPago}
             abrirModalCompartir={abrirModalCompartir}
+            enviarAvisoPago={enviarAvisoPago}
           />
         )}
       </div>
@@ -9474,6 +10048,54 @@ const eliminarExpediente = useCallback((id) => {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-outline-secondary" onClick={cerrarModalCompartir}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💰 Modal Aviso/Recordatorio de Pago */}
+      {mostrarModalAvisoPago && pagoParaNotificar && expedienteDelPago && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-sm modal-dialog-centered">
+            <div className="modal-content">
+              <div className={`modal-header text-white ${pagoParaNotificar.estado === 'Vencido' ? 'bg-danger' : 'bg-info'}`}>
+                <h5 className="modal-title">
+                  {pagoParaNotificar.estado === 'Vencido' ? '⚠️ Recordatorio de Pago' : '📧 Aviso de Pago'}
+                </h5>
+                <button type="button" className="btn-close btn-close-white" onClick={cerrarModalAvisoPago}></button>
+              </div>
+              <div className="modal-body">
+                <div className="mb-3 small">
+                  <div><strong>Póliza:</strong> {expedienteDelPago.numero_poliza || 'Sin número'}</div>
+                  <div><strong>Cliente:</strong> {expedienteDelPago.cliente_nombre || 'N/A'}</div>
+                  <div className="mt-2">
+                    <strong>Pago #{pagoParaNotificar.numero}</strong>
+                  </div>
+                  <div><strong>Fecha:</strong> {utils.formatearFecha(pagoParaNotificar.fecha, 'larga')}</div>
+                  <div><strong>Monto:</strong> <span className="badge bg-primary">${pagoParaNotificar.monto}</span></div>
+                  <div className="mt-2">
+                    <strong>Estado:</strong> <span className={`badge ${pagoParaNotificar.badgeClass}`}>{pagoParaNotificar.estado}</span>
+                  </div>
+                </div>
+
+                <div className="d-grid gap-2">
+                  <button
+                    className="btn btn-success d-flex align-items-center justify-content-center"
+                    onClick={() => enviarAvisoPagoWhatsApp(pagoParaNotificar, expedienteDelPago)}
+                  >
+                    <Share2 size={16} className="me-2" /> WhatsApp
+                  </button>
+                  <button
+                    className="btn btn-info text-white d-flex align-items-center justify-content-center"
+                    onClick={() => enviarAvisoPagoEmail(pagoParaNotificar, expedienteDelPago)}
+                  >
+                    <Mail size={16} className="me-2" /> Email
+                  </button>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={cerrarModalAvisoPago}>Cerrar</button>
               </div>
             </div>
           </div>
@@ -9543,6 +10165,7 @@ const eliminarExpediente = useCallback((id) => {
                     setMostrarModalPago(false);
                     setExpedienteParaPago(null);
                     setComprobantePago(null);
+                    setFechaUltimoPago('');
                   }}
                   disabled={procesandoPago}
                 ></button>
@@ -9564,6 +10187,30 @@ const eliminarExpediente = useCallback((id) => {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Campo para fecha real de pago */}
+                <div className="mb-3">
+                  <label className="form-label fw-bold">
+                    <Calendar size={16} className="me-2" />
+                    Fecha en que se realizó el pago *
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={fechaUltimoPago}
+                    onChange={(e) => setFechaUltimoPago(e.target.value)}
+                    disabled={procesandoPago}
+                  />
+                  <small className="text-muted d-block mt-1">
+                    {(() => {
+                      const fechaLimite = expedienteParaPago.fecha_vencimiento_pago || expedienteParaPago.proximo_pago;
+                      if (fechaLimite) {
+                        return `Fecha límite de pago: ${new Date(fechaLimite).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+                      }
+                      return 'Seleccione la fecha en que el cliente realizó el pago';
+                    })()}
+                  </small>
                 </div>
 
                 {/* Campo para subir comprobante */}
@@ -9633,6 +10280,7 @@ const eliminarExpediente = useCallback((id) => {
                     setMostrarModalPago(false);
                     setExpedienteParaPago(null);
                     setComprobantePago(null);
+                    setFechaUltimoPago('');
                   }}
                   disabled={procesandoPago}
                 >
@@ -9642,7 +10290,7 @@ const eliminarExpediente = useCallback((id) => {
                   type="button" 
                   className="btn btn-success" 
                   onClick={procesarPagoConComprobante}
-                  disabled={!comprobantePago || procesandoPago}
+                  disabled={!comprobantePago || !fechaUltimoPago || procesandoPago}
                 >
                   {procesandoPago ? (
                     <>
