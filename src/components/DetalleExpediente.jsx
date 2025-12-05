@@ -43,8 +43,9 @@ const DetalleExpediente = ({
   }, [datos?.producto, datos?.tipo_de_poliza]);
 
   const renderCampo = (label, valor, opts = {}) => {
-    const { strong = true, className = '' } = opts;
-    if (valor === undefined || valor === null || valor === '' || valor === '-') return null;
+    const { strong = true, className = '', forceShow = false } = opts;
+    // Si forceShow está activado, mostrar siempre (para campos financieros con $0.00)
+    if (!forceShow && (valor === undefined || valor === null || valor === '' || valor === '-')) return null;
     return (
       <div className={`col-md-3 mb-2 ${className}`}>
         <small className="text-muted" style={{ fontSize: '0.7rem' }}>{label}:</small>
@@ -186,12 +187,15 @@ const DetalleExpediente = ({
         <div className="seccion-bloque seccion-financiera">
           <h6 className="text-secondary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>💰 Información Financiera</h6>
           <div className="row g-2">
-            {renderCampo('Prima Neta', datos?.prima_pagada ? utils.formatearMoneda?.(datos.prima_pagada) : '$0.00')}
-            {renderCampo('Otros Descuentos', datos?.otros_descuentos ? utils.formatearMoneda?.(datos.otros_descuentos) : '$0.00')}
-            {renderCampo('Financiamiento por pago fraccionado', datos?.cargo_pago_fraccionado ? utils.formatearMoneda?.(datos.cargo_pago_fraccionado) : '$0.00')}
-            {renderCampo('Gastos de expedición', datos?.gastos_expedicion ? utils.formatearMoneda?.(datos.gastos_expedicion) : '$0.00')}
-            {renderCampo('I.V.A.', datos?.iva ? utils.formatearMoneda?.(datos.iva) : '$0.00')}
-            {renderCampo('Total a pagar', datos?.total ? utils.formatearMoneda?.(datos.total) : '$0.00')}
+            {renderCampo('1. Prima Neta', utils.formatearMoneda?.(datos?.prima_pagada || '0.00'), { forceShow: true })}
+            {renderCampo('2. Otros Descuentos', utils.formatearMoneda?.(datos?.otros_servicios || '0.00'), { forceShow: true })}
+            {renderCampo('3. Financiamiento por pago fraccionado', utils.formatearMoneda?.(datos?.cargo_pago_fraccionado || '0.00'), { forceShow: true })}
+            {renderCampo('4. Gastos de expedición', utils.formatearMoneda?.(datos?.gastos_expedicion || '0.00'), { forceShow: true })}
+            {renderCampo('5. I.V.A.', utils.formatearMoneda?.(datos?.iva || '0.00'), { forceShow: true })}
+            {renderCampo('6. Total a pagar', utils.formatearMoneda?.(datos?.total || '0.00'), { forceShow: true })}
+            {renderCampo('Cesión de Comisión', utils.formatearMoneda?.(datos?.cesion_comision || '0.00'), { forceShow: true })}
+            {renderCampo('1er. Pago', utils.formatearMoneda?.(datos?.primer_pago || '0.00'), { forceShow: true })}
+            {renderCampo('Subsecuentes', utils.formatearMoneda?.(datos?.pagos_subsecuentes || '0.00'), { forceShow: true })}
             {renderCampo('Forma de Pago', (tipoPagoMostrar || datos?.tipo_pago)?.toUpperCase?.())}
           </div>
         </div>
@@ -352,33 +356,47 @@ const DetalleExpediente = ({
                 <div className="row g-1">
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>1. Prima Neta:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.prima_pagada ? utils.formatearMoneda(datos.prima_pagada) : '$0.00'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.prima_pagada || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>2. Otros Descuentos:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.otros_descuentos ? utils.formatearMoneda(datos.otros_descuentos) : '$0.00'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.otros_servicios || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>3. Financiamiento por pago fraccionado:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.cargo_pago_fraccionado ? utils.formatearMoneda(datos.cargo_pago_fraccionado) : '$0.00'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.cargo_pago_fraccionado || '0.00')}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>4. Gastos de expedición:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.gastos_expedicion ? utils.formatearMoneda(datos.gastos_expedicion) : '$0.00'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.gastos_expedicion || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>5. I.V.A.:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.iva ? utils.formatearMoneda(datos.iva) : '$0.00'}</strong></div>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.iva || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>6. Total a pagar:</small>
-                    <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{datos.total ? utils.formatearMoneda(datos.total) : '$0.00'}</strong></div>
+                    <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{utils.formatearMoneda(datos.total || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
                     <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datos.tipo_pago || 'No especificado'}</strong></div>
+                  </div>
+                </div>
+                <div className="row g-1 mt-1">
+                  <div className="col-md-3">
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Cesión de Comisión:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.cesion_comision || '0.00')}</strong></div>
+                  </div>
+                  <div className="col-md-3">
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>1er. Pago:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.primer_pago || '0.00')}</strong></div>
+                  </div>
+                  <div className="col-md-3">
+                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subsecuentes:</small>
+                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.pagos_subsecuentes || '0.00')}</strong></div>
                   </div>
                 </div>
                 {(datos.fecha_limite_pago || datos.fecha_pago) && (
