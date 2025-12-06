@@ -4343,6 +4343,40 @@ const Formulario = React.memo(({
         
         console.log('🔍 Aplicando agente al formulario:', agenteParaFormulario);
 
+        // ✅ NORMALIZACIÓN DE COMPAÑÍA: Buscar coincidencia case-insensitive
+        let companiaNormalizada = datosExtraidos.compania || prev.compania;
+        if (datosExtraidos.compania) {
+          const companiaEncontrada = aseguradoras.find(a => 
+            a.nombre.toLowerCase() === datosExtraidos.compania.toLowerCase()
+          );
+          if (companiaEncontrada) {
+            companiaNormalizada = companiaEncontrada.nombre;
+            console.log('✅ Compañía normalizada:', datosExtraidos.compania, '→', companiaNormalizada);
+          }
+        }
+
+        // ✅ NORMALIZACIÓN DE PRODUCTO: Buscar coincidencia parcial o exacta
+        let productoNormalizado = datosExtraidos.producto || prev.producto;
+        if (datosExtraidos.producto) {
+          // Primero buscar coincidencia exacta
+          let productoEncontrado = tiposProductos.find(p => 
+            p.nombre.toLowerCase() === datosExtraidos.producto.toLowerCase()
+          );
+          
+          // Si no hay coincidencia exacta, buscar coincidencia parcial (ej: "Autos" en "Tu Auto Seguro Más")
+          if (!productoEncontrado) {
+            productoEncontrado = tiposProductos.find(p => 
+              datosExtraidos.producto.toLowerCase().includes(p.nombre.toLowerCase()) ||
+              p.nombre.toLowerCase().includes(datosExtraidos.producto.toLowerCase())
+            );
+          }
+          
+          if (productoEncontrado) {
+            productoNormalizado = productoEncontrado.nombre;
+            console.log('✅ Producto normalizado:', datosExtraidos.producto, '→', productoNormalizado);
+          }
+        }
+
         const nuevoFormulario = {
           ...prev, // Mantener TODO (incluye datos del cliente que ya están bien)
           ...datosPoliza, // Aplicar datos de la póliza base
@@ -4363,9 +4397,9 @@ const Formulario = React.memo(({
           clave_agente: datosExtraidos.clave_agente || prev.clave_agente || '',
           sub_agente: '',
           etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
-          // Usar datos originales del PDF
-          compania: datosExtraidos.compania || prev.compania,
-          producto: datosExtraidos.producto || prev.producto,
+          // Usar datos normalizados del PDF
+          compania: companiaNormalizada,
+          producto: productoNormalizado,
           tipo_cobertura: datosExtraidos.tipo_cobertura || datosPoliza.tipo_cobertura || prev.tipo_cobertura,
           deducible: datosExtraidos.deducible || datosPoliza.deducible || prev.deducible,
           suma_asegurada: datosExtraidos.suma_asegurada || datosPoliza.suma_asegurada || prev.suma_asegurada,

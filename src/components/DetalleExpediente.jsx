@@ -471,6 +471,7 @@ const DetalleExpediente = ({
                     {renderCampo('Tipo', datos?.tipo_vehiculo)}
                     {usoMostrar && renderCampo('Uso', usoMostrar)}
                     {servicioMostrar && renderCampo('Servicio', servicioMostrar)}
+                    {datos?.tipo_carga && renderCampo('Tipo de Carga', datos?.tipo_carga)}
                   </div>
                 </div>
               )}

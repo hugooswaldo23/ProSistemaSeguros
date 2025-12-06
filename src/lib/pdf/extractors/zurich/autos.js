@@ -62,7 +62,7 @@ export async function extraer(ctx) {
   // Combinar páginas 1 y 2 para tener toda la info del agente
   const texto = textoCompleto || (textoPagina1 + '\n' + (textoPagina2 || ''));
   
-  const compania = 'ZURICH';
+  const compania = 'Zurich';
   
   // DEBUG: Mostrar texto completo extraído
   console.log('📄 ========== TEXTO EXTRAÍDO COMPLETO ==========');
@@ -168,38 +168,68 @@ export async function extraer(ctx) {
   // Fecha de captura (fecha actual en formato YYYY-MM-DD)
   const fecha_captura = new Date().toISOString().split('T')[0];
   
+  // ==================== PRODUCTO ====================
+  // Formato: "Producto: Tu Auto Seguro Mas"
+  const productoMatch = texto.match(/Producto[:\s]+([^\n]+?)(?:\s+R\.F\.C\.|$)/i);
+  const producto_especifico = productoMatch ? productoMatch[1].trim() : 'Tu Auto Seguro Mas';
+  
+  // Mapear a categoría genérica para el formulario
+  const producto_nombre = 'Autos';
+  
   // ==================== VEHÍCULO ====================
-  // Marca
-  const marcaMatch = texto.match(/Marca[:\s]+([A-Z]+)/i);
-  const marca = marcaMatch ? marcaMatch[1] : '';
-  
-  // Modelo (descripción del vehículo)
-  const modeloMatch = texto.match(/(?:Modelo|Tipo|Descripci[oó]n)[:\s]+([A-Z0-9\s]+?)(?=\n|Año|Serie|Motor)/i);
-  const modelo = modeloMatch ? modeloMatch[1].trim() : '';
-  
-  // Año
-  const anioMatch = texto.match(/Año[:\s]+(\d{4})/i) || texto.match(/Modelo[:\s]+\d{4}/i);
-  const anio = anioMatch ? anioMatch[1] || anioMatch[0].match(/\d{4}/)[0] : '';
-  
-  // Serie / VIN
-  const serieMatch = texto.match(/(?:Serie|VIN|N[uú]mero\s+de\s+serie)[:\s]+([A-Z0-9]{17})/i);
-  const numero_serie = serieMatch ? serieMatch[1] : '';
+  // Formato Zurich: "Placas: 0 Capacidad: 5 Servicio: Particular No. de Motor: QR25615336M"
+  // "No. de Serie: JN8BT27T9UW14855 Uso: Tipo Carga: No Peligrosa"
+  // "Marca: NISSAN Modelo: 2020 Clave: Salvamento:"
+  // "Descripción: X TRAIL SENSE 2ROW SUV CVT AA EE CD BA 170HP ABS 2.5L 4CIL 5P 5OCUP"
   
   // Placas
-  const placasMatch = texto.match(/Placas?[:\s]+([A-Z0-9\-]+)/i);
-  const placas = placasMatch ? placasMatch[1] : '';
-  
-  // Motor
-  const motorMatch = texto.match(/Motor[:\s]+([A-Z0-9]+)/i);
-  const motor = motorMatch ? motorMatch[1] : '';
-  
-  // Uso
-  const usoMatch = texto.match(/Uso[:\s]+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?=\n|$)/i);
-  const uso = usoMatch ? usoMatch[1].trim() : '';
+  const placasMatch = texto.match(/Placas:\s*([A-Z0-9\-]+)/i);
+  const placas = placasMatch ? placasMatch[1].trim() : '';
   
   // Servicio
-  const servicioMatch = texto.match(/Servicio[:\s]+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?=\n|$)/i);
+  const servicioMatch = texto.match(/Servicio:\s*([A-Za-zÁÉÍÓÚÑáéíóúñ\s]+?)(?=No\.\s+de\s+Motor|$)/i);
   const servicio = servicioMatch ? servicioMatch[1].trim() : '';
+  
+  // Motor
+  const motorMatch = texto.match(/No\.\s+de\s+Motor:\s*([A-Z0-9]+)/i);
+  const motor = motorMatch ? motorMatch[1].trim() : '';
+  
+  // Serie / VIN
+  const serieMatch = texto.match(/No\.\s+de\s+Serie:\s*([A-Z0-9]+)/i);
+  const numero_serie = serieMatch ? serieMatch[1].trim() : '';
+  
+  // Uso
+  const usoMatch = texto.match(/Uso:\s*([A-Za-zÁÉÍÓÚÑáéíóúñ\s]+?)(?=Tipo\s+Carga|$)/i);
+  const uso = usoMatch ? usoMatch[1].trim() : '';
+  
+  // Tipo de Carga
+  const tipoCargaMatch = texto.match(/Tipo\s+Carga:\s*([A-Za-zÁÉÍÓÚÑáéíóúñ\s]+?)(?=Marca:|$)/i);
+  const tipo_carga = tipoCargaMatch ? tipoCargaMatch[1].trim() : '';
+  
+  // Marca
+  const marcaMatch = texto.match(/Marca:\s*([A-Z]+)/i);
+  const marca = marcaMatch ? marcaMatch[1].trim() : '';
+  
+  // Año (Modelo)
+  const anioMatch = texto.match(/Modelo:\s*(\d{4})/i);
+  const anio = anioMatch ? anioMatch[1] : '';
+  
+  // Descripción completa del vehículo
+  const descripcionMatch = texto.match(/Descripci[oó]n:\s*([A-Z0-9\s]+)/i);
+  const modelo = descripcionMatch ? descripcionMatch[1].trim() : '';
+  
+  // Color - no aparece en Zurich, dejar vacío
+  const color = '';
+  
+  // Tipo de vehículo - extraer de la descripción (SUV, SEDAN, etc)
+  let tipo_vehiculo = '';
+  if (modelo) {
+    if (modelo.includes('SUV')) tipo_vehiculo = 'SUV';
+    else if (modelo.includes('SEDAN')) tipo_vehiculo = 'SEDAN';
+    else if (modelo.includes('HATCHBACK')) tipo_vehiculo = 'HATCHBACK';
+    else if (modelo.includes('PICKUP')) tipo_vehiculo = 'PICKUP';
+    else if (modelo.includes('COUPE')) tipo_vehiculo = 'COUPE';
+  }
   
   // ==================== AGENTE ====================
   // El nombre viene como: MENDOZA LOPEZ CESAR PAUL (apellidos + nombre)
@@ -287,26 +317,71 @@ export async function extraer(ctx) {
   const pagos_subsecuentes = linea3 ? limpiarMonto(linea3[3]) : '';
   
   // ==================== COBERTURAS ====================
+  // Formato Zurich:
+  // Coberturas Amparadas    Deducibles    Primas
+  // Límites de Responsabilidad
+  // Daños Materiales    Valor Comercial    5 %    $ 2,311.91
+  // Robo Total    Valor Comercial    10 %    $ 3,330.80
+  // Gastos Médicos Ocupantes (L.U.C.)    $ 500,000    Ninguno    $ 299.37
+  // Otros Servicios Contratados
+  // Asistencia Vial    Amparada    Ninguno    $ 346.86
+  
   const coberturas = [];
   
-  // Patrón general para coberturas de Zurich
-  // Buscar líneas con: Nombre de cobertura | Suma asegurada | Deducible
-  const patronCobertura = /([A-ZÁÉÍÓÚÑa-záéíóúñ\s]{10,50})\s+\$?\s*([\d,]+\.?\d+|AMPARADA?)\s+([\d,]+\.?\d+%?|N\/A|AMPARADA?)/gi;
+  // Buscar el bloque completo de coberturas (desde "Coberturas Amparadas" hasta "Observaciones")
+  const bloqueCoberturasMatch = texto.match(/Coberturas\s+Amparadas[\s\S]{0,5000}?(?=Observaciones|Si\s+el\s+contenido)/i);
+  const textoCoberturas = bloqueCoberturasMatch ? bloqueCoberturasMatch[0] : '';
   
-  let matchCobertura;
-  while ((matchCobertura = patronCobertura.exec(texto)) !== null) {
-    const nombreCob = matchCobertura[1].trim();
-    const suma = matchCobertura[2];
-    const deducible = matchCobertura[3];
+  if (textoCoberturas) {
+    // Dividir en líneas y procesar cada una
+    const lineas = textoCoberturas.split('\n');
     
-    // Filtrar líneas que no sean coberturas reales
-    if (nombreCob.length > 5 && !nombreCob.match(/Prima|Total|Gastos|Vigencia|Asegurado/i)) {
-      coberturas.push({
-        nombre: nombreCob,
-        suma_asegurada: suma === 'AMPARADA' || suma === 'AMPARADO' ? 'AMPARADA' : suma,
-        deducible: deducible === 'AMPARADA' || deducible === 'AMPARADO' ? 'N/A' : deducible,
-        tipo: suma === 'AMPARADA' || suma === 'AMPARADO' ? 'amparada' : 'monto'
-      });
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i].trim();
+      
+      // Saltar headers, líneas vacías y títulos
+      if (!linea || 
+          linea.includes('Coberturas Amparadas') || 
+          linea.includes('Deducibles') || 
+          linea.includes('Primas') ||
+          linea.includes('Límites de Responsabilidad') ||
+          linea === 'Otros Servicios Contratados') {
+        continue;
+      }
+      
+      // Patrón: Nombre | Suma | Deducible | Prima
+      // Ejemplo: "Daños Materiales    Valor Comercial    5 %    $ 2,311.91"
+      // Ejemplo: "R.C. por daños a Terceros L.U.C.    $ 1,500,000    0 UMA    $ 1,821.01"
+      // Ejemplo: "Gastos Médicos Ocupantes (L.U.C.)    $ 500,000    Ninguno    $ 299.37"
+      // Ejemplo: "Asistencia Vial    Amparada    Ninguno    $ 346.86"
+      // Ejemplo: "Multas y Corralones    45 UMA    Ninguno    $ 30.93"
+      // Ejemplo: "Responsabilidad Civil Extranjero    Amparada    0 UMA"
+      const match = linea.match(/^(.+?)\s+(Valor\s+Comercial|\$\s*[\d,]+|Amparad[oa]|[\d]+\s+UMA)\s+([\d]+\s*%?|[\d]+\s+UMA|Ninguno|Amparad[oa]|N\/A|0\s+UMA)(?:\s+\$?\s*([\d,]+\.?\d*))?/i);
+      
+      if (match) {
+        const nombreCob = match[1].trim();
+        const suma = match[2].trim();
+        let deducible = match[3].trim();
+        const prima = match[4] ? match[4].replace(/,/g, '') : '0.00';
+        
+        // Normalizar deducible: si es solo "0", agregar "UMA"
+        if (deducible === '0' || deducible === '0 UMA') {
+          deducible = '0 UMA';
+        } else if (deducible === 'AMPARADA' || deducible === 'AMPARADO') {
+          deducible = 'N/A';
+        }
+        
+        // Filtrar líneas que no sean coberturas
+        if (!nombreCob.match(/Prima|Total\s+1er|Subsecuentes|Financiamiento|I\.V\.A\./i) && nombreCob.length > 3) {
+          coberturas.push({
+            nombre: nombreCob,
+            suma_asegurada: suma === 'AMPARADA' || suma === 'AMPARADO' || suma === 'Amparada' ? 'AMPARADA' : suma.replace(/\$/g, '').trim(),
+            deducible: deducible,
+            prima: parseFloat(prima).toFixed(2),
+            tipo: suma.includes('Amparad') ? 'amparada' : 'monto'
+          });
+        }
+      }
     }
   }
   
@@ -331,7 +406,8 @@ export async function extraer(ctx) {
     
     // Póliza
     compania,
-    producto: 'Autos',
+    producto: producto_nombre,
+    producto_especifico, // Guardar el producto específico de Zurich para referencia
     etapa_activa: 'Emitida',
     agente,
     clave_agente,
@@ -366,10 +442,11 @@ export async function extraer(ctx) {
     numero_serie,
     motor,
     placas,
-    color: '',
-    tipo_vehiculo: '',
+    color,
+    tipo_vehiculo,
     uso,
     servicio,
+    tipo_carga,
     
     // Coberturas
     coberturas
