@@ -311,7 +311,8 @@ const CalendarioPagos = React.memo(({
   calcularProximoPago, 
   mostrarResumen = true,
   compacto = false,
-  onEnviarAviso // Callback para enviar avisos de pago
+  onEnviarAviso, // Callback para enviar avisos de pago
+  historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
@@ -544,8 +545,19 @@ const CalendarioPagos = React.memo(({
                       <button 
                         className="btn btn-sm btn-outline-primary"
                         onClick={() => {
-                          // TODO: Implementar visualización de comprobante
-                          toast.info('Función de ver comprobante próximamente');
+                          // Buscar en el historial el evento de pago correspondiente
+                          const eventoPago = historial.find(evento => 
+                            evento.tipo_evento === 'pago_registrado' &&
+                            evento.datos_adicionales?.fecha_pago === pago.fecha &&
+                            evento.datos_adicionales?.comprobante_url
+                          );
+                          
+                          if (eventoPago?.datos_adicionales?.comprobante_url) {
+                            // Abrir comprobante en nueva pestaña
+                            window.open(eventoPago.datos_adicionales.comprobante_url, '_blank');
+                          } else {
+                            alert('No se encontró el comprobante de pago para esta fecha');
+                          }
                         }}
                         title="Ver comprobante de pago"
                       >
@@ -7718,7 +7730,33 @@ const estadoInicialFormulario = {
 
       console.log('✅ Pago registrado en BD');
 
-      // 2. Agregar comentario al historial con información del comprobante
+      // 2. Subir comprobante de pago a S3
+      let comprobanteUrl = null;
+      try {
+        console.log('📤 Subiendo comprobante a S3...');
+        const formData = new FormData();
+        formData.append('file', comprobantePago);
+        formData.append('tipo', 'comprobante-pago');
+        formData.append('expediente_id', expedienteParaPago.id);
+        
+        const uploadResponse = await fetch(`${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        if (uploadResponse.ok) {
+          const uploadData = await uploadResponse.json();
+          comprobanteUrl = uploadData.data?.pdf_url || uploadData.data?.url;
+          console.log('✅ Comprobante subido a S3:', comprobanteUrl);
+        } else {
+          console.warn('⚠️ No se pudo subir comprobante a S3, continuando sin URL');
+        }
+      } catch (errorUpload) {
+        console.warn('⚠️ Error al subir comprobante:', errorUpload);
+        // Continuar sin bloquear el proceso
+      }
+
+      // 3. Agregar comentario al historial con información del comprobante
       try {
         // Construir descripción consolidada con formato en columna
         const etapaFinal = datosActualizacion.etapa_activa || expedienteParaPago.etapa_activa;
@@ -7794,6 +7832,7 @@ const estadoInicialFormulario = {
               fecha_pago: fechaUltimoPago,
               numero_pago: numeroPago,
               comprobante_nombre: comprobantePago.name,
+              comprobante_url: comprobanteUrl, // URL del comprobante en S3
               siguiente_vencimiento: proximoPago || null,
               estatus_pago_nuevo: nuevoEstatusPago,
               etapa_activa: etapaFinal,
