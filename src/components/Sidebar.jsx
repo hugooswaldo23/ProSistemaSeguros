@@ -21,7 +21,7 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
 
     const getWidth = () => {
         if (esMobile) return '280px';
-        return colapsado ? '80px' : '280px';
+        return colapsado ? '80px' : '200px';
     };
 
     const getTransform = () => {
@@ -86,20 +86,23 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
                         <button
                             key={modulo.key}
                             onClick={() => navigate(modulo.key)}
-                            className={`btn w-100 text-white d-flex align-items-center py-2 border-0 ${
+                            className={`btn w-100 text-white d-flex py-2 border-0 ${
                                 isActive ? 'bg-primary' : 'bg-transparent'
                             } ${!modulo.activo ? 'opacity-50' : ''}`}
                             style={{ 
                                 borderRadius: '0',
                                 justifyContent: (colapsado && !esMobile) ? 'center' : 'flex-start',
-                                paddingLeft: (colapsado && !esMobile) ? '0' : '1.5rem',
-                                paddingRight: (colapsado && !esMobile) ? '0' : '1.5rem'
+                                paddingLeft: (colapsado && !esMobile) ? '0' : '1rem',
+                                paddingRight: (colapsado && !esMobile) ? '0' : '1rem',
+                                alignItems: 'flex-start',
+                                paddingTop: '0.6rem',
+                                paddingBottom: '0.6rem'
                             }}
                             disabled={!modulo.activo}
                             title={(colapsado && !esMobile) ? modulo.nombre : ''}
                         >
-                            <IconoModulo size={18} className={mostrarTexto ? 'me-3' : ''} />
-                            {mostrarTexto && modulo.nombre}
+                            <IconoModulo size={18} className={mostrarTexto ? 'me-2' : ''} style={{ marginTop: '2px', flexShrink: 0 }} />
+                            {mostrarTexto && <span style={{ textAlign: 'left', lineHeight: '1.3' }}>{modulo.nombre}</span>}
                         </button>
                     );
                 })}

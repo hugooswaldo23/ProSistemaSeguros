@@ -89,6 +89,11 @@ const CONSTANTS = {
   }
 };
 
+// ============= VARIABLES GLOBALES PARA SNAPSHOT =============
+// Flag global para indicar que se debe capturar un snapshot del formulario
+// Se usa para capturar el estado completo después de extraer PDF + cargar BD + calcular automáticos
+let globalSnapshotPendiente = false;
+
 // ============= UTILIDADES =============
 const utils = {
   formatearFecha: (fecha, formato = 'corta') => {
@@ -261,7 +266,7 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
         <div><small className="text-muted">Contacto: {contactoNombre}</small></div>
       )}
       {emailMostrar && (
-        <div><small className="text-muted">✉️ {emailMostrar}</small></div>
+        <div><small className="text-muted">{emailMostrar}</small></div>
       )}
       {/* Teléfonos: si hay contacto, mostrar ambos (móvil y fijo). Si no hay contacto, caer a teléfonos del cliente */}
       {tieneContacto ? (
@@ -290,23 +295,14 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
 });
 
 const EstadoPago = React.memo(({ expediente }) => (
-  <div>
+  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
     <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
     {expediente.frecuenciaPago && (
       <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
     )}
-    <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
-    {expediente.proximoPago && ((expediente.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expediente.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
-      <div>
-        <small className={`${
-          expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
-          expediente.estatusPago === 'Por Vencer' ? 'text-warning' :
-          'text-muted'
-        }`}>
-          Pago: {utils.formatearFecha(expediente.proximoPago)}
-        </small>
-      </div>
-    )}
+    <div className="mt-1">
+      <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+    </div>
   </div>
 ));
 
@@ -321,12 +317,27 @@ const CalendarioPagos = React.memo(({
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
   const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
   
-  // Mostrar solo para tipo de pago Fraccionado y con datos básicos
-  if (tipoPago?.toUpperCase() !== 'FRACCIONADO' || !frecuencia || !expediente.inicio_vigencia) {
+  // Validar que tenga los datos mínimos necesarios
+  if (!expediente.inicio_vigencia) {
+    return null;
+  }
+  
+  // Determinar si es Anual o Fraccionado
+  const esAnual = tipoPago?.toUpperCase() === 'ANUAL' || tipoPago?.toUpperCase() === 'CONTADO';
+  const esFraccionado = tipoPago?.toUpperCase() === 'FRACCIONADO';
+  
+  // Si no es ninguno de los dos, no mostrar
+  if (!esAnual && !esFraccionado) {
+    return null;
+  }
+  
+  // Para fraccionado, validar que tenga frecuencia
+  if (esFraccionado && !frecuencia) {
     return null;
   }
 
-  const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+  // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
+  const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
   const pagos = [];
   
   // 🔧 Obtener periodo de gracia del expediente o calcular según compañía (convertir a número)
@@ -441,8 +452,8 @@ const CalendarioPagos = React.memo(({
     <div className="card border-primary">
       <div className="card-header bg-primary text-white">
         <h6 className="mb-0">
-          📅 Calendario de Pagos - {frecuencia}
-          <small className="ms-2">({numeroPagos} pagos en el año)</small>
+          📅 Calendario de Pagos - {esAnual ? 'Anual' : frecuencia}
+          <small className="ms-2">({numeroPagos} {numeroPagos === 1 ? 'pago' : 'pagos'} en el año)</small>
         </h6>
       </div>
       <div className="card-body p-3">
@@ -3219,121 +3230,90 @@ const ListaExpedientes = React.memo(({
   }, [expedientes]);
 
   return (
-    <div className="p-3 p-md-4">
-      <div className="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-4 gap-3">
-        <h3 className="mb-0">Gestión de Pólizas</h3>
+    <div className="p-3">
+      {/* Estilos globales para normalizar fuentes */}
+      <style>{`
+        .table-sm { font-size: 0.875rem !important; }
+        .table-sm small { font-size: 0.75rem !important; }
+        .table-sm .badge { font-size: 0.75rem !important; }
+        .table-sm .text-muted { font-size: 0.75rem !important; }
+      `}</style>
+      
+      {/* Header Compacto */}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h4 className="mb-0">Gestión de Pólizas</h4>
         <button
           onClick={() => {
             setMostrarModalMetodoCaptura(true);
           }}
-          className="btn btn-primary w-100 w-md-auto"
+          className="btn btn-primary"
         >
           <Plus size={16} className="me-2" />
           Nueva Póliza
         </button>
       </div>
 
-      {/* Layout: Sidebar + Contenido */}
-      <div className="row g-2">
-        {/* Sidebar - Carpetas (Desktop) */}
-        <div className="col-auto d-none d-md-block" style={{ minWidth: '160px', maxWidth: '180px' }}>
-          <div className="card">
-            <div className="card-header bg-light py-2 px-2">
-              <h6 className="mb-0" style={{ fontSize: '0.85rem' }}>📂 Carpetas</h6>
-            </div>
-            <div className="list-group list-group-flush">
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'todas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('todas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>📋 Todas</span>
-                <span className={`badge ${carpetaSeleccionada === 'todas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.todas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'en_proceso' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('en_proceso')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>📝 En Proceso</span>
-                <span className={`badge ${carpetaSeleccionada === 'en_proceso' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.en_proceso}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vigentes' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('vigentes')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>✅ Vigentes</span>
-                <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-primary' : 'bg-success'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.vigentes}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'renovadas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('renovadas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>🔄 Renovadas</span>
-                <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-primary' : 'bg-info'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.renovadas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'por_renovar' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('por_renovar')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>⏰ Por Renovar</span>
-                <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-primary' : 'bg-warning'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.por_renovar}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vencidas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('vencidas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>⚠️ Vencidas</span>
-                <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-primary' : 'bg-danger'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.vencidas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'canceladas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('canceladas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>🚫 Canceladas</span>
-                <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.canceladas}
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Selector de Carpetas - Móvil */}
-        <div className="col-12 d-md-none mb-3">
-          <select 
-            className="form-select"
-            value={carpetaSeleccionada}
-            onChange={(e) => setCarpetaSeleccionada(e.target.value)}
+      {/* Carpetas Horizontales */}
+      <div className="mb-3" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        <div className="d-inline-flex gap-2">
+          <button
+            className={`btn ${carpetaSeleccionada === 'todas' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('todas')}
+            style={{ whiteSpace: 'nowrap' }}
           >
-            <option value="todas">📋 Todas ({contadores.todas})</option>
-            <option value="en_proceso">📝 En Proceso ({contadores.en_proceso})</option>
-            <option value="vigentes">✅ Vigentes ({contadores.vigentes})</option>
-            <option value="por_renovar">🔔 Por Renovar ({contadores.por_renovar})</option>
-            <option value="vencidas">⏰ Vencidas ({contadores.vencidas})</option>
-            <option value="canceladas">🚫 Canceladas ({contadores.canceladas})</option>
-          </select>
+            📋 Todas
+            <span className="badge bg-white text-dark ms-2">{contadores.todas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'en_proceso' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('en_proceso')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            📝 En Proceso
+            <span className="badge bg-secondary ms-2">{contadores.en_proceso}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'vigentes' ? 'btn-success' : 'btn-outline-success'}`}
+            onClick={() => setCarpetaSeleccionada('vigentes')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ✅ Vigentes
+            <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-success' : 'bg-success text-white'} ms-2`}>{contadores.vigentes}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'renovadas' ? 'btn-info' : 'btn-outline-info'}`}
+            onClick={() => setCarpetaSeleccionada('renovadas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            🔄 Renovadas
+            <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-info' : 'bg-info text-white'} ms-2`}>{contadores.renovadas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'por_renovar' ? 'btn-warning' : 'btn-outline-warning'}`}
+            onClick={() => setCarpetaSeleccionada('por_renovar')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ⏰ Por Renovar
+            <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'} ms-2`}>{contadores.por_renovar}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'vencidas' ? 'btn-danger' : 'btn-outline-danger'}`}
+            onClick={() => setCarpetaSeleccionada('vencidas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ⚠️ Vencidas
+            <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-danger' : 'bg-danger text-white'} ms-2`}>{contadores.vencidas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'canceladas' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('canceladas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            🚫 Canceladas
+            <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-dark' : 'bg-secondary text-white'} ms-2`}>{contadores.canceladas}</span>
+          </button>
         </div>
-
-        {/* Contenido principal */}
-        <div className="col">
+      </div>
 
       {/* Alertas de duplicados */}
       {(analisisDuplicados.polizasDuplicadas.length > 0 || 
@@ -3465,31 +3445,27 @@ const ListaExpedientes = React.memo(({
           <>
             {/* Vista Desktop - Tabla */}
             <div className="table-responsive d-none d-lg-block">
-              <table className="table table-hover table-sm mb-0">
+              <table className="table table-hover table-sm mb-0" style={{ fontSize: '0.875rem' }}>
                 <thead className="table-light">
-                  <tr style={{ fontSize: '0.75rem' }}>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Póliza</th>
-                    <th style={{ width: '180px', verticalAlign: 'middle' }}>Cliente</th>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Compañía</th>
-                    <th style={{ width: '200px', verticalAlign: 'middle' }}>Producto</th>
-                    <th style={{ width: '80px' }}>
+                  <tr>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Póliza</th>
+                    <th style={{ width: '240px', verticalAlign: 'middle', textAlign: 'center' }}>Cliente</th>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Compañía</th>
+                    <th style={{ width: '210px', verticalAlign: 'middle', textAlign: 'center' }}>Producto</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>
                       <div>Etapa</div>
                       <div>Activa</div>
                     </th>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Agente</th>
-                    <th style={{ width: '100px' }}>
-                      <div>Tipo</div>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
+                    <th style={{ width: '200px', textAlign: 'center' }}>
                       <div>Estatus Pago</div>
+                      <div>y Progreso</div>
                     </th>
-                    <th style={{ width: '140px' }}>
-                      <div>Progreso</div>
-                      <div>de Pagos</div>
-                    </th>
-                    <th style={{ width: '100px' }}>
+                    <th style={{ width: '100px', textAlign: 'center' }}>
                       <div>Vigencia</div>
                       <div>Pago</div>
                     </th>
-                    <th width="180" style={{ verticalAlign: 'middle' }}>Acciones</th>
+                    <th width="150" style={{ verticalAlign: 'middle', textAlign: 'center' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3502,51 +3478,57 @@ const ListaExpedientes = React.memo(({
                     const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
                     
                     return (
-                      <tr key={expediente.id} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
+                      <tr key={expediente.id} style={{ verticalAlign: 'middle' }}>
                         <td style={{ verticalAlign: 'middle' }}>
                           <div>
                             <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
                             {esDuplicadaCompleta && (
                               <div>
-                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada (misma póliza + mismo VIN)">
+                                <span className="badge bg-warning text-dark" title="Póliza duplicada (misma póliza + mismo VIN)">
                                   ⚠️ Duplicada
                                 </span>
                               </div>
                             )}
                             {esVinDuplicado && (
                               <div>
-                                <span className="badge" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
+                                <span className="badge" style={{ backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
                                   ⚠️ VIN Duplicado
                                 </span>
                               </div>
                             )}
                             {esPolizaVinDistinto && (
                               <div>
-                                <span className="badge bg-danger" style={{ fontSize: '0.7rem' }} title="Mismo número de póliza con VIN diferente - Revisar urgente">
+                                <span className="badge bg-danger" title="Mismo número de póliza con VIN diferente - Revisar urgente">
                                   ⚠️ Póliza VIN Distinto
                                 </span>
                               </div>
                             )}
                             {expediente.endoso && (
-                              <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>End: {expediente.endoso}</small></div>
+                              <div><small className="text-muted">End: {expediente.endoso}</small></div>
                             )}
                             {expediente.inciso && (
-                              <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Inc: {expediente.inciso}</small></div>
+                              <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
                             )}
                             {/* Fechas de captura y emisión */}
-                            <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '4px', lineHeight: '1.3' }}>
+                            <div style={{ marginTop: '4px', fontSize: '0.7rem', lineHeight: '1.3' }}>
                               {expediente.created_at && (
-                                <div>📝 Cap: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                                <div>
+                                  <div className="text-muted">Captura</div>
+                                  <div>{utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                                </div>
                               )}
                               {expediente.fecha_emision && (
-                                <div>📄 Emi: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                                <div style={{ marginTop: '2px' }}>
+                                  <div className="text-muted">Emisión</div>
+                                  <div>{utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                                </div>
                               )}
                             </div>
                           </div>
                         </td>
                         <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
-                        <td>{expediente.compania}</td>
-                        <td>
+                        <td style={{ textAlign: 'center' }}>{expediente.compania}</td>
+                        <td style={{ fontSize: '0.7rem' }}>
                           <div>
                             <strong>{expediente.producto}</strong>
                             {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos') || expediente.producto?.includes('Auto')) && (
@@ -3572,90 +3554,83 @@ const ListaExpedientes = React.memo(({
                             )}
                           </div>
                         </td>
-                        <td>
+                        <td style={{ textAlign: 'center', fontSize: '0.7rem' }}>
                           <Badge tipo="etapa" valor={expediente.etapa_activa} />
                           {expediente.motivoCancelacion && (
-                            <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Motivo: {expediente.motivoCancelacion}</small></div>
+                            <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
                         </td>
-                        <td style={{ fontSize: '0.75rem' }}>{agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente || '-'}</td>
-                        <td>
-                          <EstadoPago expediente={expediente} />
-                        </td>
-                        <td style={{ fontSize: '0.75rem' }}>
-                          {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
-                           (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
-                           expediente.inicio_vigencia ? (
-                            (() => {
-                              // Normalizar campos
-                              const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-                              
-                              // Calcular progreso de pagos
-                              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-                              const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
-                              
-                              let pagosRealizados = 0;
-                              if (fechaUltimoPago) {
-                                const fechaUltimo = new Date(fechaUltimoPago);
-                                const fechaInicio = new Date(expediente.inicio_vigencia);
-                                
-                                const mesesPorFrecuencia = {
-                                  'Mensual': 1,
-                                  'Trimestral': 3,
-                                  'Semestral': 6
-                                };
-                                
-                                const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-                                const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
-                                                            (fechaUltimo.getMonth() - fechaInicio.getMonth());
-                                
-                                pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
-                                pagosRealizados = Math.min(pagosRealizados, numeroPagos);
+                        <td style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                          {(() => {
+                            if (agenteInfo) {
+                              const nombreCompleto = agenteInfo.nombre || '';
+                              const palabras = nombreCompleto.trim().split(/\s+/);
+                              const primerNombre = palabras[0] || '';
+                              const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
+                              return `${agenteInfo.codigoAgente} - ${primerNombre} ${primerApellido}`.trim();
+                            } else if (expediente.agente) {
+                              // Si no hay agenteInfo, procesar el texto del expediente
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                const codigo = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                const primerNombre = palabras[0] || '';
+                                const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
+                                return `${codigo} - ${primerNombre} ${primerApellido}`.trim();
                               }
-                              
-                              const progreso = numeroPagos > 0 ? (pagosRealizados / numeroPagos) * 100 : 0;
-                              const proximoPago = expediente.fecha_vencimiento_pago || expediente.proximo_pago;
-                              const diasHastaProximo = proximoPago ? utils.calcularDiasRestantes(proximoPago) : null;
-                              const proximoVencido = diasHastaProximo !== null && diasHastaProximo < 0;
-                              const proximoCerca = diasHastaProximo !== null && diasHastaProximo >= 0 && diasHastaProximo <= 15;
-                              
-                              return (
-                                <div>
-                                  {/* Barra de progreso */}
-                                  <div className="progress mb-1" style={{ height: '8px' }}>
-                                    <div 
-                                      className={`progress-bar ${progreso === 100 ? 'bg-success' : 'bg-primary'}`}
-                                      style={{ width: `${progreso}%` }}
-                                    ></div>
-                                  </div>
-                                  
-                                  {/* Info compacta */}
-                                  <div className="d-flex justify-content-between align-items-center">
-                                    <small className="text-muted">
-                                      {pagosRealizados}/{numeroPagos}
-                                    </small>
-                                    {proximoPago && pagosRealizados < numeroPagos && (
-                                      <span 
-                                        className={`badge ${proximoVencido ? 'bg-danger' : proximoCerca ? 'bg-warning' : 'bg-secondary'}`}
-                                        style={{ fontSize: '0.65rem' }}
-                                      >
-                                        {proximoVencido ? '⚠️ Vencido' : proximoCerca ? '⏰ Por vencer' : '📅 Próx'}
-                                      </span>
-                                    )}
-                                    {pagosRealizados === numeroPagos && (
-                                      <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>
-                                        ✅ Completo
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })()
-                          ) : (
-                            <small className="text-muted">-</small>
-                          )}
+                              return textoAgente;
+                            }
+                            return '-';
+                          })()}
                         </td>
-                        <td style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                        <td style={{ textAlign: 'center' }}>
+                          <div>
+                            {/* Tipo y Estatus de Pago */}
+                            <EstadoPago expediente={expediente} />
+                            
+                            {/* Progreso de pagos solo si es fraccionado */}
+                            {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
+                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
+                             expediente.inicio_vigencia && (
+                              (() => {
+                                // Normalizar campos
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                
+                                // Calcular progreso de pagos
+                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
+                                
+                                let pagosRealizados = 0;
+                                if (fechaUltimoPago) {
+                                  const fechaUltimo = new Date(fechaUltimoPago);
+                                  const fechaInicio = new Date(expediente.inicio_vigencia);
+                                  
+                                  const mesesPorFrecuencia = {
+                                    'Mensual': 1,
+                                    'Trimestral': 3,
+                                    'Semestral': 6
+                                  };
+                                  
+                                  const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                                  const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
+                                                              (fechaUltimo.getMonth() - fechaInicio.getMonth());
+                                  
+                                  pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+                                  pagosRealizados = Math.min(pagosRealizados, numeroPagos);
+                                }
+                                
+                                return (
+                                  <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                                    <span className="text-muted">{pagosRealizados}/{numeroPagos}</span>
+                                  </div>
+                                );
+                              })()
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '0.7rem', lineHeight: '1.4', textAlign: 'center' }}>
                           <div>
                             {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
                           </div>
@@ -3669,138 +3644,133 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
-                            <div className="d-flex gap-1 align-items-center">
-                              {/* === BOTONES DE RENOVACIÓN === */}
-                              {(() => {
-                                const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
-                                
-                                if (!estaPorRenovar) return null;
-                                
-                                const etapaActual = expediente.etapa_activa || '';
-                                
-                                // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
-                                const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
-                                                                !etapaActual.includes('Cotización') && 
-                                                                !etapaActual.includes('Enviada') &&
-                                                                !etapaActual.includes('Pendiente de Emisión');
-                                
-                                const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
-                                                               etapaActual === 'Renovación Enviada';
-                                
-                                const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
-                                
-                                return (
-                                  <>
-                                    {puedeIniciarCotizacion && (
-                                      <button
-                                        onClick={() => iniciarCotizacionRenovacion(expediente)}
-                                        className="btn btn-primary btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Cotizar Renovación"
-                                      >
-                                        <FileText size={12} />
-                                      </button>
-                                    )}
-                                    
-                                    {puedeMarcarAutorizado && (
-                                      <button
-                                        onClick={() => marcarRenovacionAutorizada(expediente)}
-                                        className="btn btn-success btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Marcar como Autorizado"
-                                      >
-                                        <CheckCircle size={12} />
-                                      </button>
-                                    )}
-                                    
-                                    {puedeAgregarRenovada && (
-                                      <button
-                                        onClick={() => abrirModalPolizaRenovada(expediente)}
-                                        className="btn btn-info btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Agregar Póliza Renovada"
-                                      >
-                                        <RefreshCw size={12} />
-                                      </button>
-                                    )}
-                                  </>
-                                );
-                              })()}
-
-                              <button
-                                onClick={() => abrirModalCompartir(expediente)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Compartir"
-                              >
-                                <Share2 size={12} />
-                              </button>
-
-                              {(() => {
-                                // ✅ El botón de pago debe estar disponible independientemente de la etapa
-                                // Solo se oculta si ya está pagado o si la póliza está cancelada
-                                const etapaValida = expediente.etapa_activa !== 'Cancelada';
-                                // ✅ Verificar estatus_pago tanto en camelCase como snake_case
-                                const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
-                                const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                                // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
-                                const noPagado = estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado';
-                                
-                                return etapaValida && noPagado ? (
-                                  <button
-                                    onClick={() => aplicarPago(expediente.id)}
-                                    className="btn btn-success btn-sm"
-                                    style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                    title="Aplicar Pago"
-                                  >
-                                    <DollarSign size={12} />
-                                  </button>
-                                ) : null;
-                              })()}
-
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', maxWidth: '120px' }}>
+                            {/* === BOTONES DE RENOVACIÓN === */}
+                            {(() => {
+                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
                               
-                              {expediente.etapa_activa !== 'Cancelada' && (
+                              if (!estaPorRenovar) return null;
+                              
+                              const etapaActual = expediente.etapa_activa || '';
+                              
+                              // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
+                              const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                              !etapaActual.includes('Cotización') && 
+                                                              !etapaActual.includes('Enviada') &&
+                                                              !etapaActual.includes('Pendiente de Emisión');
+                              
+                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                             etapaActual === 'Renovación Enviada';
+                              
+                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                              
+                              return (
+                                <>
+                                  {puedeIniciarCotizacion && (
+                                    <button
+                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                      className="btn btn-primary btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Cotizar Renovación"
+                                    >
+                                      <FileText size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeMarcarAutorizado && (
+                                    <button
+                                      onClick={() => marcarRenovacionAutorizada(expediente)}
+                                      className="btn btn-success btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Marcar como Autorizado"
+                                    >
+                                      <CheckCircle size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeAgregarRenovada && (
+                                    <button
+                                      onClick={() => abrirModalPolizaRenovada(expediente)}
+                                      className="btn btn-info btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Agregar Póliza Renovada"
+                                    >
+                                      <RefreshCw size={12} />
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            <button
+                              onClick={() => abrirModalCompartir(expediente)}
+                              className="btn btn-success btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Compartir"
+                            >
+                              <Share2 size={12} />
+                            </button>
+
+                            {(() => {
+                              // ✅ El botón de pago debe estar disponible independientemente de la etapa
+                              // Solo se oculta si ya está pagado o si la póliza está cancelada
+                              const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                              // ✅ Verificar estatus_pago tanto en camelCase como snake_case
+                              const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
+                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                              // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
+                              const noPagado = estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado';
+                              
+                              return etapaValida && noPagado ? (
                                 <button
-                                  onClick={() => iniciarCancelacion(expediente)}
-                                  className="btn btn-danger btn-sm"
+                                  onClick={() => aplicarPago(expediente.id)}
+                                  className="btn btn-success btn-sm"
                                   style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Cancelar Póliza"
+                                  title="Aplicar Pago"
                                 >
-                                  <XCircle size={12} />
+                                  <DollarSign size={12} />
                                 </button>
-                              )}
-                              
-                              <button
-                                onClick={() => verDetalles(expediente)}
-                                className="btn btn-outline-primary btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Ver detalles"
-                              >
-                                <Eye size={12} />
-                              </button>
-                            </div>
+                              ) : null;
+                            })()}
+
                             
-                            {/* Fila 2: Editar, Eliminar */}
-                            <div className="d-flex gap-1 align-items-center">
+                            {expediente.etapa_activa !== 'Cancelada' && (
                               <button
-                                onClick={() => editarExpediente(expediente)}
-                                className="btn btn-outline-secondary btn-sm"
+                                onClick={() => iniciarCancelacion(expediente)}
+                                className="btn btn-danger btn-sm"
                                 style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Editar"
+                                title="Cancelar Póliza"
                               >
-                                <Edit size={12} />
+                                <XCircle size={12} />
                               </button>
-                              <button
-                                onClick={() => eliminarExpediente(expediente.id)}
-                                className="btn btn-outline-danger btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Eliminar"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                            )}
+                            
+                            <button
+                              onClick={() => verDetalles(expediente)}
+                              className="btn btn-outline-primary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Ver detalles"
+                            >
+                              <Eye size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => editarExpediente(expediente)}
+                              className="btn btn-outline-secondary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Editar"
+                            >
+                              <Edit size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => eliminarExpediente(expediente.id)}
+                              className="btn btn-outline-danger btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Eliminar"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -4216,8 +4186,6 @@ const ListaExpedientes = React.memo(({
           </div>
         </div>
       )}
-        </div>
-      </div>
     </div>
   );
 });
@@ -4436,13 +4404,21 @@ const Formulario = React.memo(({
             const formularioConCalculos = actualizarCalculosAutomaticos(prev);
             // ✅ SOLO aplicar los cálculos automáticos, NO sobrescribir datos del PDF
             // Los datos del PDF ya están en 'prev' del setFormulario anterior
-            return {
+            const formularioFinal = {
               ...prev,
               ...formularioConCalculos
               // NO sobrescribir nada más - los datos del PDF ya están en 'prev'
             };
+            
+            return formularioFinal;
           });
           console.log('✅ Cálculos automáticos aplicados (preservando datos del PDF)');
+          
+          // 🔍 MARCAR que el snapshot debe guardarse después de que el formulario termine de actualizarse
+          setTimeout(() => {
+            globalSnapshotPendiente = true;
+            console.log('📸 Snapshot pendiente - se guardará en próximo render');
+          }, 200);
         }, 150);
       } else {
         // FORZAR la actualización después de un pequeño delay
@@ -4474,6 +4450,12 @@ const Formulario = React.memo(({
             movimiento: datosExtraidos.movimiento
           }));
           console.log('✅ Valores forzados después del render (incluyendo vehículo)');
+          
+          // 🔍 MARCAR que el snapshot debe guardarse (modo fallback)
+          setTimeout(() => {
+            globalSnapshotPendiente = true;
+            console.log('📸 Snapshot pendiente (fallback) - se guardará en próximo render');
+          }, 150);
         }, 100);
       }
       
@@ -5618,7 +5600,11 @@ const Formulario = React.memo(({
                 </div>
               )}
 
-              {formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicio_vigencia && (
+              {/* Mostrar calendario para Fraccionado y Anual */}
+              {formulario.inicio_vigencia && (
+                (formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago) || 
+                formulario.tipo_pago === 'Anual'
+              ) && (
                 <div className="col-12 mt-3">
                   <CalendarioPagos 
                     expediente={formulario} 
@@ -5960,11 +5946,13 @@ const DetallesExpediente = React.memo(({
                 )}
               />
             </div>
-            {/* Mostrar calendario si es fraccionado - buscar en múltiples campos */}
-            {((expedienteSeleccionado.tipo_pago === 'Fraccionado') || 
-              (expedienteSeleccionado.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
-             (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago) && 
-             expedienteSeleccionado.inicio_vigencia && (
+            {/* Mostrar calendario para Fraccionado y Anual */}
+            {expedienteSeleccionado.inicio_vigencia && (
+              (expedienteSeleccionado.tipo_pago === 'Fraccionado' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
+              expedienteSeleccionado.tipo_pago === 'Anual' ||
+              (expedienteSeleccionado.forma_pago?.toUpperCase() === 'FRACCIONADO' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
+              expedienteSeleccionado.forma_pago?.toUpperCase() === 'ANUAL'
+            ) && (
               <div className="col-12">
                 <CalendarioPagos 
                   expediente={expedienteSeleccionado}
@@ -6400,35 +6388,35 @@ const estadoInicialFormulario = {
   const [formularioOriginal, setFormularioOriginal] = useState(null); // Snapshot al abrir edición
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const debugLogOnceRef = useRef(false);
-  const snapshotPendiente = useRef(false); // Flag para capturar snapshot cuando esté listo
 
   // 📸 Capturar snapshot cuando el formulario esté completamente cargado en modo edición
-  // ⚠️ DESHABILITADO: Ahora se captura INMEDIATAMENTE en editarExpediente para evitar sobrescritura
+  // 📸 CAPTURAR SNAPSHOT cuando el formulario termine de cargarse (PDF + BD + Cálculos)
   useEffect(() => {
-    // Limpiar flag cuando se sale de edición
-    if (!modoEdicion) {
-      snapshotPendiente.current = false;
-    }
-    
-    // ⚠️ COMENTADO: Ya no necesitamos capturar aquí, se hace inmediatamente en editarExpediente
-    /*
-    if (snapshotPendiente.current && modoEdicion && formulario.id) {
-      // Verificar que los datos de contacto están cargados
-      const tieneContacto = formulario.contacto_nombre || formulario.contacto_email || formulario.contacto_telefono_fijo;
+    // Si hay un snapshot pendiente Y el formulario está listo
+    if (globalSnapshotPendiente && formulario) {
+      // Verificar que los datos están completos (o al menos tiene algo cargado)
+      const tieneNumeroPoliza = formulario.numero_poliza;
+      const tieneCompania = formulario.compania;
       
-      if (tieneContacto || clienteSeleccionado) {
-        console.log('📸 Capturando snapshot del formulario con datos completos:', {
-          id: formulario.id,
+      if (tieneNumeroPoliza && tieneCompania) {
+        console.log('📸 Capturando snapshot del formulario completo:', {
+          numero_poliza: formulario.numero_poliza,
+          compania: formulario.compania,
           contacto_nombre: formulario.contacto_nombre,
-          contacto_email: formulario.contacto_email,
-          estatusPago: formulario.estatusPago,
-          estatus_pago: formulario.estatus_pago
+          fecha_emision: formulario.fecha_emision,
+          total_campos: Object.keys(formulario).filter(k => !k.startsWith('_')).length
         });
         setFormularioOriginal(JSON.parse(JSON.stringify(formulario)));
-        snapshotPendiente.current = false;
+        globalSnapshotPendiente = false;
       }
     }
-    */
+  }, [formulario]); // Se ejecuta cada vez que el formulario cambia
+  
+  // Limpiar flag cuando se cambia de vista
+  useEffect(() => {
+    if (vistaActual !== 'formulario') {
+      globalSnapshotPendiente = false;
+    }
   }, [modoEdicion]);
 
   // Debug solicitado: imprimir TODOS los campos visibles del editor con su valor actual
@@ -8710,6 +8698,7 @@ const estadoInicialFormulario = {
                 
                 // Fechas (marcar como esFecha para normalización correcta)
                 { key: 'fecha_emision', label: 'Fecha de emisión', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
+                { key: 'fecha_captura', label: 'Fecha de captura', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'inicio_vigencia', label: 'Inicio de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'termino_vigencia', label: 'Término de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'fecha_vencimiento_pago', label: 'Vencimiento de pago', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
@@ -8745,6 +8734,10 @@ const estadoInicialFormulario = {
                 { key: 'uso', label: 'Uso' },
                 { key: 'servicio', label: 'Servicio' },
                 { key: 'movimiento', label: 'Movimiento' },
+                
+                // Conductor
+                { key: 'conductor_habitual', label: 'Conductor habitual' },
+                { key: 'edad_conductor', label: 'Edad del conductor' },
                 
                 // Datos del cliente
                 { key: 'nombre', label: 'Nombre' },
@@ -9142,43 +9135,139 @@ const estadoInicialFormulario = {
                 tiene_datos_originales: !!formularioParaGuardar._datos_originales_pdf
               });
               
-              // 🔍 Detectar si hubo modificaciones manuales después del extractor
-              let huboModificacionesManuales = false;
+              // 🔍 DETECTAR CAMPOS MODIFICADOS MANUALMENTE
+              // ✅ LÓGICA SIMPLE: Si existe snapshot (formularioOriginal), comparar todo el formulario
               const camposModificados = [];
+              let huboModificacionesManuales = false;
               
-              if (capturadoConExtractorPDF && formularioParaGuardar._datos_originales_pdf) {
-                const originales = formularioParaGuardar._datos_originales_pdf;
-                const camposAComparar = [
+              if (formularioOriginal) {
+                console.log('✅ Snapshot disponible - detectando cambios desde el estado inicial completo');
+                console.log('📸 Campos en snapshot:', Object.keys(formularioOriginal).filter(k => !k.startsWith('_')).length);
+                console.log('🔍 DEBUG - Valores clave en snapshot:', {
+                  contacto_nombre: formularioOriginal.contacto_nombre,
+                  contacto_telefono_fijo: formularioOriginal.contacto_telefono_fijo,
+                  conductor_habitual: formularioOriginal.conductor_habitual,
+                  fecha_emision: formularioOriginal.fecha_emision,
+                  fecha_captura: formularioOriginal.fecha_captura
+                });
+                console.log('🔍 DEBUG - Valores clave en formulario actual:', {
+                  contacto_nombre: formularioParaGuardar.contacto_nombre,
+                  contacto_telefono_fijo: formularioParaGuardar.contacto_telefono_fijo,
+                  conductor_habitual: formularioParaGuardar.conductor_habitual,
+                  fecha_emision: formularioParaGuardar.fecha_emision,
+                  fecha_captura: formularioParaGuardar.fecha_captura
+                });
+                
+                // Normalizar valores para comparación
+                const normalizar = (valor) => {
+                  if (valor === null || valor === undefined) return '';
+                  if (typeof valor === 'object') return JSON.stringify(valor);
+                  return String(valor).trim();
+                };
+                
+                // Lista de campos editables a comparar
+                const camposEditables = [
+                  // === DATOS DEL CLIENTE ===
+                  { key: 'nombre', label: 'Nombre del cliente' },
+                  { key: 'apellido_paterno', label: 'Apellido paterno del cliente' },
+                  { key: 'apellido_materno', label: 'Apellido materno del cliente' },
+                  { key: 'razon_social', label: 'Razón social' },
+                  { key: 'nombre_comercial', label: 'Nombre comercial' },
+                  { key: 'rfc', label: 'RFC' },
+                  { key: 'curp', label: 'CURP' },
+                  { key: 'email', label: 'Email del cliente' },
+                  { key: 'telefono_fijo', label: 'Teléfono fijo del cliente' },
+                  { key: 'telefono_movil', label: 'Teléfono móvil del cliente' },
+                  { key: 'domicilio', label: 'Domicilio' },
+                  
+                  // === CONTACTO ADICIONAL ===
+                  { key: 'contacto_nombre', label: 'Nombre del contacto' },
+                  { key: 'contacto_apellido_paterno', label: 'Apellido paterno del contacto' },
+                  { key: 'contacto_apellido_materno', label: 'Apellido materno del contacto' },
+                  { key: 'contacto_email', label: 'Email del contacto' },
+                  { key: 'contacto_telefono_fijo', label: 'Teléfono fijo del contacto' },
+                  { key: 'contacto_telefono_movil', label: 'Teléfono móvil del contacto' },
+                  
+                  // === DATOS BÁSICOS DE PÓLIZA ===
                   { key: 'numero_poliza', label: 'Número de póliza' },
                   { key: 'compania', label: 'Aseguradora' },
                   { key: 'producto', label: 'Producto' },
-                  { key: 'prima_pagada', label: 'Prima' },
-                  { key: 'total', label: 'Total' },
+                  { key: 'tipo_seguro', label: 'Tipo de seguro' },
+                  { key: 'endoso', label: 'Endoso' },
+                  { key: 'inciso', label: 'Inciso' },
+                  
+                  // === FECHAS ===
                   { key: 'fecha_emision', label: 'Fecha de emisión' },
+                  { key: 'fecha_captura', label: 'Fecha de captura' },
                   { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
-                  // NO comparar termino_vigencia porque se calcula automáticamente
-                  { key: 'etapa_activa', label: 'Etapa' }
-                  // NO comparar agente porque se normaliza automáticamente (de "140956 - NOMBRE" a "140956")
-                  // NO comparar tipo_pago porque puede ajustarse automáticamente
+                  { key: 'termino_vigencia', label: 'Término de vigencia' },
+                  
+                  // === MONTOS ===
+                  { key: 'prima_pagada', label: 'Prima' },
+                  { key: 'cargo_pago_fraccionado', label: 'Cargo pago fraccionado' },
+                  { key: 'gastos_expedicion', label: 'Gastos de expedición' },
+                  { key: 'iva', label: 'IVA' },
+                  { key: 'recargo', label: 'Recargo' },
+                  { key: 'total', label: 'Total' },
+                  { key: 'subtotal', label: 'Subtotal' },
+                  { key: 'suma_asegurada', label: 'Suma asegurada' },
+                  { key: 'deducible', label: 'Deducible' },
+                  
+                  // === PAGO ===
+                  { key: 'forma_pago', label: 'Forma de pago' },
+                  { key: 'tipo_pago', label: 'Tipo de pago' },
+                  { key: 'frecuenciaPago', label: 'Frecuencia de pago' },
+                  { key: 'primer_pago', label: 'Primer pago' },
+                  { key: 'pagos_subsecuentes', label: 'Pagos subsecuentes' },
+                  { key: 'periodo_gracia', label: 'Período de gracia' },
+                  
+                  // === VEHÍCULO (PARA AUTOS) ===
+                  { key: 'marca', label: 'Marca' },
+                  { key: 'modelo', label: 'Modelo' },
+                  { key: 'anio', label: 'Año' },
+                  { key: 'tipo_vehiculo', label: 'Tipo de vehículo' },
+                  { key: 'numero_serie', label: 'Número de serie' },
+                  { key: 'motor', label: 'Motor' },
+                  { key: 'placas', label: 'Placas' },
+                  { key: 'color', label: 'Color' },
+                  { key: 'codigo_vehiculo', label: 'Código de vehículo' },
+                  { key: 'tipo_cobertura', label: 'Tipo de cobertura' },
+                  { key: 'plan', label: 'Plan' },
+                  
+                  // === USO Y SERVICIO ===
+                  { key: 'uso', label: 'Uso' },
+                  { key: 'servicio', label: 'Servicio' },
+                  { key: 'movimiento', label: 'Movimiento' },
+                  
+                  // === CONDUCTOR ===
+                  { key: 'conductor_habitual', label: 'Conductor habitual' },
+                  { key: 'edad_conductor', label: 'Edad del conductor' },
+                  { key: 'licencia_conducir', label: 'Licencia de conducir' },
+                  
+                  // === OTROS ===
+                  { key: 'observaciones', label: 'Observaciones' }
                 ];
                 
-                console.log('🔍 Comparando datos originales PDF vs formulario actual...');
-                camposAComparar.forEach(({ key, label }) => {
-                  const valorOriginal = String(originales[key] || '').trim();
-                  const valorActual = String(formularioParaGuardar[key] || '').trim();
+                // Comparar cada campo
+                camposEditables.forEach(({ key, label }) => {
+                  const valorOriginal = normalizar(formularioOriginal[key]);
+                  const valorActual = normalizar(formularioParaGuardar[key]);
                   
-                  console.log(`  ${key}: "${valorOriginal}" vs "${valorActual}" → ${valorOriginal !== valorActual ? 'DIFERENTE' : 'igual'}`);
-                  
-                  // Solo marcar como modificado si AMBOS valores existen y son diferentes
-                  // Esto evita false positives por campos vacíos vs calculados
-                  if (valorOriginal && valorActual && valorOriginal !== valorActual) {
-                    huboModificacionesManuales = true;
-                    camposModificados.push(`${label}: "${valorOriginal}" → "${valorActual}"`);
-                    console.log(`    ✏️ MODIFICACIÓN DETECTADA: ${label}`);
+                  if (valorOriginal !== valorActual) {
+                    // Ignorar cambios de vacío a vacío
+                    if (!valorOriginal && !valorActual) return;
+                    
+                    camposModificados.push(
+                      `• ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`
+                    );
+                    console.log(`  ✏️ ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`);
                   }
                 });
                 
-                console.log(`🔍 Total modificaciones detectadas: ${camposModificados.length}`);
+                huboModificacionesManuales = camposModificados.length > 0;
+                console.log(`✅ ${camposModificados.length} campo(s) modificado(s) manualmente`);
+              } else {
+                console.log('⚠️ No hay snapshot - no se pueden detectar cambios manuales');
               }
               
               // 🎯 EVENTO CAPTURA: Registrar en el nuevo sistema de historial
@@ -9196,10 +9285,13 @@ const estadoInicialFormulario = {
                 // Incluir nombre de la aseguradora para identificar qué extractor se usó
                 descripcionEvento = `Póliza extraída con Extractor PDF ${aseguradoraNombre} • Archivo: ${nombreArchivoPDF}`;
                 if (huboModificacionesManuales && camposModificados.length > 0) {
-                  descripcionEvento += ` • ${camposModificados.length} campo(s) modificado(s) manualmente`;
+                  descripcionEvento += `\n\n${camposModificados.length} campo(s) modificado(s) manualmente:\n${camposModificados.join('\n')}`;
                 }
               } else {
                 descripcionEvento = `Póliza capturada manualmente`;
+                if (huboModificacionesManuales && camposModificados.length > 0) {
+                  descripcionEvento += `\n\nCampos capturados:\n${camposModificados.join('\n')}`;
+                }
               }
               
               // Agregar información de fechas si están disponibles
