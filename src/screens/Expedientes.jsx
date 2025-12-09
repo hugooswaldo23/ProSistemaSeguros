@@ -383,14 +383,13 @@ const CalendarioPagos = React.memo(({
     }
   }
 
-  const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago
-    ? new Date(expediente.fechaUltimoPago || expediente.fecha_ultimo_pago)
-    : null;
+  // 🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
+  const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
   let totalPagado = 0;
   let totalPendiente = 0;
   let totalPorVencer = 0;
   let totalVencido = 0;
-  let pagosRealizados = 0;
+  let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
     // 🔥 Crear fecha en hora local para evitar problemas de timezone
@@ -398,10 +397,10 @@ const CalendarioPagos = React.memo(({
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
     
-    let pagado = false;
-    if (fechaUltimoPago && fechaPago <= fechaUltimoPago) {
-      pagado = true;
-      pagosRealizados++;
+    // 🔥 Determinar si está pagado basándose en el número de recibo
+    let pagado = pago.numero <= ultimoReciboPagado;
+    
+    if (pagado) {
       totalPagado += parseFloat(pago.monto) || 0;
     } else {
       // Clasificar según estado
@@ -8077,7 +8076,7 @@ const estadoInicialFormulario = {
         estatus_pago: nuevoEstatusPago,
         fecha_vencimiento_pago: nuevaFechaVencimiento,
         fecha_ultimo_pago: fechaUltimoPago, // 🔥 Fecha REAL en que se pagó
-        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : null, // 🔥 Número del recibo que se pagó
+        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1, // 🔥 Para anuales siempre es 1
         proximo_pago: proximoPago
       };
       
