@@ -8052,18 +8052,26 @@ const estadoInicialFormulario = {
       // 🔥 Calcular el próximo pago basándose en el número de recibo que se acaba de pagar
       const proximoPago = calcularSiguientePago({
         ...expedienteParaPago,
-        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : null
+        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1
       });
+
+      // 🔥 Para fraccionados, verificar si hay más recibos pendientes
+      let hayMasRecibosPendientes = false;
+      if (esFraccionado) {
+        const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+        hayMasRecibosPendientes = numeroReciboPago < numeroPagos;
+      }
 
       // Determinar el nuevo estatus basado en si hay o no próximo pago
       let nuevoEstatusPago = 'Pagado';
       let nuevaFechaVencimiento = null;
       
-      if (proximoPago && proximoPago.trim() !== '') {
+      if (hayMasRecibosPendientes || (proximoPago && proximoPago.trim() !== '')) {
         // Hay un siguiente pago pendiente
         nuevoEstatusPago = 'Pendiente';
         nuevaFechaVencimiento = proximoPago;
-        console.log('✅ Pago aplicado. Siguiente pago pendiente:', proximoPago);
+        console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago pendiente:`, proximoPago);
       } else {
         // No hay más pagos (Anual o último pago de fraccionado)
         nuevoEstatusPago = 'Pagado';
@@ -8080,8 +8088,8 @@ const estadoInicialFormulario = {
         proximo_pago: proximoPago
       };
       
-      // Si está completamente pagado, cambiar etapa a "En Vigencia"
-      if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.etapa_activa !== 'En Vigencia') {
+      // Solo cambiar a "En Vigencia" si está COMPLETAMENTE pagado (todos los recibos)
+      if (nuevoEstatusPago === 'Pagado' && !hayMasRecibosPendientes && expedienteParaPago.etapa_activa !== 'En Vigencia') {
         datosActualizacion.etapa_activa = 'En Vigencia';
         console.log('✅ Cambiando etapa a "En Vigencia" porque póliza está completamente pagada');
       }
