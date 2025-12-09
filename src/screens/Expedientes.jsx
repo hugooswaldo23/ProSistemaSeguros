@@ -3034,6 +3034,12 @@ const ListaExpedientes = React.memo(({
           if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
           
           const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          const mesesPorFrecuencia = {
+            'Mensual': 1,
+            'Trimestral': 3,
+            'Semestral': 6
+          };
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
           
           // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
           const pagosRealizados = exp.ultimo_recibo_pagado || 0;
