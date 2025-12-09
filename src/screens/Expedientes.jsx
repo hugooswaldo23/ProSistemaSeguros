@@ -8090,7 +8090,6 @@ const estadoInicialFormulario = {
       console.log('💰 Aplicando pago:', { 
         expedienteId: expedienteParaPago.id, 
         fechaRealPago: fechaUltimoPago,
-        fechaReciboPagado: fechaDelReciboPagado,
         numeroReciboPagado: numeroReciboPago,
         proximoPago,
         nuevoEstatusPago,
