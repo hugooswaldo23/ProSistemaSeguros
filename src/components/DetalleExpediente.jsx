@@ -47,10 +47,10 @@ const DetalleExpediente = ({
     // Si forceShow está activado, mostrar siempre (para campos financieros con $0.00)
     if (!forceShow && (valor === undefined || valor === null || valor === '' || valor === '-')) return null;
     return (
-      <div className={`col-md-3 mb-2 ${className}`}>
-        <small className="text-muted" style={{ fontSize: '0.7rem' }}>{label}:</small>
+      <div className={`col-md-3 mb-1 ${className}`}>
+        <small className="text-muted" style={{ fontSize: '0.6rem' }}>{label}:</small>
         <div>
-          {strong ? <strong style={{ fontSize: '0.8rem' }}>{valor}</strong> : <span style={{ fontSize: '0.8rem' }}>{valor}</span>}
+          {strong ? <strong style={{ fontSize: '0.7rem' }}>{valor}</strong> : <span style={{ fontSize: '0.7rem' }}>{valor}</span>}
         </div>
       </div>
     );
@@ -106,24 +106,24 @@ const DetalleExpediente = ({
   }, [datos?.forma_pago, datos?.tipo_pago]);
 
   const Caratula = () => (
-    <div className="card border-0 shadow-sm mb-3">
-      <div className="card-header bg-light">
-        <div className="d-flex flex-wrap align-items-center justify-content-between gap-2">
-          <h6 className="mb-0">Datos Generales de Póliza</h6>
+    <div className="card border-0 shadow-sm mb-2">
+      <div className="card-header bg-light py-1 px-2">
+        <div className="d-flex flex-wrap align-items-center justify-content-between gap-1">
+          <small className="mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Datos Generales de Póliza</small>
           {showResumenChips && (
-            <div className="d-flex flex-wrap gap-2">
+            <div className="d-flex flex-wrap gap-1">
               {datos?.compania && (
-                <span className="badge bg-primary-subtle text-primary border">{datos.compania}</span>
+                <span className="badge bg-primary-subtle text-primary border" style={{ fontSize: '0.65rem' }}>{datos.compania}</span>
               )}
               {datos?.numero_poliza && (
-                <span className="badge bg-secondary-subtle text-secondary border">Póliza #{datos.numero_poliza}</span>
+                <span className="badge bg-secondary-subtle text-secondary border" style={{ fontSize: '0.65rem' }}>Póliza #{datos.numero_poliza}</span>
               )}
               {datos?.termino_vigencia && (
-                <span className="badge bg-info-subtle text-info border">
+                <span className="badge bg-info-subtle text-info border" style={{ fontSize: '0.65rem' }}>
                   Termina {utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() || '-'}
                 </span>
               )}
-              <span className={`badge ${pagoInfo.clase} border`}> {pagoInfo.estatus}
+              <span className={`badge ${pagoInfo.clase} border`} style={{ fontSize: '0.65rem' }}> {pagoInfo.estatus}
                 {pagoInfo.dias !== null && pagoInfo.estatus !== 'Pagado' && (
                   <span className="ms-1">{pagoInfo.dias < 0 ? `${Math.abs(pagoInfo.dias)} días vencido` : `en ${pagoInfo.dias} días`}</span>
                 )}
@@ -132,13 +132,13 @@ const DetalleExpediente = ({
           )}
         </div>
       </div>
-      <div className="card-body">
+      <div className="card-body py-2 px-2">
         {/* Asegurado */}
         <div className="seccion-bloque seccion-asegurado">
-          <h6 className="text-primary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>
+          <h6 className="text-primary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
             👤 Información del {datos?.tipo_persona === 'Moral' ? 'Asegurado (Persona Moral)' : 'Asegurado'}
           </h6>
-          <div className="row g-2">
+          <div className="row g-1">
             {datos?.tipo_persona === 'Moral' ? (
               renderCampo('Razón Social', datos?.razonSocial || datos?.razon_social || '-')
             ) : (
@@ -150,8 +150,8 @@ const DetalleExpediente = ({
 
         {/* Póliza */}
         <div className="seccion-bloque seccion-poliza">
-          <h6 className="text-primary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>📋 Datos de la Póliza</h6>
-          <div className="row g-2">
+          <h6 className="text-primary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>📋 Datos de la Póliza</h6>
+          <div className="row g-1">
             {renderCampo('Compañía', datos?.compania)}
             {renderCampo('Número de Póliza', datos?.numero_poliza)}
             {renderCampo('Endoso', datos?.endoso)}
@@ -165,15 +165,15 @@ const DetalleExpediente = ({
 
         {/* Vigencia */}
         <div className="seccion-bloque seccion-vigencia">
-          <h6 className="text-success mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>📅 Vigencia de la Póliza</h6>
-          <div className="row g-2">
+          <h6 className="text-success mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>📅 Vigencia de la Póliza</h6>
+          <div className="row g-1">
             {renderCampo('Inicio', datos?.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-')}
             {renderCampo('Fin', datos?.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-')}
             {/* Siempre mostrar Aviso de Renovación, incluso si está vacío */}
-            <div className="col-md-3 mb-2 text-warning">
-              <small className="text-muted" style={{ fontSize: '0.7rem' }}>🔔 Aviso de Renovación:</small>
+            <div className="col-md-3 mb-1 text-warning">
+              <small className="text-muted" style={{ fontSize: '0.6rem' }}>🔔 Aviso de Renovación:</small>
               <div>
-                <strong style={{ fontSize: '0.8rem' }}>
+                <strong style={{ fontSize: '0.7rem' }}>
                   {datos?.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-'}
                 </strong>
               </div>
@@ -185,8 +185,8 @@ const DetalleExpediente = ({
 
         {/* Financiera (subida antes de vehículo) */}
         <div className="seccion-bloque seccion-financiera">
-          <h6 className="text-secondary mb-2" style={{ fontSize: '0.85rem', fontWeight: 600 }}>💰 Información Financiera</h6>
-          <div className="row g-2">
+          <h6 className="text-secondary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>💰 Información Financiera</h6>
+          <div className="row g-1">
             {renderCampo('1. Prima Neta', utils.formatearMoneda?.(datos?.prima_pagada || '0.00'), { forceShow: true })}
             {renderCampo('2. Otros Descuentos', utils.formatearMoneda?.(datos?.otros_servicios || '0.00'), { forceShow: true })}
             {renderCampo('3. Financiamiento por pago fraccionado', utils.formatearMoneda?.(datos?.cargo_pago_fraccionado || '0.00'), { forceShow: true })}
@@ -256,147 +256,147 @@ const DetalleExpediente = ({
             className={`accordion-collapse collapse ${openGeneral ? 'show' : ''}`}
             aria-labelledby="headingDatosGeneralesPoliza"
           >
-            <div className="accordion-body">
+            <div className="accordion-body py-1 px-2">
               {/* INFORMACIÓN DEL ASEGURADO */}
-              <div className="p-2 bg-light rounded mb-2">
-                <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+              <div className="p-1 bg-light rounded mb-1">
+                <h6 className="text-primary mb-1" style={{ fontSize: '0.7rem', fontWeight: '600' }}>
                   👤 INFORMACIÓN DEL {datos.tipo_persona === 'Moral' ? 'ASEGURADO (PERSONA MORAL)' : 'ASEGURADO'}
                 </h6>
                 <div className="row g-1">
                   {datos?.tipo_persona === 'Moral' ? (
                     <div className="col-md-6">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Razón Social:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{datos.razonSocial || datos.razon_social || '-'}</strong></div>
+                      <small className="text-muted" style={{ fontSize: '0.6rem' }}>Razón Social:</small>
+                      <div><strong style={{ fontSize: '0.7rem' }}>{datos.razonSocial || datos.razon_social || '-'}</strong></div>
                     </div>
                   ) : (
                     <div className="col-md-6">
-                      <small className="text-muted" style={{ fontSize: '0.7rem' }}>Nombre Completo:</small>
-                      <div><strong style={{ fontSize: '0.8rem' }}>{datos.nombre} {datos.apellido_paterno} {datos.apellido_materno}</strong></div>
+                      <small className="text-muted" style={{ fontSize: '0.6rem' }}>Nombre Completo:</small>
+                      <div><strong style={{ fontSize: '0.7rem' }}>{datos.nombre} {datos.apellido_paterno} {datos.apellido_materno}</strong></div>
                     </div>
                   )}
                   <div className="col-md-6">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Conductor Habitual:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Conductor Habitual:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
                   </div>
                 </div>
               </div>
               {/* DATOS DE LA PÓLIZA */}
-              <div className="p-2 bg-primary bg-opacity-10 rounded mb-2">
-                <h6 className="text-primary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📋 DATOS DE LA PÓLIZA</h6>
+              <div className="p-1 bg-primary bg-opacity-10 rounded mb-1">
+                <h6 className="text-primary mb-1" style={{ fontSize: '0.7rem', fontWeight: '600' }}>📋 DATOS DE LA PÓLIZA</h6>
                 <div className="row g-1">
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Compañía:</small>
-                    <div><strong className="text-primary" style={{ fontSize: '0.8rem' }}>{datos.compania}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Compañía:</small>
+                    <div><strong className="text-primary" style={{ fontSize: '0.7rem' }}>{datos.compania}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Número de Póliza:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.numero_poliza || '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Número de Póliza:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.numero_poliza || '-'}</strong></div>
                   </div>
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Endoso:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.endoso || '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Endoso:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.endoso || '-'}</strong></div>
                   </div>
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Inciso:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.inciso || '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Inciso:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.inciso || '-'}</strong></div>
                   </div>
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Plan:</small>
-                    <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datos.plan || '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Plan:</small>
+                    <div><strong className="text-uppercase" style={{ fontSize: '0.7rem' }}>{datos.plan || '-'}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Producto:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.producto}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Producto:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.producto}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Tipo de Pago:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{tipoPagoMostrar || datos.tipo_pago}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Tipo de Pago:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{tipoPagoMostrar || datos.tipo_pago}</strong></div>
                     {datos?.tipo_pago && datos?.tipo_pago.toUpperCase() === 'FRACCIONADO' && tipoPagoMostrar && tipoPagoMostrar.toUpperCase() !== 'ANUAL' && (
-                      <small className="text-muted" style={{ fontSize: '0.6rem' }}>Fraccionado ({tipoPagoMostrar})</small>
+                      <small className="text-muted" style={{ fontSize: '0.55rem' }}>Fraccionado ({tipoPagoMostrar})</small>
                     )}
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Agente:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.agente || '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Agente:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.agente || '-'}</strong></div>
                   </div>
                 </div>
               </div>
               {/* VIGENCIA */}
-              <div className="p-2 bg-success bg-opacity-10 rounded mb-2">
-                <h6 className="text-success mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
+              <div className="p-1 bg-success bg-opacity-10 rounded mb-1">
+                <h6 className="text-success mb-1" style={{ fontSize: '0.7rem', fontWeight: '600' }}>📅 VIGENCIA DE LA PÓLIZA</h6>
                 <div className="row g-1">
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Desde las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Desde las 12:00 P.M. del:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.inicio_vigencia ? utils.formatearFecha?.(datos.inicio_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Hasta las 12:00 P.M. del:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Hasta las 12:00 P.M. del:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.termino_vigencia ? utils.formatearFecha?.(datos.termino_vigencia, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-warning" style={{ fontSize: '0.7rem' }}>🔔 Aviso de Renovación:</small>
-                    <div><strong className="text-warning" style={{ fontSize: '0.8rem' }}>{datos.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                    <small className="text-warning" style={{ fontSize: '0.6rem' }}>🔔 Aviso de Renovación:</small>
+                    <div><strong className="text-warning" style={{ fontSize: '0.7rem' }}>{datos.fecha_aviso_renovacion ? utils.formatearFecha?.(datos.fecha_aviso_renovacion, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-2">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Emisión:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Fecha de Emisión:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.fecha_emision ? utils.formatearFecha?.(datos.fecha_emision, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Fecha de Captura:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{datos.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Fecha de Captura:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.fecha_captura ? utils.formatearFecha?.(datos.fecha_captura, 'cortaY')?.toUpperCase() : '-'}</strong></div>
                   </div>
                 </div>
               </div>
               
               {/* INFORMACIÓN FINANCIERA */}
-              <div className="p-2 bg-secondary bg-opacity-10 rounded mb-2">
-                <h6 className="text-secondary mb-1" style={{ fontSize: '0.85rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
+              <div className="p-1 bg-secondary bg-opacity-10 rounded mb-1">
+                <h6 className="text-secondary mb-1" style={{ fontSize: '0.7rem', fontWeight: '600' }}>💰 INFORMACIÓN FINANCIERA</h6>
                 <div className="row g-1">
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>1. Prima Neta:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.prima_pagada || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>1. Prima Neta:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.prima_pagada || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>2. Otros Descuentos:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.otros_servicios || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>2. Otros Descuentos:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.otros_servicios || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-4">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>3. Financiamiento por pago fraccionado:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.cargo_pago_fraccionado || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>3. Financiamiento por pago fraccionado:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.cargo_pago_fraccionado || '0.00')}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>4. Gastos de expedición:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.gastos_expedicion || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>4. Gastos de expedición:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.gastos_expedicion || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>5. I.V.A.:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.iva || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>5. I.V.A.:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.iva || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>6. Total a pagar:</small>
-                    <div><strong className="text-success" style={{ fontSize: '0.95rem' }}>{utils.formatearMoneda(datos.total || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>6. Total a pagar:</small>
+                    <div><strong className="text-success" style={{ fontSize: '0.85rem' }}>{utils.formatearMoneda(datos.total || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Forma de Pago:</small>
-                    <div><strong className="text-uppercase" style={{ fontSize: '0.8rem' }}>{datos.tipo_pago || 'No especificado'}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Forma de Pago:</small>
+                    <div><strong className="text-uppercase" style={{ fontSize: '0.7rem' }}>{datos.tipo_pago || 'No especificado'}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Cesión de Comisión:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.cesion_comision || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Cesión de Comisión:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.cesion_comision || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>1er. Pago:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.primer_pago || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>1er. Pago:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.primer_pago || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-3">
-                    <small className="text-muted" style={{ fontSize: '0.7rem' }}>Subsecuentes:</small>
-                    <div><strong style={{ fontSize: '0.8rem' }}>{utils.formatearMoneda(datos.pagos_subsecuentes || '0.00')}</strong></div>
+                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Subsecuentes:</small>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.pagos_subsecuentes || '0.00')}</strong></div>
                   </div>
                 </div>
                 {(datos.fecha_limite_pago || datos.fecha_pago) && (

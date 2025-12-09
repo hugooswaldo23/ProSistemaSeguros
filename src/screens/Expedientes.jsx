@@ -545,17 +545,40 @@ const CalendarioPagos = React.memo(({
                       <button 
                         className="btn btn-sm btn-outline-primary"
                         onClick={() => {
+                          // Normalizar fechas para comparación (solo YYYY-MM-DD)
+                          const normalizarFecha = (fecha) => {
+                            if (!fecha) return null;
+                            const d = new Date(fecha);
+                            return d.toISOString().split('T')[0]; // Solo YYYY-MM-DD
+                          };
+                          
+                          const fechaBuscada = normalizarFecha(pago.fecha);
+                          console.log('🔍 Buscando comprobante para fecha:', fechaBuscada);
+                          console.log('📋 Historial disponible:', historial?.length || 0, 'eventos');
+                          
                           // Buscar en el historial el evento de pago correspondiente
-                          const eventoPago = historial.find(evento => 
-                            evento.tipo_evento === 'pago_registrado' &&
-                            evento.datos_adicionales?.fecha_pago === pago.fecha &&
-                            evento.datos_adicionales?.comprobante_url
-                          );
+                          const eventoPago = historial.find(evento => {
+                            const fechaEvento = normalizarFecha(evento.datos_adicionales?.fecha_pago);
+                            const coincide = evento.tipo_evento === 'pago_registrado' &&
+                              fechaEvento === fechaBuscada &&
+                              evento.datos_adicionales?.comprobante_url;
+                            
+                            if (coincide) {
+                              console.log('✅ Comprobante encontrado:', evento.datos_adicionales.comprobante_url);
+                            }
+                            return coincide;
+                          });
                           
                           if (eventoPago?.datos_adicionales?.comprobante_url) {
                             // Abrir comprobante en nueva pestaña
                             window.open(eventoPago.datos_adicionales.comprobante_url, '_blank');
                           } else {
+                            console.warn('❌ No se encontró comprobante. Eventos de pago:', 
+                              historial.filter(e => e.tipo_evento === 'pago_registrado').map(e => ({
+                                fecha: e.datos_adicionales?.fecha_pago,
+                                tiene_url: !!e.datos_adicionales?.comprobante_url
+                              }))
+                            );
                             alert('No se encontró el comprobante de pago para esta fecha');
                           }
                         }}
@@ -2193,11 +2216,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-xl" style={{ maxWidth: '1100px' }}>
-        <div className="modal-content">
-          <div className="modal-header py-1">
-            <small className="modal-title mb-0 fw-semibold">
-              <FileText className="me-2" size={14} />
+      <div className="modal-dialog modal-lg" style={{ maxWidth: '900px', maxHeight: '90vh' }}>
+        <div className="modal-content" style={{ maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal-header py-2 px-3">
+            <small className="modal-title mb-0 fw-semibold" style={{ fontSize: '0.85rem' }}>
+              <FileText className="me-1" size={14} />
               Extractor Inteligente de Pólizas PDF
             </small>
             <button 
@@ -2216,13 +2239,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             style={{ display: 'none' }}
           />
           
-          <div className="modal-body">
+          <div className="modal-body p-3" style={{ overflowY: 'auto', flex: 1 }}>
             {/* SELECCIÓN DE MÉTODO DE EXTRACCIÓN */}
             {estado === 'seleccionando-metodo' && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <h5 className="mb-2">Extractor Automático de Pólizas</h5>
-                  <p className="text-muted small mb-0">
+              <div className="py-2">
+                <div className="text-center mb-3">
+                  <h6 className="mb-1">Extractor Automático de Pólizas</h6>
+                  <p className="text-muted small mb-0" style={{ fontSize: '0.75rem' }}>
                     Extracción instantánea y gratuita por patrones de texto
                   </p>
                 </div>
@@ -2310,69 +2333,75 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             {estado === 'validando-cliente' && datosExtraidos && (
               <div className="py-1">
                 <div className="text-center mb-2">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '35px', height: '35px', fontSize: '0.75rem' }}>
+                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '30px', height: '30px', fontSize: '0.7rem' }}>
                     <strong>1/3</strong>
                   </div>
-                  <small className="d-block mt-1 fw-semibold">Validación de Cliente</small>
+                  <small className="d-block mt-1 fw-semibold" style={{ fontSize: '0.75rem' }}>Validación de Cliente</small>
                 </div>
 
                 <div className="card mb-2">
-                  <div className="card-header bg-light py-1">
-                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>👤 Datos del Cliente Extraídos</small>
+                  <div className="card-header bg-light py-1 px-2">
+                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>👤 Datos del Cliente Extraídos</small>
                   </div>
                   <div className="card-body p-2">
-                    <div className="row g-2">
-                      {/* Nombre/Razón Social - SIEMPRE visible */}
-                      <div className="col-md-6">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>
-                          {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social/Empresa:' : 'Nombre Completo:'}
-                        </small>
-                        <small className="mb-0" style={{ fontSize: '0.75rem' }}>
-                          {datosExtraidos.tipo_persona === 'Moral' 
-                            ? (datosExtraidos.razonSocial || <span className="text-muted">No encontrado</span>)
-                            : (`${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim() || <span className="text-muted">No encontrado</span>)
-                          }
-                        </small>
+                    <div className="row g-1">
+                      {/* COLUMNA IZQUIERDA: Nombre y RFC */}
+                      <div className="col-md-6 col-12">
+                        {/* Nombre/Razón Social */}
+                        <div className="mb-1">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social/Empresa:' : 'Nombre Completo:'}
+                          </small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.tipo_persona === 'Moral' 
+                              ? (datosExtraidos.razonSocial || <span className="text-muted">No encontrado</span>)
+                              : (`${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim() || <span className="text-muted">No encontrado</span>)
+                            }
+                          </small>
+                        </div>
+                        
+                        {/* RFC */}
+                        <div>
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>RFC:</small>
+                          {datosExtraidos.rfc ? (
+                            <small className="mb-0" style={{ fontSize: '0.7rem' }}>{datosExtraidos.rfc}</small>
+                          ) : (
+                            <span className="badge bg-warning text-dark" style={{ fontSize: '0.6rem' }}>
+                              <i className="bi bi-exclamation-triangle me-1"></i>No encontrado
+                            </span>
+                          )}
+                        </div>
                       </div>
                       
-                      {/* RFC - SIEMPRE visible */}
-                      <div className="col-md-3">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>RFC:</small>
-                        {datosExtraidos.rfc ? (
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.rfc}</small>
-                        ) : (
-                          <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>
-                            <i className="bi bi-exclamation-triangle me-1"></i>No encontrado
-                          </span>
-                        )}
+                      {/* COLUMNA DERECHA: Dirección y Ciudad/Estado */}
+                      <div className="col-md-6 col-12">
+                        {/* Dirección */}
+                        <div className="mb-1">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Dirección:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.domicilio || <span className="text-muted">No encontrada</span>}
+                          </small>
+                        </div>
+                        
+                        {/* Ciudad/Estado */}
+                        <div>
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Ciudad/Estado:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {(datosExtraidos.municipio || datosExtraidos.estado) 
+                              ? [datosExtraidos.municipio, datosExtraidos.estado].filter(Boolean).join(', ')
+                              : <span className="text-muted">No encontrado</span>
+                            }
+                          </small>
+                        </div>
                       </div>
                       
                       {/* Email - SOLO si cliente existe en BD */}
                       {clienteEncontrado && datosExtraidos.email && (
-                        <div className="col-md-3">
-                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Email:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.email}</small>
+                        <div className="col-md-6 col-12">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Email:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>{datosExtraidos.email}</small>
                         </div>
                       )}
-                      
-                      {/* Dirección completa - SIEMPRE visible */}
-                      <div className="col-md-6">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Dirección:</small>
-                        <small className="mb-0" style={{ fontSize: '0.75rem' }}>
-                          {datosExtraidos.domicilio || <span className="text-muted">No encontrada</span>}
-                        </small>
-                      </div>
-                      
-                      {/* Ciudad/Estado - SIEMPRE visible */}
-                      <div className="col-md-3">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Ciudad/Estado:</small>
-                        <small className="mb-0" style={{ fontSize: '0.75rem' }}>
-                          {(datosExtraidos.municipio || datosExtraidos.estado) 
-                            ? [datosExtraidos.municipio, datosExtraidos.estado].filter(Boolean).join(', ')
-                            : <span className="text-muted">No encontrado</span>
-                          }
-                        </small>
-                      </div>
                       
                       {/* Teléfono - SOLO si cliente existe en BD */}
                       {clienteEncontrado && datosExtraidos.telefono_movil && (
@@ -2386,127 +2415,89 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
 
                 {clienteEncontrado ? (
-                  <div className="alert alert-success py-2 mb-2">
-                    <div className="d-flex align-items-center mb-2">
-                      <CheckCircle className="me-2" size={18} />
-                      <small className="mb-0 fw-semibold">✅ Cliente ENCONTRADO en base de datos</small>
+                  <div className="alert alert-success py-1 px-2 mb-2">
+                    <div className="d-flex align-items-center">
+                      <CheckCircle className="me-2" size={16} />
+                      <small className="mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>✅ Cliente ENCONTRADO en base de datos</small>
                     </div>
                     
-                    <div className="card border-success">
+                    <div className="card border-success mt-1">
                       <div className="card-body p-2">
-                        <small className="card-subtitle mb-2 text-success fw-semibold d-block" style={{ fontSize: '0.8rem' }}>Datos en Base de Datos</small>
-                        
-                        <div className="row g-2">
-                          <div className="col-md-3">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>ID Cliente</small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.codigo || clienteEncontrado.id}</small>
+                        <div className="row g-1">
+                          {/* FILA 1: ID Cliente, Fecha Registro, Nombre Completo */}
+                          <div className="col-md-2 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>ID</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.codigo || clienteEncontrado.id}</small>
                           </div>
                           
-                          <div className="col-md-3">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Fecha de Registro</small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</small>
+                          <div className="col-md-2 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Registro</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'N/A'}</small>
                           </div>
 
-                          <div className="col-md-6">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
-                              {clienteEncontrado.tipoPersona === 'Persona Moral' ? 'Razón Social' : 'Nombre Completo'}
-                            </small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>
+                          <div className="col-md-4 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
                               {clienteEncontrado.tipoPersona === 'Persona Moral' 
                                 ? (clienteEncontrado.razonSocial || clienteEncontrado.nombre || 'N/A')
-                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} ${clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}`.trim()
+                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''}`.trim()
                               }
                             </small>
                           </div>
 
+                          {/* RFC */}
                           {clienteEncontrado.rfc && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>RFC</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.rfc}</small>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>RFC</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.rfc}</small>
                             </div>
                           )}
-
-                          {clienteEncontrado.curp && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>CURP</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.curp}</small>
-                            </div>
-                          )}
-
+                          
+                          {/* Email */}
                           {clienteEncontrado.email && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Email</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.email}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_movil && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Móvil</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_movil}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_fijo && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Fijo</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_fijo}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.direccion && (
-                            <div className="col-12">
-                              <small className="text-muted d-block">Dirección</small>
-                              <strong>{clienteEncontrado.direccion}</strong>
-                            </div>
-                          )}
-
-                          {(clienteEncontrado.ciudad || clienteEncontrado.estado) && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Ubicación</small>
-                              <strong>{clienteEncontrado.ciudad}{clienteEncontrado.ciudad && clienteEncontrado.estado ? ', ' : ''}{clienteEncontrado.estado}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.codigo_postal && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Código Postal</small>
-                              <strong>{clienteEncontrado.codigo_postal}</strong>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Email</small>
+                              <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={clienteEncontrado.email}>{clienteEncontrado.email}</small>
                             </div>
                           )}
                         </div>
                       </div>
                     </div>
                     
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionCliente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Cliente Existente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        Crear Cliente Nuevo
-                      </button>
+                    <div>
+                      <hr className="my-1" />
+                      <small className="mb-1 fw-semibold d-block" style={{ fontSize: '0.75rem' }}>¿Qué deseas hacer?</small>
+                      <div className="d-flex gap-2">
+                        <button 
+                          className="btn btn-success btn-sm flex-fill py-1"
+                          onClick={() => handleDecisionCliente('usar-existente')}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          <CheckCircle className="me-1" size={14} />
+                          Usar Cliente Existente
+                        </button>
+                        <button 
+                          className="btn btn-outline-primary btn-sm flex-fill py-1"
+                          onClick={() => handleDecisionCliente('crear-nuevo')}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          Crear Cliente Nuevo
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Cliente NO encontrado en base de datos</strong>
+                  <div className="alert alert-warning py-1 px-2">
+                    <div className="d-flex align-items-center mb-1">
+                      <AlertCircle className="me-2" size={18} />
+                      <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>⚠️ Cliente NO encontrado en base de datos</small>
                     </div>
-                    <p className="mb-3">Se creará un nuevo cliente con los datos extraídos del PDF.</p>
+                    <small className="mb-2 d-block" style={{ fontSize: '0.7rem' }}>Se creará un nuevo cliente con los datos extraídos del PDF.</small>
                     <div className="d-flex gap-2">
                       <button 
-                        className="btn btn-primary flex-fill"
+                        className="btn btn-primary btn-sm flex-fill py-1"
                         onClick={() => handleDecisionCliente('crear-nuevo')}
+                        style={{ fontSize: '0.75rem' }}
                       >
                         <CheckCircle className="me-2" size={16} />
                         Crear Cliente y Continuar
@@ -2525,30 +2516,30 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
             {/* PASO 2: VALIDACIÓN DE AGENTE */}
             {estado === 'validando-agente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
+              <div className="py-2">
+                <div className="text-center mb-2">
+                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '35px', height: '35px', fontSize: '0.75rem' }}>
                     <strong>2/3</strong>
                   </div>
-                  <h5 className="mt-3">Validación de Agente</h5>
+                  <h6 className="mt-2 mb-0" style={{ fontSize: '0.9rem' }}>Validación de Agente</h6>
                 </div>
 
                 {datosExtraidos.agente ? (
-                  <div className="card mb-4">
-                    <div className="card-header bg-light py-1">
-                      <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>👔 Agente Extraído del PDF</small>
+                  <div className="card mb-2">
+                    <div className="card-header bg-light py-1 px-2">
+                      <small className="mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>👔 Agente Extraído del PDF</small>
                     </div>
                     <div className="card-body p-2">
-                      <div className="row g-2">
-                        <div className="col-md-3">
-                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Clave Agente:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>
+                      <div className="row g-1">
+                        <div className="col-md-3 col-6">
+                          <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Clave Agente</small>
+                          <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
                             {datosExtraidos.clave_agente || <span className="text-muted">No encontrado</span>}
                           </small>
                         </div>
-                        <div className="col-md-9">
-                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Nombre del Agente:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>
+                        <div className="col-md-9 col-6">
+                          <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre del Agente</small>
+                          <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
                             {datosExtraidos.agente}
                           </small>
                         </div>
@@ -2556,88 +2547,97 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-info mb-4">
-                    <AlertCircle className="me-2" size={20} />
-                    No se pudo extraer información del agente del PDF
+                  <div className="alert alert-info mb-2 py-1 px-2">
+                    <small style={{ fontSize: '0.7rem' }}>
+                      <AlertCircle className="me-1" size={14} />
+                      No se pudo extraer información del agente del PDF
+                    </small>
                   </div>
                 )}
 
                 {agenteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
+                  <div className="alert alert-success py-2 px-2">
+                    <div className="d-flex align-items-center mb-2">
+                      <CheckCircle className="me-1" size={16} />
+                      <strong style={{ fontSize: '0.8rem' }}>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
                     </div>
                     
                     {claveYaExiste && (
-                      <div className="alert alert-info mb-3">
-                        <strong>ℹ️ Este agente ya tiene la clave {datosExtraidos.clave_agente} registrada para esta aseguradora</strong>
-                        <p className="mb-0 mt-2 small">La póliza se vinculará al agente existente sin crear duplicados.</p>
+                      <div className="alert alert-info mb-2 py-1 px-2">
+                        <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                          <strong>ℹ️ Este agente ya tiene la clave {datosExtraidos.clave_agente} registrada para esta aseguradora.</strong>
+                          {' '}La póliza se vinculará al agente existente sin crear duplicados.
+                        </small>
                       </div>
                     )}
                     
                     {!claveYaExiste && (
-                      <div className="alert alert-warning mb-3">
-                        <strong>📋 Se agregará la nueva clave {datosExtraidos.clave_agente} a este agente</strong>
-                        <p className="mb-0 mt-2 small">El agente existe pero no tiene esta clave registrada para esta aseguradora.</p>
+                      <div className="alert alert-warning mb-2 py-1 px-2">
+                        <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                          <strong>📋 Se agregará la nueva clave {datosExtraidos.clave_agente} a este agente.</strong>
+                          {' '}El agente existe pero no tiene esta clave registrada para esta aseguradora.
+                        </small>
                       </div>
                     )}
                     
                     <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Equipo de Trabajo</h6>
+                      <div className="card-body p-2">
+                        <small className="card-subtitle mb-1 d-block text-success fw-semibold" style={{ fontSize: '0.7rem' }}>Datos en Equipo de Trabajo</small>
                         
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Código Agente</small>
-                            <strong>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</strong>
+                        <div className="row g-1">
+                          <div className="col-md-2 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Código</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</small>
                           </div>
                           
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Nombre Completo</small>
-                            <strong>{agenteEncontrado.nombre}</strong>
+                          <div className="col-md-4 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre</small>
+                            <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={agenteEncontrado.nombre}>{agenteEncontrado.nombre}</small>
                           </div>
 
                           {agenteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{agenteEncontrado.email}</strong>
+                            <div className="col-md-3 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Email</small>
+                              <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={agenteEncontrado.email}>{agenteEncontrado.email}</small>
                             </div>
                           )}
 
                           {agenteEncontrado.telefono && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono</small>
-                              <strong>{agenteEncontrado.telefono}</strong>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Teléfono</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{agenteEncontrado.telefono}</small>
                             </div>
                           )}
 
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Estado</small>
-                            <span className="badge bg-success">Activo</span>
+                          <div className="col-md-1 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Estado</small>
+                            <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>Activo</span>
                           </div>
                         </div>
                       </div>
                     </div>
                     
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
+                    <hr className="my-1" />
+                    <small className="d-block mb-1 fw-semibold" style={{ fontSize: '0.7rem' }}>¿Qué deseas hacer?</small>
+                    <div className="d-flex gap-1">
                       <button 
-                        className="btn btn-success flex-fill"
+                        className="btn btn-success btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('usar-existente')}
                       >
-                        <CheckCircle className="me-2" size={16} />
+                        <CheckCircle className="me-1" size={14} />
                         Usar Este Agente
                       </button>
                       <button 
-                        className="btn btn-outline-primary flex-fill"
+                        className="btn btn-outline-primary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('crear-nuevo')}
                       >
                         Crear Agente Nuevo
                       </button>
                       <button 
-                        className="btn btn-outline-secondary"
+                        className="btn btn-outline-secondary btn-sm py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('omitir')}
                       >
                         Seleccionar Después
@@ -2645,30 +2645,33 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
+                  <div className="alert alert-warning py-2 px-2">
+                    <div className="d-flex align-items-center mb-1">
+                      <AlertCircle className="me-1" size={16} />
+                      <strong style={{ fontSize: '0.8rem' }}>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
                     </div>
-                    <p className="mb-3">
+                    <small className="d-block mb-2" style={{ fontSize: '0.7rem' }}>
                       El agente con código <strong>{datosExtraidos.agente?.match(/^(\d+)/)?.[1] || 'N/A'}</strong> no está registrado.
-                    </p>
-                    <div className="d-flex gap-2">
+                    </small>
+                    <div className="d-flex gap-1">
                       <button 
-                        className="btn btn-primary flex-fill"
+                        className="btn btn-primary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('crear-nuevo')}
                       >
-                        <CheckCircle className="me-2" size={16} />
+                        <CheckCircle className="me-1" size={14} />
                         Crear Agente Nuevo
                       </button>
                       <button 
-                        className="btn btn-outline-secondary flex-fill"
+                        className="btn btn-outline-secondary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('omitir')}
                       >
                         Continuar sin Agente
                       </button>
                       <button 
-                        className="btn btn-outline-secondary"
+                        className="btn btn-outline-secondary btn-sm py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={onClose}
                       >
                         Cancelar
@@ -2682,33 +2685,35 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             {/* PASO 3: PREVIEW DE TODOS LOS DATOS */}
             {estado === 'preview-datos' && datosExtraidos && (
               <div>
-                <div className="alert alert-success mb-3">
-                  <CheckCircle className="me-2" size={20} />
-                  <strong>¡Extracción completada!</strong>
+                <div className="alert alert-success mb-2 py-1 px-2">
+                  <CheckCircle className="me-1" size={16} />
+                  <strong style={{ fontSize: '0.8rem' }}>¡Extracción completada!</strong>
                 </div>
 
                 {informacionArchivo && (
-                  <div className="card mb-3">
-                    <div className="card-body">
-                      <strong>Archivo:</strong> {informacionArchivo.nombre} ({informacionArchivo.tamaño})
+                  <div className="card mb-2">
+                    <div className="card-body py-1 px-2">
+                      <small style={{ fontSize: '0.7rem' }}>
+                        <strong>Archivo:</strong> {informacionArchivo.nombre} ({informacionArchivo.tamaño})
+                      </small>
                     </div>
                   </div>
                 )}
 
                 {errores.length > 0 && (
-                  <div className="alert alert-info mb-3">
-                    <h6 className="alert-heading">📊 Reporte de Extracción:</h6>
+                  <div className="alert alert-info mb-2 py-1 px-2">
+                    <small className="fw-semibold d-block mb-1" style={{ fontSize: '0.7rem' }}>📊 Reporte de Extracción:</small>
                     {errores.map((error, idx) => (
-                      <div key={idx} className="small">{error}</div>
+                      <small key={idx} className="d-block" style={{ fontSize: '0.65rem' }}>{error}</small>
                     ))}
                   </div>
                 )}
 
                 <div className="card">
-                  <div className="card-header bg-primary text-white">
-                    <h6 className="mb-0">🎯 Datos Extraídos del PDF</h6>
+                  <div className="card-header bg-primary text-white py-1 px-2">
+                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>🎯 Datos Extraídos del PDF</small>
                   </div>
-                  <div className="card-body" style={{ padding: '0.5rem' }}>
+                  <div className="card-body" style={{ padding: '0.25rem' }}>
                     {/* Usar únicamente el componente DetalleExpediente unificado */}
                     <DetalleExpediente
                       datos={datosExtraidos}
@@ -4513,15 +4518,15 @@ const Formulario = React.memo(({
   }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado, agentes]);
 
   return (
-    <div className="p-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">
+    <div className="p-3">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h5 className="mb-0" style={{ fontSize: '1.1rem' }}>
           {modoEdicion ? 'Editar Expediente' : 'Nuevo Expediente'}
-        </h3>
+        </h5>
         <div className="d-flex gap-2">
           <button
             onClick={() => setVistaActual('lista')}
-            className="btn btn-outline-secondary"
+            className="btn btn-outline-secondary btn-sm"
           >
             Cancelar
           </button>
@@ -4529,13 +4534,27 @@ const Formulario = React.memo(({
       </div>
 
       <div className="card">
-        <div className="card-body">
+        <div className="card-body" style={{ fontSize: '0.85rem' }}>
+          <style>{`
+            .card-body .form-label { margin-bottom: 0.25rem; font-size: 0.8rem; }
+            .card-body .form-control, 
+            .card-body .form-select { 
+              padding: 0.25rem 0.5rem; 
+              font-size: 0.85rem;
+              height: calc(1.5em + 0.5rem + 2px);
+            }
+            .card-body .row { margin-bottom: 0.5rem; }
+            .card-body h6.card-title { font-size: 0.9rem; }
+            .card-body h6 { font-size: 0.85rem; }
+            .card-body .alert { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+            .card-body hr { margin: 0.5rem 0; }
+          `}</style>
           {datosImportadosDesdePDF && !modoEdicion && infoImportacion && (
-            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
-              <CheckCircle className="me-2" size={20} />
+            <div className="alert alert-success alert-dismissible fade show mb-2 py-2 px-3" role="alert" style={{ fontSize: '0.8rem' }}>
+              <CheckCircle className="me-2" size={16} />
               <div>
                 <strong>✅ Datos importados desde PDF exitosamente</strong>
-                <ul className="mb-0 mt-2" style={{ fontSize: '0.9rem' }}>
+                <ul className="mb-0 mt-1" style={{ fontSize: '0.75rem' }}>
                   {infoImportacion.clienteCreado && (
                     <li>🆕 <strong>Cliente creado automáticamente:</strong> {infoImportacion.nombreCliente}</li>
                   )}
@@ -4569,10 +4588,10 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Cliente */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>
               {clienteSeleccionado?.tipoPersona === 'Persona Moral' ? 'Datos de la Empresa' : 'Datos del Cliente'}
-            </h5>
+            </h6>
             
             {/* Buscador de Cliente */}
             <BuscadorCliente
@@ -4589,33 +4608,33 @@ const Formulario = React.memo(({
 
             {/* Datos del cliente (solo lectura si está seleccionado) */}
             {clienteSeleccionado && (
-              <div className="row g-3 mt-2" key={clienteSeleccionado.id}>
+              <div className="row g-2 mt-1" key={clienteSeleccionado.id}>
                 {clienteSeleccionado.tipoPersona === 'Persona Moral' ? (
                   // Campos para Persona Moral (Empresa)
                   <>
                     <div className="col-md-12">
-                      <label className="form-label">Razón Social</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Razón Social</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.razon_social || ''}
                         readOnly
                       />
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label">Nombre Comercial</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre Comercial</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.nombre_comercial || ''}
                         readOnly
                       />
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label">RFC</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>RFC</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.rfc || ''}
                         readOnly
                       />
@@ -4623,23 +4642,23 @@ const Formulario = React.memo(({
                     
                     {/* Datos de Contacto - Editables */}
                     <div className="col-12">
-                      <hr className="my-3" />
-                      <h6 className="text-muted mb-2">
+                      <hr className="my-2" />
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         💼 Datos del Contacto Principal
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Editable - Se actualizará el cliente)
-                        </small>
-                      </h6>
-                      <div className="alert alert-info py-2 px-3 mb-3" role="alert" style={{ fontSize: '0.85rem' }}>
+                        </span>
+                      </small>
+                      <div className="alert alert-info py-1 px-2 mb-2" role="alert" style={{ fontSize: '0.7rem' }}>
                         Requisito mínimo para guardar póliza (PM): <strong>Nombre</strong> y <strong>Email</strong> o <strong>Teléfono Móvil</strong>.
                       </div>
                     </div>
                     
                     <div className="col-md-4">
-                      <label className="form-label">Nombre del Contacto <span className="text-danger">*</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre del Contacto <span className="text-danger">*</span></label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_nombre || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
@@ -4666,30 +4685,30 @@ const Formulario = React.memo(({
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Email del Contacto <span className="text-muted">(uno de estos)</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email del Contacto <span className="text-muted" style={{ fontSize: '0.7rem' }}>(uno de estos)</span></label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_email || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
                         placeholder="55 1234 5678"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil <span className="text-muted">(uno de estos)</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil <span className="text-muted" style={{ fontSize: '0.7rem' }}>(uno de estos)</span></label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
@@ -4701,75 +4720,78 @@ const Formulario = React.memo(({
                   <>
                     {/* Datos del Cliente (Solo lectura) */}
                     <div className="col-12">
-                      <h6 className="text-muted mb-3">
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         👤 Datos del Cliente
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Solo lectura)
-                        </small>
-                      </h6>
+                        </span>
+                      </small>
                     </div>
                     
-                    <div className="col-md-4">
-                      <label className="form-label">Nombre</label>
+                    {/* Primera fila: Nombre, Apellidos y RFC */}
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.nombre ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">Apellido Paterno</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Paterno</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.apellido_paterno ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">Apellido Materno</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Materno</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.apellido_materno ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">RFC</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>RFC</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.rfc ?? ''}
                         readOnly
                       />
                     </div>
+                    
+                    {/* Segunda fila: Email y Teléfonos */}
                     <div className="col-md-4">
-                      <label className="form-label">Email</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email</label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.email || ''}
                         onChange={(e) => setFormulario({...formulario, email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, telefono_fijo: e.target.value})}
                         placeholder="55 5555 5555"
@@ -4778,70 +4800,70 @@ const Formulario = React.memo(({
                     
                     {/* Datos de Contacto Adicional/Gestor - Editables */}
                     <div className="col-12">
-                      <hr className="my-3" />
-                      <h6 className="text-muted mb-3">
+                      <hr className="my-2" />
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         💼 Contacto Adicional / Gestor
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Opcional - Editable)
-                        </small>
-                      </h6>
+                        </span>
+                      </small>
                     </div>
                     
                     <div className="col-md-4">
-                      <label className="form-label">Nombre del Contacto</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre del Contacto</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_nombre || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Apellido Paterno</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Paterno</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_apellido_paterno || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
                         placeholder="Apellido Paterno"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Apellido Materno</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Materno</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_apellido_materno || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
                         placeholder="Apellido Materno"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Email del Contacto</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email del Contacto</label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_email || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
                         placeholder="55 1234 5678"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
@@ -4854,13 +4876,13 @@ const Formulario = React.memo(({
           </div>
 
           {/* Datos del Seguro */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">Datos del Seguro</h5>
-            <div className="row g-3">
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Datos del Seguro</h6>
+            <div className="row g-2">
               <div className="col-md-4">
-                <label className="form-label">Compañía <span className="text-danger">*</span></label>
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Compañía <span className="text-danger">*</span></label>
                 <select
-                  className="form-select"
+                  className="form-select form-select-sm"
                   value={formulario.compania}
                   onChange={(e) => {
                     const nuevaCompania = e.target.value;
@@ -5097,9 +5119,9 @@ const Formulario = React.memo(({
 
           {/* Datos de la Póliza - Visible para Autos o si ya existen valores (edición) */}
           {(formulario.producto === 'Autos Individual' || formulario.uso || formulario.servicio || formulario.movimiento) && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
-              <div className="row g-3">
+            <div className="mb-2">
+              <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Datos de la Póliza</h6>
+              <div className="row g-2">
                 <div className="col-md-6">
                   <label className="form-label">Número de Póliza</label>
                   <input
@@ -5329,38 +5351,38 @@ const Formulario = React.memo(({
           </div>
 
           {/* Fechas y Vigencia - SIEMPRE VISIBLE */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">Fechas y Vigencia</h5>
-            <div className="row g-3">
-              <div className="col-md-3">
-                <label className="form-label">Fecha de Emisión</label>
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Fechas y Vigencia</h6>
+            <div className="row g-2">
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Fecha de Emisión</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.fecha_emision || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormulario(prev => ({ ...prev, fecha_emision: e.target.value }))}
                 />
-                <small className="form-text text-muted">
+                <small className="form-text text-muted" style={{ fontSize: '0.65rem' }}>
                   Fecha en que se emitió la póliza
                 </small>
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Fecha de Captura</label>
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Fecha de Captura</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.fecha_captura || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormulario(prev => ({ ...prev, fecha_captura: e.target.value }))}
                 />
-                <small className="form-text text-muted">
+                <small className="form-text text-muted" style={{ fontSize: '0.65rem' }}>
                   Fecha de registro en el sistema
                 </small>
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Inicio de Vigencia</label>
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Inicio de Vigencia</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.inicio_vigencia ?? ''}
                   onChange={(e) => {
                     const nuevoFormulario = { ...formulario, inicio_vigencia: e.target.value };
@@ -5383,16 +5405,16 @@ const Formulario = React.memo(({
                 />
               </div>
               <div className="col-md-3">
-                <label className="form-label">📅 Aviso de Renovación</label>
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>📅 Aviso de Renovación</label>
                 <input
                   type="date"
-                  className="form-control bg-light"
+                  className="form-control form-control-sm bg-light"
                   value={formulario.fecha_aviso_renovacion || ''}
                   readOnly
                   disabled
                   style={{ cursor: 'not-allowed' }}
                 />
-                <small className="text-muted">Se calcula automáticamente (Término - 30 días)</small>
+                <small className="text-muted" style={{ fontSize: '0.65rem' }}>Se calcula automáticamente (Término - 30 días)</small>
               </div>
             </div>
           </div>
@@ -5746,14 +5768,14 @@ const Formulario = React.memo(({
             <button
               type="button"
               onClick={() => setVistaActual('lista')}
-              className="btn btn-outline-secondary"
+              className="btn btn-outline-secondary btn-sm"
             >
               Cancelar
             </button>
             <button
               type="button"
               onClick={guardarExpediente}
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
             >
               {modoEdicion ? 'Actualizar' : 'Guardar'} Expediente
             </button>
@@ -5794,9 +5816,19 @@ const DetallesExpediente = React.memo(({
   calculartermino_vigencia,
   calcularProximoPago,
   abrirModalCompartir,
-  enviarAvisoPago
+  enviarAvisoPago,
+  historial = [] // Historial del expediente
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
+  
+  // Debug: verificar que el historial llega correctamente
+  useEffect(() => {
+    console.log('🔍 DetallesExpediente - Historial recibido:', {
+      cantidad: historial?.length || 0,
+      historial: historial,
+      expediente_id: expedienteSeleccionado?.id
+    });
+  }, [historial, expedienteSeleccionado?.id]);
   
   // Estados para controlar secciones colapsables (todas cerradas por defecto)
   const [mostrarAsegurado, setMostrarAsegurado] = useState(false);
@@ -5967,10 +5999,12 @@ const DetallesExpediente = React.memo(({
             ) && (
               <div className="col-12">
                 <CalendarioPagos 
+                  key={`calendario-${expedienteSeleccionado?.id}-${historial?.length || 0}`}
                   expediente={expedienteSeleccionado}
                   calcularProximoPago={calcularProximoPago}
                   mostrarResumen={true}
                   onEnviarAviso={enviarAvisoPago}
+                  historial={historial}
                 />
               </div>
             )}
@@ -6199,6 +6233,7 @@ const ModuloExpedientes = () => {
   const [comprobantePago, setComprobantePago] = useState(null);
   const [procesandoPago, setProcesandoPago] = useState(false);
   const [fechaUltimoPago, setFechaUltimoPago] = useState(''); // Fecha en que realmente se pagó
+  const [historialExpediente, setHistorialExpediente] = useState([]); // Historial del expediente seleccionado
   
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
@@ -7734,6 +7769,9 @@ const estadoInicialFormulario = {
       let comprobanteUrl = null;
       try {
         console.log('📤 Subiendo comprobante a S3...');
+        console.log('📄 Archivo:', comprobantePago?.name, 'Tamaño:', comprobantePago?.size, 'bytes');
+        console.log('🔗 Endpoint:', `${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`);
+        
         const formData = new FormData();
         formData.append('file', comprobantePago);
         formData.append('tipo', 'comprobante-pago');
@@ -7744,15 +7782,21 @@ const estadoInicialFormulario = {
           body: formData
         });
         
+        console.log('📡 Respuesta del servidor:', uploadResponse.status, uploadResponse.statusText);
+        
         if (uploadResponse.ok) {
           const uploadData = await uploadResponse.json();
           comprobanteUrl = uploadData.data?.pdf_url || uploadData.data?.url;
           console.log('✅ Comprobante subido a S3:', comprobanteUrl);
+          console.log('📦 Respuesta completa:', uploadData);
         } else {
+          const errorText = await uploadResponse.text();
+          console.error('❌ Error del servidor:', errorText);
           console.warn('⚠️ No se pudo subir comprobante a S3, continuando sin URL');
         }
       } catch (errorUpload) {
-        console.warn('⚠️ Error al subir comprobante:', errorUpload);
+        console.error('❌ Error al subir comprobante:', errorUpload);
+        console.error('Stack:', errorUpload.stack);
         // Continuar sin bloquear el proceso
       }
 
@@ -10083,9 +10127,29 @@ const eliminarExpediente = useCallback((id) => {
   }
 }, []);
 
-  const verDetalles = useCallback((expediente) => {
+  const verDetalles = useCallback(async (expediente) => {
     setExpedienteSeleccionado(expediente);
     setVistaActual('detalles');
+    
+    // Primero limpiamos el historial anterior
+    setHistorialExpediente([]);
+    
+    // Luego cargamos el nuevo historial del expediente
+    try {
+      const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        const historial = data?.data || data || [];
+        const historialArray = Array.isArray(historial) ? historial : [];
+        setHistorialExpediente(historialArray);
+        console.log('📋 Historial cargado para CalendarioPagos:', historialArray.length, 'eventos', historialArray);
+      } else {
+        setHistorialExpediente([]);
+      }
+    } catch (error) {
+      console.warn('⚠️ No se pudo cargar historial:', error);
+      setHistorialExpediente([]);
+    }
   }, []);
 
   return (
@@ -10174,6 +10238,7 @@ const eliminarExpediente = useCallback((id) => {
             calcularProximoPago={calcularProximoPago}
             abrirModalCompartir={abrirModalCompartir}
             enviarAvisoPago={enviarAvisoPago}
+            historial={historialExpediente}
           />
         )}
       </div>
@@ -10318,11 +10383,11 @@ const eliminarExpediente = useCallback((id) => {
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content">
-              <div className="modal-header bg-success text-white">
-                <h5 className="modal-title">
-                  <DollarSign size={20} className="me-2" />
+              <div className="modal-header bg-success text-white py-2 px-3">
+                <h6 className="modal-title mb-0" style={{ fontSize: '0.95rem' }}>
+                  <DollarSign size={18} className="me-2" />
                   Aplicar Pago
-                </h5>
+                </h6>
                 <button 
                   type="button" 
                   className="btn-close btn-close-white" 
@@ -10336,38 +10401,38 @@ const eliminarExpediente = useCallback((id) => {
                 ></button>
               </div>
               
-              <div className="modal-body">
+              <div className="modal-body py-2 px-3">
                 {/* Información del expediente */}
-                <div className="alert alert-info mb-3">
-                  <h6 className="mb-2">
-                    <strong>Póliza:</strong> {expedienteParaPago.numero_poliza || 'Sin número'}
-                  </h6>
-                  <div className="small">
+                <div className="alert alert-info mb-2 py-2 px-2">
+                  <div className="mb-1">
+                    <strong style={{ fontSize: '0.85rem' }}>Póliza:</strong> <span style={{ fontSize: '0.85rem' }}>{expedienteParaPago.numero_poliza || 'Sin número'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem' }}>
                     <div><strong>Cliente:</strong> {expedienteParaPago.cliente_nombre || 'Sin nombre'}</div>
                     <div><strong>Aseguradora:</strong> {expedienteParaPago.compania || 'N/A'}</div>
                     <div><strong>Producto:</strong> {expedienteParaPago.producto || 'N/A'}</div>
                     {expedienteParaPago.importe_total && (
-                      <div className="mt-2">
-                        <strong>Monto a pagar:</strong> <span className="badge bg-success">${parseFloat(expedienteParaPago.importe_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+                      <div className="mt-1">
+                        <strong>Monto a pagar:</strong> <span className="badge bg-success" style={{ fontSize: '0.7rem' }}>${parseFloat(expedienteParaPago.importe_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
                 {/* Campo para fecha real de pago */}
-                <div className="mb-3">
-                  <label className="form-label fw-bold">
-                    <Calendar size={16} className="me-2" />
+                <div className="mb-2">
+                  <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
+                    <Calendar size={14} className="me-1" />
                     Fecha en que se realizó el pago *
                   </label>
                   <input
                     type="date"
-                    className="form-control"
+                    className="form-control form-control-sm"
                     value={fechaUltimoPago}
                     onChange={(e) => setFechaUltimoPago(e.target.value)}
                     disabled={procesandoPago}
                   />
-                  <small className="text-muted d-block mt-1">
+                  <small className="text-muted d-block mt-1" style={{ fontSize: '0.7rem' }}>
                     {(() => {
                       const fechaLimite = expedienteParaPago.fecha_vencimiento_pago || expedienteParaPago.proximo_pago;
                       if (fechaLimite) {
@@ -10379,14 +10444,14 @@ const eliminarExpediente = useCallback((id) => {
                 </div>
 
                 {/* Campo para subir comprobante */}
-                <div className="mb-3">
-                  <label className="form-label fw-bold">
-                    <Upload size={16} className="me-2" />
+                <div className="mb-2">
+                  <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
+                    <Upload size={14} className="me-1" />
                     Comprobante de Pago *
                   </label>
                   <input
                     type="file"
-                    className="form-control"
+                    className="form-control form-control-sm"
                     accept=".pdf,.jpg,.jpeg,.png,.webp"
                     onChange={(e) => {
                       const archivo = e.target.files[0];
@@ -10402,45 +10467,45 @@ const eliminarExpediente = useCallback((id) => {
                     }}
                     disabled={procesandoPago}
                   />
-                  <small className="text-muted d-block mt-1">
+                  <small className="text-muted d-block mt-1" style={{ fontSize: '0.7rem' }}>
                     Formatos permitidos: PDF, JPG, PNG, WEBP (máximo 10MB)
                   </small>
                   
                   {comprobantePago && (
-                    <div className="alert alert-success mt-2 mb-0 d-flex align-items-center justify-content-between">
-                      <div>
-                        <CheckCircle size={16} className="me-2" />
+                    <div className="alert alert-success mt-2 mb-0 py-1 px-2 d-flex align-items-center justify-content-between">
+                      <div style={{ fontSize: '0.75rem' }}>
+                        <CheckCircle size={14} className="me-1" />
                         <strong>{comprobantePago.name}</strong>
-                        <small className="d-block ms-4 text-muted">
+                        <small className="d-block ms-3 text-muted" style={{ fontSize: '0.7rem' }}>
                           {(comprobantePago.size / 1024).toFixed(2)} KB
                         </small>
                       </div>
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-danger"
+                        className="btn btn-sm btn-outline-danger py-0 px-1"
                         onClick={() => setComprobantePago(null)}
                         disabled={procesandoPago}
                       >
-                        <X size={14} />
+                        <X size={12} />
                       </button>
                     </div>
                   )}
                 </div>
 
                 {/* Información adicional */}
-                <div className="alert alert-warning mb-0">
-                  <small>
-                    <AlertCircle size={14} className="me-1" />
+                <div className="alert alert-warning mb-0 py-1 px-2">
+                  <small style={{ fontSize: '0.7rem' }}>
+                    <AlertCircle size={12} className="me-1" />
                     <strong>Importante:</strong> El comprobante de pago se guardará en el expediente 
                     y se agregará un comentario automático en el historial.
                   </small>
                 </div>
               </div>
               
-              <div className="modal-footer">
+              <div className="modal-footer py-2 px-3">
                 <button 
                   type="button" 
-                  className="btn btn-outline-secondary" 
+                  className="btn btn-outline-secondary btn-sm" 
                   onClick={() => {
                     setMostrarModalPago(false);
                     setExpedienteParaPago(null);
@@ -10453,18 +10518,18 @@ const eliminarExpediente = useCallback((id) => {
                 </button>
                 <button 
                   type="button" 
-                  className="btn btn-success" 
+                  className="btn btn-success btn-sm"
                   onClick={procesarPagoConComprobante}
                   disabled={!comprobantePago || !fechaUltimoPago || procesandoPago}
                 >
                   {procesandoPago ? (
                     <>
-                      <Loader size={16} className="me-2 spinner-border spinner-border-sm" />
+                      <Loader size={14} className="me-1 spinner-border spinner-border-sm" />
                       Procesando...
                     </>
                   ) : (
                     <>
-                      <CheckCircle size={16} className="me-2" />
+                      <CheckCircle size={14} className="me-1" />
                       Confirmar Pago
                     </>
                   )}

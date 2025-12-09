@@ -383,7 +383,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                         <div className="mb-1">
                           {/* Línea principal: nombre del archivo o método */}
                           {evento.datos_adicionales?.nombre_archivo_pdf ? (
-                            <div className="mb-1">
+                            <div className="mb-2">
                               <span className="text-dark" style={{ fontSize: '0.85rem' }}>
                                 📄 {evento.datos_adicionales.nombre_archivo_pdf}
                               </span>
@@ -391,6 +391,17 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                 <span className="badge bg-warning bg-opacity-10 text-warning ms-2" style={{ fontSize: '0.75rem' }}>
                                   ✏️ {evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) editado(s)
                                 </span>
+                              )}
+                              {/* Mostrar detalle de campos modificados si existen */}
+                              {evento.datos_adicionales?.campos_modificados && evento.datos_adicionales.campos_modificados.length > 0 && (
+                                <div className="mt-2 p-2 bg-light rounded" style={{ fontSize: '0.75rem' }}>
+                                  <div className="text-muted mb-1">Campos modificados manualmente:</div>
+                                  {evento.datos_adicionales.campos_modificados.map((campo, idx) => (
+                                    <div key={idx} className="text-dark" style={{ lineHeight: '1.4' }}>
+                                      {campo}
+                                    </div>
+                                  ))}
+                                </div>
                               )}
                             </div>
                           ) : (
