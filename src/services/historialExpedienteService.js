@@ -33,6 +33,7 @@ export const TIPOS_EVENTO = {
   PAGO_REGISTRADO: 'pago_registrado',
   PAGO_VENCIDO: 'pago_vencido',
   RECORDATORIO_PAGO_ENVIADO: 'recordatorio_pago_enviado',
+  AVISO_PAGO_ENVIADO: 'aviso_pago_enviado',
   PAGO_APLICADO_MANUALMENTE: 'pago_aplicado_manualmente',
   PAGO_REMOVIDO: 'pago_removido',
   
@@ -94,6 +95,7 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.PAGO_REGISTRADO]: { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.PAGO_VENCIDO]: { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
     [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.AVISO_PAGO_ENVIADO]: { icon: '📢', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE]: { icon: '✏️', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_REMOVIDO]: { icon: '🔙', color: '#fd7e14', bgColor: '#ffe5d0' },
     

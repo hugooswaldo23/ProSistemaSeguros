@@ -33,6 +33,8 @@ export function detectarAseguradora(textoInicial) {
   // Orden de prioridad (más específico primero)
   if (/\bCHUBB\b/i.test(texto)) return 'CHUBB';
   if (/\bQU[AÁ]LITAS\b/i.test(texto)) return 'QUALITAS';
+  if (/elpotosi\.com/i.test(texto)) return 'ELPOTOSI';
+  if (/444[\s\-]?8349000/i.test(texto)) return 'ELPOTOSI'; // Teléfono como fallback
   if (/\bHDI\b/i.test(texto)) return 'HDI';
   if (/\bGNP\b/.test(texto)) return 'GNP';
   if (/\bMAPFRE\b/.test(texto)) return 'MAPFRE';

@@ -1,5 +1,5 @@
-import fs from 'fs';
-import * as pdfParse from 'pdf-parse/lib/pdf-parse.js';
+const fs = require('fs');
+const pdfParse = require('pdf-parse');
 
 const pdfPath = process.argv[2] || 'c:\\Users\\alvar\\Downloads\\PolizaCayenne.pdf';
 
@@ -21,7 +21,7 @@ fs.readFile(pdfPath, (err, dataBuffer) => {
       console.log('\n\n===== PÁGINA 3 =====');
       console.log(pages[2]);
     }
-  }).catch(err => {
-    console.error('Error procesando PDF:', err);
+  }).catch(function(error) {
+    console.error('Error parseando PDF:', error);
   });
 });

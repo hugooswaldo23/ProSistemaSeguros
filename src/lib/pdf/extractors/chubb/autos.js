@@ -200,39 +200,36 @@ export async function extraer(ctx) {
   console.log('\n📋 PASO 2: EXTRACCIÓN DE AGENTE');
   console.log('─────────────────────────────────────────────────────────');
   
-  // Chubb usa "Clave interna del agente: XXXXX" o "Clave interna del agente: NOMBRE APELLIDOS"
+  // Chubb usa "Clave interna del agente: XXXXX" y "Conducto: N - NOMBRE"
   let agente = '';
+  let clave_agente = '';
   
-  // Estrategia 1: Capturar código numérico + nombre (ej: "141975 - RITA DINGLER CHAIRES")
+  // Estrategia 1: Capturar "Conducto: N - NOMBRE" (ej: "Conducto: 1 - RITA DINGELER CHAIRES")
+  const conductoMatch = textoCompleto.match(/CONDUCTO[:\s]+\d+\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Descripci[oó]n|Desglose|Datos|RFC|Domicilio|C\.P\.|Tel[eé]fono|\n\n))/i);
+  
+  // Estrategia 2: Capturar "Clave interna del agente: 141975"
+  const claveInternaMatch = textoCompleto.match(/CLAVE\s+INTERNA\s+DEL\s+AGENTE[:\s]+(\d{3,})/i);
+  
+  // Estrategia 3: Capturar código + nombre en una sola línea (ej: "141975 - RITA DINGLER CHAIRES")
   const claveConNombreMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CONDUCTO)[:\s]+(\d{3,})\s*[-–]\s*([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Datos|RFC|Domicilio|Desglose|\n\n))/i);
   
-  // Estrategia 2: Capturar solo nombre después de "Clave interna del agente:" (ej: "RITA DINGLER CHAIRES")
-  const soloPalabraMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:Desglose|RFC|Datos|Domicilio|\n\n))/i);
-  
-  // Estrategia 3: Capturar código numérico solo
-  const soloCodigoMatch = textoCompleto.match(/(?:CLAVE\s+INTERNA\s+DEL\s+AGENTE|CLAVE\s+AGENTE|AGENTE|CLAVE\s+DEL\s+AGENTE|CLAVE\s+PRODUCTOR|CLAVE\s+INTERNA)[:\s]+(\d{3,})/i);
-  
   if (claveConNombreMatch) {
-    // Caso ideal: código + nombre
-    agente = `${claveConNombreMatch[1]} - ${claveConNombreMatch[2].trim()}`;
-  } else if (soloPalabraMatch && !/\d/.test(soloPalabraMatch[1])) {
-    // Si solo hay nombre (sin dígitos), buscamos si hay código en otro lugar
-    const codigoSeparado = textoCompleto.match(/(?:C[OÓ]DIGO\s+AGENTE|AGENTE)[:\s]+(\d{3,})/i);
-    if (codigoSeparado) {
-      agente = `${codigoSeparado[1]} - ${soloPalabraMatch[1].trim()}`;
-    } else {
-      agente = soloPalabraMatch[1].trim();
-    }
-  } else if (soloCodigoMatch) {
-    // Solo código, intentar buscar nombre en otro lugar
-    const nombreSeparado = textoCompleto.match(/(?:NOMBRE\s+DEL\s+AGENTE|PRODUCTOR)[:\s]+([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*(?:CLAVE|RFC|Domicilio|\n\n))/i);
-    if (nombreSeparado) {
-      agente = `${soloCodigoMatch[1]} - ${nombreSeparado[1].trim()}`;
-    } else {
-      agente = soloCodigoMatch[1];
-    }
+    // Caso ideal: código + nombre en una línea
+    clave_agente = claveConNombreMatch[1];
+    agente = claveConNombreMatch[2].trim();
+  } else if (claveInternaMatch && conductoMatch) {
+    // Caso común en Chubb: clave y nombre en líneas separadas
+    clave_agente = claveInternaMatch[1];
+    agente = conductoMatch[1].trim();
+  } else if (claveInternaMatch) {
+    // Solo tenemos la clave
+    clave_agente = claveInternaMatch[1];
+  } else if (conductoMatch) {
+    // Solo tenemos el nombre
+    agente = conductoMatch[1].trim();
   }
   
+  console.log('Clave agente:', clave_agente || '❌ NO ENCONTRADO');
   console.log('Agente:', agente || '❌ NO ENCONTRADO');
   
   // ==================== PASO 3: DATOS DE LA PÓLIZA ====================
@@ -832,6 +829,7 @@ export async function extraer(ctx) {
     producto: 'Autos Individual',
     plan, // Paquete (INTEGRAL, LIMITADA, etc.)
     etapa_activa: 'Emitida',
+    clave_agente,
     agente,
     numero_poliza,
     endoso,

@@ -101,7 +101,111 @@ Los siguientes eventos están definidos pero requieren lógica específica:
 ## 🔧 TODO TÉCNICO
 
 - [ ] Reemplazar `usuario_nombre: 'Sistema'` por usuario autenticado actual
-- [ ] Implementar detección detallada de campos modificados en DATOS_ACTUALIZADOS
+- [ ] Implementar detección detallada de campos modificados en DATOS_ACTUALIZADOSINSTRUCCIONES PARA HUGO - COMPROBANTES DE PAGO EN AWS S3
+==========================================================
+
+OBJETIVO:
+Permitir subir y visualizar comprobantes de pago en AWS S3 (igual que las pólizas)
+
+----------------------------------------------------------
+ENDPOINT NECESARIO
+----------------------------------------------------------
+
+POST /api/expedientes/:id/comprobante
+Content-Type: multipart/form-data
+
+Campos del formulario:
+- file: El archivo del comprobante (PDF/imagen)
+- tipo: "comprobante-pago"
+- expediente_id: ID del expediente
+
+Response exitosa (200):
+{
+  "success": true,
+  "data": {
+    "url": "https://s3.amazonaws.com/prosistema-polizas/comprobantes/2025/expediente-431/comprobante-20251208.pdf",
+    "pdf_url": "https://s3.amazonaws.com/prosistema-polizas/comprobantes/2025/expediente-431/comprobante-20251208.pdf",
+    "pdf_key": "comprobantes/2025/expediente-431/comprobante-20251208.pdf",
+    "pdf_nombre": "comprobante-pago.pdf",
+    "pdf_size": 245680
+  }
+}
+
+Response error (500):
+{
+  "success": false,
+  "error": "Descripción del error"
+}
+
+----------------------------------------------------------
+ESTRUCTURA EN S3
+----------------------------------------------------------
+
+Bucket: prosistema-polizas (el mismo existente)
+
+Nueva carpeta para comprobantes:
+comprobantes/
+  └── 2025/
+      └── expediente-{id}/
+          ├── comprobante-20251208.pdf
+          ├── comprobante-20251215.pdf
+
+Ejemplo de key completa:
+comprobantes/2025/expediente-431/comprobante-20251208.pdf
+
+----------------------------------------------------------
+LÓGICA DEL ENDPOINT
+----------------------------------------------------------
+
+1. Recibir archivo via multer o similar
+2. Generar nombre: comprobante-{YYYYMMDD}.pdf
+3. Key de S3: comprobantes/{año}/expediente-{id}/{nombre}
+4. Subir a S3 usando s3.upload()
+5. Retornar URL pública del archivo
+
+----------------------------------------------------------
+CONFIGURACIÓN AWS (YA EXISTENTE)
+----------------------------------------------------------
+
+Usar las MISMAS credenciales que para PDFs de pólizas:
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
+- AWS_S3_BUCKET=prosistema-polizas
+- AWS_REGION=us-east-1
+
+----------------------------------------------------------
+VALIDACIONES RECOMENDADAS
+----------------------------------------------------------
+
+- Solo permitir: PDF, JPG, PNG
+- Tamaño máximo: 10MB
+- Verificar que el expediente existe
+- Sanitizar nombre del archivo
+
+----------------------------------------------------------
+COMANDO DE PRUEBA
+----------------------------------------------------------
+
+curl -X POST http://localhost:3000/api/expedientes/431/comprobante \
+  -F 'file=@/ruta/al/comprobante.pdf' \
+  -F 'tipo=comprobante-pago' \
+  -F 'expediente_id=431'
+
+Debe retornar JSON con URL accesible del comprobante.
+
+----------------------------------------------------------
+NOTAS IMPORTANTES
+----------------------------------------------------------
+
+- El frontend YA está implementado
+- El frontend sube el comprobante cuando se aplica un pago
+- El frontend guarda la URL en el historial (datos_adicionales.comprobante_url)
+- El botón "Ver Comprobante" abre la URL en nueva pestaña
+- Si falla la subida, el frontend continúa (no bloquea el pago)
+
+SOLO FALTA IMPLEMENTAR EL ENDPOINT EN BACKEND.
+
+PRIORIDAD: ALTA
 - [ ] Crear job programado para detectar pólizas próximas a vencer
 - [ ] Crear job programado para marcar pólizas vencidas
 - [ ] Implementar sistema de recordatorios automáticos

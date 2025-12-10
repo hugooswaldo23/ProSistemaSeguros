@@ -32,9 +32,135 @@ body {
   box-shadow: none;
 }
 
+/* Overlay para sidebar en móvil */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
+.sidebar-overlay.active {
+  display: block;
+}
+
+/* Sidebar responsivo */
+.sidebar-wrapper {
+  transition: transform 0.3s ease;
+}
+
+/* Tablas responsivas mejoradas */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Botones responsivos */
+.btn-group-responsive {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Cards responsivos */
+.card-responsive {
+  margin-bottom: 1rem;
+}
+
+/* Formularios responsivos */
+.form-responsive .form-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .display-4 {
     font-size: 2rem;
+  }
+  
+  /* Ocultar columnas no esenciales en tablas */
+  .d-md-table-cell {
+    display: none !important;
+  }
+  
+  /* Ajustar padding en móvil */
+  .p-4 {
+    padding: 1rem !important;
+  }
+  
+  .px-4 {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+  
+  /* Botones más pequeños en móvil */
+  .btn {
+    font-size: 0.875rem;
+    padding: 0.375rem 0.75rem;
+  }
+  
+  /* Cards más compactas */
+  .card-body {
+    padding: 1rem;
+  }
+  
+  /* Modales de ancho completo */
+  .modal-dialog {
+    margin: 0.5rem;
+  }
+  
+  /* Ajustar títulos */
+  h3 {
+    font-size: 1.5rem;
+  }
+  
+  h5 {
+    font-size: 1.125rem;
+  }
+  
+  /* Stack de botones en móvil */
+  .d-flex.justify-content-between {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .d-flex.justify-content-between > * {
+    width: 100%;
+  }
+}
+
+@media (max-width: 576px) {
+  /* Ajustes para pantallas muy pequeñas */
+  .container-fluid {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  
+  /* Iconos más pequeños */
+  .lucide {
+    width: 16px;
+    height: 16px;
+  }
+  
+  /* Badges más pequeños */
+  .badge {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.5rem;
+  }
+  
+  /* Cards de pólizas en móvil */
+  .card-body {
+    font-size: 0.875rem;
+  }
+  
+  /* Botones más compactos */
+  .btn-sm {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
   }
 }

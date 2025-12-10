@@ -1598,14 +1598,8 @@ const SistemaGestionPersonal = () => {
                       <tbody>
                         {asignacionesUsuario.map((a, i) => {
                           const producto = tiposProductos.find(p => String(p.id) === String(a.productoId));
-                          // intentar resolver aseguradora a partir de aseguradoras.productos_disponibles
-                          let aseguradora = null;
-                          for (const as of aseguradoras) {
-                            const lista = as.productos_disponibles || [];
-                            const ids = lista.map(it => (typeof it === 'object' ? (it.producto_id || it.productoId || it.id) : it));
-                            if (ids.map(String).includes(String(a.productoId))) { aseguradora = as; break; }
-                          }
-
+                          // Usar aseguradoraId directamente de la asignación
+                          const aseguradora = aseguradoras.find(aseg => String(aseg.id) === String(a.aseguradoraId));
                           const ejecutivo = usuarios.find(u => String(u.id) === String(a.ejecutivoId));
 
                           return (

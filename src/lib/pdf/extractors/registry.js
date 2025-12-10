@@ -1,5 +1,5 @@
 /**
- * Registry de Extractores Modulares
+ * Registry de Extractores Automáticos
  * 
  * Carga dinámicamente el extractor específico según aseguradora y producto.
  */
@@ -25,6 +25,10 @@ export async function loadExtractor(company, producto = 'autos') {
       case 'CHUBB':
         console.log(`   ✅ Cargando: ./chubb/${prod}.js`);
         return await import(`./chubb/${prod}.js`);
+        
+      case 'ELPOTOSI':
+        console.log(`   ✅ Cargando: ./elpotosi/${prod}.js`);
+        return await import(`./elpotosi/${prod}.js`);
         
       case 'HDI':
         console.log(`   ✅ Cargando: ./hdi/${prod}.js`);

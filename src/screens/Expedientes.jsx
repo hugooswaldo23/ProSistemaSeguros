@@ -54,7 +54,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw, Calendar } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import BuscadorCliente from '../components/BuscadorCliente';
 import ModalCapturarContacto from '../components/ModalCapturarContacto';
@@ -88,6 +88,11 @@ const CONSTANTS = {
     'Semestral': 6
   }
 };
+
+// ============= VARIABLES GLOBALES PARA SNAPSHOT =============
+// Flag global para indicar que se debe capturar un snapshot del formulario
+// Se usa para capturar el estado completo después de extraer PDF + cargar BD + calcular automáticos
+let globalSnapshotPendiente = false;
 
 // ============= UTILIDADES =============
 const utils = {
@@ -261,7 +266,7 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
         <div><small className="text-muted">Contacto: {contactoNombre}</small></div>
       )}
       {emailMostrar && (
-        <div><small className="text-muted">✉️ {emailMostrar}</small></div>
+        <div><small className="text-muted">{emailMostrar}</small></div>
       )}
       {/* Teléfonos: si hay contacto, mostrar ambos (móvil y fijo). Si no hay contacto, caer a teléfonos del cliente */}
       {tieneContacto ? (
@@ -289,100 +294,213 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
   );
 });
 
-const EstadoPago = React.memo(({ expediente }) => (
-  <div>
-    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
-    {expediente.frecuenciaPago && (
-      <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
-    )}
-    <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
-    {expediente.proximoPago && ((expediente.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expediente.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
-      <div>
-        <small className={`${
-          expediente.estatusPago === 'Vencido' ? 'text-danger fw-bold' :
-          expediente.estatusPago === 'Por Vencer' ? 'text-warning' :
-          'text-muted'
-        }`}>
-          Pago: {utils.formatearFecha(expediente.proximoPago)}
-        </small>
+// 🔥 Función para leer el estatus de pago desde el backend
+// OPCIÓN A: Si el expediente trae array de recibos desde el backend
+// OPCIÓN B: Si solo trae estatus_pago calculado
+const obtenerEstatusPagoDesdeBackend = (expediente) => {
+  // OPCIÓN A: Si el backend envía los recibos en el array
+  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
+    
+    // Buscar el próximo recibo pendiente (siguiente al último pagado)
+    const proximoReciboPendiente = expediente.recibos.find(r => r.numero_recibo === ultimoReciboPagado + 1);
+    
+    if (proximoReciboPendiente) {
+      return proximoReciboPendiente.estatus; // Vencido, Pago por vencer, Pendiente, Pagado
+    }
+    
+    // Si no hay próximo recibo, está completamente pagado
+    return 'Pagado';
+  }
+  
+  // OPCIÓN B: Leer directamente el campo estatus_pago del expediente
+  const estatusBackend = expediente.estatus_pago || expediente.estatusPago;
+  
+  if (!estatusBackend) {
+    console.warn(`⚠️ Póliza ${expediente.numero_poliza} sin estatus_pago en BD`);
+    return 'Sin definir';
+  }
+  
+  // Normalizar formato (backend puede enviar minúsculas)
+  const estatusNormalizado = estatusBackend.toLowerCase().trim();
+  
+  if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
+    return 'Pagado';
+  } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+    return 'Vencido';
+  } else if (estatusNormalizado === 'pago por vencer' || estatusNormalizado === 'por vencer') {
+    return 'Pago por vencer';
+  } else if (estatusNormalizado === 'pendiente') {
+    return 'Pendiente';
+  } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+    return 'Cancelado';
+  }
+  
+  // Si no reconocemos el valor, devolverlo capitalizado
+  return estatusBackend.charAt(0).toUpperCase() + estatusBackend.slice(1).toLowerCase();
+};
+
+const EstadoPago = React.memo(({ expediente }) => {
+  // 🔥 Leer estatus directamente del backend (NO calcular)
+  const estatusDesdeBackend = obtenerEstatusPagoDesdeBackend(expediente);
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+      {expediente.frecuenciaPago && (
+        <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
+      )}
+      <div className="mt-1">
+        <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
       </div>
-    )}
-  </div>
-));
+    </div>
+  );
+});
 
 const CalendarioPagos = React.memo(({ 
   expediente, 
   calcularProximoPago, 
   mostrarResumen = true,
-  compacto = false 
+  compacto = false,
+  onEnviarAviso, // Callback para enviar avisos de pago
+  historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
-  // Mostrar solo para tipo de pago Fraccionado y con datos básicos
-  if (expediente.tipo_pago !== 'Fraccionado' || !expediente.frecuenciaPago || !expediente.inicio_vigencia) {
+  // Normalizar campos (aceptar múltiples nombres)
+  const tipoPago = expediente.tipo_pago || expediente.forma_pago;
+  const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+  
+  // Validar que tenga los datos mínimos necesarios
+  if (!expediente.inicio_vigencia) {
+    return null;
+  }
+  
+  // Determinar si es Anual o Fraccionado
+  const esAnual = tipoPago?.toUpperCase() === 'ANUAL' || tipoPago?.toUpperCase() === 'CONTADO';
+  const esFraccionado = tipoPago?.toUpperCase() === 'FRACCIONADO';
+  
+  // Si no es ninguno de los dos, no mostrar
+  if (!esAnual && !esFraccionado) {
+    return null;
+  }
+  
+  // Para fraccionado, validar que tenga frecuencia
+  if (esFraccionado && !frecuencia) {
     return null;
   }
 
-  const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[expediente.frecuenciaPago] || 0;
-  const pagos = [];
+  // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
+  const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
+  let pagos = [];
   
-  // 🔧 Obtener periodo de gracia del expediente o calcular según compañía (convertir a número)
-  const periodoGracia = expediente.periodo_gracia 
-    ? parseInt(expediente.periodo_gracia, 10)
-    : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
-  
-  console.log('📅 CALENDARIO - Periodo de gracia usado:', periodoGracia, '| Del expediente:', expediente.periodo_gracia, '| Tipo:', typeof expediente.periodo_gracia);
-  
-  // Determinar montos: usar primer_pago y pagos_subsecuentes si están disponibles, sino dividir el total
-  const usarMontosExactos = expediente.primer_pago && expediente.pagos_subsecuentes;
-  const primerPagoMonto = usarMontosExactos ? parseFloat(expediente.primer_pago) : null;
-  const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(expediente.pagos_subsecuentes) : null;
-  const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
-  
-  for (let i = 1; i <= numeroPagos; i++) {
-    const fechaPago = calcularProximoPago(
-      expediente.inicio_vigencia,
-      expediente.tipo_pago,
-      expediente.frecuenciaPago,
-      expediente.compania,
-      i,
-      periodoGracia  // 🔥 Pasar periodo de gracia del expediente
-    );
+  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
+  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
+    pagos = expediente.recibos.map(r => ({
+      numero: r.numero_recibo,
+      fecha: r.fecha_vencimiento,
+      monto: parseFloat(r.monto).toFixed(2),
+      estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Pendiente
+      comprobante_url: r.comprobante_url,
+      comprobante_nombre: r.comprobante_nombre,
+      fecha_pago_real: r.fecha_pago_real
+    }));
+  } else {
+    // Fallback: Calcular recibos en el frontend (método antiguo)
+    const periodoGracia = expediente.periodo_gracia 
+      ? parseInt(expediente.periodo_gracia, 10)
+      : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
     
-    if (fechaPago) {
-      // Calcular monto según si es primer pago o subsecuente
-      let monto = montoPorDefecto;
-      if (usarMontosExactos) {
-        monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
-      }
+    const primerPagoField = expediente.primer_pago || expediente.primerPago;
+    const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+    
+    const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
+    const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
+    const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
+    const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+    
+    for (let i = 1; i <= numeroPagos; i++) {
+      const fechaPago = calcularProximoPago(
+        expediente.inicio_vigencia,
+        tipoPago,
+        frecuencia,
+        expediente.compania,
+        i,
+        periodoGracia
+      );
       
-      pagos.push({
-        numero: i,
-        fecha: fechaPago,
-        monto: monto
-      });
+      if (fechaPago) {
+        let monto = montoPorDefecto;
+        if (usarMontosExactos) {
+          monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
+        }
+        
+        pagos.push({
+          numero: i,
+          fecha: fechaPago,
+          monto: monto
+        });
+      }
     }
   }
 
-  const fechaUltimoPago = expediente.fechaUltimoPago ? new Date(expediente.fechaUltimoPago) : null;
+  // 🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
+  const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
   let totalPagado = 0;
   let totalPendiente = 0;
-  let pagosRealizados = 0;
+  let totalPorVencer = 0;
+  let totalVencido = 0;
+  let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
-    // 🔥 Crear fecha en hora local para evitar problemas de timezone
+    // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
+    if (pago.estatusBackend) {
+      const estatusNorm = pago.estatusBackend.toLowerCase();
+      const pagado = estatusNorm === 'pagado';
+      
+      if (pagado) {
+        totalPagado += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'vencido') {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'pago por vencer') {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
+      
+      let estado = pago.estatusBackend;
+      let badgeClass = 'bg-secondary';
+      
+      if (estatusNorm === 'pagado') {
+        badgeClass = 'bg-success';
+      } else if (estatusNorm === 'vencido') {
+        badgeClass = 'bg-danger';
+      } else if (estatusNorm === 'pago por vencer') {
+        badgeClass = 'bg-warning';
+      }
+      
+      return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
+    }
+    
+    // Fallback: Calcular estatus en el frontend (método antiguo)
     const [year, month, day] = pago.fecha.split('-');
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
     
-    let pagado = false;
-    if (fechaUltimoPago && fechaPago <= fechaUltimoPago) {
-      pagado = true;
-      pagosRealizados++;
+    let pagado = pago.numero <= ultimoReciboPagado;
+    
+    if (pagado) {
       totalPagado += parseFloat(pago.monto) || 0;
     } else {
-      totalPendiente += parseFloat(pago.monto) || 0;
+      if (diasRestantes < 0) {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (diasRestantes <= 15) {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
     }
     
-    let estado = 'Por vencer';
+    let estado = 'Pendiente';
     let badgeClass = 'bg-secondary';
     
     if (pagado) {
@@ -394,15 +512,17 @@ const CalendarioPagos = React.memo(({
     } else if (diasRestantes === 0) {
       estado = 'Vence hoy';
       badgeClass = 'bg-danger';
-    } else if (diasRestantes <= 7) {
-      estado = `Vence en ${diasRestantes} días`;
+    } else if (diasRestantes <= 15) {
+      // Por vencer: cuando faltan 15 días o menos
+      estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por vencer';
       badgeClass = 'bg-warning';
-    } else if (diasRestantes <= 30) {
-      estado = 'Próximo';
-      badgeClass = 'bg-info';
+    } else {
+      // Pendiente: cuando falta más de 15 días
+      estado = 'Pendiente';
+      badgeClass = 'bg-secondary';
     }
     
-    return { ...pago, estado, badgeClass, pagado };
+    return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
   if (compacto) {
@@ -419,42 +539,63 @@ const CalendarioPagos = React.memo(({
     <div className="card border-primary">
       <div className="card-header bg-primary text-white">
         <h6 className="mb-0">
-          📅 Calendario de Pagos - {expediente.frecuenciaPago}
-          <small className="ms-2">({numeroPagos} pagos en el año)</small>
+          📅 Calendario de Pagos - {esAnual ? 'Anual' : frecuencia}
+          <small className="ms-2">({numeroPagos} {numeroPagos === 1 ? 'pago' : 'pagos'} en el año)</small>
         </h6>
       </div>
       <div className="card-body p-3">
         {mostrarResumen && (
-          <div className="row mb-3">
-            <div className="col-md-3">
-              <div className="card bg-light">
+          <div className="row mb-3 g-2">
+            {/* Total Anual */}
+            <div className="col">
+              <div className="card bg-light h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Total Anual</h6>
-                  <h4 className="mb-0 text-primary">{utils.formatearMoneda(expediente.total)}</h4>
+                  <small className="text-muted d-block mb-1">Total Anual</small>
+                  <h5 className="mb-0 text-primary">{utils.formatearMoneda(expediente.total)}</h5>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-success text-white">
+            
+            {/* Pagado */}
+            <div className="col">
+              <div className="card bg-success text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Pagado</h6>
-                  <h4 className="mb-0">{utils.formatearMoneda(totalPagado)}</h4>
+                  <small className="d-block mb-1">✅ Pagado</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPagado)}</h5>
+                  <small className="d-block mt-1">{pagosRealizados} de {numeroPagos}</small>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-warning text-white">
+            
+            {/* Por Vencer */}
+            <div className="col">
+              <div className="card bg-warning text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Pendiente</h6>
-                  <h4 className="mb-0">{utils.formatearMoneda(totalPendiente)}</h4>
+                  <small className="d-block mb-1">⚠️ Por Vencer</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPorVencer)}</h5>
+                  <small className="d-block mt-1">≤ 15 días</small>
                 </div>
               </div>
             </div>
-            <div className="col-md-3">
-              <div className="card bg-info text-white">
+            
+            {/* Vencido */}
+            <div className="col">
+              <div className="card bg-danger text-white h-100">
                 <div className="card-body text-center p-2">
-                  <h6 className="mb-0">Progreso</h6>
-                  <h4 className="mb-0">{pagosRealizados}/{numeroPagos}</h4>
+                  <small className="d-block mb-1">❌ Vencido</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalVencido)}</h5>
+                  <small className="d-block mt-1">Atrasado</small>
+                </div>
+              </div>
+            </div>
+            
+            {/* Pendiente */}
+            <div className="col">
+              <div className="card bg-secondary text-white h-100">
+                <div className="card-body text-center p-2">
+                  <small className="d-block mb-1">📅 Pendiente</small>
+                  <h5 className="mb-0">{utils.formatearMoneda(totalPendiente)}</h5>
+                  <small className="d-block mt-1">Sin riesgo</small>
                 </div>
               </div>
             </div>
@@ -469,6 +610,7 @@ const CalendarioPagos = React.memo(({
                 <th>Fecha de Pago</th>
                 <th>Monto</th>
                 <th width="150">Estado</th>
+                <th width="200">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -483,13 +625,73 @@ const CalendarioPagos = React.memo(({
                       {pago.estado}
                     </span>
                   </td>
+                  <td>
+                    {pago.pagado ? (
+                      // Botón para ver comprobante de pago
+                      <button 
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={() => {
+                          // Normalizar fechas para comparación (solo YYYY-MM-DD)
+                          const normalizarFecha = (fecha) => {
+                            if (!fecha) return null;
+                            const d = new Date(fecha);
+                            return d.toISOString().split('T')[0]; // Solo YYYY-MM-DD
+                          };
+                          
+                          const fechaBuscada = normalizarFecha(pago.fecha);
+                          console.log('🔍 Buscando comprobante para fecha:', fechaBuscada);
+                          console.log('📋 Historial disponible:', historial?.length || 0, 'eventos');
+                          
+                          // Buscar en el historial el evento de pago correspondiente
+                          const eventoPago = historial.find(evento => {
+                            const fechaEvento = normalizarFecha(evento.datos_adicionales?.fecha_pago);
+                            const coincide = evento.tipo_evento === 'pago_registrado' &&
+                              fechaEvento === fechaBuscada &&
+                              evento.datos_adicionales?.comprobante_url;
+                            
+                            if (coincide) {
+                              console.log('✅ Comprobante encontrado:', evento.datos_adicionales.comprobante_url);
+                            }
+                            return coincide;
+                          });
+                          
+                          if (eventoPago?.datos_adicionales?.comprobante_url) {
+                            // Abrir comprobante en nueva pestaña
+                            window.open(eventoPago.datos_adicionales.comprobante_url, '_blank');
+                          } else {
+                            console.warn('❌ No se encontró comprobante. Eventos de pago:', 
+                              historial.filter(e => e.tipo_evento === 'pago_registrado').map(e => ({
+                                fecha: e.datos_adicionales?.fecha_pago,
+                                tiene_url: !!e.datos_adicionales?.comprobante_url
+                              }))
+                            );
+                            alert('No se encontró el comprobante de pago para esta fecha');
+                          }
+                        }}
+                        title="Ver comprobante de pago"
+                      >
+                        <FileText size={14} className="me-1" />
+                        Ver Comprobante
+                      </button>
+                    ) : (
+                      // Botón para enviar aviso/recordatorio
+                      <button 
+                        className={`btn btn-sm ${pago.estado === 'Vencido' ? 'btn-danger' : 'btn-outline-info'}`}
+                        onClick={() => onEnviarAviso && onEnviarAviso(pago, expediente)}
+                        title={pago.estado === 'Vencido' ? 'Enviar recordatorio de pago vencido' : 'Enviar aviso de pago'}
+                      >
+                        <Mail size={14} className="me-1" />
+                        {pago.estado === 'Vencido' ? 'Recordatorio' : 'Enviar Aviso'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
             {expediente.total && (
               <tfoot>
                 <tr className="table-info">
-                  <td colSpan="2" className="text-end"><strong>Total Anual:</strong></td>
+                  <td colSpan="3" className="text-end"><strong>Total Anual:</strong></td>
                   <td colSpan="2"><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
                 </tr>
               </tfoot>
@@ -639,7 +841,8 @@ const BarraBusqueda = React.memo(({ busqueda, setBusqueda, placeholder = "Buscar
 
 // ============= COMPONENTE EXTRACTOR PDF =============
 const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {
-  const [estado, setEstado] = useState('esperando'); // esperando, procesando, validando-cliente, validando-agente, preview-datos, error, capturando-rfc
+  const [estado, setEstado] = useState('seleccionando-metodo'); // seleccionando-metodo, esperando, procesando, validando-cliente, validando-agente, preview-datos, error, capturando-rfc
+  const [metodoExtraccion, setMetodoExtraccion] = useState(null); // 'auto' o 'openai'
   const [archivo, setArchivo] = useState(null);
   const [datosExtraidos, setDatosExtraidos] = useState(null);
   const [errores, setErrores] = useState([]);
@@ -648,6 +851,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Estados para el flujo paso a paso
   const [clienteEncontrado, setClienteEncontrado] = useState(null);
   const [agenteEncontrado, setAgenteEncontrado] = useState(null);
+  const [claveYaExiste, setClaveYaExiste] = useState(false); // true si el agente ya tiene esta clave+aseguradora
   const [decisionCliente, setDecisionCliente] = useState(null); // 'usar-existente', 'crear-nuevo'
   const [decisionAgente, setDecisionAgente] = useState(null); // 'usar-existente', 'crear-nuevo', 'omitir'
   
@@ -659,19 +863,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   const fileInputRef = useRef(null);
   const yaAbriSelectorRef = useRef(false); // Bandera para evitar abrir selector múltiples veces
   
-  // Abrir selector automáticamente solo la primera vez
+  // Si hay un archivo pre-seleccionado, procesarlo inmediatamente
   useEffect(() => {
-    // Si ya abrimos el selector o ya procesamos un archivo, no hacer nada
-    if (yaAbriSelectorRef.current) {
-      return;
-    }
-    
     // Verificar si ya hay un archivo seleccionado desde el modal anterior
-    if (window._selectedPDFFile) {
-      yaAbriSelectorRef.current = true; // Marcar como procesado
+    if (window._selectedPDFFile && window._autoExtractorMode) {
       const file = window._selectedPDFFile;
       delete window._selectedPDFFile; // Limpiar
-      // Procesar el archivo directamente
+      delete window._autoExtractorMode; // Limpiar flag
+      
+      // Configurar método automático y procesar directamente
+      setMetodoExtraccion('auto');
       setArchivo(file);
       setInformacionArchivo({
         nombre: file.name,
@@ -679,16 +880,27 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         tipo: file.type,
         fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
       });
-      procesarPDF(file);
-    } else if (estado === 'esperando' && fileInputRef.current) {
-      // Si no hay archivo, abrir el selector (solo una vez)
-      yaAbriSelectorRef.current = true; // Marcar antes de abrir
-      const timer = setTimeout(() => {
-        fileInputRef.current?.click();
-      }, 200);
-      return () => clearTimeout(timer);
+      // Procesar inmediatamente sin esperar
+      setEstado('procesando');
+      setTimeout(() => procesarPDF(file), 100);
     }
-  }, []); // Solo al montar el componente
+  }, []);
+  
+  // Abrir selector automáticamente solo cuando se haya elegido el método manualmente
+  useEffect(() => {
+    // Solo abrir selector si ya se eligió método y no se ha abierto antes
+    if (metodoExtraccion && !yaAbriSelectorRef.current && estado === 'esperando') {
+      yaAbriSelectorRef.current = true;
+      
+      if (fileInputRef.current) {
+        // Abrir selector de archivo
+        const timer = setTimeout(() => {
+          fileInputRef.current?.click();
+        }, 200);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [metodoExtraccion, estado]);
 
   const procesarPDF = useCallback(async (file) => {
     setEstado('procesando');
@@ -834,10 +1046,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // ==================== SISTEMA MODULAR DE EXTRACCIÓN ====================
+      // ==================== SISTEMA AUTOMÁTICO DE EXTRACCIÓN ====================
       let datosExtraidos = {};
       
       try {
+        // Usar el sistema automático (regex)
+        console.log('⚙️ Usando extractor automático...');
         const { detectarAseguradoraYProducto } = await import('../lib/pdf/detectorLigero.js');
         const { loadExtractor } = await import('../lib/pdf/extractors/registry.js');
         
@@ -858,12 +1072,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           setErrores([{
             tipo: 'error',
             mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Por favor, contacte al administrador.'
+            detalle: 'Esta aseguradora aún no está soportada. Disponibles: Qualitas, Chubb.'
           }]);
           return;
         }
       } catch (error) {
-        console.error('❌ Error en sistema modular:', error);
+        console.error('❌ Error en sistema de extracción:', error);
         setEstado('error');
         setErrores([{
           tipo: 'error',
@@ -988,6 +1202,63 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.warn('⚠️ Error durante validación de pagos fraccionados:', e);
       }
 
+      console.log('📋 ========== DATOS EXTRAÍDOS COMPLETOS ==========');
+      console.log('👤 CLIENTE:', {
+        tipo_persona: resultado.tipo_persona,
+        nombre: resultado.nombre,
+        apellido_paterno: resultado.apellido_paterno,
+        apellido_materno: resultado.apellido_materno,
+        razonSocial: resultado.razonSocial,
+        rfc: resultado.rfc,
+        rfcLength: resultado.rfc?.length,
+        curp: resultado.curp
+      });
+      console.log('📍 DIRECCIÓN:', {
+        domicilio: resultado.domicilio,
+        municipio: resultado.municipio,
+        estado: resultado.estado,
+        codigo_postal: resultado.codigo_postal
+      });
+      console.log('📞 CONTACTO:', {
+        email: resultado.email,
+        telefono_movil: resultado.telefono_movil,
+        telefono_fijo: resultado.telefono_fijo
+      });
+      console.log('📄 PÓLIZA:', {
+        numero_poliza: resultado.numero_poliza,
+        compania: resultado.compania,
+        producto: resultado.producto,
+        tipo_cobertura: resultado.tipo_cobertura
+      });
+      console.log('📅 FECHAS:', {
+        fecha_emision: resultado.fecha_emision,
+        fecha_captura: resultado.fecha_captura,
+        inicio_vigencia: resultado.inicio_vigencia,
+        termino_vigencia: resultado.termino_vigencia
+      });
+      console.log('💰 MONTOS:', {
+        prima_pagada: resultado.prima_pagada,
+        gastos_expedicion: resultado.gastos_expedicion,
+        cargo_pago_fraccionado: resultado.cargo_pago_fraccionado,
+        iva: resultado.iva,
+        total: resultado.total,
+        primer_pago: resultado.primer_pago,
+        pagos_subsecuentes: resultado.pagos_subsecuentes
+      });
+      console.log('🚗 VEHÍCULO:', {
+        marca: resultado.marca,
+        modelo: resultado.modelo,
+        anio: resultado.anio,
+        placas: resultado.placas,
+        serie: resultado.serie,
+        vin: resultado.vin
+      });
+      console.log('👨‍💼 AGENTE:', {
+        clave_agente: resultado.clave_agente,
+        agente: resultado.agente
+      });
+      console.log('================================================');
+
       setDatosExtraidos(resultado);
       
       // Guardar información del cliente encontrado (o null si no existe)
@@ -1009,20 +1280,44 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         });
       }
       
-      // Buscar agente en el equipo de trabajo
+      // Buscar agente en el equipo de trabajo (búsqueda preliminar)
       let agenteEncontradoEnBD = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          agenteEncontradoEnBD = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
+      let claveYaExisteEnBD = false;
+      
+      if (datosExtraidos.clave_agente && datosExtraidos.agente && agentes.length > 0) {
+        // Buscar por nombre completo
+        const nombreExtraido = datosExtraidos.agente.trim().toUpperCase();
+        agenteEncontradoEnBD = agentes.find(miembro => {
+          if (miembro.perfil !== 'Agente' || !miembro.activo) return false;
+          
+          const nombreBD = (miembro.nombre || '').trim().toUpperCase();
+          const nombreCompleto = `${miembro.nombre || ''} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.trim().toUpperCase();
+          
+          return nombreBD === nombreExtraido || nombreCompleto === nombreExtraido;
+        });
+        
+        // Si encontramos el agente, verificar si ya tiene esta clave
+        if (agenteEncontradoEnBD) {
+          try {
+            const { obtenerEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+            const asignacionesResult = await obtenerEjecutivosPorProducto(agenteEncontradoEnBD.id);
+            
+            if (asignacionesResult.success && asignacionesResult.data) {
+              // Buscar si ya tiene esta clave
+              claveYaExisteEnBD = asignacionesResult.data.some(asig => 
+                String(asig.clave) === String(datosExtraidos.clave_agente)
+              );
+              
+              console.log(`🔍 Agente: ${agenteEncontradoEnBD.nombre} | Clave ${datosExtraidos.clave_agente}: ${claveYaExisteEnBD ? 'YA EXISTE' : 'NUEVA'}`);
+            }
+          } catch (error) {
+            console.error('Error al verificar claves del agente:', error);
+          }
         }
       }
+      
       setAgenteEncontrado(agenteEncontradoEnBD);
+      setClaveYaExiste(claveYaExisteEnBD);
       
       // Pasar al PASO 1: Validación de Cliente
       setEstado('validando-cliente');
@@ -1036,7 +1331,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       setEstado('error');
       setErrores(['❌ Error al procesar el archivo PDF: ' + error.message]);
     }
-  }, []);
+  }, [metodoExtraccion]); // Agregar metodoExtraccion como dependencia
 
   const handleFileUpload = useCallback((e) => {
     const file = e.target.files[0];
@@ -1072,13 +1367,28 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         return; // Detener hasta que se capture el RFC
       }
       
-      // Si hay RFC, continuar con la creación normal
+      // ✅ VALIDAR DATOS DE CONTACTO PRINCIPAL
+      const tieneNombre = datosExtraidos.tipo_persona === 'Moral' 
+        ? (datosExtraidos.razonSocial && datosExtraidos.razonSocial.trim() !== '')
+        : (datosExtraidos.nombre && datosExtraidos.nombre.trim() !== '');
+      
+      const tieneRFC = datosExtraidos.rfc && datosExtraidos.rfc.trim() !== '';
+      
+      if (!tieneNombre || !tieneRFC) {
+        setErrores(['❌ Faltan datos principales del cliente. Se requiere al menos: ' + 
+          (datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social' : 'Nombre') + 
+          ' y RFC para crear el cliente.']);
+        setEstado('error');
+        return;
+      }
+      
+      // Si hay RFC y nombre, continuar con la creación normal
       console.log('🔄 Creando nuevo cliente...');
       
       // Usar tipo de persona ya detectado en la extracción
       const tipoPersonaDetectado = datosExtraidos.tipo_persona === 'Moral' ? 'Persona Moral' : 'Persona Física';
       
-      // Preparar datos según tipo de persona
+      // Preparar datos según tipo de persona (SIN email ni teléfono)
       let nuevoCliente = {};
       
       if (tipoPersonaDetectado === 'Persona Moral') {
@@ -1093,7 +1403,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           estado: datosExtraidos.estado || '',
           codigoPostal: datosExtraidos.codigo_postal || '',
           pais: datosExtraidos.pais || 'MEXICO',
-          email: datosExtraidos.email || '',
           activo: true
         };
       } else {
@@ -1110,27 +1419,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           estado: datosExtraidos.estado || '',
           codigoPostal: datosExtraidos.codigo_postal || '',
           pais: datosExtraidos.pais || 'MEXICO',
-          email: datosExtraidos.email || '',
           activo: true
         };
       }
       
-      console.log('📋 Datos del cliente a crear:');
-      console.log('   - Tipo persona:', tipoPersonaDetectado);
-      console.log('   - RFC:', datosExtraidos.rfc, '(longitud:', datosExtraidos.rfc?.length, ')');
-      if (tipoPersonaDetectado === 'Persona Moral') {
-        console.log('   - Razón Social:', nuevoCliente.razonSocial);
-      } else {
-        console.log('   - Nombre:', nuevoCliente.nombre);
-        console.log('   - Apellidos:', nuevoCliente.apellidoPaterno, nuevoCliente.apellidoMaterno);
-      }
-      console.log('   - Dirección completa:', nuevoCliente.direccion);
-      console.log('   - Colonia:', nuevoCliente.colonia);
-      console.log('   - Municipio:', nuevoCliente.municipio);
-      console.log('   - Estado:', nuevoCliente.estado);
-      console.log('   - CP:', nuevoCliente.codigoPostal);
-      console.log('   - País:', nuevoCliente.pais);
-      console.log('   - JSON completo:', JSON.stringify(nuevoCliente, null, 2));
+      console.log(`📋 Creando cliente (${tipoPersonaDetectado}) | RFC: ${datosExtraidos.rfc} | ${tipoPersonaDetectado === 'Persona Moral' ? nuevoCliente.razonSocial : nuevoCliente.nombre}`);
       
       const { crearCliente } = await import('../services/clientesService');
       const resultado = await crearCliente(nuevoCliente);
@@ -1331,26 +1624,125 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
   // PASO 2: Manejar decisión sobre el agente
   const handleDecisionAgente = useCallback(async (decision) => {
+    console.log('🎯 handleDecisionAgente:', decision);
     setDecisionAgente(decision);
     
-    if (decision === 'crear-nuevo') {
-      console.log('🔄 Creando nuevo agente...');
+    if (decision === 'usar-existente') {
+      console.log(`✅ Usando agente: ${agenteEncontrado?.nombre} | Clave ${datosExtraidos.clave_agente}: ${claveYaExiste ? 'existente' : 'nueva'}`);
       
-      // Extraer código y nombre del agente del string "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      const agenteTexto = datosExtraidos.agente || '';
-      const codigoMatch = agenteTexto.match(/^(\d+)/);
-      const nombreCompletoMatch = agenteTexto.match(/\d+\s*-\s*(.+)$/);
+      // Si la clave NO existe, agregarla
+      if (!claveYaExiste && datosExtraidos.clave_agente && agenteEncontrado) {
+        
+        try {
+          // Identificar aseguradora
+          const companiaExtraida = datosExtraidos.compania;
+          let aseguradoraId = null;
+          
+          if (companiaExtraida && aseguradoras.length > 0) {
+            const normalizarNombre = (nombre) => {
+              return nombre
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .toUpperCase()
+                .replace(/\s+/g, ' ')
+                .replace(/^(EL|LA|LOS|LAS)\s+/i, '')
+                .replace(/\s+(SEGUROS|SEGURO|S\.A\.|SA|DE\s+CV)$/i, '')
+                .trim();
+            };
+            
+            const companiaExtraidaNormalizada = normalizarNombre(companiaExtraida);
+            let mejorScore = 0;
+            let aseguradoraMatch = null;
+            
+            for (const aseg of aseguradoras) {
+              if (!aseg.nombre) continue;
+              const nombreAsegNormalizado = normalizarNombre(aseg.nombre);
+              let score = 0;
+              
+              if (nombreAsegNormalizado === companiaExtraidaNormalizada) {
+                score = 100;
+              } else if (nombreAsegNormalizado.includes(companiaExtraidaNormalizada) || 
+                         companiaExtraidaNormalizada.includes(nombreAsegNormalizado)) {
+                score = 80;
+              }
+              
+              if (score > mejorScore) {
+                mejorScore = score;
+                aseguradoraMatch = aseg;
+              }
+            }
+            
+            if (aseguradoraMatch && mejorScore >= 60) {
+              aseguradoraId = aseguradoraMatch.id;
+            }
+          }
+          
+          // Buscar producto
+          const productoExtraido = datosExtraidos.producto;
+          let productoMatch = null;
+          
+          if (productoExtraido && tiposProductos.length > 0) {
+            productoMatch = tiposProductos.find(prod =>
+              prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
+            );
+            
+            if (!productoMatch) {
+              productoMatch = tiposProductos.find(prod =>
+                prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+              );
+            }
+            
+            if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
+              productoMatch = tiposProductos.find(prod => 
+                prod.nombre && prod.nombre.toLowerCase().includes('auto')
+              );
+            }
+          }
+          
+          // Vincular agente con nueva clave
+          if (aseguradoraId && productoMatch) {
+            const { guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+            const asignacion = {
+              usuarioId: agenteEncontrado.id,
+              aseguradoraId: aseguradoraId,
+              productoId: productoMatch.id,
+              ejecutivoId: agenteEncontrado.id,
+              clave: datosExtraidos.clave_agente,
+              comisionPersonalizada: 0
+            };
+            
+            const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
+            
+            if (resultadoAsignacion.success) {
+              console.log('✅ Nueva clave agregada al agente');
+              toast.success(`Clave ${datosExtraidos.clave_agente} agregada al agente ${agenteEncontrado.nombre}`);
+            } else {
+              console.error('❌ Error al agregar clave:', resultadoAsignacion.error);
+              toast.error('No se pudo agregar la clave al agente');
+            }
+          } else {
+            console.warn('⚠️ No se pudo vincular: falta aseguradoraId o producto');
+          }
+        } catch (error) {
+          console.error('❌ Error al agregar clave:', error);
+          toast.error('Error al agregar la clave al agente');
+        }
+      }
       
-      if (!codigoMatch || !nombreCompletoMatch) {
+      // Continuar al preview
+      setEstado('preview-datos');
+    } else if (decision === 'crear-nuevo') {
+      // Obtener clave y nombre ya separados desde el extractor
+      const codigo = datosExtraidos.clave_agente; // La clave de la aseguradora (ej: 25576, 776024)
+      const nombreCompleto = datosExtraidos.agente; // El nombre del agente sin la clave
+      console.log('🔍 Nombre agente:', nombreCompleto);
+      
+      if (!codigo || !nombreCompleto) {
         console.error('❌ No se pudo extraer información del agente');
-  toast('⚠️ No se pudo extraer la información del agente del PDF. Crea el agente manualmente en Equipo de Trabajo.');
+        toast('⚠️ No se pudo extraer la información del agente del PDF. Crea el agente manualmente en Equipo de Trabajo.');
         // Continuar sin crear el agente
         setEstado('preview-datos');
         return;
       }
-      
-      const codigo = codigoMatch[1];
-      const nombreCompleto = nombreCompletoMatch[1].trim();
       
       // Detectar si es persona moral (empresa)
       const palabrasEmpresa = ['ASOCIADOS', 'Y CIA', 'S.A.', 'SA DE CV', 'S DE RL', 'SC', 'AGTE DE SEGU', 'AGENTE DE SEGUROS', 'ASESORES', 'CONSULTORES', 'GRUPO', 'CORPORATIVO'];
@@ -1363,7 +1755,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         nombre = nombreCompleto;
         apellidoPaterno = '';
         apellidoMaterno = '';
-        console.log('🏢 Detectado como Persona Moral:', nombreCompleto);
       } else {
         // Persona Física: Dividir en nombre y apellidos
         const palabras = nombreCompleto.split(/\s+/);
@@ -1380,121 +1771,331 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           nombre = palabras[0];
           apellidoPaterno = palabras[1];
         }
-        console.log('👤 Detectado como Persona Física:', nombre, apellidoPaterno, apellidoMaterno);
       }
       
       try {
-        const nuevoAgente = {
-          codigo: codigo,
-          nombre: nombre,
-          apellidoPaterno: apellidoPaterno,
-          apellidoMaterno: apellidoMaterno,
-          perfil: 'Agente',
-          activo: true,
-          fechaIngreso: new Date().toISOString().split('T')[0],
-          productosAseguradoras: []
-        };
+        // PRIMERO: Identificar la aseguradora antes de buscar al agente
+        const companiaExtraida = datosExtraidos.compania;
+        let aseguradoraId = null;
         
-        const { crearMiembroEquipo, guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
-        const resultado = await crearMiembroEquipo(nuevoAgente);
-        
-        if (resultado.success) {
-          setAgenteEncontrado(resultado.data);
-          console.log('✅ Agente creado:', resultado.data.nombre);
-          const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
-          toast.success(`Agente creado: ${nombreMostrar}`);
+        if (companiaExtraida && aseguradoras.length > 0) {
+          // Normalizar nombre de aseguradora
+          const normalizarNombre = (nombre) => {
+            return nombre
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+              .toUpperCase()
+              .replace(/\s+/g, ' ')
+              .replace(/^(EL|LA|LOS|LAS)\s+/i, '')
+              .replace(/\s+(SEGUROS|SEGURO|S\.A\.|SA|DE\s+CV)$/i, '')
+              .trim();
+          };
           
-          // VINCULAR AGENTE CON ASEGURADORA Y PRODUCTO
-          // Buscar aseguradora por nombre (ej: "Qualitas")
-          const companiaExtraida = datosExtraidos.compania;
-          const productoExtraido = datosExtraidos.producto;
+          const companiaExtraidaNormalizada = normalizarNombre(companiaExtraida);
           
-          if (companiaExtraida && productoExtraido && aseguradoras.length > 0 && tiposProductos.length > 0) {
-            // Buscar aseguradora - Intentar varios métodos
-            let aseguradoraMatch = aseguradoras.find(aseg => 
-              aseg.nombre && aseg.nombre.toLowerCase() === companiaExtraida.toLowerCase()
-            );
+          // Buscar aseguradora con fuzzy matching
+          let mejorScore = 0;
+          let aseguradoraMatch = null;
+          
+          for (const aseg of aseguradoras) {
+            if (!aseg.nombre) continue;
+            const nombreAsegNormalizado = normalizarNombre(aseg.nombre);
+            let score = 0;
             
-            // Si no encontró exacto, buscar que contenga
-            if (!aseguradoraMatch) {
-              aseguradoraMatch = aseguradoras.find(aseg => 
-                aseg.nombre && aseg.nombre.toLowerCase().includes(companiaExtraida.toLowerCase())
-              );
+            if (nombreAsegNormalizado === companiaExtraidaNormalizada) {
+              score = 100;
+            } else if (nombreAsegNormalizado.includes(companiaExtraidaNormalizada) || 
+                       companiaExtraidaNormalizada.includes(nombreAsegNormalizado)) {
+              score = 80;
             }
             
-            // Si aún no encontró, buscar al revés (que la extraída contenga el nombre de BD)
-            if (!aseguradoraMatch) {
-              aseguradoraMatch = aseguradoras.find(aseg => 
-                aseg.nombre && companiaExtraida.toLowerCase().includes(aseg.nombre.toLowerCase())
-              );
-            }
-            
-            console.log('🔍 Resultado búsqueda aseguradora:', aseguradoraMatch);
-            
-            if (aseguradoraMatch) {
-              // Los productos son genéricos (no tienen aseguradora_id)
-              // Buscar directamente por nombre del producto
-              let productoMatch = tiposProductos.find(prod =>
-                prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
-              );
-              
-              // Si no encontró, intentar al revés (que el producto contenga parte del extraído)
-              if (!productoMatch) {
-                productoMatch = tiposProductos.find(prod =>
-                  prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
-                );
-              }
-              
-              // Si no encontró, intentar palabras clave
-              if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
-                productoMatch = tiposProductos.find(prod => 
-                  prod.nombre && prod.nombre.toLowerCase().includes('auto')
-                );
-              }
-              
-              if (productoMatch) {
-                // Guardar la asociación agente-aseguradora-producto-clave
-                try {
-                  const asignacion = {
-                    usuarioId: resultado.data.id,
-                    aseguradoraId: aseguradoraMatch.id, // ID de Qualitas
-                    productoId: productoMatch.id,
-                    ejecutivoId: resultado.data.id,
-                    clave: codigo, // La clave del PDF (25576, etc.)
-                    comisionPersonalizada: 0
-                  };
-                  
-                  const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
-                  
-                  if (resultadoAsignacion.success) {
-                    console.log('✅ Agente vinculado con aseguradora y producto');
-                  } else {
-                    console.warn('⚠️ No se pudo vincular agente con producto:', resultadoAsignacion.error);
-                  }
-                } catch (errorAsignacion) {
-                  console.error('❌ Error al vincular agente:', errorAsignacion);
-                }
-              } else {
-                console.warn('⚠️ No se encontró producto matching para:', productoExtraido);
-              }
-            } else {
-              console.warn('⚠️ No se encontró aseguradora matching para:', companiaExtraida);
+            if (score > mejorScore) {
+              mejorScore = score;
+              aseguradoraMatch = aseg;
             }
           }
+          
+          if (aseguradoraMatch && mejorScore >= 60) {
+            aseguradoraId = aseguradoraMatch.id;
+            console.log('🏢 Aseguradora identificada:', aseguradoraMatch.nombre, 'ID:', aseguradoraId);
+          } else {
+            console.warn('⚠️ No se pudo identificar la aseguradora:', companiaExtraida);
+          }
+        }
+        
+        // PASO 1: Buscar agente por ASEGURADORA + CLAVE (combinación única)
+        const { obtenerEquipoDeTrabajo, obtenerEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+        const equipoResult = await obtenerEquipoDeTrabajo();
+        
+        console.log('📋 Equipo obtenido. Total miembros:', equipoResult.data?.length || 0);
+        console.log('📋 Success:', equipoResult.success);
+        if (equipoResult.data && equipoResult.data.length > 0) {
+          console.log('📋 Primeros 3 miembros:', equipoResult.data.slice(0, 3).map(m => ({ 
+            id: m.id, 
+            nombre: m.nombre, 
+            perfil: m.perfil,
+            activo: m.activo,
+            apellidoPaterno: m.apellidoPaterno || m.apellido_paterno
+          })));
+          
+          // Buscar específicamente ALVARO
+          const alvaro = equipoResult.data.find(m => m.nombre?.includes('ALVARO'));
+          if (alvaro) {
+            console.log('👤 ALVARO encontrado en BD:', {
+              id: alvaro.id,
+              nombre: alvaro.nombre,
+              apellidoPaterno: alvaro.apellidoPaterno || alvaro.apellido_paterno,
+              apellidoMaterno: alvaro.apellidoMaterno || alvaro.apellido_materno,
+              perfil: alvaro.perfil,
+              activo: alvaro.activo
+            });
+          } else {
+            console.log('❌ ALVARO NO encontrado en el equipo');
+          }
+        }
+        
+        let agenteExistente = null;
+        if (equipoResult.success && equipoResult.data && aseguradoraId) {
+          console.log('🔎 Buscando por ASEGURADORA + CLAVE:', aseguradoraId, '+', codigo);
+          // PASO 1A: Buscar por ASEGURADORA + CLAVE (la clave solo es única dentro de cada aseguradora)
+          for (const miembro of equipoResult.data) {
+            if (miembro.perfil !== 'Agente' || !miembro.activo) continue;
+            
+            const asignacionesResult = await obtenerEjecutivosPorProducto(miembro.id);
+            if (asignacionesResult.success && asignacionesResult.data) {
+              console.log(`  Revisando agente ${miembro.nombre}, asignaciones:`, asignacionesResult.data.length);
+              // Buscar combinación: misma aseguradora Y misma clave
+              const tieneAseguradoraYClave = asignacionesResult.data.some(asig => {
+                const match = String(asig.aseguradoraId) === String(aseguradoraId) && 
+                              String(asig.clave) === String(codigo);
+                if (match) {
+                  console.log('    ✅ MATCH! asegId:', asig.aseguradoraId, 'clave:', asig.clave);
+                }
+                return match;
+              });
+              
+              if (tieneAseguradoraYClave) {
+                agenteExistente = miembro;
+                console.log('✅ Agente encontrado por ASEGURADORA + CLAVE:', aseguradoraId, '+', codigo, '→', miembro.nombre);
+                break;
+              }
+            }
+          }
+        }
+        
+        // PASO 1B: Si no se encontró por aseguradora+clave, buscar por NOMBRE
+        if (!agenteExistente && equipoResult.success && equipoResult.data) {
+          console.log('🔎 No encontrado por aseg+clave. Buscando por NOMBRE:', `${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
+          agenteExistente = equipoResult.data.find(miembro => {
+            if (miembro.perfil !== 'Agente' || !miembro.activo) return false;
+            
+            // Opción 1: Nombre compuesto desde campos separados (apellidoPaterno, apellidoMaterno)
+            const nombreCompleto1 = `${miembro.nombre} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.trim().toUpperCase();
+            const nombreCompleto2 = `${nombre} ${apellidoPaterno} ${apellidoMaterno}`.trim().toUpperCase();
+            
+            // Opción 2: Nombre completo todo en un solo campo (para agentes guardados con nombre completo)
+            const nombreSoloCampo = (miembro.nombre || '').trim().toUpperCase();
+            const nombreExtraido = nombreCompleto2;
+            
+            console.log(`  Comparando opción 1: "${nombreCompleto1}" === "${nombreCompleto2}"`, nombreCompleto1 === nombreCompleto2);
+            console.log(`  Comparando opción 2: "${nombreSoloCampo}" === "${nombreExtraido}"`, nombreSoloCampo === nombreExtraido);
+            
+            return nombreCompleto1 === nombreCompleto2 || nombreSoloCampo === nombreExtraido;
+          });
+          
+          if (agenteExistente) {
+            console.log('✅ Agente encontrado por NOMBRE:', agenteExistente.nombre);
+          } else {
+            console.log('❌ No se encontró agente por nombre');
+          }
+        }
+        
+        let agenteId;
+        let yaExisteAsignacion = false;
+        
+        if (agenteExistente) {
+          agenteId = agenteExistente.id;
+          console.log('✅ Agente ya existe en equipo:', agenteExistente.nombre, 'ID:', agenteId);
+          
+          // PASO 2: Verificar si YA TIENE esta combinación aseguradora+clave asignada
+          const asignacionesResult = await obtenerEjecutivosPorProducto(agenteId);
+          if (asignacionesResult.success && asignacionesResult.data) {
+            if (aseguradoraId) {
+              // Buscar si ya existe esta combinación específica
+              yaExisteAsignacion = asignacionesResult.data.some(asig => 
+                String(asig.aseguradoraId) === String(aseguradoraId) &&
+                String(asig.clave) === String(codigo)
+              );
+              
+              if (yaExisteAsignacion) {
+                console.log('⚠️ El agente YA TIENE la clave', codigo, 'en esta aseguradora');
+                setAgenteEncontrado(agenteExistente);
+                setClaveYaExiste(true); // Marcar que la clave ya existe
+                toast.info(`El agente ya tiene la clave ${codigo} registrada en esta aseguradora`);
+              } else {
+                console.log('ℹ️ Se agregará nueva clave', codigo, 'al agente existente para esta aseguradora');
+                setAgenteEncontrado(agenteExistente);
+                setClaveYaExiste(false); // Marcar que la clave NO existe
+                toast.success(`Agente encontrado: ${esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`}`);
+              }
+            } else {
+              // No se pudo identificar la aseguradora, buscar solo por clave
+              console.log('⚠️ No se identificó aseguradora, buscando solo por clave');
+              yaExisteAsignacion = asignacionesResult.data.some(asig => 
+                String(asig.clave) === String(codigo)
+              );
+              
+              if (yaExisteAsignacion) {
+                console.log('⚠️ El agente YA TIENE la clave', codigo);
+                setAgenteEncontrado(agenteExistente);
+                setClaveYaExiste(true);
+                toast.info(`El agente ya tiene la clave ${codigo} registrada`);
+              } else {
+                console.log('ℹ️ Se agregará nueva clave', codigo, 'al agente existente');
+                setAgenteEncontrado(agenteExistente);
+                setClaveYaExiste(false);
+                toast.success(`Agente encontrado: ${esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`}`);
+              }
+            }
+          } else {
+            // No se pudieron obtener las asignaciones, marcar como agente encontrado sin validar clave
+            console.log('⚠️ No se pudieron obtener las asignaciones del agente');
+            setAgenteEncontrado(agenteExistente);
+            setClaveYaExiste(false);
+          }
         } else {
-          throw new Error(resultado.error);
+          // El agente NO EXISTE - Crear nuevo
+          // Generar código consecutivo para el equipo (AG001, AG002, etc.)
+          const prefijo = 'AG';
+          const agentesExistentes = equipoResult.data.filter(m => 
+            m.perfil === 'Agente' && m.codigo && m.codigo.startsWith(prefijo)
+          );
+          
+          let maxNumero = 0;
+          for (const ag of agentesExistentes) {
+            const num = parseInt(ag.codigo.replace(prefijo, ''), 10);
+            if (!isNaN(num) && num > maxNumero) maxNumero = num;
+          }
+          
+          const siguienteNumero = maxNumero + 1;
+          const codigoConsecutivo = prefijo + String(siguienteNumero).padStart(3, '0'); // AG001, AG002, etc.
+          
+          const nuevoAgente = {
+            codigo: codigoConsecutivo, // Código del equipo, NO la clave de aseguradora
+            nombre: nombre,
+            apellidoPaterno: apellidoPaterno,
+            apellidoMaterno: apellidoMaterno,
+            perfil: 'Agente',
+            activo: true,
+            fechaIngreso: new Date().toISOString().split('T')[0],
+            productosAseguradoras: []
+          };
+          
+          const { crearMiembroEquipo } = await import('../services/equipoDeTrabajoService');
+          const resultado = await crearMiembroEquipo(nuevoAgente);
+          
+          if (resultado.success) {
+            agenteId = resultado.data.id;
+            setAgenteEncontrado(resultado.data);
+            console.log('✅ Agente creado exitosamente:', resultado.data.nombre, 'ID:', resultado.data.id);
+            const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
+            toast.success(`Agente creado: ${nombreMostrar}`);
+            
+            // RECARGAR LISTA DE AGENTES para que aparezca en el componente principal
+            try {
+              const { obtenerAgentesEquipo } = await import('../services/equipoDeTrabajoService');
+              const resultadoAgentes = await obtenerAgentesEquipo();
+              if (resultadoAgentes.success && window.recargarAgentes) {
+                window.recargarAgentes(resultadoAgentes.data);
+                console.log('✅ Lista de agentes recargada');
+              }
+            } catch (errorRecarga) {
+              console.warn('⚠️ No se pudo recargar la lista de agentes:', errorRecarga);
+            }
+          } else {
+            throw new Error(resultado.error);
+          }
+        }
+        
+        // VINCULAR AGENTE CON ASEGURADORA Y PRODUCTO
+        const productoExtraido = datosExtraidos.producto;
+        
+        console.log('🔗 INICIO VINCULACIÓN:');
+        console.log('   aseguradoraId:', aseguradoraId);
+        console.log('   productoExtraido:', productoExtraido);
+        console.log('   agenteId:', agenteId);
+        console.log('   yaExisteAsignacion:', yaExisteAsignacion);
+        
+        if (aseguradoraId && productoExtraido && tiposProductos.length > 0) {
+          // Ya tenemos la aseguradora identificada arriba
+          console.log('🔗 Vinculando agente con aseguradora ID:', aseguradoraId);
+          
+          // Buscar producto
+          let productoMatch = tiposProductos.find(prod =>
+            prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
+          );
+          
+          if (!productoMatch) {
+            productoMatch = tiposProductos.find(prod =>
+              prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+            );
+          }
+          
+          if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
+            productoMatch = tiposProductos.find(prod => 
+              prod.nombre && prod.nombre.toLowerCase().includes('auto')
+            );
+          }
+          
+          console.log('📦 Producto encontrado:', productoMatch ? productoMatch.nombre : 'NO ENCONTRADO');
+          
+          if (productoMatch) {
+            console.log('✅ Verificando si ya existe asignación:', yaExisteAsignacion);
+            // Verificar si ya existe esta asignación
+            if (!yaExisteAsignacion) {
+              console.log('💾 Guardando nueva asignación...');
+              // Guardar la asociación agente-aseguradora-producto-clave
+              try {
+                const { guardarEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+                const asignacion = {
+                  usuarioId: agenteId,
+                  aseguradoraId: aseguradoraId,
+                  productoId: productoMatch.id,
+                  ejecutivoId: agenteId,
+                  clave: codigo, // La clave específica para esta aseguradora
+                  comisionPersonalizada: 0
+                };
+                
+                
+                const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
+                
+                if (resultadoAsignacion.success) {
+                  console.log('✅ Agente vinculado con aseguradora - Clave:', codigo);
+                } else {
+                  console.warn('⚠️ No se pudo vincular agente con producto:', resultadoAsignacion.error);
+                }
+              } catch (errorAsignacion) {
+                console.error('❌ Error al vincular agente:', errorAsignacion);
+              }
+            } else {
+              console.log('ℹ️ El agente ya tiene asignada esta clave para esta aseguradora, se omite vinculación');
+            }
+          } else {
+            console.warn('⚠️ No se encontró producto matching para:', productoExtraido);
+          }
+        } else {
+          console.warn('⚠️ No se pudo vincular: falta aseguradoraId o productoExtraido');
         }
       } catch (error) {
-        console.error('❌ Error al crear agente:', error);
+        console.error('❌ Error al procesar agente:', error);
         const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno} ${apellidoMaterno}`;
-  toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
+        toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
         // Continuar sin el agente
       }
     }
     
     // Pasar al PASO 3: Preview de todos los datos
     setEstado('preview-datos');
-  }, [datosExtraidos, aseguradoras, tiposProductos]);
+  }, [datosExtraidos, aseguradoras, tiposProductos, agenteEncontrado, claveYaExiste]);
 
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
@@ -1549,8 +2150,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       
       if (!datosConCliente.tipo_pago || !datosConCliente.frecuenciaPago) {
         const fp = (datosConCliente.forma_pago || '').toLowerCase();
-        
-        console.log('🔧 Normalizando tipo_pago desde forma_pago:', datosConCliente.forma_pago);
         
         if (fp.includes('tri')) {
           datosConCliente.tipo_pago = 'Fraccionado';
@@ -1703,11 +2302,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-xl" style={{ maxWidth: '1100px' }}>
-        <div className="modal-content">
-          <div className="modal-header py-1">
-            <small className="modal-title mb-0 fw-semibold">
-              <FileText className="me-2" size={14} />
+      <div className="modal-dialog modal-lg" style={{ maxWidth: '900px', maxHeight: '90vh' }}>
+        <div className="modal-content" style={{ maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal-header py-2 px-3">
+            <small className="modal-title mb-0 fw-semibold" style={{ fontSize: '0.85rem' }}>
+              <FileText className="me-1" size={14} />
               Extractor Inteligente de Pólizas PDF
             </small>
             <button 
@@ -1726,7 +2325,86 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             style={{ display: 'none' }}
           />
           
-          <div className="modal-body">
+          <div className="modal-body p-3" style={{ overflowY: 'auto', flex: 1 }}>
+            {/* SELECCIÓN DE MÉTODO DE EXTRACCIÓN */}
+            {estado === 'seleccionando-metodo' && (
+              <div className="py-2">
+                <div className="text-center mb-3">
+                  <h6 className="mb-1">Extractor Automático de Pólizas</h6>
+                  <p className="text-muted small mb-0" style={{ fontSize: '0.75rem' }}>
+                    Extracción instantánea y gratuita por patrones de texto
+                  </p>
+                </div>
+                
+                <div className="row g-3 justify-content-center">
+                  {/* ÚNICO Extractor Automático */}
+                  <div className="col-md-8 col-lg-6">
+                    <div 
+                      className="card h-100 border-primary cursor-pointer shadow-sm" 
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setMetodoExtraccion('auto');
+                        setEstado('esperando');
+                      }}
+                    >
+                      <div className="card-body text-center p-4">
+                        <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3" 
+                             style={{ width: '70px', height: '70px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="35" height="35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
+                            <polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
+                            <polyline points="21 12 16.5 14.6 16.5 19.79"></polyline>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                          </svg>
+                        </div>
+                        <h5 className="card-title mb-3">Continuar</h5>
+                        <p className="card-text text-muted mb-4">
+                          Extrae datos de pólizas de forma instantánea usando patrones específicos para cada aseguradora.
+                        </p>
+                        <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
+                          <span className="badge bg-success">✓ Gratis</span>
+                          <span className="badge bg-success">⚡ Instantáneo</span>
+                          <span className="badge bg-success">🎯 Preciso</span>
+                        </div>
+                        <div className="text-muted mt-3" style={{ fontSize: '0.9rem' }}>
+                          <strong>Aseguradoras disponibles:</strong><br/>
+                          <small>Qualitas • Chubb</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="text-center mt-4">
+                  <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+            
+            {estado === 'esperando' && (
+              <div className="text-center py-5">
+                <div className="mb-3">
+                  <FileText size={48} className="text-muted" />
+                </div>
+                <p className="mb-2 fw-semibold">Esperando archivo PDF...</p>
+                <small className="text-muted">
+                  Método: Extractor Automático
+                </small>
+                <div className="mt-3">
+                  <button 
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Seleccionar PDF
+                  </button>
+                </div>
+              </div>
+            )}
+            
             {estado === 'procesando' && (
               <div className="text-center py-3">
                 <div className="spinner-border text-primary mb-2" role="status" style={{ width: '2rem', height: '2rem' }}>
@@ -1741,52 +2419,81 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             {estado === 'validando-cliente' && datosExtraidos && (
               <div className="py-1">
                 <div className="text-center mb-2">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '35px', height: '35px', fontSize: '0.75rem' }}>
+                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '30px', height: '30px', fontSize: '0.7rem' }}>
                     <strong>1/3</strong>
                   </div>
-                  <small className="d-block mt-1 fw-semibold">Validación de Cliente</small>
+                  <small className="d-block mt-1 fw-semibold" style={{ fontSize: '0.75rem' }}>Validación de Cliente</small>
                 </div>
 
                 <div className="card mb-2">
-                  <div className="card-header bg-light py-1">
-                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>👤 Datos del Cliente Extraídos</small>
+                  <div className="card-header bg-light py-1 px-2">
+                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>👤 Datos del Cliente Extraídos</small>
                   </div>
                   <div className="card-body p-2">
-                    <div className="row g-2">
-                      <div className="col-md-6">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>
-                          {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social:' : 'Nombre Completo:'}
-                        </small>
-                        <small className="mb-0" style={{ fontSize: '0.75rem' }}>
-                          {datosExtraidos.tipo_persona === 'Moral' 
-                            ? datosExtraidos.razonSocial 
-                            : `${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim()
-                          }
-                        </small>
-                      </div>
-                      <div className="col-md-3">
-                        <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>RFC:</small>
-                        {datosExtraidos.rfc ? (
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.rfc}</small>
-                        ) : (
-                          <div className="d-flex align-items-center">
-                            <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>
-                              <i className="bi bi-exclamation-triangle me-1"></i>
-                              RFC no encontrado en PDF
+                    <div className="row g-1">
+                      {/* COLUMNA IZQUIERDA: Nombre y RFC */}
+                      <div className="col-md-6 col-12">
+                        {/* Nombre/Razón Social */}
+                        <div className="mb-1">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.tipo_persona === 'Moral' ? 'Razón Social/Empresa:' : 'Nombre Completo:'}
+                          </small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.tipo_persona === 'Moral' 
+                              ? (datosExtraidos.razonSocial || <span className="text-muted">No encontrado</span>)
+                              : (`${datosExtraidos.nombre || ''} ${datosExtraidos.apellido_paterno || ''} ${datosExtraidos.apellido_materno || ''}`.trim() || <span className="text-muted">No encontrado</span>)
+                            }
+                          </small>
+                        </div>
+                        
+                        {/* RFC */}
+                        <div>
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>RFC:</small>
+                          {datosExtraidos.rfc ? (
+                            <small className="mb-0" style={{ fontSize: '0.7rem' }}>{datosExtraidos.rfc}</small>
+                          ) : (
+                            <span className="badge bg-warning text-dark" style={{ fontSize: '0.6rem' }}>
+                              <i className="bi bi-exclamation-triangle me-1"></i>No encontrado
                             </span>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
-                      {datosExtraidos.domicilio && (
-                        <div className="col-md-6">
-                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Dirección:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.domicilio}</small>
+                      
+                      {/* COLUMNA DERECHA: Dirección y Ciudad/Estado */}
+                      <div className="col-md-6 col-12">
+                        {/* Dirección */}
+                        <div className="mb-1">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Dirección:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.domicilio || <span className="text-muted">No encontrada</span>}
+                          </small>
+                        </div>
+                        
+                        {/* Ciudad/Estado */}
+                        <div>
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Ciudad/Estado:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                            {(datosExtraidos.municipio || datosExtraidos.estado) 
+                              ? [datosExtraidos.municipio, datosExtraidos.estado].filter(Boolean).join(', ')
+                              : <span className="text-muted">No encontrado</span>
+                            }
+                          </small>
+                        </div>
+                      </div>
+                      
+                      {/* Email - SOLO si cliente existe en BD */}
+                      {clienteEncontrado && datosExtraidos.email && (
+                        <div className="col-md-6 col-12">
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Email:</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>{datosExtraidos.email}</small>
                         </div>
                       )}
-                      {datosExtraidos.email && (
+                      
+                      {/* Teléfono - SOLO si cliente existe en BD */}
+                      {clienteEncontrado && datosExtraidos.telefono_movil && (
                         <div className="col-md-3">
-                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Email:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.email}</small>
+                          <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Teléfono:</small>
+                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.telefono_movil}</small>
                         </div>
                       )}
                     </div>
@@ -1794,127 +2501,89 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
 
                 {clienteEncontrado ? (
-                  <div className="alert alert-success py-2 mb-2">
-                    <div className="d-flex align-items-center mb-2">
-                      <CheckCircle className="me-2" size={18} />
-                      <small className="mb-0 fw-semibold">✅ Cliente ENCONTRADO en base de datos</small>
+                  <div className="alert alert-success py-1 px-2 mb-2">
+                    <div className="d-flex align-items-center">
+                      <CheckCircle className="me-2" size={16} />
+                      <small className="mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>✅ Cliente ENCONTRADO en base de datos</small>
                     </div>
                     
-                    <div className="card border-success">
+                    <div className="card border-success mt-1">
                       <div className="card-body p-2">
-                        <small className="card-subtitle mb-2 text-success fw-semibold d-block" style={{ fontSize: '0.8rem' }}>Datos en Base de Datos</small>
-                        
-                        <div className="row g-2">
-                          <div className="col-md-3">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>ID Cliente</small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.codigo || clienteEncontrado.id}</small>
+                        <div className="row g-1">
+                          {/* FILA 1: ID Cliente, Fecha Registro, Nombre Completo */}
+                          <div className="col-md-2 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>ID</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.codigo || clienteEncontrado.id}</small>
                           </div>
                           
-                          <div className="col-md-3">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Fecha de Registro</small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX') : 'N/A'}</small>
+                          <div className="col-md-2 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Registro</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.created_at ? new Date(clienteEncontrado.created_at).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: '2-digit' }) : 'N/A'}</small>
                           </div>
 
-                          <div className="col-md-6">
-                            <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>
-                              {clienteEncontrado.tipoPersona === 'Persona Moral' ? 'Razón Social' : 'Nombre Completo'}
-                            </small>
-                            <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>
+                          <div className="col-md-4 col-4">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
                               {clienteEncontrado.tipoPersona === 'Persona Moral' 
                                 ? (clienteEncontrado.razonSocial || clienteEncontrado.nombre || 'N/A')
-                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''} ${clienteEncontrado.apellido_materno || clienteEncontrado.apellidoMaterno || ''}`.trim()
+                                : `${clienteEncontrado.nombre || ''} ${clienteEncontrado.apellido_paterno || clienteEncontrado.apellidoPaterno || ''}`.trim()
                               }
                             </small>
                           </div>
 
+                          {/* RFC */}
                           {clienteEncontrado.rfc && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>RFC</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.rfc}</small>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>RFC</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.rfc}</small>
                             </div>
                           )}
-
-                          {clienteEncontrado.curp && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>CURP</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.curp}</small>
-                            </div>
-                          )}
-
+                          
+                          {/* Email */}
                           {clienteEncontrado.email && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Email</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.email}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_movil && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Móvil</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_movil}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.telefono_fijo && (
-                            <div className="col-md-3">
-                              <small className="text-muted d-block" style={{ fontSize: '0.7rem' }}>Teléfono Fijo</small>
-                              <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefono_fijo}</small>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.direccion && (
-                            <div className="col-12">
-                              <small className="text-muted d-block">Dirección</small>
-                              <strong>{clienteEncontrado.direccion}</strong>
-                            </div>
-                          )}
-
-                          {(clienteEncontrado.ciudad || clienteEncontrado.estado) && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Ubicación</small>
-                              <strong>{clienteEncontrado.ciudad}{clienteEncontrado.ciudad && clienteEncontrado.estado ? ', ' : ''}{clienteEncontrado.estado}</strong>
-                            </div>
-                          )}
-
-                          {clienteEncontrado.codigo_postal && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Código Postal</small>
-                              <strong>{clienteEncontrado.codigo_postal}</strong>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Email</small>
+                              <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={clienteEncontrado.email}>{clienteEncontrado.email}</small>
                             </div>
                           )}
                         </div>
                       </div>
                     </div>
                     
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-success flex-fill"
-                        onClick={() => handleDecisionCliente('usar-existente')}
-                      >
-                        <CheckCircle className="me-2" size={16} />
-                        Usar Cliente Existente
-                      </button>
-                      <button 
-                        className="btn btn-outline-primary flex-fill"
-                        onClick={() => handleDecisionCliente('crear-nuevo')}
-                      >
-                        Crear Cliente Nuevo
-                      </button>
+                    <div>
+                      <hr className="my-1" />
+                      <small className="mb-1 fw-semibold d-block" style={{ fontSize: '0.75rem' }}>¿Qué deseas hacer?</small>
+                      <div className="d-flex gap-2">
+                        <button 
+                          className="btn btn-success btn-sm flex-fill py-1"
+                          onClick={() => handleDecisionCliente('usar-existente')}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          <CheckCircle className="me-1" size={14} />
+                          Usar Cliente Existente
+                        </button>
+                        <button 
+                          className="btn btn-outline-primary btn-sm flex-fill py-1"
+                          onClick={() => handleDecisionCliente('crear-nuevo')}
+                          style={{ fontSize: '0.75rem' }}
+                        >
+                          Crear Cliente Nuevo
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Cliente NO encontrado en base de datos</strong>
+                  <div className="alert alert-warning py-1 px-2">
+                    <div className="d-flex align-items-center mb-1">
+                      <AlertCircle className="me-2" size={18} />
+                      <small className="fw-semibold" style={{ fontSize: '0.75rem' }}>⚠️ Cliente NO encontrado en base de datos</small>
                     </div>
-                    <p className="mb-3">Se creará un nuevo cliente con los datos extraídos del PDF.</p>
+                    <small className="mb-2 d-block" style={{ fontSize: '0.7rem' }}>Se creará un nuevo cliente con los datos extraídos del PDF.</small>
                     <div className="d-flex gap-2">
                       <button 
-                        className="btn btn-primary flex-fill"
+                        className="btn btn-primary btn-sm flex-fill py-1"
                         onClick={() => handleDecisionCliente('crear-nuevo')}
+                        style={{ fontSize: '0.75rem' }}
                       >
                         <CheckCircle className="me-2" size={16} />
                         Crear Cliente y Continuar
@@ -1933,92 +2602,128 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
             {/* PASO 2: VALIDACIÓN DE AGENTE */}
             {estado === 'validando-agente' && datosExtraidos && (
-              <div className="py-4">
-                <div className="text-center mb-4">
-                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '50px', height: '50px' }}>
+              <div className="py-2">
+                <div className="text-center mb-2">
+                  <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center" style={{ width: '35px', height: '35px', fontSize: '0.75rem' }}>
                     <strong>2/3</strong>
                   </div>
-                  <h5 className="mt-3">Validación de Agente</h5>
+                  <h6 className="mt-2 mb-0" style={{ fontSize: '0.9rem' }}>Validación de Agente</h6>
                 </div>
 
                 {datosExtraidos.agente ? (
-                  <div className="card mb-4">
-                    <div className="card-header bg-light">
-                      <h6 className="mb-0">👔 Agente Extraído del PDF</h6>
+                  <div className="card mb-2">
+                    <div className="card-header bg-light py-1 px-2">
+                      <small className="mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>👔 Agente Extraído del PDF</small>
                     </div>
-                    <div className="card-body">
-                      <p className="mb-0"><strong>{datosExtraidos.agente}</strong></p>
+                    <div className="card-body p-2">
+                      <div className="row g-1">
+                        <div className="col-md-3 col-6">
+                          <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Clave Agente</small>
+                          <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.clave_agente || <span className="text-muted">No encontrado</span>}
+                          </small>
+                        </div>
+                        <div className="col-md-9 col-6">
+                          <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre del Agente</small>
+                          <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>
+                            {datosExtraidos.agente}
+                          </small>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-info mb-4">
-                    <AlertCircle className="me-2" size={20} />
-                    No se pudo extraer información del agente del PDF
+                  <div className="alert alert-info mb-2 py-1 px-2">
+                    <small style={{ fontSize: '0.7rem' }}>
+                      <AlertCircle className="me-1" size={14} />
+                      No se pudo extraer información del agente del PDF
+                    </small>
                   </div>
                 )}
 
                 {agenteEncontrado ? (
-                  <div className="alert alert-success">
-                    <div className="d-flex align-items-center mb-3">
-                      <CheckCircle className="me-2" size={24} />
-                      <strong>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
+                  <div className="alert alert-success py-2 px-2">
+                    <div className="d-flex align-items-center mb-2">
+                      <CheckCircle className="me-1" size={16} />
+                      <strong style={{ fontSize: '0.8rem' }}>✅ Agente ENCONTRADO en Equipo de Trabajo</strong>
                     </div>
                     
+                    {claveYaExiste && (
+                      <div className="alert alert-info mb-2 py-1 px-2">
+                        <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                          <strong>ℹ️ Este agente ya tiene la clave {datosExtraidos.clave_agente} registrada para esta aseguradora.</strong>
+                          {' '}La póliza se vinculará al agente existente sin crear duplicados.
+                        </small>
+                      </div>
+                    )}
+                    
+                    {!claveYaExiste && (
+                      <div className="alert alert-warning mb-2 py-1 px-2">
+                        <small className="mb-0" style={{ fontSize: '0.7rem' }}>
+                          <strong>📋 Se agregará la nueva clave {datosExtraidos.clave_agente} a este agente.</strong>
+                          {' '}El agente existe pero no tiene esta clave registrada para esta aseguradora.
+                        </small>
+                      </div>
+                    )}
+                    
                     <div className="card border-success">
-                      <div className="card-body">
-                        <h6 className="card-subtitle mb-3 text-success">Datos en Equipo de Trabajo</h6>
+                      <div className="card-body p-2">
+                        <small className="card-subtitle mb-1 d-block text-success fw-semibold" style={{ fontSize: '0.7rem' }}>Datos en Equipo de Trabajo</small>
                         
-                        <div className="row g-3">
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Código Agente</small>
-                            <strong>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</strong>
+                        <div className="row g-1">
+                          <div className="col-md-2 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Código</small>
+                            <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{agenteEncontrado.codigo || agenteEncontrado.codigoAgente}</small>
                           </div>
                           
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Nombre Completo</small>
-                            <strong>{agenteEncontrado.nombre}</strong>
+                          <div className="col-md-4 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Nombre</small>
+                            <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={agenteEncontrado.nombre}>{agenteEncontrado.nombre}</small>
                           </div>
 
                           {agenteEncontrado.email && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Email</small>
-                              <strong>{agenteEncontrado.email}</strong>
+                            <div className="col-md-3 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Email</small>
+                              <small className="fw-semibold text-truncate d-block" style={{ fontSize: '0.7rem' }} title={agenteEncontrado.email}>{agenteEncontrado.email}</small>
                             </div>
                           )}
 
                           {agenteEncontrado.telefono && (
-                            <div className="col-md-6">
-                              <small className="text-muted d-block">Teléfono</small>
-                              <strong>{agenteEncontrado.telefono}</strong>
+                            <div className="col-md-2 col-6">
+                              <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Teléfono</small>
+                              <small className="fw-semibold" style={{ fontSize: '0.7rem' }}>{agenteEncontrado.telefono}</small>
                             </div>
                           )}
 
-                          <div className="col-md-6">
-                            <small className="text-muted d-block">Estado</small>
-                            <span className="badge bg-success">Activo</span>
+                          <div className="col-md-1 col-6">
+                            <small className="text-muted d-block" style={{ fontSize: '0.65rem' }}>Estado</small>
+                            <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>Activo</span>
                           </div>
                         </div>
                       </div>
                     </div>
                     
-                    <hr className="my-3" />
-                    <p className="mb-3"><strong>¿Qué deseas hacer?</strong></p>
-                    <div className="d-flex gap-2">
+                    <hr className="my-1" />
+                    <small className="d-block mb-1 fw-semibold" style={{ fontSize: '0.7rem' }}>¿Qué deseas hacer?</small>
+                    <div className="d-flex gap-1">
                       <button 
-                        className="btn btn-success flex-fill"
+                        className="btn btn-success btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('usar-existente')}
                       >
-                        <CheckCircle className="me-2" size={16} />
+                        <CheckCircle className="me-1" size={14} />
                         Usar Este Agente
                       </button>
                       <button 
-                        className="btn btn-outline-primary flex-fill"
+                        className="btn btn-outline-primary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('crear-nuevo')}
                       >
                         Crear Agente Nuevo
                       </button>
                       <button 
-                        className="btn btn-outline-secondary"
+                        className="btn btn-outline-secondary btn-sm py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('omitir')}
                       >
                         Seleccionar Después
@@ -2026,30 +2731,33 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                     </div>
                   </div>
                 ) : (
-                  <div className="alert alert-warning">
-                    <div className="d-flex align-items-center mb-2">
-                      <AlertCircle className="me-2" size={24} />
-                      <strong>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
+                  <div className="alert alert-warning py-2 px-2">
+                    <div className="d-flex align-items-center mb-1">
+                      <AlertCircle className="me-1" size={16} />
+                      <strong style={{ fontSize: '0.8rem' }}>⚠️ Agente NO encontrado en Equipo de Trabajo</strong>
                     </div>
-                    <p className="mb-3">
+                    <small className="d-block mb-2" style={{ fontSize: '0.7rem' }}>
                       El agente con código <strong>{datosExtraidos.agente?.match(/^(\d+)/)?.[1] || 'N/A'}</strong> no está registrado.
-                    </p>
-                    <div className="d-flex gap-2">
+                    </small>
+                    <div className="d-flex gap-1">
                       <button 
-                        className="btn btn-primary flex-fill"
+                        className="btn btn-primary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('crear-nuevo')}
                       >
-                        <CheckCircle className="me-2" size={16} />
+                        <CheckCircle className="me-1" size={14} />
                         Crear Agente Nuevo
                       </button>
                       <button 
-                        className="btn btn-outline-secondary flex-fill"
+                        className="btn btn-outline-secondary btn-sm flex-fill py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={() => handleDecisionAgente('omitir')}
                       >
                         Continuar sin Agente
                       </button>
                       <button 
-                        className="btn btn-outline-secondary"
+                        className="btn btn-outline-secondary btn-sm py-1"
+                        style={{ fontSize: '0.75rem' }}
                         onClick={onClose}
                       >
                         Cancelar
@@ -2063,43 +2771,35 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             {/* PASO 3: PREVIEW DE TODOS LOS DATOS */}
             {estado === 'preview-datos' && datosExtraidos && (
               <div>
-                <div className="alert alert-success mb-3">
-                  <CheckCircle className="me-2" size={20} />
-                  <strong>¡Extracción completada!</strong>
+                <div className="alert alert-success mb-2 py-1 px-2">
+                  <CheckCircle className="me-1" size={16} />
+                  <strong style={{ fontSize: '0.8rem' }}>¡Extracción completada!</strong>
                 </div>
 
                 {informacionArchivo && (
-                  <div className="card mb-3">
-                    <div className="card-body">
-                      <strong>Archivo:</strong> {informacionArchivo.nombre} ({informacionArchivo.tamaño})
+                  <div className="card mb-2">
+                    <div className="card-body py-1 px-2">
+                      <small style={{ fontSize: '0.7rem' }}>
+                        <strong>Archivo:</strong> {informacionArchivo.nombre} ({informacionArchivo.tamaño})
+                      </small>
                     </div>
                   </div>
                 )}
 
                 {errores.length > 0 && (
-                  <div className="alert alert-info mb-3">
-                    <h6 className="alert-heading">📊 Reporte de Extracción:</h6>
+                  <div className="alert alert-info mb-2 py-1 px-2">
+                    <small className="fw-semibold d-block mb-1" style={{ fontSize: '0.7rem' }}>📊 Reporte de Extracción:</small>
                     {errores.map((error, idx) => (
-                      <div key={idx} className="small">{error}</div>
+                      <small key={idx} className="d-block" style={{ fontSize: '0.65rem' }}>{error}</small>
                     ))}
                   </div>
                 )}
 
                 <div className="card">
-                  <div className="card-header bg-primary text-white">
-                    <h6 className="mb-0">🎯 Datos Extraídos del PDF</h6>
+                  <div className="card-header bg-primary text-white py-1 px-2">
+                    <small className="mb-0 fw-semibold" style={{ fontSize: '0.8rem' }}>🎯 Datos Extraídos del PDF</small>
                   </div>
-                  <div className="card-body" style={{ padding: '0.5rem' }}>
-                    {/* DEBUG: Verificar datos antes de renderizar */}
-                    {console.log('🔍 DEBUG - datosExtraidos antes de DetalleExpediente:', {
-                      marca: datosExtraidos?.marca,
-                      modelo: datosExtraidos?.modelo,
-                      anio: datosExtraidos?.anio,
-                      numero_serie: datosExtraidos?.numero_serie,
-                      placas: datosExtraidos?.placas,
-                      color: datosExtraidos?.color,
-                      producto: datosExtraidos?.producto
-                    })}
+                  <div className="card-body" style={{ padding: '0.25rem' }}>
                     {/* Usar únicamente el componente DetalleExpediente unificado */}
                     <DetalleExpediente
                       datos={datosExtraidos}
@@ -2255,16 +2955,22 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               <div className="text-center py-5">
                 <XCircle size={48} className="text-danger mb-3" />
                 <h6 className="mb-3 text-danger">Error al procesar el archivo</h6>
-                <div className="alert alert-danger">
+                <div className="alert alert-danger text-start">
                   {errores.map((error, idx) => (
-                    <div key={idx}>{error}</div>
+                    <div key={idx}>
+                      <strong>{error.mensaje}</strong>
+                      {error.detalle && (
+                        <div className="small text-muted mt-1">{error.detalle}</div>
+                      )}
+                    </div>
                   ))}
                 </div>
                 <button 
                   className="btn btn-primary mt-3"
                   onClick={() => {
-                    setEstado('esperando');
+                    setEstado('seleccionando-metodo');
                     setErrores([]);
+                    setMetodoExtraccion(null);
                   }}
                 >
                   Intentar de nuevo
@@ -2387,7 +3093,7 @@ const ListaExpedientes = React.memo(({
   abrirModalCompartir
 }) => {
   // Estado para carpeta/categoría seleccionada
-  const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('todas');
+  const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
   
   // Filtrar expedientes según la carpeta seleccionada
   const expedientesFiltrados = React.useMemo(() => {
@@ -2396,58 +3102,189 @@ const ListaExpedientes = React.memo(({
     
     switch (carpetaSeleccionada) {
       case 'en_proceso':
-        // Pólizas pendientes de pago (nuevas o renovaciones)
-        // Incluye: En cotización, Emitida, Renovación en Proceso, etc. que NO estén pagadas
+        // 1. Pólizas con estatus anterior al primer pago (nuevas o renovaciones)
+        // 2. Pólizas fraccionadas que regresan dinámicamente (próximo pago ≤ 15 días)
         return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+          
+          // Para pago único (Anual): mostrar si no está pagado
+          if (!esFraccionado) {
+            return estatusPago !== 'pagado';
+          }
+          
+          // Para pago fraccionado: verificar si hay recibos pendientes o próximos
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          const mesesPorFrecuencia = {
+            'Mensual': 1,
+            'Trimestral': 3,
+            'Semestral': 6
+          };
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          
+          // Si ya pagó todos los recibos, NO va a "En Proceso"
+          if (pagosRealizados >= numeroPagos) return false;
+          
+          // Calcular fecha del próximo recibo
+          const proximoRecibo = pagosRealizados + 1;
+          const fechaInicio = new Date(exp.inicio_vigencia);
+          const fechaProximoRecibo = new Date(fechaInicio);
+          fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+          
+          // Calcular días hasta el vencimiento
+          const hoyLocal = new Date();
+          hoyLocal.setHours(0, 0, 0, 0);
+          fechaProximoRecibo.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+          
+          // Mostrar en "En Proceso" si está vencido o por vencer (≤ 15 días)
+          return diasRestantes <= 15;
         });
       
       case 'vigentes':
-        // Pólizas NUEVAS pagadas que aún no necesitan renovación
-        // Criterio: Pagadas + hoy < fecha_aviso_renovacion + etapa NO es Renovada
+        // Pólizas NUEVAS pagadas con próximo pago > 15 días (o totalmente pagadas)
+        // NO están en periodo de renovación (> 30 días para término)
         return expedientes.filter(exp => {
-          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false; // Renovadas van a su propia carpeta
-          if (!exp.termino_vigencia) return true; // Sin término, mantener en vigentes
           
-          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+          
+          // Para pago único: debe estar pagado
+          if (!esFraccionado) {
+            if (estatusPago !== 'pagado') return false;
+          } else {
+            // Para fraccionado: verificar que próximo pago > 15 días
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            
+            // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            
+            // Si no ha pagado nada, no está en vigentes
+            if (pagosRealizados === 0) return false;
+            
+            const mesesPorFrecuencia = {
+              'Mensual': 1,
+              'Trimestral': 3,
+              'Semestral': 6
+            };
+            
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            // Si ya pagó todos, está en vigentes
+            if (pagosRealizados >= numeroPagos) {
+              // Continuar para verificar si no está en periodo de renovación
+            } else {
+              // Calcular días hasta próximo pago
+              const proximoRecibo = pagosRealizados + 1;
+              const fechaInicio = new Date(exp.inicio_vigencia);
+              const fechaProximoRecibo = new Date(fechaInicio);
+              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+              
+              const hoyLocal = new Date();
+              hoyLocal.setHours(0, 0, 0, 0);
+              fechaProximoRecibo.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+              
+              // Solo está en vigentes si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            }
+          }
+          
+          // Verificar que NO esté en periodo de renovación (> 30 días para término)
+          if (!exp.termino_vigencia) return true;
+          
           let fechaAviso;
           if (exp.fecha_aviso_renovacion) {
             fechaAviso = new Date(exp.fecha_aviso_renovacion);
           } else {
-            // Fallback: calcular 30 días antes del término
             const fechaTermino = new Date(exp.termino_vigencia);
             fechaAviso = new Date(fechaTermino);
             fechaAviso.setDate(fechaAviso.getDate() - 30);
           }
           
-          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+          return hoy < fechaAviso; // Solo si AÚN no llegó al periodo de renovación
         });
       
       case 'renovadas':
-        // Pólizas RENOVADAS pagadas que aún no necesitan renovarse otra vez
-        // Criterio: etapa = Renovada + hoy < fecha_aviso_renovacion
+        // Pólizas RENOVADAS pagadas con próximo pago > 15 días
+        // NO están en periodo de renovación (> 30 días para término)
         return expedientes.filter(exp => {
           if (exp.etapa_activa !== 'Renovada') return false;
+          if (exp.etapa_activa === 'Cancelada') return false;
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          if (estatusPago !== 'pagado') return false;
-          if (!exp.termino_vigencia) return true; // Sin término, mantener en renovadas
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
           
-          // Obtener fecha de aviso: usar la de BD o calcular (término - 30 días)
+          // Para pago único: debe estar pagado
+          if (!esFraccionado) {
+            if (estatusPago !== 'pagado') return false;
+          } else {
+            // Para fraccionado: verificar que próximo pago > 15 días
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            
+            // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            
+            // Si no ha pagado nada, no está en renovadas
+            if (pagosRealizados === 0) return false;
+            
+            const mesesPorFrecuencia = {
+              'Mensual': 1,
+              'Trimestral': 3,
+              'Semestral': 6
+            };
+            
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            // Si ya pagó todos, está en renovadas
+            if (pagosRealizados >= numeroPagos) {
+              // Continuar para verificar si no está en periodo de renovación
+            } else {
+              // Calcular días hasta próximo pago
+              const proximoRecibo = pagosRealizados + 1;
+              const fechaInicio = new Date(exp.inicio_vigencia);
+              const fechaProximoRecibo = new Date(fechaInicio);
+              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+              
+              const hoyLocal = new Date();
+              hoyLocal.setHours(0, 0, 0, 0);
+              fechaProximoRecibo.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+              
+              // Solo está en renovadas si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            }
+          }
+          
+          // Verificar que NO esté en periodo de renovación (> 30 días para término)
+          if (!exp.termino_vigencia) return true;
+          
           let fechaAviso;
           if (exp.fecha_aviso_renovacion) {
             fechaAviso = new Date(exp.fecha_aviso_renovacion);
           } else {
-            // Fallback: calcular 30 días antes del término
             const fechaTermino = new Date(exp.termino_vigencia);
             fechaAviso = new Date(fechaTermino);
             fechaAviso.setDate(fechaAviso.getDate() - 30);
           }
           
-          return hoy < fechaAviso; // Aún no llegó el aviso de renovación
+          return hoy < fechaAviso; // Solo si AÚN no llegó al periodo de renovación
         });
       
       case 'por_renovar':
@@ -2498,14 +3335,90 @@ const ListaExpedientes = React.memo(({
       todas: expedientes.length,
       
       en_proceso: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        return estatusPago !== 'pagado' && exp.etapa_activa !== 'Cancelada';
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        // Para pago único (Anual): mostrar si no está pagado
+        if (!esFraccionado) {
+          return estatusPago !== 'pagado';
+        }
+        
+        // Para pago fraccionado: verificar si hay recibos vencidos o por vencer
+        const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+        if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
+        
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+        
+        // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+        const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+        
+        // Si ya pagó todos los recibos, NO va a "En Proceso"
+        if (pagosRealizados >= numeroPagos) return false;
+        
+        const mesesPorFrecuencia = {
+          'Mensual': 1,
+          'Trimestral': 3,
+          'Semestral': 6
+        };
+        
+        const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+        
+        // Calcular fecha del próximo recibo
+        const proximoRecibo = pagosRealizados + 1;
+        const fechaInicio = new Date(exp.inicio_vigencia);
+        const fechaProximoRecibo = new Date(fechaInicio);
+        fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+        
+        // Calcular días hasta el vencimiento
+        const hoyLocal = new Date();
+        hoyLocal.setHours(0, 0, 0, 0);
+        fechaProximoRecibo.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+        
+        // Mostrar en "En Proceso" si está vencido o por vencer (≤ 15 días)
+        return diasRestantes <= 15;
       }).length,
       
       vigentes: expedientes.filter(exp => {
-        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        if (estatusPago !== 'pagado' || exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
+        
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        if (!esFraccionado) {
+          if (estatusPago !== 'pagado') return false;
+        } else {
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          // 🔥 Usar el contador directo de recibos pagados
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          if (pagosRealizados === 0) {
+            return false;
+          }
+          
+          if (pagosRealizados < numeroPagos) {
+            const proximoRecibo = pagosRealizados + 1;
+            const fechaInicio = new Date(exp.inicio_vigencia);
+            const fechaProximoRecibo = new Date(fechaInicio);
+            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+            
+            const hoyLocal = new Date();
+            hoyLocal.setHours(0, 0, 0, 0);
+            fechaProximoRecibo.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+            
+            if (diasRestantes <= 15) return false;
+          }
+        }
+        
         if (!exp.termino_vigencia) return true;
         
         let fechaAviso;
@@ -2522,8 +3435,43 @@ const ListaExpedientes = React.memo(({
       
       renovadas: expedientes.filter(exp => {
         if (exp.etapa_activa !== 'Renovada') return false;
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        if (estatusPago !== 'pagado') return false;
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        if (!esFraccionado) {
+          if (estatusPago !== 'pagado') return false;
+        } else {
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          // 🔥 Usar el contador directo de recibos pagados
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          
+          const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          if (pagosRealizados === 0) {
+            return false;
+          }
+          
+          if (pagosRealizados < numeroPagos) {
+            const proximoRecibo = pagosRealizados + 1;
+            const fechaInicio = new Date(exp.inicio_vigencia);
+            const fechaProximoRecibo = new Date(fechaInicio);
+            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+            
+            const hoyLocal = new Date();
+            hoyLocal.setHours(0, 0, 0, 0);
+            fechaProximoRecibo.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+            
+            if (diasRestantes <= 15) return false;
+          }
+        }
+        
         if (!exp.termino_vigencia) return true;
         
         let fechaAviso;
@@ -2627,9 +3575,18 @@ const ListaExpedientes = React.memo(({
   }, [expedientes]);
 
   return (
-    <div className="p-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">Gestión de Pólizas</h3>
+    <div className="p-3">
+      {/* Estilos globales para normalizar fuentes */}
+      <style>{`
+        .table-sm { font-size: 0.875rem !important; }
+        .table-sm small { font-size: 0.75rem !important; }
+        .table-sm .badge { font-size: 0.75rem !important; }
+        .table-sm .text-muted { font-size: 0.75rem !important; }
+      `}</style>
+      
+      {/* Header Compacto */}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h4 className="mb-0">Gestión de Pólizas</h4>
         <button
           onClick={() => {
             setMostrarModalMetodoCaptura(true);
@@ -2641,91 +3598,67 @@ const ListaExpedientes = React.memo(({
         </button>
       </div>
 
-      {/* Layout: Sidebar + Contenido */}
-      <div className="row g-2">
-        {/* Sidebar - Carpetas */}
-        <div className="col-auto" style={{ minWidth: '160px', maxWidth: '180px' }}>
-          <div className="card">
-            <div className="card-header bg-light py-2 px-2">
-              <h6 className="mb-0" style={{ fontSize: '0.85rem' }}>📂 Carpetas</h6>
-            </div>
-            <div className="list-group list-group-flush">
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'todas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('todas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>📋 Todas</span>
-                <span className={`badge ${carpetaSeleccionada === 'todas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.todas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'en_proceso' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('en_proceso')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>📝 En Proceso</span>
-                <span className={`badge ${carpetaSeleccionada === 'en_proceso' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.en_proceso}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vigentes' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('vigentes')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>✅ Vigentes</span>
-                <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-primary' : 'bg-success'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.vigentes}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'renovadas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('renovadas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>🔄 Renovadas</span>
-                <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-primary' : 'bg-info'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.renovadas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'por_renovar' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('por_renovar')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>⏰ Por Renovar</span>
-                <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-primary' : 'bg-warning'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.por_renovar}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'vencidas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('vencidas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>⚠️ Vencidas</span>
-                <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-primary' : 'bg-danger'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.vencidas}
-                </span>
-              </button>
-              <button
-                className={`list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 px-2 ${carpetaSeleccionada === 'canceladas' ? 'active' : ''}`}
-                onClick={() => setCarpetaSeleccionada('canceladas')}
-                style={{ fontSize: '0.8rem' }}
-              >
-                <span>🚫 Canceladas</span>
-                <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-primary' : 'bg-secondary'}`} style={{ fontSize: '0.7rem' }}>
-                  {contadores.canceladas}
-                </span>
-              </button>
-            </div>
-          </div>
+      {/* Carpetas Horizontales */}
+      <div className="mb-3" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
+        <div className="d-inline-flex gap-2">
+          <button
+            className={`btn ${carpetaSeleccionada === 'todas' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('todas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            📋 Todas
+            <span className="badge bg-white text-dark ms-2">{contadores.todas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'en_proceso' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('en_proceso')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            📝 En Proceso
+            <span className="badge bg-secondary ms-2">{contadores.en_proceso}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'vigentes' ? 'btn-success' : 'btn-outline-success'}`}
+            onClick={() => setCarpetaSeleccionada('vigentes')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ✅ Vigentes
+            <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-success' : 'bg-success text-white'} ms-2`}>{contadores.vigentes}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'renovadas' ? 'btn-info' : 'btn-outline-info'}`}
+            onClick={() => setCarpetaSeleccionada('renovadas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            🔄 Renovadas
+            <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-info' : 'bg-info text-white'} ms-2`}>{contadores.renovadas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'por_renovar' ? 'btn-warning' : 'btn-outline-warning'}`}
+            onClick={() => setCarpetaSeleccionada('por_renovar')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ⏰ Por Renovar
+            <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'} ms-2`}>{contadores.por_renovar}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'vencidas' ? 'btn-danger' : 'btn-outline-danger'}`}
+            onClick={() => setCarpetaSeleccionada('vencidas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            ⚠️ Vencidas
+            <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-danger' : 'bg-danger text-white'} ms-2`}>{contadores.vencidas}</span>
+          </button>
+          <button
+            className={`btn ${carpetaSeleccionada === 'canceladas' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('canceladas')}
+            style={{ whiteSpace: 'nowrap' }}
+          >
+            🚫 Canceladas
+            <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-dark' : 'bg-secondary text-white'} ms-2`}>{contadores.canceladas}</span>
+          </button>
         </div>
-
-        {/* Contenido principal */}
-        <div className="col">
+      </div>
 
       {/* Alertas de duplicados */}
       {(analisisDuplicados.polizasDuplicadas.length > 0 || 
@@ -2824,16 +3757,16 @@ const ListaExpedientes = React.memo(({
       )}
 
       {expedientes.length > 0 && (
-        <div className="row mb-3">
-          <div className="col-md-6">
+        <div className="row mb-3 g-2">
+          <div className="col-12 col-md-8">
             <BarraBusqueda 
               busqueda={paginacion.busqueda}
               setBusqueda={paginacion.setBusqueda}
               placeholder="Buscar pólizas..."
             />
           </div>
-          <div className="col-md-6 text-end">
-            <small className="text-muted">
+          <div className="col-12 col-md-4 text-md-end">
+            <small className="text-muted d-block mt-2 mt-md-0">
               Mostrando {paginacion.itemsPaginados.length} de {paginacion.totalItems} pólizas
             </small>
           </div>
@@ -2855,28 +3788,29 @@ const ListaExpedientes = React.memo(({
           </div>
         ) : (
           <>
-            <div className="table-responsive">
-              <table className="table table-hover table-sm mb-0">
+            {/* Vista Desktop - Tabla */}
+            <div className="table-responsive d-none d-lg-block">
+              <table className="table table-hover table-sm mb-0" style={{ fontSize: '0.875rem' }}>
                 <thead className="table-light">
-                  <tr style={{ fontSize: '0.75rem' }}>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Póliza</th>
-                    <th style={{ width: '180px', verticalAlign: 'middle' }}>Cliente</th>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Compañía</th>
-                    <th style={{ width: '200px', verticalAlign: 'middle' }}>Producto</th>
-                    <th style={{ width: '80px' }}>
+                  <tr>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Póliza</th>
+                    <th style={{ width: '240px', verticalAlign: 'middle', textAlign: 'center' }}>Cliente</th>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Compañía</th>
+                    <th style={{ width: '210px', verticalAlign: 'middle', textAlign: 'center' }}>Producto</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>
                       <div>Etapa</div>
                       <div>Activa</div>
                     </th>
-                    <th style={{ width: '100px', verticalAlign: 'middle' }}>Agente</th>
-                    <th style={{ width: '100px' }}>
-                      <div>Tipo</div>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
+                    <th style={{ width: '200px', textAlign: 'center' }}>
                       <div>Estatus Pago</div>
+                      <div>y Progreso</div>
                     </th>
-                    <th style={{ width: '100px' }}>
+                    <th style={{ width: '100px', textAlign: 'center' }}>
                       <div>Vigencia</div>
                       <div>Pago</div>
                     </th>
-                    <th width="180" style={{ verticalAlign: 'middle' }}>Acciones</th>
+                    <th width="150" style={{ verticalAlign: 'middle', textAlign: 'center' }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2889,54 +3823,60 @@ const ListaExpedientes = React.memo(({
                     const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
                     
                     return (
-                      <tr key={expediente.id} style={{ fontSize: '0.8rem', verticalAlign: 'middle' }}>
+                      <tr key={expediente.id} style={{ verticalAlign: 'middle' }}>
                         <td style={{ verticalAlign: 'middle' }}>
                           <div>
                             <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
                             {esDuplicadaCompleta && (
                               <div>
-                                <span className="badge bg-warning text-dark" style={{ fontSize: '0.7rem' }} title="Póliza duplicada (misma póliza + mismo VIN)">
+                                <span className="badge bg-warning text-dark" title="Póliza duplicada (misma póliza + mismo VIN)">
                                   ⚠️ Duplicada
                                 </span>
                               </div>
                             )}
                             {esVinDuplicado && (
                               <div>
-                                <span className="badge" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
+                                <span className="badge" style={{ backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
                                   ⚠️ VIN Duplicado
                                 </span>
                               </div>
                             )}
                             {esPolizaVinDistinto && (
                               <div>
-                                <span className="badge bg-danger" style={{ fontSize: '0.7rem' }} title="Mismo número de póliza con VIN diferente - Revisar urgente">
+                                <span className="badge bg-danger" title="Mismo número de póliza con VIN diferente - Revisar urgente">
                                   ⚠️ Póliza VIN Distinto
                                 </span>
                               </div>
                             )}
                             {expediente.endoso && (
-                              <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>End: {expediente.endoso}</small></div>
+                              <div><small className="text-muted">End: {expediente.endoso}</small></div>
                             )}
                             {expediente.inciso && (
-                              <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Inc: {expediente.inciso}</small></div>
+                              <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
                             )}
                             {/* Fechas de captura y emisión */}
-                            <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '4px', lineHeight: '1.3' }}>
+                            <div style={{ marginTop: '4px', fontSize: '0.7rem', lineHeight: '1.3' }}>
                               {expediente.created_at && (
-                                <div>📝 Cap: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                                <div>
+                                  <div className="text-muted">Captura</div>
+                                  <div>{utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                                </div>
                               )}
                               {expediente.fecha_emision && (
-                                <div>📄 Emi: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                                <div style={{ marginTop: '2px' }}>
+                                  <div className="text-muted">Emisión</div>
+                                  <div>{utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                                </div>
                               )}
                             </div>
                           </div>
                         </td>
                         <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
-                        <td>{expediente.compania}</td>
-                        <td>
+                        <td style={{ textAlign: 'center' }}>{expediente.compania}</td>
+                        <td style={{ fontSize: '0.7rem' }}>
                           <div>
                             <strong>{expediente.producto}</strong>
-                            {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos')) && (
+                            {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos') || expediente.producto?.includes('Auto')) && (
                               <>
                                 {expediente.tipo_cobertura && (
                                   <div className="text-muted">
@@ -2959,22 +3899,113 @@ const ListaExpedientes = React.memo(({
                             )}
                           </div>
                         </td>
-                        <td>
+                        <td style={{ textAlign: 'center', fontSize: '0.7rem' }}>
                           <Badge tipo="etapa" valor={expediente.etapa_activa} />
                           {expediente.motivoCancelacion && (
-                            <div><small className="text-muted" style={{ fontSize: '0.7rem' }}>Motivo: {expediente.motivoCancelacion}</small></div>
+                            <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
                         </td>
-                        <td style={{ fontSize: '0.75rem' }}>{agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente || '-'}</td>
-                        <td>
-                          <EstadoPago expediente={expediente} />
-                          <CalendarioPagos 
-                            expediente={expediente} 
-                            calcularProximoPago={calcularProximoPago}
-                            compacto={true}
-                          />
+                        <td style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                          {(() => {
+                            if (agenteInfo) {
+                              const nombreCompleto = agenteInfo.nombre || '';
+                              const palabras = nombreCompleto.trim().split(/\s+/);
+                              const primerNombre = palabras[0] || '';
+                              const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
+                              return `${agenteInfo.codigoAgente} - ${primerNombre} ${primerApellido}`.trim();
+                            } else if (expediente.agente) {
+                              // Si no hay agenteInfo, procesar el texto del expediente
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                const codigo = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                const primerNombre = palabras[0] || '';
+                                const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
+                                return `${codigo} - ${primerNombre} ${primerApellido}`.trim();
+                              }
+                              return textoAgente;
+                            }
+                            return '-';
+                          })()}
                         </td>
-                        <td style={{ fontSize: '0.75rem', lineHeight: '1.4' }}>
+                        <td style={{ textAlign: 'center' }}>
+                          <div>
+                            {/* Tipo y Estatus de Pago */}
+                            <EstadoPago expediente={expediente} />
+                            
+                            {/* Estado del próximo recibo pendiente (solo para fraccionado) */}
+                            {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
+                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
+                             expediente.inicio_vigencia && (
+                              (() => {
+                                // Normalizar campos
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                
+                                // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+                                const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
+                                
+                                const mesesPorFrecuencia = {
+                                  'Mensual': 1,
+                                  'Trimestral': 3,
+                                  'Semestral': 6
+                                };
+                                
+                                const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                                
+                                // Determinar el próximo recibo pendiente
+                                const proximoRecibo = pagosRealizados + 1;
+                                
+                                // Si ya se pagaron todos los recibos
+                                if (pagosRealizados >= numeroPagos) {
+                                  return (
+                                    <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                                      <span className="text-success fw-bold">{numeroPagos}/{numeroPagos} Pagado</span>
+                                    </div>
+                                  );
+                                }
+                                
+                                // Calcular fecha de vencimiento del próximo recibo
+                                const fechaInicio = new Date(expediente.inicio_vigencia);
+                                const fechaProximoRecibo = new Date(fechaInicio);
+                                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+                                
+                                // Calcular días restantes
+                                const hoy = new Date();
+                                hoy.setHours(0, 0, 0, 0);
+                                fechaProximoRecibo.setHours(0, 0, 0, 0);
+                                const diasRestantes = Math.floor((fechaProximoRecibo - hoy) / (1000 * 60 * 60 * 24));
+                                
+                                // Determinar estado y color
+                                let estado = '';
+                                let colorClass = '';
+                                
+                                if (diasRestantes < 0) {
+                                  estado = 'Vencido';
+                                  colorClass = 'text-danger fw-bold';
+                                } else if (diasRestantes === 0) {
+                                  estado = 'Vence Hoy';
+                                  colorClass = 'text-danger fw-bold';
+                                } else if (diasRestantes <= 15) {
+                                  estado = 'Por Vencer';
+                                  colorClass = 'text-warning fw-bold';
+                                } else {
+                                  estado = 'Pendiente';
+                                  colorClass = 'text-info';
+                                }
+                                
+                                return (
+                                  <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                                    <span className={colorClass}>{proximoRecibo}/{numeroPagos} {estado}</span>
+                                  </div>
+                                );
+                              })()
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '0.7rem', lineHeight: '1.4', textAlign: 'center' }}>
                           <div>
                             {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
                           </div>
@@ -2988,138 +4019,152 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                            {/* Fila 1: Compartir, Pago, Cancelar, Ver */}
-                            <div className="d-flex gap-1 align-items-center">
-                              {/* === BOTONES DE RENOVACIÓN === */}
-                              {(() => {
-                                const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
-                                
-                                if (!estaPorRenovar) return null;
-                                
-                                const etapaActual = expediente.etapa_activa || '';
-                                
-                                // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
-                                const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
-                                                                !etapaActual.includes('Cotización') && 
-                                                                !etapaActual.includes('Enviada') &&
-                                                                !etapaActual.includes('Pendiente de Emisión');
-                                
-                                const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
-                                                               etapaActual === 'Renovación Enviada';
-                                
-                                const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
-                                
-                                return (
-                                  <>
-                                    {puedeIniciarCotizacion && (
-                                      <button
-                                        onClick={() => iniciarCotizacionRenovacion(expediente)}
-                                        className="btn btn-primary btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Cotizar Renovación"
-                                      >
-                                        <FileText size={12} />
-                                      </button>
-                                    )}
-                                    
-                                    {puedeMarcarAutorizado && (
-                                      <button
-                                        onClick={() => marcarRenovacionAutorizada(expediente)}
-                                        className="btn btn-success btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Marcar como Autorizado"
-                                      >
-                                        <CheckCircle size={12} />
-                                      </button>
-                                    )}
-                                    
-                                    {puedeAgregarRenovada && (
-                                      <button
-                                        onClick={() => abrirModalPolizaRenovada(expediente)}
-                                        className="btn btn-info btn-sm"
-                                        style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                        title="Agregar Póliza Renovada"
-                                      >
-                                        <RefreshCw size={12} />
-                                      </button>
-                                    )}
-                                  </>
-                                );
-                              })()}
-
-                              <button
-                                onClick={() => abrirModalCompartir(expediente)}
-                                className="btn btn-success btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Compartir"
-                              >
-                                <Share2 size={12} />
-                              </button>
-
-                              {(() => {
-                                // ✅ El botón de pago debe estar disponible independientemente de la etapa
-                                // Solo se oculta si ya está pagado o si la póliza está cancelada
-                                const etapaValida = expediente.etapa_activa !== 'Cancelada';
-                                // ✅ Verificar estatus_pago tanto en camelCase como snake_case
-                                const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
-                                const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
-                                // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
-                                const noPagado = estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado';
-                                
-                                return etapaValida && noPagado ? (
-                                  <button
-                                    onClick={() => aplicarPago(expediente.id)}
-                                    className="btn btn-success btn-sm"
-                                    style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                    title="Aplicar Pago"
-                                  >
-                                    <DollarSign size={12} />
-                                  </button>
-                                ) : null;
-                              })()}
-
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', maxWidth: '120px' }}>
+                            {/* === BOTONES DE RENOVACIÓN === */}
+                            {(() => {
+                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
                               
-                              {expediente.etapa_activa !== 'Cancelada' && (
+                              if (!estaPorRenovar) return null;
+                              
+                              const etapaActual = expediente.etapa_activa || '';
+                              
+                              // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
+                              const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                              !etapaActual.includes('Cotización') && 
+                                                              !etapaActual.includes('Enviada') &&
+                                                              !etapaActual.includes('Pendiente de Emisión');
+                              
+                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                             etapaActual === 'Renovación Enviada';
+                              
+                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                              
+                              return (
+                                <>
+                                  {puedeIniciarCotizacion && (
+                                    <button
+                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                      className="btn btn-primary btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Cotizar Renovación"
+                                    >
+                                      <FileText size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeMarcarAutorizado && (
+                                    <button
+                                      onClick={() => marcarRenovacionAutorizada(expediente)}
+                                      className="btn btn-success btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Marcar como Autorizado"
+                                    >
+                                      <CheckCircle size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeAgregarRenovada && (
+                                    <button
+                                      onClick={() => abrirModalPolizaRenovada(expediente)}
+                                      className="btn btn-info btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Agregar Póliza Renovada"
+                                    >
+                                      <RefreshCw size={12} />
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            <button
+                              onClick={() => abrirModalCompartir(expediente)}
+                              className="btn btn-success btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Compartir"
+                            >
+                              <Share2 size={12} />
+                            </button>
+
+                            {(() => {
+                              // ✅ El botón de pago debe estar disponible independientemente de la etapa
+                              // Solo se oculta si ya está pagado o si la póliza está cancelada
+                              const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                              
+                              // ✅ Verificar estatus_pago tanto en camelCase como snake_case
+                              const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
+                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                              
+                              // 🔥 Para pagos fraccionados, verificar si hay pagos pendientes usando contador directo
+                              const esFraccionado = (expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO');
+                              let tienePagosPendientes = false;
+                              
+                              if (esFraccionado && (expediente.frecuenciaPago || expediente.frecuencia_pago)) {
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
+                                
+                                // Si no ha completado todos los pagos, tiene pendientes
+                                tienePagosPendientes = pagosRealizados < numeroPagos;
+                              }
+                              
+                              // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
+                              // Para fraccionados: mostrar si tiene pagos pendientes
+                              // Para pago único: mostrar si no está pagado
+                              const noPagado = esFraccionado 
+                                ? tienePagosPendientes
+                                : (estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado');
+                              
+                              return etapaValida && noPagado ? (
                                 <button
-                                  onClick={() => iniciarCancelacion(expediente)}
-                                  className="btn btn-danger btn-sm"
+                                  onClick={() => aplicarPago(expediente.id)}
+                                  className="btn btn-success btn-sm"
                                   style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                  title="Cancelar Póliza"
+                                  title="Aplicar Pago"
                                 >
-                                  <XCircle size={12} />
+                                  <DollarSign size={12} />
                                 </button>
-                              )}
-                              
-                              <button
-                                onClick={() => verDetalles(expediente)}
-                                className="btn btn-outline-primary btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Ver detalles"
-                              >
-                                <Eye size={12} />
-                              </button>
-                            </div>
+                              ) : null;
+                            })()}
+
                             
-                            {/* Fila 2: Editar, Eliminar */}
-                            <div className="d-flex gap-1 align-items-center">
+                            {expediente.etapa_activa !== 'Cancelada' && (
                               <button
-                                onClick={() => editarExpediente(expediente)}
-                                className="btn btn-outline-secondary btn-sm"
+                                onClick={() => iniciarCancelacion(expediente)}
+                                className="btn btn-danger btn-sm"
                                 style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Editar"
+                                title="Cancelar Póliza"
                               >
-                                <Edit size={12} />
+                                <XCircle size={12} />
                               </button>
-                              <button
-                                onClick={() => eliminarExpediente(expediente.id)}
-                                className="btn btn-outline-danger btn-sm"
-                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                title="Eliminar"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                            )}
+                            
+                            <button
+                              onClick={() => verDetalles(expediente)}
+                              className="btn btn-outline-primary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Ver detalles"
+                            >
+                              <Eye size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => editarExpediente(expediente)}
+                              className="btn btn-outline-secondary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Editar"
+                            >
+                              <Edit size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => eliminarExpediente(expediente.id)}
+                              className="btn btn-outline-danger btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Eliminar"
+                            >
+                              <Trash2 size={12} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -3128,6 +4173,298 @@ const ListaExpedientes = React.memo(({
                 </tbody>
               </table>
             </div>
+
+            {/* Vista Móvil - Cards */}
+            <div className="d-lg-none p-3">
+              {paginacion.itemsPaginados.map((expediente) => {
+                const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
+                const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
+                const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
+                const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
+                
+                return (
+                  <div key={expediente.id} className="card mb-3 shadow-sm">
+                    <div className="card-body p-3">
+                      {/* Header - Número de Póliza */}
+                      <div className="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                          <h6 className="mb-1">
+                            <strong className="text-primary">{expediente.numero_poliza || 'Sin número'}</strong>
+                          </h6>
+                          {(expediente.endoso || expediente.inciso) && (
+                            <small className="text-muted">
+                              {expediente.endoso && `End: ${expediente.endoso}`}
+                              {expediente.endoso && expediente.inciso && ' | '}
+                              {expediente.inciso && `Inc: ${expediente.inciso}`}
+                            </small>
+                          )}
+                        </div>
+                        <Badge tipo="etapa" valor={expediente.etapa_activa} />
+                      </div>
+
+                      {/* Alertas de duplicados */}
+                      {(esDuplicadaCompleta || esVinDuplicado || esPolizaVinDistinto) && (
+                        <div className="mb-2">
+                          {esDuplicadaCompleta && (
+                            <span className="badge bg-warning text-dark me-1" style={{ fontSize: '0.7rem' }}>
+                              ⚠️ Duplicada
+                            </span>
+                          )}
+                          {esVinDuplicado && (
+                            <span className="badge me-1" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }}>
+                              ⚠️ VIN Duplicado
+                            </span>
+                          )}
+                          {esPolizaVinDistinto && (
+                            <span className="badge bg-danger" style={{ fontSize: '0.7rem' }}>
+                              ⚠️ Póliza VIN Distinto
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Cliente */}
+                      <div className="mb-2 pb-2 border-bottom">
+                        <small className="text-muted d-block">Cliente</small>
+                        <InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} />
+                      </div>
+
+                      {/* Compañía y Producto */}
+                      <div className="row g-2 mb-2">
+                        <div className="col-6">
+                          <small className="text-muted d-block">Compañía</small>
+                          <strong style={{ fontSize: '0.875rem' }}>{expediente.compania}</strong>
+                        </div>
+                        <div className="col-6">
+                          <small className="text-muted d-block">Producto</small>
+                          <strong style={{ fontSize: '0.875rem' }}>{expediente.producto}</strong>
+                          {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos') || expediente.producto?.includes('Auto')) && (
+                            <>
+                              {expediente.tipo_cobertura && (
+                                <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                  {expediente.tipo_cobertura}
+                                </div>
+                              )}
+                              {(expediente.marca || expediente.modelo) && (
+                                <div style={{ fontSize: '0.75rem' }}>
+                                  {expediente.marca} {expediente.modelo}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Agente */}
+                      {expediente.agente && (
+                        <div className="mb-2">
+                          <small className="text-muted d-block">Agente</small>
+                          <span style={{ fontSize: '0.875rem' }}>
+                            {agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Estado de Pago */}
+                      <div className="mb-2">
+                        <small className="text-muted d-block">Estado de Pago</small>
+                        <EstadoPago expediente={expediente} />
+                        <CalendarioPagos 
+                          expediente={expediente} 
+                          calcularProximoPago={calcularProximoPago}
+                          compacto={true}
+                        />
+                      </div>
+
+                      {/* Vigencia */}
+                      <div className="row g-2 mb-3">
+                        <div className="col-6">
+                          <small className="text-muted d-block">Inicio Vigencia</small>
+                          <span style={{ fontSize: '0.875rem' }}>
+                            {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
+                          </span>
+                        </div>
+                        <div className="col-6">
+                          <small className="text-muted d-block">Fin Vigencia</small>
+                          <span style={{ fontSize: '0.875rem' }}>
+                            {expediente.termino_vigencia ? utils.formatearFecha(expediente.termino_vigencia, 'cortaY') : '-'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Fechas */}
+                      {(expediente.created_at || expediente.fecha_emision) && (
+                        <div className="mb-3" style={{ fontSize: '0.75rem', color: '#6c757d' }}>
+                          {expediente.created_at && (
+                            <div>📝 Capturada: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                          )}
+                          {expediente.fecha_emision && (
+                            <div>📄 Emitida: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Botones de Acción */}
+                      <div className="d-flex flex-wrap gap-2">
+                        {/* Botones de renovación */}
+                        {(() => {
+                          const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                          if (!estaPorRenovar) return null;
+                          
+                          const etapaActual = expediente.etapa_activa || '';
+                          const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                          !etapaActual.includes('Cotización') && 
+                                                          !etapaActual.includes('Enviada') &&
+                                                          !etapaActual.includes('Pendiente de Emisión');
+                          
+                          const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                         etapaActual === 'Renovación Enviada';
+                          
+                          const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                          
+                          return (
+                            <>
+                              {puedeIniciarCotizacion && (
+                                <button
+                                  onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                  className="btn btn-primary btn-sm"
+                                  title="Cotizar Renovación"
+                                >
+                                  <FileText size={14} className="me-1" />
+                                  Cotizar
+                                </button>
+                              )}
+                              {puedeMarcarAutorizado && (
+                                <button
+                                  onClick={() => marcarRenovacionAutorizada(expediente)}
+                                  className="btn btn-success btn-sm"
+                                  title="Marcar como Autorizado"
+                                >
+                                  <CheckCircle size={14} className="me-1" />
+                                  Autorizar
+                                </button>
+                              )}
+                              {puedeAgregarRenovada && (
+                                <button
+                                  onClick={() => abrirModalPolizaRenovada(expediente)}
+                                  className="btn btn-info btn-sm"
+                                  title="Agregar Póliza Renovada"
+                                >
+                                  <RefreshCw size={14} className="me-1" />
+                                  Renovar
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
+
+                        <button
+                          onClick={() => abrirModalCompartir(expediente)}
+                          className="btn btn-success btn-sm"
+                          title="Compartir"
+                        >
+                          <Share2 size={14} className="me-1" />
+                          Compartir
+                        </button>
+
+                        {(() => {
+                          const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                          const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
+                          const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                          
+                          // 🔥 Para pagos fraccionados, verificar si hay pagos pendientes
+                          const esFraccionado = (expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO');
+                          let tienePagosPendientes = false;
+                          
+                          if (esFraccionado && (expediente.frecuenciaPago || expediente.frecuencia_pago)) {
+                            const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                            const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
+                            
+                            let pagosRealizados = 0;
+                            if (fechaUltimoPago && expediente.inicio_vigencia) {
+                              const fechaUltimo = new Date(fechaUltimoPago);
+                              const fechaInicio = new Date(expediente.inicio_vigencia);
+                              
+                              const mesesPorFrecuencia = {
+                                'Mensual': 1,
+                                'Trimestral': 3,
+                                'Semestral': 6
+                              };
+                              
+                              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                              const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
+                                                          (fechaUltimo.getMonth() - fechaInicio.getMonth());
+                              
+                              pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+                              pagosRealizados = Math.min(pagosRealizados, numeroPagos);
+                            }
+                            
+                            // Si no ha completado todos los pagos, tiene pendientes
+                            tienePagosPendientes = pagosRealizados < numeroPagos;
+                          }
+                          
+                          // Para fraccionados: mostrar si tiene pagos pendientes
+                          // Para pago único: mostrar si no está pagado
+                          const noPagado = esFraccionado 
+                            ? tienePagosPendientes
+                            : (estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado');
+                          
+                          return etapaValida && noPagado ? (
+                            <button
+                              onClick={() => aplicarPago(expediente.id)}
+                              className="btn btn-success btn-sm"
+                              title="Aplicar Pago"
+                            >
+                              <DollarSign size={14} className="me-1" />
+                              Pagar
+                            </button>
+                          ) : null;
+                        })()}
+
+                        <button
+                          onClick={() => verDetalles(expediente)}
+                          className="btn btn-outline-primary btn-sm"
+                          title="Ver detalles"
+                        >
+                          <Eye size={14} className="me-1" />
+                          Ver
+                        </button>
+                        
+                        <button
+                          onClick={() => editarExpediente(expediente)}
+                          className="btn btn-outline-secondary btn-sm"
+                          title="Editar"
+                        >
+                          <Edit size={14} className="me-1" />
+                          Editar
+                        </button>
+
+                        {expediente.etapa_activa !== 'Cancelada' && (
+                          <button
+                            onClick={() => iniciarCancelacion(expediente)}
+                            className="btn btn-danger btn-sm"
+                            title="Cancelar Póliza"
+                          >
+                            <XCircle size={14} className="me-1" />
+                            Cancelar
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => eliminarExpediente(expediente.id)}
+                          className="btn btn-outline-danger btn-sm"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
             {paginacion.totalPaginas > 1 && (
               <div className="card-footer">
                 <Paginacion 
@@ -3185,8 +4522,9 @@ const ListaExpedientes = React.memo(({
                       setVistaActual('formulario');
                       setModoEdicion(false);
                       limpiarFormulario();
-                      // Guardar archivo temporalmente y abrir el extractor
+                      // Guardar archivo y abrir el extractor directamente en modo automático
                       window._selectedPDFFile = file;
+                      window._autoExtractorMode = true;
                       setTimeout(() => {
                         setMostrarExtractorPDF(true);
                       }, 100);
@@ -3279,8 +4617,6 @@ const ListaExpedientes = React.memo(({
           </div>
         </div>
       )}
-        </div>
-      </div>
     </div>
   );
 });
@@ -3332,7 +4668,6 @@ const Formulario = React.memo(({
       if (datosExtraidos.cliente_id) {
         // El cliente ya fue creado o encontrado en el extractor PDF
         // Buscar el cliente en la base de datos usando el cliente_id
-        console.log('� Buscando cliente con ID:', datosExtraidos.cliente_id);
         
         try {
           const response = await fetch(`${API_URL}/api/clientes`);
@@ -3341,7 +4676,7 @@ const Formulario = React.memo(({
           
           if (clienteSeleccionadoFinal) {
             handleClienteSeleccionado(clienteSeleccionadoFinal);
-            console.log('✅ Cliente vinculado:', clienteSeleccionadoFinal.nombre || clienteSeleccionadoFinal.razonSocial, 'ID:', clienteSeleccionadoFinal.id);
+            console.log('✅ Cliente vinculado:', clienteSeleccionadoFinal.nombre || clienteSeleccionadoFinal.razonSocial);
           } else {
             console.error('❌ No se encontró el cliente con ID:', datosExtraidos.cliente_id);
           }
@@ -3352,31 +4687,16 @@ const Formulario = React.memo(({
         console.warn('⚠️ No se proporcionó cliente_id. El cliente debe ser seleccionado manualmente.');
       }
       
-      // 2. BUSCAR AGENTE POR CÓDIGO Y COMPAÑÍA
-      // El agente extraído viene en formato: "25576 - ALVARO IVAN GONZALEZ JIMENEZ"
-      let agenteCodigo = null;
-      if (datosExtraidos.agente && agentes.length > 0) {
-        // Extraer código del agente del formato "25576 - NOMBRE"
-        const codigoAgenteMatch = datosExtraidos.agente.match(/^(\d+)/);
-        if (codigoAgenteMatch) {
-          const codigoAgente = codigoAgenteMatch[1];
-          
-          // Buscar agente en el equipo de trabajo que tenga ese código
-          // Nota: Un agente puede tener diferentes códigos según la compañía
-          const agenteEncontrado = agentes.find(miembro => 
-            miembro.perfil === 'Agente' && 
-            miembro.activo &&
-            (miembro.codigo === codigoAgente || miembro.codigoAgente === codigoAgente)
-          );
-          
-          if (agenteEncontrado) {
-            agenteCodigo = agenteEncontrado.codigo || agenteEncontrado.codigoAgente;
-            console.log('✅ Agente encontrado en equipo:', agenteEncontrado.nombre, 'Código:', agenteCodigo);
-          } else {
-            console.warn('⚠️ Agente no encontrado en equipo. Código:', codigoAgente, 'Compañía:', datosExtraidos.compania);
-            console.log('💡 El agente debe ser agregado al Equipo de Trabajo antes de asignar pólizas');
-          }
-        }
+      // 2. PREPARAR NOMBRE DEL AGENTE PARA MOSTRAR EN EL FORMULARIO
+      // Los extractores ahora envían clave_agente y agente por separado
+      // El modal de agentes ya valida y vincula al agente en el equipo de trabajo
+      let agenteDisplay = '';
+      if (datosExtraidos.clave_agente && datosExtraidos.agente) {
+        agenteDisplay = `${datosExtraidos.clave_agente} - ${datosExtraidos.agente}`;
+        console.log('✅ Agente extraído:', agenteDisplay);
+      } else if (datosExtraidos.agente) {
+        agenteDisplay = datosExtraidos.agente;
+        console.log('✅ Agente extraído:', agenteDisplay);
       }
       
       // 3. BUSCAR VENDEDOR/SUB-AGENTE (si aplica)
@@ -3385,12 +4705,7 @@ const Formulario = React.memo(({
       let subAgenteId = null;
       
       // 4. POPULAR FORMULARIO CON DATOS DE LA PÓLIZA (NO sobrescribir datos del cliente)
-      // handleClienteSeleccionado YA aplicó los datos del cliente correctamente
-      console.log('📋 Datos de la póliza a aplicar:', {
-        compania: datosExtraidos.compania,
-        producto: datosExtraidos.producto,
-        numero_poliza: datosExtraidos.numero_poliza
-      });
+      console.log(`📋 Extracción completa | Póliza: ${datosExtraidos.numero_poliza} | Vehículo: ${datosExtraidos.marca} ${datosExtraidos.modelo}`);
       
       // EXCLUIR campos del cliente para NO sobrescribirlos con valores undefined del PDF
       const { 
@@ -3403,16 +4718,6 @@ const Formulario = React.memo(({
         // El resto son datos de la póliza
         ...datosPoliza 
       } = datosExtraidos;
-      
-      // DEBUG: Verificar datos del vehículo
-      console.log('🚗 DEBUG - Datos del vehículo en datosPoliza:', {
-        marca: datosPoliza.marca,
-        modelo: datosPoliza.modelo,
-        anio: datosPoliza.anio,
-        numero_serie: datosPoliza.numero_serie,
-        placas: datosPoliza.placas,
-        color: datosPoliza.color
-      });
       
       // Usar setFormulario con callback para hacer UPDATE PARCIAL
       setFormulario(prev => {
@@ -3430,6 +4735,47 @@ const Formulario = React.memo(({
           return valorPDF;
         };
 
+        // Concatenar agente para el formulario
+        const agenteParaFormulario = datosExtraidos.clave_agente && datosExtraidos.agente 
+          ? `${datosExtraidos.clave_agente} - ${datosExtraidos.agente}` 
+          : (datosExtraidos.agente || agenteDisplay || prev.agente || '');
+        
+        console.log('🔍 Aplicando agente al formulario:', agenteParaFormulario);
+
+        // ✅ NORMALIZACIÓN DE COMPAÑÍA: Buscar coincidencia case-insensitive
+        let companiaNormalizada = datosExtraidos.compania || prev.compania;
+        if (datosExtraidos.compania) {
+          const companiaEncontrada = aseguradoras.find(a => 
+            a.nombre.toLowerCase() === datosExtraidos.compania.toLowerCase()
+          );
+          if (companiaEncontrada) {
+            companiaNormalizada = companiaEncontrada.nombre;
+            console.log('✅ Compañía normalizada:', datosExtraidos.compania, '→', companiaNormalizada);
+          }
+        }
+
+        // ✅ NORMALIZACIÓN DE PRODUCTO: Buscar coincidencia parcial o exacta
+        let productoNormalizado = datosExtraidos.producto || prev.producto;
+        if (datosExtraidos.producto) {
+          // Primero buscar coincidencia exacta
+          let productoEncontrado = tiposProductos.find(p => 
+            p.nombre.toLowerCase() === datosExtraidos.producto.toLowerCase()
+          );
+          
+          // Si no hay coincidencia exacta, buscar coincidencia parcial (ej: "Autos" en "Tu Auto Seguro Más")
+          if (!productoEncontrado) {
+            productoEncontrado = tiposProductos.find(p => 
+              datosExtraidos.producto.toLowerCase().includes(p.nombre.toLowerCase()) ||
+              p.nombre.toLowerCase().includes(datosExtraidos.producto.toLowerCase())
+            );
+          }
+          
+          if (productoEncontrado) {
+            productoNormalizado = productoEncontrado.nombre;
+            console.log('✅ Producto normalizado:', datosExtraidos.producto, '→', productoNormalizado);
+          }
+        }
+
         const nuevoFormulario = {
           ...prev, // Mantener TODO (incluye datos del cliente que ya están bien)
           ...datosPoliza, // Aplicar datos de la póliza base
@@ -3445,12 +4791,24 @@ const Formulario = React.memo(({
           movimiento: aplicarSiVacio(datosPoliza.movimiento, prev.movimiento),
           // Si no tiene fecha_emision, usar fecha actual como valor inicial
           fecha_emision: datosPoliza.fecha_emision || prev.fecha_emision || new Date().toISOString().split('T')[0],
-          // Forzar valores de la póliza
-          agente: agenteCodigo || '',
+          // Forzar valores críticos de la póliza que vienen del PDF
+          agente: agenteParaFormulario,
+          clave_agente: datosExtraidos.clave_agente || prev.clave_agente || '',
           sub_agente: '',
           etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
-          compania: datosExtraidos.compania,
-          producto: datosExtraidos.producto,
+          // Usar datos normalizados del PDF
+          compania: companiaNormalizada,
+          producto: productoNormalizado,
+          tipo_cobertura: datosExtraidos.tipo_cobertura || datosPoliza.tipo_cobertura || prev.tipo_cobertura,
+          deducible: datosExtraidos.deducible || datosPoliza.deducible || prev.deducible,
+          suma_asegurada: datosExtraidos.suma_asegurada || datosPoliza.suma_asegurada || prev.suma_asegurada,
+          // Vehículo
+          marca: datosExtraidos.marca || datosPoliza.marca || prev.marca,
+          modelo: datosExtraidos.modelo || datosPoliza.modelo || prev.modelo,
+          anio: datosExtraidos.anio || datosPoliza.anio || prev.anio,
+          numero_serie: datosExtraidos.numero_serie || datosPoliza.numero_serie || prev.numero_serie,
+          placas: datosExtraidos.placas || datosPoliza.placas || prev.placas,
+          color: datosExtraidos.color || datosPoliza.color || prev.color,
           // ====== CONFIGURACIÓN DE PAGOS FRACCIONADOS ======
           // Mapear tipo_pago y frecuenciaPago desde forma_pago si existe
           tipo_pago: datosExtraidos.tipo_pago || prev.tipo_pago,
@@ -3465,29 +4823,7 @@ const Formulario = React.memo(({
           __pdfSize: datosExtraidos.__pdfSize || prev.__pdfSize
         };
         
-        console.log('✅ Formulario actualizado - Datos del cliente preservados:', {
-          cliente_id: nuevoFormulario.cliente_id,
-          razon_social: nuevoFormulario.razon_social,
-          rfc: nuevoFormulario.rfc,
-          email: nuevoFormulario.email,
-          telefono_movil: nuevoFormulario.telefono_movil
-        });
-        
-        console.log('✅ Formulario actualizado - Datos de la póliza aplicados:', {
-          compania: nuevoFormulario.compania,
-          producto: nuevoFormulario.producto,
-          numero_poliza: nuevoFormulario.numero_poliza,
-          inicio_vigencia: nuevoFormulario.inicio_vigencia
-        });
-        
-        console.log('🚗 DEBUG - Datos del vehículo en nuevoFormulario:', {
-          marca: nuevoFormulario.marca,
-          modelo: nuevoFormulario.modelo,
-          anio: nuevoFormulario.anio,
-          numero_serie: nuevoFormulario.numero_serie,
-          placas: nuevoFormulario.placas,
-          color: nuevoFormulario.color
-        });
+        console.log(`✅ Formulario actualizado | Cliente: ${nuevoFormulario.cliente_id || 'N/A'} | Póliza: ${nuevoFormulario.numero_poliza || 'N/A'} | Vehículo: ${nuevoFormulario.marca} ${nuevoFormulario.modelo} ${nuevoFormulario.anio}`);
         
         return nuevoFormulario;
       });
@@ -3499,13 +4835,21 @@ const Formulario = React.memo(({
             const formularioConCalculos = actualizarCalculosAutomaticos(prev);
             // ✅ SOLO aplicar los cálculos automáticos, NO sobrescribir datos del PDF
             // Los datos del PDF ya están en 'prev' del setFormulario anterior
-            return {
+            const formularioFinal = {
               ...prev,
               ...formularioConCalculos
               // NO sobrescribir nada más - los datos del PDF ya están en 'prev'
             };
+            
+            return formularioFinal;
           });
           console.log('✅ Cálculos automáticos aplicados (preservando datos del PDF)');
+          
+          // 🔍 MARCAR que el snapshot debe guardarse después de que el formulario termine de actualizarse
+          setTimeout(() => {
+            globalSnapshotPendiente = true;
+            console.log('📸 Snapshot pendiente - se guardará en próximo render');
+          }, 200);
         }, 150);
       } else {
         // FORZAR la actualización después de un pequeño delay
@@ -3514,7 +4858,7 @@ const Formulario = React.memo(({
             ...prev,
             compania: datosExtraidos.compania,
             producto: datosExtraidos.producto,
-            agente: agenteCodigo || '',
+            agente: agenteDisplay || '',
             // Preservar datos del vehículo también en este caso
             marca: datosExtraidos.marca,
             modelo: datosExtraidos.modelo,
@@ -3537,6 +4881,12 @@ const Formulario = React.memo(({
             movimiento: datosExtraidos.movimiento
           }));
           console.log('✅ Valores forzados después del render (incluyendo vehículo)');
+          
+          // 🔍 MARCAR que el snapshot debe guardarse (modo fallback)
+          setTimeout(() => {
+            globalSnapshotPendiente = true;
+            console.log('📸 Snapshot pendiente (fallback) - se guardará en próximo render');
+          }, 150);
         }, 100);
       }
       
@@ -3549,7 +4899,7 @@ const Formulario = React.memo(({
         clienteCreado: clienteSeleccionadoFinal && !datosExtraidos.cliente_existente,
         clienteEncontrado: !!datosExtraidos.cliente_existente,
         nombreCliente: clienteSeleccionadoFinal?.nombre || 'N/A',
-        agenteAsignado: !!agenteCodigo,
+        agenteAsignado: !!agenteDisplay,
         poliza: datosExtraidos.numero_poliza || 'N/A',
         compania: datosExtraidos.compania || 'N/A'
       });
@@ -3563,7 +4913,7 @@ const Formulario = React.memo(({
       } else {
         console.log('  Cliente: ⚠️ No pudo crearse - revisar datos');
       }
-      console.log('  Agente:', agenteCodigo ? '✅ Asignado' : '⚠️ No encontrado (revisar código)');
+      console.log('  Agente:', agenteDisplay ? `✅ ${agenteDisplay}` : '⚠️ No extraído del PDF');
       console.log('  Póliza:', datosExtraidos.numero_poliza || 'N/A');
       console.log('  Compañía:', datosExtraidos.compania || 'N/A');
       
@@ -3582,15 +4932,15 @@ const Formulario = React.memo(({
   }, [formulario, actualizarCalculosAutomaticos, setFormulario, handleClienteSeleccionado, agentes]);
 
   return (
-    <div className="p-4">
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">
+    <div className="p-3">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <h5 className="mb-0" style={{ fontSize: '1.1rem' }}>
           {modoEdicion ? 'Editar Expediente' : 'Nuevo Expediente'}
-        </h3>
+        </h5>
         <div className="d-flex gap-2">
           <button
             onClick={() => setVistaActual('lista')}
-            className="btn btn-outline-secondary"
+            className="btn btn-outline-secondary btn-sm"
           >
             Cancelar
           </button>
@@ -3598,13 +4948,27 @@ const Formulario = React.memo(({
       </div>
 
       <div className="card">
-        <div className="card-body">
+        <div className="card-body" style={{ fontSize: '0.85rem' }}>
+          <style>{`
+            .card-body .form-label { margin-bottom: 0.25rem; font-size: 0.8rem; }
+            .card-body .form-control, 
+            .card-body .form-select { 
+              padding: 0.25rem 0.5rem; 
+              font-size: 0.85rem;
+              height: calc(1.5em + 0.5rem + 2px);
+            }
+            .card-body .row { margin-bottom: 0.5rem; }
+            .card-body h6.card-title { font-size: 0.9rem; }
+            .card-body h6 { font-size: 0.85rem; }
+            .card-body .alert { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+            .card-body hr { margin: 0.5rem 0; }
+          `}</style>
           {datosImportadosDesdePDF && !modoEdicion && infoImportacion && (
-            <div className="alert alert-success alert-dismissible fade show mb-4" role="alert">
-              <CheckCircle className="me-2" size={20} />
+            <div className="alert alert-success alert-dismissible fade show mb-2 py-2 px-3" role="alert" style={{ fontSize: '0.8rem' }}>
+              <CheckCircle className="me-2" size={16} />
               <div>
                 <strong>✅ Datos importados desde PDF exitosamente</strong>
-                <ul className="mb-0 mt-2" style={{ fontSize: '0.9rem' }}>
+                <ul className="mb-0 mt-1" style={{ fontSize: '0.75rem' }}>
                   {infoImportacion.clienteCreado && (
                     <li>🆕 <strong>Cliente creado automáticamente:</strong> {infoImportacion.nombreCliente}</li>
                   )}
@@ -3638,10 +5002,10 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Cliente */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>
               {clienteSeleccionado?.tipoPersona === 'Persona Moral' ? 'Datos de la Empresa' : 'Datos del Cliente'}
-            </h5>
+            </h6>
             
             {/* Buscador de Cliente */}
             <BuscadorCliente
@@ -3658,33 +5022,33 @@ const Formulario = React.memo(({
 
             {/* Datos del cliente (solo lectura si está seleccionado) */}
             {clienteSeleccionado && (
-              <div className="row g-3 mt-2" key={clienteSeleccionado.id}>
+              <div className="row g-2 mt-1" key={clienteSeleccionado.id}>
                 {clienteSeleccionado.tipoPersona === 'Persona Moral' ? (
                   // Campos para Persona Moral (Empresa)
                   <>
                     <div className="col-md-12">
-                      <label className="form-label">Razón Social</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Razón Social</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.razon_social || ''}
                         readOnly
                       />
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label">Nombre Comercial</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre Comercial</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.nombre_comercial || ''}
                         readOnly
                       />
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label">RFC</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>RFC</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.rfc || ''}
                         readOnly
                       />
@@ -3692,23 +5056,23 @@ const Formulario = React.memo(({
                     
                     {/* Datos de Contacto - Editables */}
                     <div className="col-12">
-                      <hr className="my-3" />
-                      <h6 className="text-muted mb-2">
+                      <hr className="my-2" />
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         💼 Datos del Contacto Principal
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Editable - Se actualizará el cliente)
-                        </small>
-                      </h6>
-                      <div className="alert alert-info py-2 px-3 mb-3" role="alert" style={{ fontSize: '0.85rem' }}>
+                        </span>
+                      </small>
+                      <div className="alert alert-info py-1 px-2 mb-2" role="alert" style={{ fontSize: '0.7rem' }}>
                         Requisito mínimo para guardar póliza (PM): <strong>Nombre</strong> y <strong>Email</strong> o <strong>Teléfono Móvil</strong>.
                       </div>
                     </div>
                     
                     <div className="col-md-4">
-                      <label className="form-label">Nombre del Contacto <span className="text-danger">*</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre del Contacto <span className="text-danger">*</span></label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_nombre || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
@@ -3735,30 +5099,30 @@ const Formulario = React.memo(({
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Email del Contacto <span className="text-muted">(uno de estos)</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email del Contacto <span className="text-muted" style={{ fontSize: '0.7rem' }}>(uno de estos)</span></label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_email || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
                         placeholder="55 1234 5678"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil <span className="text-muted">(uno de estos)</span></label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil <span className="text-muted" style={{ fontSize: '0.7rem' }}>(uno de estos)</span></label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
@@ -3770,75 +5134,78 @@ const Formulario = React.memo(({
                   <>
                     {/* Datos del Cliente (Solo lectura) */}
                     <div className="col-12">
-                      <h6 className="text-muted mb-3">
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         👤 Datos del Cliente
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Solo lectura)
-                        </small>
-                      </h6>
+                        </span>
+                      </small>
                     </div>
                     
-                    <div className="col-md-4">
-                      <label className="form-label">Nombre</label>
+                    {/* Primera fila: Nombre, Apellidos y RFC */}
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.nombre ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">Apellido Paterno</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Paterno</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.apellido_paterno ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">Apellido Materno</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Materno</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.apellido_materno ?? ''}
                         readOnly
                       />
                     </div>
-                    <div className="col-md-4">
-                      <label className="form-label">RFC</label>
+                    <div className="col-md-3">
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>RFC</label>
                       <input
                         type="text"
-                        className="form-control bg-light"
+                        className="form-control form-control-sm bg-light"
                         value={formulario.rfc ?? ''}
                         readOnly
                       />
                     </div>
+                    
+                    {/* Segunda fila: Email y Teléfonos */}
                     <div className="col-md-4">
-                      <label className="form-label">Email</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email</label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.email || ''}
                         onChange={(e) => setFormulario({...formulario, email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, telefono_fijo: e.target.value})}
                         placeholder="55 5555 5555"
@@ -3847,70 +5214,70 @@ const Formulario = React.memo(({
                     
                     {/* Datos de Contacto Adicional/Gestor - Editables */}
                     <div className="col-12">
-                      <hr className="my-3" />
-                      <h6 className="text-muted mb-3">
+                      <hr className="my-2" />
+                      <small className="text-muted d-block mb-1" style={{ fontSize: '0.75rem' }}>
                         💼 Contacto Adicional / Gestor
-                        <small className="ms-2" style={{ fontSize: '12px', fontWeight: 'normal' }}>
+                        <span className="ms-1" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
                           (Opcional - Editable)
-                        </small>
-                      </h6>
+                        </span>
+                      </small>
                     </div>
                     
                     <div className="col-md-4">
-                      <label className="form-label">Nombre del Contacto</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Nombre del Contacto</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_nombre || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_nombre: e.target.value})}
                         placeholder="Nombre"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Apellido Paterno</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Paterno</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_apellido_paterno || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_apellido_paterno: e.target.value})}
                         placeholder="Apellido Paterno"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Apellido Materno</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Apellido Materno</label>
                       <input
                         type="text"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_apellido_materno || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_apellido_materno: e.target.value})}
                         placeholder="Apellido Materno"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Email del Contacto</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Email del Contacto</label>
                       <input
                         type="email"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_email || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_email: e.target.value})}
                         placeholder="correo@ejemplo.com"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Fijo</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Fijo</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_fijo || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_fijo: e.target.value})}
                         placeholder="55 1234 5678"
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Teléfono Móvil</label>
+                      <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Teléfono Móvil</label>
                       <input
                         type="tel"
-                        className="form-control"
+                        className="form-control form-control-sm"
                         value={formulario.contacto_telefono_movil || ''}
                         onChange={(e) => setFormulario({...formulario, contacto_telefono_movil: e.target.value})}
                         placeholder="55 5555 5555"
@@ -3923,13 +5290,13 @@ const Formulario = React.memo(({
           </div>
 
           {/* Datos del Seguro */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">Datos del Seguro</h5>
-            <div className="row g-3">
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Datos del Seguro</h6>
+            <div className="row g-2">
               <div className="col-md-4">
-                <label className="form-label">Compañía <span className="text-danger">*</span></label>
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Compañía <span className="text-danger">*</span></label>
                 <select
-                  className="form-select"
+                  className="form-select form-select-sm"
                   value={formulario.compania}
                   onChange={(e) => {
                     const nuevaCompania = e.target.value;
@@ -3999,7 +5366,12 @@ const Formulario = React.memo(({
             </div>
           </div>
 
-          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
+          {(() => {
+            // Verificar si el producto es de tipo autos
+            if (!formulario.producto) return false;
+            const producto = tiposProductos.find(p => p.id === formulario.producto);
+            return producto && producto.nombre && producto.nombre.toUpperCase().includes('AUTO');
+          })() && (
             <div className="alert alert-info mb-4">
               <h6 className="alert-heading">
                 <AlertCircle className="me-2" size={20} />
@@ -4012,7 +5384,12 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Vehículo - Solo si es Autos */}
-          {formulario.producto && formulario.producto.toLowerCase().includes('autos') && (
+          {(() => {
+            // Verificar si el producto es de tipo autos
+            if (!formulario.producto) return false;
+            const producto = tiposProductos.find(p => p.id === formulario.producto);
+            return producto && producto.nombre && producto.nombre.toUpperCase().includes('AUTO');
+          })() && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
               <div className="row g-3">
@@ -4156,9 +5533,9 @@ const Formulario = React.memo(({
 
           {/* Datos de la Póliza - Visible para Autos o si ya existen valores (edición) */}
           {(formulario.producto === 'Autos Individual' || formulario.uso || formulario.servicio || formulario.movimiento) && (
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Datos de la Póliza</h5>
-              <div className="row g-3">
+            <div className="mb-2">
+              <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Datos de la Póliza</h6>
+              <div className="row g-2">
                 <div className="col-md-6">
                   <label className="form-label">Número de Póliza</label>
                   <input
@@ -4261,18 +5638,13 @@ const Formulario = React.memo(({
             <div className="row g-3">
               <div className="col-md-6">
                 <label className="form-label">Agente</label>
-                <select
-                  className="form-select"
+                <input
+                  type="text"
+                  className="form-control"
                   value={formulario.agente ?? ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, agente: e.target.value }))}
-                >
-                  <option value="">Seleccionar agente</option>
-                  {agentes.map(agente => (
-                    <option key={agente.id} value={agente.codigo}>
-                      {agente.codigo} - {agente.nombre} {agente.apellido_paterno} {agente.apellido_materno}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="Clave y nombre del agente"
+                />
               </div>
               <div className="col-md-6">
                 <label className="form-label">Sub Agente</label>
@@ -4393,38 +5765,38 @@ const Formulario = React.memo(({
           </div>
 
           {/* Fechas y Vigencia - SIEMPRE VISIBLE */}
-          <div className="mb-4">
-            <h5 className="card-title border-bottom pb-2">Fechas y Vigencia</h5>
-            <div className="row g-3">
-              <div className="col-md-3">
-                <label className="form-label">Fecha de Emisión</label>
+          <div className="mb-2">
+            <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Fechas y Vigencia</h6>
+            <div className="row g-2">
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Fecha de Emisión</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.fecha_emision || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormulario(prev => ({ ...prev, fecha_emision: e.target.value }))}
                 />
-                <small className="form-text text-muted">
+                <small className="form-text text-muted" style={{ fontSize: '0.65rem' }}>
                   Fecha en que se emitió la póliza
                 </small>
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Fecha de Captura</label>
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Fecha de Captura</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.fecha_captura || new Date().toISOString().split('T')[0]}
                   onChange={(e) => setFormulario(prev => ({ ...prev, fecha_captura: e.target.value }))}
                 />
-                <small className="form-text text-muted">
+                <small className="form-text text-muted" style={{ fontSize: '0.65rem' }}>
                   Fecha de registro en el sistema
                 </small>
               </div>
-              <div className="col-md-3">
-                <label className="form-label">Inicio de Vigencia</label>
+              <div className="col-md-2">
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Inicio de Vigencia</label>
                 <input
                   type="date"
-                  className="form-control"
+                  className="form-control form-control-sm"
                   value={formulario.inicio_vigencia ?? ''}
                   onChange={(e) => {
                     const nuevoFormulario = { ...formulario, inicio_vigencia: e.target.value };
@@ -4447,16 +5819,16 @@ const Formulario = React.memo(({
                 />
               </div>
               <div className="col-md-3">
-                <label className="form-label">📅 Aviso de Renovación</label>
+                <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>📅 Aviso de Renovación</label>
                 <input
                   type="date"
-                  className="form-control bg-light"
+                  className="form-control form-control-sm bg-light"
                   value={formulario.fecha_aviso_renovacion || ''}
                   readOnly
                   disabled
                   style={{ cursor: 'not-allowed' }}
                 />
-                <small className="text-muted">Se calcula automáticamente (Término - 30 días)</small>
+                <small className="text-muted" style={{ fontSize: '0.65rem' }}>Se calcula automáticamente (Término - 30 días)</small>
               </div>
             </div>
           </div>
@@ -4586,7 +5958,7 @@ const Formulario = React.memo(({
               </div>
               
               <div className="col-md-3">
-                <label className="form-label">Fecha de Pago</label>
+                <label className="form-label">Fecha Límite de Pago</label>
                 <input
                   type="date"
                   className="form-control"
@@ -4657,7 +6029,30 @@ const Formulario = React.memo(({
                 </select>
               </div>
 
-              {formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago && formulario.inicio_vigencia && (
+              {/* Campo de Fecha de Pago - Solo si está marcado como Pagado */}
+              {formulario.estatusPago === 'Pagado' && (
+                <div className="col-md-6">
+                  <label className="form-label">
+                    Fecha de Pago
+                    <small className="text-muted ms-2">(¿Cuándo se pagó?)</small>
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={formulario.fecha_ultimo_pago || ''}
+                    onChange={(e) => setFormulario(prev => ({ ...prev, fecha_ultimo_pago: e.target.value }))}
+                  />
+                  <small className="text-muted d-block mt-1">
+                    Si no se especifica, se usará la fecha de captura
+                  </small>
+                </div>
+              )}
+
+              {/* Mostrar calendario para Fraccionado y Anual */}
+              {formulario.inicio_vigencia && (
+                (formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago) || 
+                formulario.tipo_pago === 'Anual'
+              ) && (
                 <div className="col-12 mt-3">
                   <CalendarioPagos 
                     expediente={formulario} 
@@ -4787,14 +6182,14 @@ const Formulario = React.memo(({
             <button
               type="button"
               onClick={() => setVistaActual('lista')}
-              className="btn btn-outline-secondary"
+              className="btn btn-outline-secondary btn-sm"
             >
               Cancelar
             </button>
             <button
               type="button"
               onClick={guardarExpediente}
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
             >
               {modoEdicion ? 'Actualizar' : 'Guardar'} Expediente
             </button>
@@ -4834,9 +6229,20 @@ const DetallesExpediente = React.memo(({
   calcularSiguientePago,
   calculartermino_vigencia,
   calcularProximoPago,
-  abrirModalCompartir
+  abrirModalCompartir,
+  enviarAvisoPago,
+  historial = [] // Historial del expediente
 }) => {
   const [clienteInfo, setClienteInfo] = useState(null);
+  
+  // Debug: verificar que el historial llega correctamente
+  useEffect(() => {
+    console.log('🔍 DetallesExpediente - Historial recibido:', {
+      cantidad: historial?.length || 0,
+      historial: historial,
+      expediente_id: expedienteSeleccionado?.id
+    });
+  }, [historial, expedienteSeleccionado?.id]);
   
   // Estados para controlar secciones colapsables (todas cerradas por defecto)
   const [mostrarAsegurado, setMostrarAsegurado] = useState(false);
@@ -4998,14 +6404,21 @@ const DetallesExpediente = React.memo(({
                 )}
               />
             </div>
-            {expedienteSeleccionado.tipo_pago === 'Fraccionado' && 
-             expedienteSeleccionado.frecuenciaPago && 
-             expedienteSeleccionado.inicio_vigencia && (
+            {/* Mostrar calendario para Fraccionado y Anual */}
+            {expedienteSeleccionado.inicio_vigencia && (
+              (expedienteSeleccionado.tipo_pago === 'Fraccionado' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
+              expedienteSeleccionado.tipo_pago === 'Anual' ||
+              (expedienteSeleccionado.forma_pago?.toUpperCase() === 'FRACCIONADO' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
+              expedienteSeleccionado.forma_pago?.toUpperCase() === 'ANUAL'
+            ) && (
               <div className="col-12">
                 <CalendarioPagos 
+                  key={`calendario-${expedienteSeleccionado?.id}-${historial?.length || 0}`}
                   expediente={expedienteSeleccionado}
                   calcularProximoPago={calcularProximoPago}
                   mostrarResumen={true}
+                  onEnviarAviso={enviarAvisoPago}
+                  historial={historial}
                 />
               </div>
             )}
@@ -5023,6 +6436,11 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  
+  // 💰 Estados para aviso/recordatorio de pago
+  const [pagoParaNotificar, setPagoParaNotificar] = useState(null);
+  const [expedienteDelPago, setExpedienteDelPago] = useState(null);
+  const [mostrarModalAvisoPago, setMostrarModalAvisoPago] = useState(false);
   
   // Estados para flujo de renovación
   const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
@@ -5053,6 +6471,21 @@ const ModuloExpedientes = () => {
       }
     };
     fetchAgentes();
+    
+    // Exponer función global para recargar agentes desde el modal de extracción
+    window.recargarAgentes = (nuevosAgentes) => {
+      const agentesOrdenados = nuevosAgentes.sort((a, b) => {
+        const nombreA = `${a.nombre} ${a.apellido_paterno}`.toLowerCase();
+        const nombreB = `${b.nombre} ${b.apellido_paterno}`.toLowerCase();
+        return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
+      });
+      setAgentes(agentesOrdenados);
+    };
+    
+    // Cleanup
+    return () => {
+      delete window.recargarAgentes;
+    };
   }, []);
   
   // Cargar expedientes y clientes desde el backend
@@ -5076,60 +6509,13 @@ const ModuloExpedientes = () => {
         setClientes(clientesData);
         setClientesMap(mapa);
         
-        // 4. Normalizar estatusPago respetando el valor de la BD
-        const expedientesProcesados = expedientesData.map(exp => {
-          // ✅ RESPETAR EL ESTATUS QUE VIENE DE LA BASE DE DATOS
-          let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
-          
-          // Normalizar para comparación (case-insensitive)
-          const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
-          
-          // Normalizar variaciones a formato estándar
-          if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-            estatusPagoCalculado = 'Pagado';
-          } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
-            estatusPagoCalculado = 'Cancelado';
-          } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
-            estatusPagoCalculado = 'Vencido';
-          } else if (estatusNormalizado === 'por vencer') {
-            estatusPagoCalculado = 'Por Vencer';
-          } else if (estatusNormalizado === 'pendiente') {
-            estatusPagoCalculado = 'Pendiente';
-          } else if (estatusPagoCalculado) {
-            // Si tiene algún valor que no reconocemos, mantenerlo y solo normalizar capitalización
-            estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
-            console.log(`⚠️ Estatus no reconocido pero preservado: "${estatusPagoCalculado}" en póliza ${exp.numero_poliza}`);
-          } else {
-            // Solo si NO viene ningún estatus, calcular basándose en la fecha
-            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-            if (fechaVencimiento) {
-              const fechaVenc = new Date(fechaVencimiento);
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              fechaVenc.setHours(0, 0, 0, 0);
-              
-              if (fechaVenc < hoy) {
-                estatusPagoCalculado = 'Vencido';
-              } else {
-                estatusPagoCalculado = 'Pendiente';
-              }
-            } else {
-              estatusPagoCalculado = 'Pendiente';
-            }
-          }
-          
-          return {
-            ...exp,
-            estatusPago: estatusPagoCalculado
-          };
-        });
-        
-        setExpedientes(expedientesProcesados);
+        // 🔥 Ya no normalizamos estatusPago - se calcula dinámicamente con calcularEstatusPagoActual()
+        setExpedientes(expedientesData);
         
         // Detectar pólizas duplicadas
-        if (expedientesProcesados.length > 0) {
+        if (expedientesData.length > 0) {
           const grupos = {};
-          expedientesProcesados.forEach(exp => {
+          expedientesData.forEach(exp => {
             if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
               const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
               if (!grupos[clave]) {
@@ -5158,6 +6544,19 @@ const ModuloExpedientes = () => {
     };
     
     cargarDatos();
+  }, []);
+  
+  // 💰 Funciones para aviso/recordatorio de pago
+  const enviarAvisoPago = useCallback((pago, expediente) => {
+    setPagoParaNotificar(pago);
+    setExpedienteDelPago(expediente);
+    setMostrarModalAvisoPago(true);
+  }, []);
+  
+  const cerrarModalAvisoPago = useCallback(() => {
+    setMostrarModalAvisoPago(false);
+    setPagoParaNotificar(null);
+    setExpedienteDelPago(null);
   }, []);
   
   const [vistaActual, setVistaActual] = useState('lista');
@@ -5200,6 +6599,9 @@ const ModuloExpedientes = () => {
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
   const [comprobantePago, setComprobantePago] = useState(null);
   const [procesandoPago, setProcesandoPago] = useState(false);
+  const [fechaUltimoPago, setFechaUltimoPago] = useState(''); // Fecha en que realmente se pagó
+  const [numeroReciboPago, setNumeroReciboPago] = useState(1); // Número de recibo a pagar (para fraccionados)
+  const [historialExpediente, setHistorialExpediente] = useState([]); // Historial del expediente seleccionado
   
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
@@ -5232,7 +6634,6 @@ const ModuloExpedientes = () => {
         }
       } catch (error) {
         console.error('Error cargando productos:', error);
-        // Fallback a productos estáticos si hay error
         setTiposProductos([
           { id: 1, nombre: 'Autos' },
           { id: 2, nombre: 'Vida' },
@@ -5402,35 +6803,35 @@ const estadoInicialFormulario = {
   const [formularioOriginal, setFormularioOriginal] = useState(null); // Snapshot al abrir edición
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const debugLogOnceRef = useRef(false);
-  const snapshotPendiente = useRef(false); // Flag para capturar snapshot cuando esté listo
 
   // 📸 Capturar snapshot cuando el formulario esté completamente cargado en modo edición
-  // ⚠️ DESHABILITADO: Ahora se captura INMEDIATAMENTE en editarExpediente para evitar sobrescritura
+  // 📸 CAPTURAR SNAPSHOT cuando el formulario termine de cargarse (PDF + BD + Cálculos)
   useEffect(() => {
-    // Limpiar flag cuando se sale de edición
-    if (!modoEdicion) {
-      snapshotPendiente.current = false;
-    }
-    
-    // ⚠️ COMENTADO: Ya no necesitamos capturar aquí, se hace inmediatamente en editarExpediente
-    /*
-    if (snapshotPendiente.current && modoEdicion && formulario.id) {
-      // Verificar que los datos de contacto están cargados
-      const tieneContacto = formulario.contacto_nombre || formulario.contacto_email || formulario.contacto_telefono_fijo;
+    // Si hay un snapshot pendiente Y el formulario está listo
+    if (globalSnapshotPendiente && formulario) {
+      // Verificar que los datos están completos (o al menos tiene algo cargado)
+      const tieneNumeroPoliza = formulario.numero_poliza;
+      const tieneCompania = formulario.compania;
       
-      if (tieneContacto || clienteSeleccionado) {
-        console.log('📸 Capturando snapshot del formulario con datos completos:', {
-          id: formulario.id,
+      if (tieneNumeroPoliza && tieneCompania) {
+        console.log('📸 Capturando snapshot del formulario completo:', {
+          numero_poliza: formulario.numero_poliza,
+          compania: formulario.compania,
           contacto_nombre: formulario.contacto_nombre,
-          contacto_email: formulario.contacto_email,
-          estatusPago: formulario.estatusPago,
-          estatus_pago: formulario.estatus_pago
+          fecha_emision: formulario.fecha_emision,
+          total_campos: Object.keys(formulario).filter(k => !k.startsWith('_')).length
         });
         setFormularioOriginal(JSON.parse(JSON.stringify(formulario)));
-        snapshotPendiente.current = false;
+        globalSnapshotPendiente = false;
       }
     }
-    */
+  }, [formulario]); // Se ejecuta cada vez que el formulario cambia
+  
+  // Limpiar flag cuando se cambia de vista
+  useEffect(() => {
+    if (vistaActual !== 'formulario') {
+      globalSnapshotPendiente = false;
+    }
   }, [modoEdicion]);
 
   // Debug solicitado: imprimir TODOS los campos visibles del editor con su valor actual
@@ -5612,7 +7013,6 @@ const estadoInicialFormulario = {
       const fechaPago = new Date(fechaInicio);
       fechaPago.setDate(fechaPago.getDate() + periodoGracia);
       const resultado = fechaPago.toISOString().split('T')[0];
-      console.log(`📅 Pago #1: ${inicio_vigencia} + ${periodoGracia} días = ${resultado}`);
       return resultado;
     }
     
@@ -5626,8 +7026,6 @@ const estadoInicialFormulario = {
       fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
       
       const resultado = fechaPagoSubsecuente.toISOString().split('T')[0];
-      console.log(`📅 Pago #${numeroPago}: ${inicio_vigencia} + ${mesesAAgregar} meses = ${resultado}`);
-      
       return resultado;
     }
     
@@ -5660,25 +7058,17 @@ const estadoInicialFormulario = {
   }, []);
 
   const actualizarCalculosAutomaticos = useCallback((formularioActual) => {
-    // 🚨 DEBUG: Verificar campos problemáticos al ENTRAR a actualizarCalculosAutomaticos
-    console.log('🔧 DEBUG actualizarCalculosAutomaticos ENTRADA:');
-    console.log('🔧   cargo_pago_fraccionado:', formularioActual.cargo_pago_fraccionado);
-    console.log('🔧   gastos_expedicion:', formularioActual.gastos_expedicion);
-    console.log('🔧   inicio_vigencia:', formularioActual.inicio_vigencia);
-    console.log('🔧   termino_vigencia:', formularioActual.termino_vigencia);
+    // Cálculos automáticos de vigencias y fechas
     
     // ✅ Siempre recalcular el término de vigencia a partir del inicio
     // Esto permite que el formulario reaccione cuando el usuario edita inicio_vigencia
     const termino_vigencia = calculartermino_vigencia(formularioActual.inicio_vigencia);
     
-    console.log('🔧   termino_vigencia (calculado):', termino_vigencia);
     
-    // 🔧 Calcular periodo de gracia: usar valor extraído del PDF si existe (convertir a número), sino aplicar regla de negocio
+    // Calcular periodo de gracia: usar valor extraído del PDF si existe (convertir a número), sino aplicar regla de negocio
     const periodoGracia = formularioActual.periodo_gracia 
       ? parseInt(formularioActual.periodo_gracia, 10)
       : (formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
-    
-    console.log('🔧 actualizarCalculosAutomaticos - Periodo de gracia:', periodoGracia, '| Del formulario:', formularioActual.periodo_gracia, '| Tipo:', typeof formularioActual.periodo_gracia);
     
     // ⚠️ Si la fecha fue editada manualmente, NO recalcular
     if (formularioActual._fechaManual) {
@@ -5741,10 +7131,7 @@ const estadoInicialFormulario = {
       fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
     };
     
-    // 🚨 DEBUG: Verificar campos problemáticos al SALIR de actualizarCalculosAutomaticos
-    console.log('🔧 DEBUG actualizarCalculosAutomaticos SALIDA:');
-    console.log('🔧   cargo_pago_fraccionado:', resultado.cargo_pago_fraccionado);
-    console.log('🔧   gastos_expedicion:', resultado.gastos_expedicion);
+
     
     return resultado;
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
@@ -6242,6 +7629,271 @@ const estadoInicialFormulario = {
       }
     }, [cambiarEstadoExpediente]);
 
+  // 💰 Enviar aviso de pago por WhatsApp
+  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
+    try {
+      // Obtener datos del cliente
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (!respCliente?.success) {
+        toast.error('No se pudo obtener la información del cliente');
+        return;
+      }
+      const cliente = respCliente.data;
+      
+      // Verificar que el cliente tenga teléfono móvil
+      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+      
+      if (!telefono) {
+        toast.error('El cliente no tiene teléfono móvil registrado');
+        return;
+      }
+
+      // Limpiar el número de teléfono
+      const telefonoLimpio = telefono.replace(/[\s\-()]/g, '');
+      
+      // Validar formato
+      if (!/^\d{10,15}$/.test(telefonoLimpio)) {
+        toast.error(`El número de teléfono "${telefono}" no es válido para WhatsApp`);
+        return;
+      }
+      
+      // Generar mensaje personalizado
+      const esVencido = pago.estado === 'Vencido';
+      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+        ? cliente.razonSocial || cliente.razon_social
+        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+      
+      const mensaje = `Hola ${nombreCliente},\n\n` +
+        `${esVencido ? '⚠️ *RECORDATORIO DE PAGO VENCIDO*' : '📋 *AVISO DE PAGO PRÓXIMO*'}\n\n` +
+        `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
+        `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
+        `*Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}*\n` +
+        `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
+        `Monto: *$${pago.monto}*\n` +
+        `Estado: ${pago.estado}\n\n` +
+        `${esVencido 
+          ? '⚠️ *IMPORTANTE:* Este pago está vencido. En caso de algún siniestro, *no tendremos cobertura de la compañía aseguradora*. Por favor, regulariza tu situación lo antes posible para reactivar tu protección.' 
+          : '📅 *IMPORTANTE:* Te recordamos que tu próximo pago está próximo a vencer. Es fundamental registrar tu pago a tiempo para *no perder la cobertura* de tu póliza y mantener tu protección activa.'
+        }\n\n` +
+        `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
+        `Saludos cordiales`;
+      
+      // Crear URL de WhatsApp
+      const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
+      
+      // Abrir WhatsApp
+      window.open(url, '_blank');
+      
+      // Obtener nombre del contacto principal
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+      
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
+      
+      // Registrar la notificación en el sistema de notificaciones
+      try {
+        await notificacionesService.registrarNotificacion({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
+          tipo_mensaje: esVencido 
+            ? notificacionesService.TIPOS_MENSAJE.PAGO_VENCIDO 
+            : notificacionesService.TIPOS_MENSAJE.RECORDATORIO_PAGO,
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: telefono,
+          mensaje: mensaje,
+          numero_poliza: expediente.numero_poliza,
+          compania: expediente.compania,
+          producto: expediente.producto,
+          estatus_pago: pago.estado,
+          estado_envio: 'enviado'
+        });
+        console.log('✅ Notificación de pago registrada');
+      } catch (error) {
+        console.error('⚠️ Error al registrar notificación (no crítico):', error);
+      }
+      
+      // Registrar evento en el historial de trazabilidad
+      try {
+        await historialService.registrarEvento({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_evento: esVencido 
+            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
+            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          usuario_nombre: 'Sistema',
+          descripcion: `Enviado a ${nombreDestinatario} por WhatsApp (${telefono})`,
+          metodo_contacto: 'WhatsApp',
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: telefono,
+          datos_adicionales: {
+            canal: 'WhatsApp',
+            numero_poliza: expediente.numero_poliza,
+            numero_pago: pago.numero,
+            total_pagos: pago.totalPagos || null,
+            fecha_pago: pago.fecha,
+            monto: pago.monto,
+            estado_pago: pago.estado,
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+          }
+        });
+        console.log('✅ Evento de pago registrado en trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+      }
+      
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por WhatsApp a ${nombreCliente}`);
+      cerrarModalAvisoPago();
+      
+      // 🔄 Recargar historial automáticamente después de 1.5 segundos
+      setTimeout(() => {
+        // Disparar evento personalizado para que TimelineExpediente recargue
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Error al enviar aviso por WhatsApp:', error);
+      toast.error('Error al enviar aviso por WhatsApp');
+    }
+  }, [cerrarModalAvisoPago]);
+
+  // 💰 Enviar aviso de pago por Email
+  const enviarAvisoPagoEmail = useCallback(async (pago, expediente) => {
+    try {
+      // Obtener datos del cliente
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (!respCliente?.success) {
+        toast.error('No se pudo obtener la información del cliente');
+        return;
+      }
+      const cliente = respCliente.data;
+      
+      // Verificar que el cliente tenga email
+      const email = cliente?.contacto_email || cliente?.email;
+      
+      if (!email) {
+        toast.error('El cliente no tiene email registrado');
+        return;
+      }
+      
+      // Generar mensaje personalizado
+      const esVencido = pago.estado === 'Vencido';
+      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
+        ? cliente.razonSocial || cliente.razon_social
+        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
+      
+      const asunto = esVencido 
+        ? `⚠️ Recordatorio: Pago Vencido - Póliza ${expediente.numero_poliza}`
+        : `📋 Aviso: Próximo Pago - Póliza ${expediente.numero_poliza}`;
+      
+      const cuerpo = `Estimado/a ${nombreCliente},\n\n` +
+        `${esVencido ? 'Le recordamos que tiene un pago vencido:' : 'Le notificamos sobre su próximo pago:'}\n\n` +
+        `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
+        `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
+        `Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}\n` +
+        `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
+        `Monto: $${pago.monto}\n` +
+        `Estado: ${pago.estado}\n\n` +
+        `${esVencido 
+          ? '⚠️ IMPORTANTE: Este pago está vencido. En caso de presentarse algún siniestro, NO TENDREMOS COBERTURA de la compañía aseguradora. Le solicitamos regularizar su situación lo antes posible para reactivar su protección y evitar inconvenientes.' 
+          : '📋 IMPORTANTE: Le recordamos que este pago está próximo a vencer. Es fundamental realizar su pago en tiempo y forma para NO PERDER LA COBERTURA de su póliza y mantener su protección activa sin interrupciones.'
+        }\n\n` +
+        `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
+        `Saludos cordiales`;
+      
+      // Obtener nombre del contacto principal
+      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+      const nombreContactoPrincipal = tieneContactoPrincipal
+        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
+        : '';
+      
+      const nombreDestinatario = nombreContactoPrincipal 
+        ? `${nombreCliente} (${nombreContactoPrincipal})`
+        : nombreCliente;
+      
+      // Registrar la notificación en el sistema de notificaciones
+      try {
+        await notificacionesService.registrarNotificacion({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
+          tipo_mensaje: esVencido 
+            ? notificacionesService.TIPOS_MENSAJE.PAGO_VENCIDO 
+            : notificacionesService.TIPOS_MENSAJE.RECORDATORIO_PAGO,
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: email,
+          asunto: asunto,
+          mensaje: cuerpo,
+          numero_poliza: expediente.numero_poliza,
+          compania: expediente.compania,
+          producto: expediente.producto,
+          estatus_pago: pago.estado,
+          estado_envio: 'enviado'
+        });
+        console.log('✅ Notificación de pago registrada');
+      } catch (error) {
+        console.error('⚠️ Error al registrar notificación (no crítico):', error);
+      }
+      
+      // Registrar evento en el historial de trazabilidad
+      try {
+        await historialService.registrarEvento({
+          expediente_id: expediente.id,
+          cliente_id: expediente.cliente_id,
+          tipo_evento: esVencido 
+            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
+            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          usuario_nombre: 'Sistema',
+          descripcion: `Enviado a ${nombreDestinatario} por Email (${email})`,
+          metodo_contacto: 'Email',
+          destinatario_nombre: nombreDestinatario,
+          destinatario_contacto: email,
+          datos_adicionales: {
+            canal: 'Email',
+            asunto: asunto,
+            numero_poliza: expediente.numero_poliza,
+            numero_pago: pago.numero,
+            total_pagos: pago.totalPagos || null,
+            fecha_pago: pago.fecha,
+            monto: pago.monto,
+            estado_pago: pago.estado,
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+          }
+        });
+        console.log('✅ Evento de pago registrado en trazabilidad');
+      } catch (error) {
+        console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
+      }
+      
+      // Abrir cliente de email con mailto
+      const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      window.location.href = mailtoUrl;
+      
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por Email a ${nombreCliente}`);
+      cerrarModalAvisoPago();
+      
+      // 🔄 Recargar historial automáticamente después de 1.5 segundos
+      setTimeout(() => {
+        // Disparar evento personalizado para que TimelineExpediente recargue
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada');
+      }, 1500);
+      
+    } catch (error) {
+      console.error('Error al enviar aviso por Email:', error);
+      toast.error('Error al enviar aviso por Email');
+    }
+  }, [cerrarModalAvisoPago]);
+
     // Manejar selección de archivo PDF
     const handleSeleccionarPDF = useCallback((event) => {
       const file = event.target.files?.[0];
@@ -6359,35 +8011,30 @@ const estadoInicialFormulario = {
         ? parseInt(expediente.periodo_gracia, 10)
         : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
       
-      const fechaInicio = new Date(expediente.inicio_vigencia);
-      const fechaPrimerPago = new Date(fechaInicio);
-      fechaPrimerPago.setDate(fechaPrimerPago.getDate() + periodoGracia);
+      // 🔥 Usar el número de recibo pagado directamente
+      const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
       
-      if (!expediente.fechaUltimoPago) {
-        // ✅ Si no hay último pago registrado, calcular el pago #2 (el primero después del inicial)
+      if (ultimoReciboPagado === 0) {
+        // ✅ Si no hay recibos pagados, calcular el pago #1
         return calcularProximoPago(
           expediente.inicio_vigencia, 
           expediente.tipo_pago, 
           expediente.frecuenciaPago, 
           expediente.compania, 
-          2,
+          1,
           periodoGracia  // 🔥 Pasar periodo de gracia
         );
       }
       
-      const fechaUltimoPago = new Date(expediente.fechaUltimoPago);
-      const mesesTranscurridos = (fechaUltimoPago.getFullYear() - fechaPrimerPago.getFullYear()) * 12 + 
-                                 (fechaUltimoPago.getMonth() - fechaPrimerPago.getMonth());
-      
-      const mesesPorPago = CONSTANTS.MESES_POR_FRECUENCIA[expediente.frecuenciaPago];
-      const numeroPagoActual = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+      // El siguiente recibo es el número siguiente al último pagado
+      const siguienteNumeroRecibo = ultimoReciboPagado + 1;
       
       return calcularProximoPago(
         expediente.inicio_vigencia,
         expediente.tipo_pago,
         expediente.frecuenciaPago,
         expediente.compania,
-        numeroPagoActual + 1,
+        siguienteNumeroRecibo,
         periodoGracia  // 🔥 Pasar periodo de gracia
       );
     }
@@ -6400,8 +8047,28 @@ const estadoInicialFormulario = {
     const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
     if (!expedienteActual) return;
     
+    // Calcular fecha límite del pago pendiente (default para fecha de pago)
+    const fechaLimite = expedienteActual.fecha_vencimiento_pago || 
+                        expedienteActual.proximo_pago || 
+                        new Date().toISOString().split('T')[0];
+    
+    // 🔥 Calcular el próximo recibo pendiente para pagos fraccionados usando el contador directo
+    let proximoReciboPendiente = 1;
+    const esFraccionado = (expedienteActual.tipo_pago === 'Fraccionado') || (expedienteActual.forma_pago?.toUpperCase() === 'FRACCIONADO');
+    
+    if (esFraccionado && (expedienteActual.frecuenciaPago || expedienteActual.frecuencia_pago)) {
+      const frecuencia = expedienteActual.frecuenciaPago || expedienteActual.frecuencia_pago;
+      const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+      const ultimoReciboPagado = expedienteActual.ultimo_recibo_pagado || 0;
+      
+      // El próximo recibo es simplemente el siguiente al último pagado
+      proximoReciboPendiente = Math.min(ultimoReciboPagado + 1, numeroPagos);
+    }
+    
     setExpedienteParaPago(expedienteActual);
     setComprobantePago(null);
+    setFechaUltimoPago(fechaLimite); // Default: fecha límite del pago pendiente
+    setNumeroReciboPago(proximoReciboPendiente); // Default: próximo recibo pendiente
     setMostrarModalPago(true);
   }, [expedientes]);
 
@@ -6417,17 +8084,47 @@ const estadoInicialFormulario = {
 
     try {
       const fechaActual = new Date().toISOString().split('T')[0];
-      const proximoPago = calcularSiguientePago(expedienteParaPago);
+      const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
+      
+      // 🔥 Calcular el próximo pago basándose en el número de recibo que se acaba de pagar
+      const proximoPago = calcularSiguientePago({
+        ...expedienteParaPago,
+        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1
+      });
+
+      // 🔥 Para fraccionados, verificar si hay más recibos pendientes
+      let hayMasRecibosPendientes = false;
+      if (esFraccionado) {
+        const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+        hayMasRecibosPendientes = numeroReciboPago < numeroPagos;
+      }
 
       // Determinar el nuevo estatus basado en si hay o no próximo pago
       let nuevoEstatusPago = 'Pagado';
       let nuevaFechaVencimiento = null;
       
-      if (proximoPago && proximoPago.trim() !== '') {
+      if (hayMasRecibosPendientes || (proximoPago && proximoPago.trim() !== '')) {
         // Hay un siguiente pago pendiente
-        nuevoEstatusPago = 'Pendiente';
         nuevaFechaVencimiento = proximoPago;
-        console.log('✅ Pago aplicado. Siguiente pago pendiente:', proximoPago);
+        
+        // 🔥 Calcular estatus usando LA MISMA LÓGICA del calendario de pagos
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const fechaProximoPago = new Date(proximoPago + 'T00:00:00');
+        fechaProximoPago.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.ceil((fechaProximoPago - hoy) / (1000 * 60 * 60 * 24));
+        
+        if (diasRestantes < 0) {
+          nuevoEstatusPago = 'Vencido';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago VENCIDO (${Math.abs(diasRestantes)} días de atraso):`, proximoPago);
+        } else if (diasRestantes <= 15) {
+          nuevoEstatusPago = 'Pago por vencer';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago por vencer (${diasRestantes} días):`, proximoPago);
+        } else {
+          nuevoEstatusPago = 'Pendiente';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago pendiente (${diasRestantes} días):`, proximoPago);
+        }
       } else {
         // No hay más pagos (Anual o último pago de fraccionado)
         nuevoEstatusPago = 'Pagado';
@@ -6439,20 +8136,21 @@ const estadoInicialFormulario = {
       const datosActualizacion = {
         estatus_pago: nuevoEstatusPago,
         fecha_vencimiento_pago: nuevaFechaVencimiento,
-        fecha_pago: fechaActual,
-        fecha_ultimo_pago: fechaActual,
+        fecha_ultimo_pago: fechaUltimoPago, // 🔥 Fecha REAL en que se pagó
+        ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1, // 🔥 Para anuales siempre es 1
         proximo_pago: proximoPago
       };
       
-      // Si está completamente pagado, cambiar etapa a "En Vigencia"
-      if (nuevoEstatusPago === 'Pagado' && expedienteParaPago.etapa_activa !== 'En Vigencia') {
+      // Solo cambiar a "En Vigencia" si está COMPLETAMENTE pagado (todos los recibos)
+      if (nuevoEstatusPago === 'Pagado' && !hayMasRecibosPendientes && expedienteParaPago.etapa_activa !== 'En Vigencia') {
         datosActualizacion.etapa_activa = 'En Vigencia';
         console.log('✅ Cambiando etapa a "En Vigencia" porque póliza está completamente pagada');
       }
 
       console.log('💰 Aplicando pago:', { 
         expedienteId: expedienteParaPago.id, 
-        fechaActual, 
+        fechaRealPago: fechaUltimoPago,
+        numeroReciboPagado: numeroReciboPago,
         proximoPago,
         nuevoEstatusPago,
         nuevaFechaVencimiento,
@@ -6473,18 +8171,93 @@ const estadoInicialFormulario = {
 
       console.log('✅ Pago registrado en BD');
 
-      // 2. Agregar comentario al historial con información del comprobante
+      // 2. Subir comprobante de pago a S3
+      let comprobanteUrl = null;
+      try {
+        console.log('📤 Subiendo comprobante a S3...');
+        console.log('📄 Archivo:', comprobantePago?.name, 'Tamaño:', comprobantePago?.size, 'bytes');
+        console.log('🔗 Endpoint:', `${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`);
+        
+        const formData = new FormData();
+        formData.append('file', comprobantePago);
+        formData.append('tipo', 'comprobante-pago');
+        formData.append('expediente_id', expedienteParaPago.id);
+        
+        const uploadResponse = await fetch(`${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`, {
+          method: 'POST',
+          body: formData
+        });
+        
+        console.log('📡 Respuesta del servidor:', uploadResponse.status, uploadResponse.statusText);
+        
+        if (uploadResponse.ok) {
+          const uploadData = await uploadResponse.json();
+          comprobanteUrl = uploadData.data?.pdf_url || uploadData.data?.url;
+          console.log('✅ Comprobante subido a S3:', comprobanteUrl);
+          console.log('📦 Respuesta completa:', uploadData);
+        } else {
+          const errorText = await uploadResponse.text();
+          console.error('❌ Error del servidor:', errorText);
+          console.warn('⚠️ No se pudo subir comprobante a S3, continuando sin URL');
+        }
+      } catch (errorUpload) {
+        console.error('❌ Error al subir comprobante:', errorUpload);
+        console.error('Stack:', errorUpload.stack);
+        // Continuar sin bloquear el proceso
+      }
+
+      // 3. Agregar comentario al historial con información del comprobante
       try {
         // Construir descripción consolidada con formato en columna
         const etapaFinal = datosActualizacion.etapa_activa || expedienteParaPago.etapa_activa;
         
+        // 🔥 Usar el número de recibo seleccionado por el usuario
+        const calcularNumeroPago = () => {
+          if (expedienteParaPago.tipo_pago === 'Anual') return 'Único';
+          
+          // Para pagos fraccionados, usar el número seleccionado en el modal
+          const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+          const totalPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          
+          return `${numeroReciboPago} de ${totalPagos}`;
+        };
+        
+        const numeroPago = calcularNumeroPago();
+        // Formatear fechas correctamente agregando timezone offset para evitar cambio de día
+        const fechaPagoFormateada = new Date(fechaUltimoPago + 'T00:00:00').toLocaleDateString('es-MX', { 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric',
+          timeZone: 'America/Mexico_City'
+        });
+        const fechaCapturaFormateada = new Date(fechaActual + 'T00:00:00').toLocaleDateString('es-MX', { 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric',
+          timeZone: 'America/Mexico_City'
+        });
+        
         let comentario;
         if (proximoPago && proximoPago.trim() !== '') {
           // Hay siguiente pago pendiente
-          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
+          comentario = `💰 Pago Registrado\n` +
+                      `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
+                      `📄 Recibo/Pago: ${numeroPago}\n` +
+                      `🧾 Comprobante: ${comprobantePago.name}\n` +
+                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                      `📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n` +
+                      `📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
         } else {
           // Póliza completamente pagada
-          comentario = `💰 Pago aplicado. Comprobante: ${comprobantePago.name}\n✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n📂 Movida a carpeta: Vigentes Pagadas`;
+          comentario = `💰 Pago Registrado (Final)\n` +
+                      `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
+                      `📄 Recibo/Pago: ${numeroPago}\n` +
+                      `🧾 Comprobante: ${comprobantePago.name}\n` +
+                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                      `✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n` +
+                      `📂 Movida a carpeta: Vigentes Pagadas`;
         }
 
         // Registrar evento estructurado de pago en historial trazabilidad
@@ -6500,15 +8273,23 @@ const estadoInicialFormulario = {
               compania: expedienteParaPago.compania,
               producto: expedienteParaPago.producto,
               monto_total: expedienteParaPago.total || null,
+              monto_pagado: expedienteParaPago.total || null,
+              fecha_pago: fechaUltimoPago,
+              numero_pago: numeroPago,
+              numero_recibo: numeroReciboPago, // 🔥 Número específico del recibo pagado
               comprobante_nombre: comprobantePago.name,
+              comprobante_url: comprobanteUrl, // URL del comprobante en S3
               siguiente_vencimiento: proximoPago || null,
               estatus_pago_nuevo: nuevoEstatusPago,
-              etapa_activa: etapaFinal
+              etapa_activa: etapaFinal,
+              tipo_pago: expedienteParaPago.tipo_pago,
+              frecuencia_pago: expedienteParaPago.frecuenciaPago
             }
           });
-          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad (con etapa consolidada)');
+          console.log('✅ Evento PAGO_REGISTRADO agregado a historial trazabilidad (con detalles completos)');
         } catch (errorRegistroPago) {
-          console.warn('⚠️ No se pudo registrar evento de pago en historial:', errorRegistroPago);
+          console.error('❌ Error al registrar pago en historial:', errorRegistroPago);
+          toast.error('⚠️ Pago aplicado pero no se pudo registrar en el historial: ' + errorRegistroPago.message);
         }
       } catch (errorHistorial) {
         console.error('⚠️ Error al agregar comentario al historial:', errorHistorial);
@@ -6530,6 +8311,8 @@ const estadoInicialFormulario = {
       }
 
       // 🔄 RECARGAR expedientes desde BD para reflejar cambios en etapa_activa
+      // Pequeño delay para asegurar que el backend procesó la actualización
+      await new Promise(resolve => setTimeout(resolve, 300));
       await recargarExpedientes();
       console.log('✅ Expedientes recargados desde BD');
       
@@ -6538,6 +8321,7 @@ const estadoInicialFormulario = {
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
+      setNumeroReciboPago(1);
       
       // 🔄 Refrescar página completa para mostrar cambios
       setTimeout(() => {
@@ -6551,7 +8335,7 @@ const estadoInicialFormulario = {
     } finally {
       setProcesandoPago(false);
     }
-  }, [expedienteParaPago, comprobantePago, calcularSiguientePago]);
+  }, [expedienteParaPago, comprobantePago, calcularSiguientePago, numeroReciboPago, fechaUltimoPago]);
 
   // Función para manejar selección de cliente
   const handleClienteSeleccionado = useCallback((cliente) => {
@@ -7130,6 +8914,10 @@ const estadoInicialFormulario = {
       cargo_pago_fraccionado: formularioParaGuardar.cargo_pago_fraccionado || '',
       gastos_expedicion: formularioParaGuardar.gastos_expedicion || '',
       estatus_pago: formularioParaGuardar.estatusPago || 'Pendiente', // ✅ FORZAR estatus_pago
+      frecuencia_pago: formularioParaGuardar.frecuenciaPago || formularioParaGuardar.frecuencia_pago || null, // ✅ FORZAR frecuencia_pago
+      // 💰 FORZAR montos de pagos fraccionados
+      primer_pago: formularioParaGuardar.primer_pago || formularioParaGuardar.primerPago || null,
+      pagos_subsecuentes: formularioParaGuardar.pagos_subsecuentes || formularioParaGuardar.pagosSubsecuentes || null,
       // 🎯 CRÍTICO: Forzar fechas en snake_case
       fecha_emision: formularioParaGuardar.fecha_emision,
       inicio_vigencia: formularioParaGuardar.inicio_vigencia,
@@ -7176,6 +8964,12 @@ const estadoInicialFormulario = {
     expedientePayload.estatus_pago = formulario.estatusPago || formulario.estatus_pago || 'Pendiente';
     expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     
+    // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
+    if (expedientePayload.estatus_pago === 'Pagado') {
+      expedientePayload.fecha_ultimo_pago = formularioParaGuardar.fecha_ultimo_pago || new Date().toISOString().split('T')[0];
+      console.log('💰 Póliza marcada como Pagado. Fecha de pago:', expedientePayload.fecha_ultimo_pago);
+    }
+    
     // 🎯 CRÍTICO: GARANTIZAR que las fechas estén en el payload (segunda vez por seguridad)
     expedientePayload.fecha_emision = formularioParaGuardar.fecha_emision;
     expedientePayload.inicio_vigencia = formularioParaGuardar.inicio_vigencia;
@@ -7212,6 +9006,9 @@ const estadoInicialFormulario = {
     delete expedientePayload.razonSocial;
     delete expedientePayload.tasaFinanciamiento;
     delete expedientePayload.subTotal;
+    delete expedientePayload.frecuenciaPago; // ✅ Eliminar camelCase, ya está como frecuencia_pago
+    delete expedientePayload.primerPago; // ✅ Eliminar camelCase, ya está como primer_pago
+    delete expedientePayload.pagosSubsecuentes; // ✅ Eliminar camelCase, ya está como pagos_subsecuentes
 
     
     // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
@@ -7223,37 +9020,8 @@ const estadoInicialFormulario = {
       expedientePayload.coberturas = JSON.stringify(expedientePayload.coberturas);
     }
 
-    // DEBUG: Verificar los campos al momento de GUARDAR
-    try {
-      const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
-      console.groupCollapsed('🧪 DEBUG Guardar Expediente — Campos clave');
-      console.log('📊 Formulario original (formularioParaGuardar):');
-      console.table([
-        { campo: 'uso', valor: k(formularioParaGuardar.uso) },
-        { campo: 'servicio', valor: k(formularioParaGuardar.servicio) },
-        { campo: 'movimiento', valor: k(formularioParaGuardar.movimiento) },
-        { campo: 'cargo_pago_fraccionado', valor: k(formularioParaGuardar.cargo_pago_fraccionado) },
-        { campo: 'gastos_expedicion', valor: k(formularioParaGuardar.gastos_expedicion) },
-        { campo: 'subtotal', valor: k(formularioParaGuardar.subtotal) }
-      ]);
-      console.log('📤 Payload final (expedientePayload):');
-      console.table([
-        { campo: 'uso', valor: k(expedientePayload.uso) },
-        { campo: 'servicio', valor: k(expedientePayload.servicio) },
-        { campo: 'movimiento', valor: k(expedientePayload.movimiento) },
-        { campo: 'cargo_pago_fraccionado', valor: k(expedientePayload.cargo_pago_fraccionado) },
-        { campo: 'gastos_expedicion', valor: k(expedientePayload.gastos_expedicion) },
-        { campo: 'subtotal', valor: k(expedientePayload.subtotal) }
-      ]);
-      
-      // 🚨 DEBUG CRÍTICO: Verificar el JSON que se envía al backend
-      console.log('🚨 JSON FINAL que se enviará al backend:');
-      console.log(JSON.stringify(expedientePayload, null, 2));
-      console.log('🚨 cargo_pago_fraccionado en JSON:', JSON.stringify(expedientePayload.cargo_pago_fraccionado));
-      console.log('🚨 gastos_expedicion en JSON:', JSON.stringify(expedientePayload.gastos_expedicion));
-      
-      console.groupEnd();
-    } catch (_) { /* noop */ }
+    // Debug: Verificar campos clave antes de guardar
+    console.log(`💾 Guardando expediente | Cliente: ${formularioParaGuardar.cliente_id} | Póliza: ${formularioParaGuardar.numero_poliza}`);
 
     if (modoEdicion) {
       // ✅ VERIFICACIÓN FINAL OBLIGATORIA - Asegurar que los campos estén ahí
@@ -7341,13 +9109,7 @@ const estadoInicialFormulario = {
         }
       }
       
-      // 🚨 DEBUG CRÍTICO: Verificar el JSON exacto que se enviará
-      console.log('🚨 [FETCH PUT] FINAL VERIFICADO:');
-      console.log('🚨 cargo_pago_fraccionado:', expedientePayload.cargo_pago_fraccionado);
-      console.log('🚨 gastos_expedicion:', expedientePayload.gastos_expedicion);
-      console.log('🚨 estatus_pago:', expedientePayload.estatus_pago);
-      console.log('🚨 [FETCH PUT] JSON.stringify del payload:');
-      console.log(JSON.stringify(expedientePayload, null, 2));
+      console.log(`✅ PUT Expediente ${formularioParaGuardar.id} | Estatus: ${expedientePayload.estatus_pago || 'N/A'}`);
       
       // ✅ Si el estatus cambió a "Pagado", actualizar etapa a "En Vigencia"
       const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
@@ -7369,21 +9131,10 @@ const estadoInicialFormulario = {
       })
         .then(response => response.json())
         .then(async (data) => {
-          // DEBUG: Verificar respuesta del backend tras UPDATE
-          try {
-            const registro = data?.data || data;
-            const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
-            console.groupCollapsed('🧪 DEBUG Respuesta PUT — Campos clave en registro devuelto');
-            console.table([
-              { campo: 'uso | variantes', valor: k(registro?.uso || registro?.uso_poliza || registro?.Uso || registro?.usoVehiculo) },
-              { campo: 'servicio | variantes', valor: k(registro?.servicio || registro?.servicio_poliza || registro?.Servicio || registro?.servicioVehiculo) },
-              { campo: 'movimiento | variantes', valor: k(registro?.movimiento || registro?.movimiento_poliza || registro?.Movimiento) },
-              { campo: 'cargo_pago_fraccionado | camel', valor: k(registro?.cargo_pago_fraccionado ?? registro?.cargoPagoFraccionado) },
-              { campo: 'gastos_expedicion | camel', valor: k(registro?.gastos_expedicion ?? registro?.gastosExpedicion) },
-              { campo: 'subtotal | variantes', valor: k(registro?.subtotal ?? registro?.sub_total ?? registro?.subTotal) }
-            ]);
-            console.groupEnd();
-          } catch (_) { /* noop */ }
+          // Debug: Verificar respuesta tras UPDATE
+          if (data?.data || data) {
+            console.log('✅ PUT completado | ID:', formularioParaGuardar.id);
+          }
           // ✨ Registrar actualización de datos en historial (trazabilidad)
           try {
             const expedienteId = formularioParaGuardar.id;
@@ -7435,6 +9186,7 @@ const estadoInicialFormulario = {
                 
                 // Fechas (marcar como esFecha para normalización correcta)
                 { key: 'fecha_emision', label: 'Fecha de emisión', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
+                { key: 'fecha_captura', label: 'Fecha de captura', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'inicio_vigencia', label: 'Inicio de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'termino_vigencia', label: 'Término de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
                 { key: 'fecha_vencimiento_pago', label: 'Vencimiento de pago', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
@@ -7470,6 +9222,10 @@ const estadoInicialFormulario = {
                 { key: 'uso', label: 'Uso' },
                 { key: 'servicio', label: 'Servicio' },
                 { key: 'movimiento', label: 'Movimiento' },
+                
+                // Conductor
+                { key: 'conductor_habitual', label: 'Conductor habitual' },
+                { key: 'edad_conductor', label: 'Edad del conductor' },
                 
                 // Datos del cliente
                 { key: 'nombre', label: 'Nombre' },
@@ -7722,6 +9478,7 @@ const estadoInicialFormulario = {
                   producto: formularioParaGuardar.producto,
                   campos_modificados: camposModificados,
                   cantidad_cambios: camposModificados.length,
+                  modificaciones_manuales: camposModificados.length > 0, // ✅ Marcar como modificación manual
                   ...(cambioEtapa && {
                     etapa_anterior: expedienteEnBD.etapa_activa,
                     etapa_nueva: formularioParaGuardar.etapa_activa
@@ -7839,11 +9596,7 @@ const estadoInicialFormulario = {
         fecha_creacion: new Date().toISOString().split('T')[0]
       };
       
-      console.log('🚨 [FETCH POST] Payload final antes de JSON.stringify:');
-      console.log('🚨 [FETCH POST] cargo_pago_fraccionado:', payloadFinal.cargo_pago_fraccionado);
-      console.log('🚨 [FETCH POST] gastos_expedicion:', payloadFinal.gastos_expedicion);
-      console.log('🚨 [FETCH POST] JSON.stringify completo:');
-      console.log(JSON.stringify(payloadFinal, null, 2));
+      console.log(`✅ POST Expediente | Póliza: ${payloadFinal.numero_poliza || 'N/A'} | Cliente: ${payloadFinal.cliente_id || 'N/A'}`);
       
   fetch(`${API_URL}/api/expedientes`, {
         method: 'POST',
@@ -7852,21 +9605,10 @@ const estadoInicialFormulario = {
       })
         .then(response => response.json())
         .then(async (data) => {
-          // DEBUG: Verificar respuesta del backend tras CREATE
-          try {
-            const registro = data?.data || data;
-            const k = (v) => (v === undefined || v === null || v === '' ? '(vacío)' : v);
-            console.groupCollapsed('🧪 DEBUG Respuesta POST — Campos clave en registro devuelto');
-            console.table([
-              { campo: 'uso | variantes', valor: k(registro?.uso || registro?.uso_poliza || registro?.Uso || registro?.usoVehiculo) },
-              { campo: 'servicio | variantes', valor: k(registro?.servicio || registro?.servicio_poliza || registro?.Servicio || registro?.servicioVehiculo) },
-              { campo: 'movimiento | variantes', valor: k(registro?.movimiento || registro?.movimiento_poliza || registro?.Movimiento) },
-              { campo: 'cargo_pago_fraccionado | camel', valor: k(registro?.cargo_pago_fraccionado ?? registro?.cargoPagoFraccionado) },
-              { campo: 'gastos_expedicion | camel', valor: k(registro?.gastos_expedicion ?? registro?.gastosExpedicion) },
-              { campo: 'subtotal | variantes', valor: k(registro?.subtotal ?? registro?.sub_total ?? registro?.subTotal) }
-            ]);
-            console.groupEnd();
-          } catch (_) { /* noop */ }
+          // Debug: Verificar respuesta tras CREATE
+          if (data?.id || data?.data?.id) {
+            console.log('✅ POST completado | ID:', data?.id || data?.data?.id);
+          }
           // ✨ Registrar creación en historial de trazabilidad
           try {
             const nuevoId = data?.id || data?.data?.id;
@@ -7881,43 +9623,139 @@ const estadoInicialFormulario = {
                 tiene_datos_originales: !!formularioParaGuardar._datos_originales_pdf
               });
               
-              // 🔍 Detectar si hubo modificaciones manuales después del extractor
-              let huboModificacionesManuales = false;
+              // 🔍 DETECTAR CAMPOS MODIFICADOS MANUALMENTE
+              // ✅ LÓGICA SIMPLE: Si existe snapshot (formularioOriginal), comparar todo el formulario
               const camposModificados = [];
+              let huboModificacionesManuales = false;
               
-              if (capturadoConExtractorPDF && formularioParaGuardar._datos_originales_pdf) {
-                const originales = formularioParaGuardar._datos_originales_pdf;
-                const camposAComparar = [
+              if (formularioOriginal) {
+                console.log('✅ Snapshot disponible - detectando cambios desde el estado inicial completo');
+                console.log('📸 Campos en snapshot:', Object.keys(formularioOriginal).filter(k => !k.startsWith('_')).length);
+                console.log('🔍 DEBUG - Valores clave en snapshot:', {
+                  contacto_nombre: formularioOriginal.contacto_nombre,
+                  contacto_telefono_fijo: formularioOriginal.contacto_telefono_fijo,
+                  conductor_habitual: formularioOriginal.conductor_habitual,
+                  fecha_emision: formularioOriginal.fecha_emision,
+                  fecha_captura: formularioOriginal.fecha_captura
+                });
+                console.log('🔍 DEBUG - Valores clave en formulario actual:', {
+                  contacto_nombre: formularioParaGuardar.contacto_nombre,
+                  contacto_telefono_fijo: formularioParaGuardar.contacto_telefono_fijo,
+                  conductor_habitual: formularioParaGuardar.conductor_habitual,
+                  fecha_emision: formularioParaGuardar.fecha_emision,
+                  fecha_captura: formularioParaGuardar.fecha_captura
+                });
+                
+                // Normalizar valores para comparación
+                const normalizar = (valor) => {
+                  if (valor === null || valor === undefined) return '';
+                  if (typeof valor === 'object') return JSON.stringify(valor);
+                  return String(valor).trim();
+                };
+                
+                // Lista de campos editables a comparar
+                const camposEditables = [
+                  // === DATOS DEL CLIENTE ===
+                  { key: 'nombre', label: 'Nombre del cliente' },
+                  { key: 'apellido_paterno', label: 'Apellido paterno del cliente' },
+                  { key: 'apellido_materno', label: 'Apellido materno del cliente' },
+                  { key: 'razon_social', label: 'Razón social' },
+                  { key: 'nombre_comercial', label: 'Nombre comercial' },
+                  { key: 'rfc', label: 'RFC' },
+                  { key: 'curp', label: 'CURP' },
+                  { key: 'email', label: 'Email del cliente' },
+                  { key: 'telefono_fijo', label: 'Teléfono fijo del cliente' },
+                  { key: 'telefono_movil', label: 'Teléfono móvil del cliente' },
+                  { key: 'domicilio', label: 'Domicilio' },
+                  
+                  // === CONTACTO ADICIONAL ===
+                  { key: 'contacto_nombre', label: 'Nombre del contacto' },
+                  { key: 'contacto_apellido_paterno', label: 'Apellido paterno del contacto' },
+                  { key: 'contacto_apellido_materno', label: 'Apellido materno del contacto' },
+                  { key: 'contacto_email', label: 'Email del contacto' },
+                  { key: 'contacto_telefono_fijo', label: 'Teléfono fijo del contacto' },
+                  { key: 'contacto_telefono_movil', label: 'Teléfono móvil del contacto' },
+                  
+                  // === DATOS BÁSICOS DE PÓLIZA ===
                   { key: 'numero_poliza', label: 'Número de póliza' },
                   { key: 'compania', label: 'Aseguradora' },
                   { key: 'producto', label: 'Producto' },
-                  { key: 'prima_pagada', label: 'Prima' },
-                  { key: 'total', label: 'Total' },
+                  { key: 'tipo_seguro', label: 'Tipo de seguro' },
+                  { key: 'endoso', label: 'Endoso' },
+                  { key: 'inciso', label: 'Inciso' },
+                  
+                  // === FECHAS ===
                   { key: 'fecha_emision', label: 'Fecha de emisión' },
+                  { key: 'fecha_captura', label: 'Fecha de captura' },
                   { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
-                  // NO comparar termino_vigencia porque se calcula automáticamente
-                  { key: 'etapa_activa', label: 'Etapa' }
-                  // NO comparar agente porque se normaliza automáticamente (de "140956 - NOMBRE" a "140956")
-                  // NO comparar tipo_pago porque puede ajustarse automáticamente
+                  { key: 'termino_vigencia', label: 'Término de vigencia' },
+                  
+                  // === MONTOS ===
+                  { key: 'prima_pagada', label: 'Prima' },
+                  { key: 'cargo_pago_fraccionado', label: 'Cargo pago fraccionado' },
+                  { key: 'gastos_expedicion', label: 'Gastos de expedición' },
+                  { key: 'iva', label: 'IVA' },
+                  { key: 'recargo', label: 'Recargo' },
+                  { key: 'total', label: 'Total' },
+                  { key: 'subtotal', label: 'Subtotal' },
+                  { key: 'suma_asegurada', label: 'Suma asegurada' },
+                  { key: 'deducible', label: 'Deducible' },
+                  
+                  // === PAGO ===
+                  { key: 'forma_pago', label: 'Forma de pago' },
+                  { key: 'tipo_pago', label: 'Tipo de pago' },
+                  { key: 'frecuenciaPago', label: 'Frecuencia de pago' },
+                  { key: 'primer_pago', label: 'Primer pago' },
+                  { key: 'pagos_subsecuentes', label: 'Pagos subsecuentes' },
+                  { key: 'periodo_gracia', label: 'Período de gracia' },
+                  
+                  // === VEHÍCULO (PARA AUTOS) ===
+                  { key: 'marca', label: 'Marca' },
+                  { key: 'modelo', label: 'Modelo' },
+                  { key: 'anio', label: 'Año' },
+                  { key: 'tipo_vehiculo', label: 'Tipo de vehículo' },
+                  { key: 'numero_serie', label: 'Número de serie' },
+                  { key: 'motor', label: 'Motor' },
+                  { key: 'placas', label: 'Placas' },
+                  { key: 'color', label: 'Color' },
+                  { key: 'codigo_vehiculo', label: 'Código de vehículo' },
+                  { key: 'tipo_cobertura', label: 'Tipo de cobertura' },
+                  { key: 'plan', label: 'Plan' },
+                  
+                  // === USO Y SERVICIO ===
+                  { key: 'uso', label: 'Uso' },
+                  { key: 'servicio', label: 'Servicio' },
+                  { key: 'movimiento', label: 'Movimiento' },
+                  
+                  // === CONDUCTOR ===
+                  { key: 'conductor_habitual', label: 'Conductor habitual' },
+                  { key: 'edad_conductor', label: 'Edad del conductor' },
+                  { key: 'licencia_conducir', label: 'Licencia de conducir' },
+                  
+                  // === OTROS ===
+                  { key: 'observaciones', label: 'Observaciones' }
                 ];
                 
-                console.log('🔍 Comparando datos originales PDF vs formulario actual...');
-                camposAComparar.forEach(({ key, label }) => {
-                  const valorOriginal = String(originales[key] || '').trim();
-                  const valorActual = String(formularioParaGuardar[key] || '').trim();
+                // Comparar cada campo
+                camposEditables.forEach(({ key, label }) => {
+                  const valorOriginal = normalizar(formularioOriginal[key]);
+                  const valorActual = normalizar(formularioParaGuardar[key]);
                   
-                  console.log(`  ${key}: "${valorOriginal}" vs "${valorActual}" → ${valorOriginal !== valorActual ? 'DIFERENTE' : 'igual'}`);
-                  
-                  // Solo marcar como modificado si AMBOS valores existen y son diferentes
-                  // Esto evita false positives por campos vacíos vs calculados
-                  if (valorOriginal && valorActual && valorOriginal !== valorActual) {
-                    huboModificacionesManuales = true;
-                    camposModificados.push(`${label}: "${valorOriginal}" → "${valorActual}"`);
-                    console.log(`    ✏️ MODIFICACIÓN DETECTADA: ${label}`);
+                  if (valorOriginal !== valorActual) {
+                    // Ignorar cambios de vacío a vacío
+                    if (!valorOriginal && !valorActual) return;
+                    
+                    camposModificados.push(
+                      `• ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`
+                    );
+                    console.log(`  ✏️ ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`);
                   }
                 });
                 
-                console.log(`🔍 Total modificaciones detectadas: ${camposModificados.length}`);
+                huboModificacionesManuales = camposModificados.length > 0;
+                console.log(`✅ ${camposModificados.length} campo(s) modificado(s) manualmente`);
+              } else {
+                console.log('⚠️ No hay snapshot - no se pueden detectar cambios manuales');
               }
               
               // 🎯 EVENTO CAPTURA: Registrar en el nuevo sistema de historial
@@ -7935,10 +9773,13 @@ const estadoInicialFormulario = {
                 // Incluir nombre de la aseguradora para identificar qué extractor se usó
                 descripcionEvento = `Póliza extraída con Extractor PDF ${aseguradoraNombre} • Archivo: ${nombreArchivoPDF}`;
                 if (huboModificacionesManuales && camposModificados.length > 0) {
-                  descripcionEvento += ` • ${camposModificados.length} campo(s) modificado(s) manualmente`;
+                  descripcionEvento += `\n\n${camposModificados.length} campo(s) modificado(s) manualmente:\n${camposModificados.join('\n')}`;
                 }
               } else {
                 descripcionEvento = `Póliza capturada manualmente`;
+                if (huboModificacionesManuales && camposModificados.length > 0) {
+                  descripcionEvento += `\n\nCampos capturados:\n${camposModificados.join('\n')}`;
+                }
               }
               
               // Agregar información de fechas si están disponibles
@@ -7983,6 +9824,47 @@ const estadoInicialFormulario = {
               await historialService.registrarEvento(eventoData);
               
               console.log(`✅ Captura registrada en historial: ${metodCaptura} - ${aseguradoraNombre}`);
+              
+              // 💰 REGISTRAR PAGO INICIAL si la póliza fue marcada como "Pagado" al momento de captura
+              const estatusPago = expedientePayload.estatus_pago || expedientePayload.estatusPago;
+              if (estatusPago === 'Pagado') {
+                console.log('💰 Detectado pago aplicado en captura inicial, registrando evento...');
+                try {
+                  const fechaPago = expedientePayload.fecha_ultimo_pago || expedientePayload.fecha_vencimiento_pago || new Date().toISOString().split('T')[0];
+                  const fechaPagoFormateada = new Date(fechaPago).toLocaleDateString('es-MX', { 
+                    day: 'numeric', 
+                    month: 'long', 
+                    year: 'numeric' 
+                  });
+                  
+                  const comentarioPago = `💰 Pago Registrado en Captura Inicial\n` +
+                    `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                    `💵 Monto: $${parseFloat(expedientePayload.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                    `✅ Póliza marcada como pagada desde la captura`;
+                  
+                  await historialService.registrarEvento({
+                    expediente_id: String(nuevoId),
+                    cliente_id: String(expedientePayload.cliente_id),
+                    tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
+                    usuario_nombre: 'Sistema',
+                    descripcion: comentarioPago,
+                    datos_adicionales: {
+                      numero_poliza: expedientePayload.numero_poliza,
+                      compania: aseguradoraNombre,
+                      producto: expedientePayload.producto || '',
+                      monto_total: expedientePayload.total || null,
+                      monto_pagado: expedientePayload.total || null,
+                      fecha_pago: fechaPago,
+                      tipo_pago: expedientePayload.tipo_pago,
+                      frecuencia_pago: expedientePayload.frecuenciaPago,
+                      aplicado_en_captura: true
+                    }
+                  });
+                  console.log('✅ Evento de pago inicial registrado en historial');
+                } catch (errorPagoInicial) {
+                  console.warn('⚠️ No se pudo registrar evento de pago inicial:', errorPagoInicial);
+                }
+              }
             }
           } catch (error) {
             console.warn('⚠️ Error al registrar captura:', error.message);
@@ -8039,64 +9921,8 @@ const estadoInicialFormulario = {
       setClientes(clientesData);
       setClientesMap(mapa);
       
-      // 5. Parsear coberturas si vienen como string JSON y normalizar alias (uso/servicio/movimiento)
-      const expedientesConCoberturasParsadas = expedientes.map(exp => {
-        if (exp.coberturas && typeof exp.coberturas === 'string') {
-          try {
-            exp.coberturas = JSON.parse(exp.coberturas);
-          } catch (error) {
-            console.error(`❌ Error parseando coberturas para ${exp.numero_poliza}:`, error);
-            exp.coberturas = null;
-          }
-        }
-        
-        // ✅ NORMALIZAR ESTATUS DE PAGO (igual que en cargarDatos)
-        let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
-        const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
-        
-        if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-          estatusPagoCalculado = 'Pagado';
-        } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
-          estatusPagoCalculado = 'Cancelado';
-        } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
-          estatusPagoCalculado = 'Vencido';
-        } else if (estatusNormalizado === 'por vencer') {
-          estatusPagoCalculado = 'Por Vencer';
-        } else if (estatusNormalizado === 'pendiente') {
-          estatusPagoCalculado = 'Pendiente';
-        } else if (estatusPagoCalculado) {
-          // Preservar valores no reconocidos
-          estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
-        } else {
-          // Solo calcular si viene vacío
-          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-          if (fechaVencimiento) {
-            const fechaVenc = new Date(fechaVencimiento);
-            const hoy = new Date();
-            hoy.setHours(0, 0, 0, 0);
-            fechaVenc.setHours(0, 0, 0, 0);
-            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
-          } else {
-            estatusPagoCalculado = 'Pendiente';
-          }
-        }
-        
-        exp.estatusPago = estatusPagoCalculado;
-        
-        // Normalizar alias para que edición y detalle los tengan listos
-        exp.uso = exp.uso || exp.uso_poliza || exp.Uso || exp.usoVehiculo || '';
-        exp.servicio = exp.servicio || exp.servicio_poliza || exp.Servicio || exp.servicioVehiculo || '';
-        exp.movimiento = exp.movimiento || exp.movimiento_poliza || exp.Movimiento || '';
-        // Montos y financieros: cubrir alias comunes del backend
-        exp.cargo_pago_fraccionado =
-          exp.cargo_pago_fraccionado ?? exp.cargoPagoFraccionado ?? exp.tasa_financiamiento ?? exp.tasaFinanciamiento ?? 0;
-        exp.gastos_expedicion =
-          exp.gastos_expedicion ?? exp.gastosExpedicion ?? exp.gastos ?? 0;
-        exp.subtotal = exp.subtotal ?? exp.sub_total ?? exp.subTotal ?? 0;
-        return exp;
-      });
-      
-      setExpedientes(expedientesConCoberturasParsadas);
+      // 🔥 Ya no normalizamos estatusPago - se calcula dinámicamente con calcularEstatusPagoActual()
+      setExpedientes(expedientes);
     } catch (err) {
       console.error('Error al recargar expedientes:', err);
     }
@@ -8398,6 +10224,19 @@ const estadoInicialFormulario = {
             estatusPago: datosConvertidos.estatusPago
           });
           
+          console.log('💰 [EDITAR] Montos de pagos fraccionados desde API:', {
+            primer_pago: desdeApi.primer_pago,
+            primerPago: desdeApi.primerPago,
+            pagos_subsecuentes: desdeApi.pagos_subsecuentes,
+            pagosSubsecuentes: desdeApi.pagosSubsecuentes,
+            convertidos: {
+              primer_pago: datosConvertidos.primer_pago,
+              primerPago: datosConvertidos.primerPago,
+              pagos_subsecuentes: datosConvertidos.pagos_subsecuentes,
+              pagosSubsecuentes: datosConvertidos.pagosSubsecuentes
+            }
+          });
+          
           // ✅ IMPORTANTE: Datos de API tienen prioridad sobre datos en memoria
           expedienteCompleto = { ...datosConvertidos };
           console.log('✅ Expediente recargado desde API con datos frescos');
@@ -8637,9 +10476,29 @@ const eliminarExpediente = useCallback((id) => {
   }
 }, []);
 
-  const verDetalles = useCallback((expediente) => {
+  const verDetalles = useCallback(async (expediente) => {
     setExpedienteSeleccionado(expediente);
     setVistaActual('detalles');
+    
+    // Primero limpiamos el historial anterior
+    setHistorialExpediente([]);
+    
+    // Luego cargamos el nuevo historial del expediente
+    try {
+      const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        const historial = data?.data || data || [];
+        const historialArray = Array.isArray(historial) ? historial : [];
+        setHistorialExpediente(historialArray);
+        // Historial cargado para CalendarioPagos
+      } else {
+        setHistorialExpediente([]);
+      }
+    } catch (error) {
+      console.warn('⚠️ No se pudo cargar historial:', error);
+      setHistorialExpediente([]);
+    }
   }, []);
 
   return (
@@ -8727,6 +10586,8 @@ const eliminarExpediente = useCallback((id) => {
             calculartermino_vigencia={calculartermino_vigencia}
             calcularProximoPago={calcularProximoPago}
             abrirModalCompartir={abrirModalCompartir}
+            enviarAvisoPago={enviarAvisoPago}
+            historial={historialExpediente}
           />
         )}
       </div>
@@ -8766,6 +10627,54 @@ const eliminarExpediente = useCallback((id) => {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-outline-secondary" onClick={cerrarModalCompartir}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 💰 Modal Aviso/Recordatorio de Pago */}
+      {mostrarModalAvisoPago && pagoParaNotificar && expedienteDelPago && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-sm modal-dialog-centered">
+            <div className="modal-content">
+              <div className={`modal-header text-white ${pagoParaNotificar.estado === 'Vencido' ? 'bg-danger' : 'bg-info'}`}>
+                <h5 className="modal-title">
+                  {pagoParaNotificar.estado === 'Vencido' ? '⚠️ Recordatorio de Pago' : '📧 Aviso de Pago'}
+                </h5>
+                <button type="button" className="btn-close btn-close-white" onClick={cerrarModalAvisoPago}></button>
+              </div>
+              <div className="modal-body">
+                <div className="mb-3 small">
+                  <div><strong>Póliza:</strong> {expedienteDelPago.numero_poliza || 'Sin número'}</div>
+                  <div><strong>Cliente:</strong> {expedienteDelPago.cliente_nombre || 'N/A'}</div>
+                  <div className="mt-2">
+                    <strong>Pago #{pagoParaNotificar.numero}</strong>
+                  </div>
+                  <div><strong>Fecha:</strong> {utils.formatearFecha(pagoParaNotificar.fecha, 'larga')}</div>
+                  <div><strong>Monto:</strong> <span className="badge bg-primary">${pagoParaNotificar.monto}</span></div>
+                  <div className="mt-2">
+                    <strong>Estado:</strong> <span className={`badge ${pagoParaNotificar.badgeClass}`}>{pagoParaNotificar.estado}</span>
+                  </div>
+                </div>
+
+                <div className="d-grid gap-2">
+                  <button
+                    className="btn btn-success d-flex align-items-center justify-content-center"
+                    onClick={() => enviarAvisoPagoWhatsApp(pagoParaNotificar, expedienteDelPago)}
+                  >
+                    <Share2 size={16} className="me-2" /> WhatsApp
+                  </button>
+                  <button
+                    className="btn btn-info text-white d-flex align-items-center justify-content-center"
+                    onClick={() => enviarAvisoPagoEmail(pagoParaNotificar, expedienteDelPago)}
+                  >
+                    <Mail size={16} className="me-2" /> Email
+                  </button>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-outline-secondary" onClick={cerrarModalAvisoPago}>Cerrar</button>
               </div>
             </div>
           </div>
@@ -8823,11 +10732,11 @@ const eliminarExpediente = useCallback((id) => {
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content">
-              <div className="modal-header bg-success text-white">
-                <h5 className="modal-title">
-                  <DollarSign size={20} className="me-2" />
+              <div className="modal-header bg-success text-white py-2 px-3">
+                <h6 className="modal-title mb-0" style={{ fontSize: '0.95rem' }}>
+                  <DollarSign size={18} className="me-2" />
                   Aplicar Pago
-                </h5>
+                </h6>
                 <button 
                   type="button" 
                   className="btn-close btn-close-white" 
@@ -8835,38 +10744,103 @@ const eliminarExpediente = useCallback((id) => {
                     setMostrarModalPago(false);
                     setExpedienteParaPago(null);
                     setComprobantePago(null);
+                    setFechaUltimoPago('');
+                    setNumeroReciboPago(1);
                   }}
                   disabled={procesandoPago}
                 ></button>
               </div>
               
-              <div className="modal-body">
+              <div className="modal-body py-2 px-3">
                 {/* Información del expediente */}
-                <div className="alert alert-info mb-3">
-                  <h6 className="mb-2">
-                    <strong>Póliza:</strong> {expedienteParaPago.numero_poliza || 'Sin número'}
-                  </h6>
-                  <div className="small">
+                <div className="alert alert-info mb-2 py-2 px-2">
+                  <div className="mb-1">
+                    <strong style={{ fontSize: '0.85rem' }}>Póliza:</strong> <span style={{ fontSize: '0.85rem' }}>{expedienteParaPago.numero_poliza || 'Sin número'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem' }}>
                     <div><strong>Cliente:</strong> {expedienteParaPago.cliente_nombre || 'Sin nombre'}</div>
                     <div><strong>Aseguradora:</strong> {expedienteParaPago.compania || 'N/A'}</div>
                     <div><strong>Producto:</strong> {expedienteParaPago.producto || 'N/A'}</div>
                     {expedienteParaPago.importe_total && (
-                      <div className="mt-2">
-                        <strong>Monto a pagar:</strong> <span className="badge bg-success">${parseFloat(expedienteParaPago.importe_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+                      <div className="mt-1">
+                        <strong>Monto a pagar:</strong> <span className="badge bg-success" style={{ fontSize: '0.7rem' }}>${parseFloat(expedienteParaPago.importe_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
+                {/* Campo para fecha real de pago */}
+                <div className="mb-2">
+                  <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
+                    <Calendar size={14} className="me-1" />
+                    Fecha real del pago (cuando el cliente pagó) *
+                  </label>
+                  <input
+                    type="date"
+                    className="form-control form-control-sm"
+                    value={fechaUltimoPago}
+                    onChange={(e) => setFechaUltimoPago(e.target.value)}
+                    disabled={procesandoPago}
+                  />
+                  <small className="text-muted d-block mt-1" style={{ fontSize: '0.7rem' }}>
+                    {(() => {
+                      const fechaLimite = expedienteParaPago.fecha_vencimiento_pago || expedienteParaPago.proximo_pago;
+                      if (fechaLimite) {
+                        return `Fecha límite de pago: ${new Date(fechaLimite).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} • La fecha de captura será hoy`;
+                      }
+                      return 'Ingrese la fecha en que el cliente realizó el pago. La fecha de captura será automática (hoy)';
+                    })()}
+                  </small>
+                </div>
+
+                {/* Selector de recibo (solo para pagos fraccionados) */}
+                {(() => {
+                  const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
+                  const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+                  
+                  if (esFraccionado && frecuencia) {
+                    const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                    const opciones = [];
+                    for (let i = 1; i <= numeroPagos; i++) {
+                      opciones.push(i);
+                    }
+                    
+                    return (
+                      <div className="mb-2">
+                        <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
+                          <FileText size={14} className="me-1" />
+                          Recibo a aplicar pago *
+                        </label>
+                        <select
+                          className="form-select form-select-sm"
+                          value={numeroReciboPago}
+                          onChange={(e) => setNumeroReciboPago(parseInt(e.target.value))}
+                          disabled={procesandoPago}
+                        >
+                          {opciones.map(num => (
+                            <option key={num} value={num}>
+                              Recibo #{num} de {numeroPagos}
+                            </option>
+                          ))}
+                        </select>
+                        <small className="text-muted d-block mt-1" style={{ fontSize: '0.7rem' }}>
+                          Seleccione el número de recibo al que corresponde este pago
+                        </small>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+
                 {/* Campo para subir comprobante */}
-                <div className="mb-3">
-                  <label className="form-label fw-bold">
-                    <Upload size={16} className="me-2" />
+                <div className="mb-2">
+                  <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
+                    <Upload size={14} className="me-1" />
                     Comprobante de Pago *
                   </label>
                   <input
                     type="file"
-                    className="form-control"
+                    className="form-control form-control-sm"
                     accept=".pdf,.jpg,.jpeg,.png,.webp"
                     onChange={(e) => {
                       const archivo = e.target.files[0];
@@ -8882,49 +10856,51 @@ const eliminarExpediente = useCallback((id) => {
                     }}
                     disabled={procesandoPago}
                   />
-                  <small className="text-muted d-block mt-1">
+                  <small className="text-muted d-block mt-1" style={{ fontSize: '0.7rem' }}>
                     Formatos permitidos: PDF, JPG, PNG, WEBP (máximo 10MB)
                   </small>
                   
                   {comprobantePago && (
-                    <div className="alert alert-success mt-2 mb-0 d-flex align-items-center justify-content-between">
-                      <div>
-                        <CheckCircle size={16} className="me-2" />
+                    <div className="alert alert-success mt-2 mb-0 py-1 px-2 d-flex align-items-center justify-content-between">
+                      <div style={{ fontSize: '0.75rem' }}>
+                        <CheckCircle size={14} className="me-1" />
                         <strong>{comprobantePago.name}</strong>
-                        <small className="d-block ms-4 text-muted">
+                        <small className="d-block ms-3 text-muted" style={{ fontSize: '0.7rem' }}>
                           {(comprobantePago.size / 1024).toFixed(2)} KB
                         </small>
                       </div>
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-danger"
+                        className="btn btn-sm btn-outline-danger py-0 px-1"
                         onClick={() => setComprobantePago(null)}
                         disabled={procesandoPago}
                       >
-                        <X size={14} />
+                        <X size={12} />
                       </button>
                     </div>
                   )}
                 </div>
 
                 {/* Información adicional */}
-                <div className="alert alert-warning mb-0">
-                  <small>
-                    <AlertCircle size={14} className="me-1" />
+                <div className="alert alert-warning mb-0 py-1 px-2">
+                  <small style={{ fontSize: '0.7rem' }}>
+                    <AlertCircle size={12} className="me-1" />
                     <strong>Importante:</strong> El comprobante de pago se guardará en el expediente 
                     y se agregará un comentario automático en el historial.
                   </small>
                 </div>
               </div>
               
-              <div className="modal-footer">
+              <div className="modal-footer py-2 px-3">
                 <button 
                   type="button" 
-                  className="btn btn-outline-secondary" 
+                  className="btn btn-outline-secondary btn-sm" 
                   onClick={() => {
                     setMostrarModalPago(false);
                     setExpedienteParaPago(null);
                     setComprobantePago(null);
+                    setFechaUltimoPago('');
+                    setNumeroReciboPago(1);
                   }}
                   disabled={procesandoPago}
                 >
@@ -8932,18 +10908,18 @@ const eliminarExpediente = useCallback((id) => {
                 </button>
                 <button 
                   type="button" 
-                  className="btn btn-success" 
+                  className="btn btn-success btn-sm"
                   onClick={procesarPagoConComprobante}
-                  disabled={!comprobantePago || procesandoPago}
+                  disabled={!comprobantePago || !fechaUltimoPago || procesandoPago}
                 >
                   {procesandoPago ? (
                     <>
-                      <Loader size={16} className="me-2 spinner-border spinner-border-sm" />
+                      <Loader size={14} className="me-1 spinner-border spinner-border-sm" />
                       Procesando...
                     </>
                   ) : (
                     <>
-                      <CheckCircle size={16} className="me-2" />
+                      <CheckCircle size={14} className="me-1" />
                       Confirmar Pago
                     </>
                   )}
