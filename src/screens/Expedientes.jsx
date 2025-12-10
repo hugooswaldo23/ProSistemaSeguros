@@ -294,17 +294,68 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
   );
 });
 
-const EstadoPago = React.memo(({ expediente }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-    <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
-    {expediente.frecuenciaPago && (
-      <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
-    )}
-    <div className="mt-1">
-      <Badge tipo="pago" valor={expediente.estatusPago || 'Sin definir'} className="badge-sm" />
+// 🔥 Función para leer el estatus de pago desde el backend
+// OPCIÓN A: Si el expediente trae array de recibos desde el backend
+// OPCIÓN B: Si solo trae estatus_pago calculado
+const obtenerEstatusPagoDesdeBackend = (expediente) => {
+  // OPCIÓN A: Si el backend envía los recibos en el array
+  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
+    
+    // Buscar el próximo recibo pendiente (siguiente al último pagado)
+    const proximoReciboPendiente = expediente.recibos.find(r => r.numero_recibo === ultimoReciboPagado + 1);
+    
+    if (proximoReciboPendiente) {
+      return proximoReciboPendiente.estatus; // Vencido, Pago por vencer, Pendiente, Pagado
+    }
+    
+    // Si no hay próximo recibo, está completamente pagado
+    return 'Pagado';
+  }
+  
+  // OPCIÓN B: Leer directamente el campo estatus_pago del expediente
+  const estatusBackend = expediente.estatus_pago || expediente.estatusPago;
+  
+  if (!estatusBackend) {
+    console.warn(`⚠️ Póliza ${expediente.numero_poliza} sin estatus_pago en BD`);
+    return 'Sin definir';
+  }
+  
+  // Normalizar formato (backend puede enviar minúsculas)
+  const estatusNormalizado = estatusBackend.toLowerCase().trim();
+  
+  if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
+    return 'Pagado';
+  } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
+    return 'Vencido';
+  } else if (estatusNormalizado === 'pago por vencer' || estatusNormalizado === 'por vencer') {
+    return 'Pago por vencer';
+  } else if (estatusNormalizado === 'pendiente') {
+    return 'Pendiente';
+  } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
+    return 'Cancelado';
+  }
+  
+  // Si no reconocemos el valor, devolverlo capitalizado
+  return estatusBackend.charAt(0).toUpperCase() + estatusBackend.slice(1).toLowerCase();
+};
+
+const EstadoPago = React.memo(({ expediente }) => {
+  // 🔥 Leer estatus directamente del backend (NO calcular)
+  const estatusDesdeBackend = obtenerEstatusPagoDesdeBackend(expediente);
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
+      {expediente.frecuenciaPago && (
+        <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
+      )}
+      <div className="mt-1">
+        <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
+      </div>
     </div>
-  </div>
-));
+  );
+});
 
 const CalendarioPagos = React.memo(({ 
   expediente, 
@@ -339,47 +390,56 @@ const CalendarioPagos = React.memo(({
 
   // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
-  const pagos = [];
+  let pagos = [];
   
-  // 🔧 Obtener periodo de gracia del expediente o calcular según compañía (convertir a número)
-  const periodoGracia = expediente.periodo_gracia 
-    ? parseInt(expediente.periodo_gracia, 10)
-    : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
-  
-  console.log('📅 CALENDARIO - Periodo de gracia usado:', periodoGracia, '| Del expediente:', expediente.periodo_gracia, '| Tipo:', typeof expediente.periodo_gracia);
-  
-  // Determinar montos: usar primer_pago y pagos_subsecuentes si están disponibles, sino dividir el total
-  // 🔥 Compatibilidad con snake_case y camelCase
-  const primerPagoField = expediente.primer_pago || expediente.primerPago;
-  const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
-  
-  const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
-  const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
-  const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
-  const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
-  
-  for (let i = 1; i <= numeroPagos; i++) {
-    const fechaPago = calcularProximoPago(
-      expediente.inicio_vigencia,
-      tipoPago,
-      frecuencia,
-      expediente.compania,
-      i,
-      periodoGracia  // 🔥 Pasar periodo de gracia del expediente
-    );
+  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
+  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
+    pagos = expediente.recibos.map(r => ({
+      numero: r.numero_recibo,
+      fecha: r.fecha_vencimiento,
+      monto: parseFloat(r.monto).toFixed(2),
+      estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Pendiente
+      comprobante_url: r.comprobante_url,
+      comprobante_nombre: r.comprobante_nombre,
+      fecha_pago_real: r.fecha_pago_real
+    }));
+  } else {
+    // Fallback: Calcular recibos en el frontend (método antiguo)
+    const periodoGracia = expediente.periodo_gracia 
+      ? parseInt(expediente.periodo_gracia, 10)
+      : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
     
-    if (fechaPago) {
-      // Calcular monto según si es primer pago o subsecuente
-      let monto = montoPorDefecto;
-      if (usarMontosExactos) {
-        monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
-      }
+    const primerPagoField = expediente.primer_pago || expediente.primerPago;
+    const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+    
+    const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
+    const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
+    const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
+    const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+    
+    for (let i = 1; i <= numeroPagos; i++) {
+      const fechaPago = calcularProximoPago(
+        expediente.inicio_vigencia,
+        tipoPago,
+        frecuencia,
+        expediente.compania,
+        i,
+        periodoGracia
+      );
       
-      pagos.push({
-        numero: i,
-        fecha: fechaPago,
-        monto: monto
-      });
+      if (fechaPago) {
+        let monto = montoPorDefecto;
+        if (usarMontosExactos) {
+          monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
+        }
+        
+        pagos.push({
+          numero: i,
+          fecha: fechaPago,
+          monto: monto
+        });
+      }
     }
   }
 
@@ -392,18 +452,45 @@ const CalendarioPagos = React.memo(({
   let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
-    // 🔥 Crear fecha en hora local para evitar problemas de timezone
+    // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
+    if (pago.estatusBackend) {
+      const estatusNorm = pago.estatusBackend.toLowerCase();
+      const pagado = estatusNorm === 'pagado';
+      
+      if (pagado) {
+        totalPagado += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'vencido') {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'pago por vencer') {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
+      
+      let estado = pago.estatusBackend;
+      let badgeClass = 'bg-secondary';
+      
+      if (estatusNorm === 'pagado') {
+        badgeClass = 'bg-success';
+      } else if (estatusNorm === 'vencido') {
+        badgeClass = 'bg-danger';
+      } else if (estatusNorm === 'pago por vencer') {
+        badgeClass = 'bg-warning';
+      }
+      
+      return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
+    }
+    
+    // Fallback: Calcular estatus en el frontend (método antiguo)
     const [year, month, day] = pago.fecha.split('-');
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
     
-    // 🔥 Determinar si está pagado basándose en el número de recibo
     let pagado = pago.numero <= ultimoReciboPagado;
     
     if (pagado) {
       totalPagado += parseFloat(pago.monto) || 0;
     } else {
-      // Clasificar según estado
       if (diasRestantes < 0) {
         totalVencido += parseFloat(pago.monto) || 0;
       } else if (diasRestantes <= 15) {
@@ -6422,60 +6509,13 @@ const ModuloExpedientes = () => {
         setClientes(clientesData);
         setClientesMap(mapa);
         
-        // 4. Normalizar estatusPago respetando el valor de la BD
-        const expedientesProcesados = expedientesData.map(exp => {
-          // ✅ RESPETAR EL ESTATUS QUE VIENE DE LA BASE DE DATOS
-          let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
-          
-          // Normalizar para comparación (case-insensitive)
-          const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
-          
-          // Normalizar variaciones a formato estándar
-          if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-            estatusPagoCalculado = 'Pagado';
-          } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
-            estatusPagoCalculado = 'Cancelado';
-          } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
-            estatusPagoCalculado = 'Vencido';
-          } else if (estatusNormalizado === 'por vencer') {
-            estatusPagoCalculado = 'Por Vencer';
-          } else if (estatusNormalizado === 'pendiente') {
-            estatusPagoCalculado = 'Pendiente';
-          } else if (estatusPagoCalculado) {
-            // Si tiene algún valor que no reconocemos, mantenerlo y solo normalizar capitalización
-            estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
-            console.log(`⚠️ Estatus no reconocido pero preservado: "${estatusPagoCalculado}" en póliza ${exp.numero_poliza}`);
-          } else {
-            // Solo si NO viene ningún estatus, calcular basándose en la fecha
-            const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-            if (fechaVencimiento) {
-              const fechaVenc = new Date(fechaVencimiento);
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              fechaVenc.setHours(0, 0, 0, 0);
-              
-              if (fechaVenc < hoy) {
-                estatusPagoCalculado = 'Vencido';
-              } else {
-                estatusPagoCalculado = 'Pendiente';
-              }
-            } else {
-              estatusPagoCalculado = 'Pendiente';
-            }
-          }
-          
-          return {
-            ...exp,
-            estatusPago: estatusPagoCalculado
-          };
-        });
-        
-        setExpedientes(expedientesProcesados);
+        // 🔥 Ya no normalizamos estatusPago - se calcula dinámicamente con calcularEstatusPagoActual()
+        setExpedientes(expedientesData);
         
         // Detectar pólizas duplicadas
-        if (expedientesProcesados.length > 0) {
+        if (expedientesData.length > 0) {
           const grupos = {};
-          expedientesProcesados.forEach(exp => {
+          expedientesData.forEach(exp => {
             if (exp.numero_poliza && exp.compania && exp.inicio_vigencia) {
               const clave = `${exp.numero_poliza}-${exp.compania}-${exp.inicio_vigencia}`;
               if (!grupos[clave]) {
@@ -6973,7 +7013,6 @@ const estadoInicialFormulario = {
       const fechaPago = new Date(fechaInicio);
       fechaPago.setDate(fechaPago.getDate() + periodoGracia);
       const resultado = fechaPago.toISOString().split('T')[0];
-      console.log(`📅 Pago #1: ${inicio_vigencia} + ${periodoGracia} días = ${resultado}`);
       return resultado;
     }
     
@@ -6987,8 +7026,6 @@ const estadoInicialFormulario = {
       fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
       
       const resultado = fechaPagoSubsecuente.toISOString().split('T')[0];
-      console.log(`📅 Pago #${numeroPago}: ${inicio_vigencia} + ${mesesAAgregar} meses = ${resultado}`);
-      
       return resultado;
     }
     
@@ -8069,9 +8106,25 @@ const estadoInicialFormulario = {
       
       if (hayMasRecibosPendientes || (proximoPago && proximoPago.trim() !== '')) {
         // Hay un siguiente pago pendiente
-        nuevoEstatusPago = 'Pendiente';
         nuevaFechaVencimiento = proximoPago;
-        console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago pendiente:`, proximoPago);
+        
+        // 🔥 Calcular estatus usando LA MISMA LÓGICA del calendario de pagos
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const fechaProximoPago = new Date(proximoPago + 'T00:00:00');
+        fechaProximoPago.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.ceil((fechaProximoPago - hoy) / (1000 * 60 * 60 * 24));
+        
+        if (diasRestantes < 0) {
+          nuevoEstatusPago = 'Vencido';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago VENCIDO (${Math.abs(diasRestantes)} días de atraso):`, proximoPago);
+        } else if (diasRestantes <= 15) {
+          nuevoEstatusPago = 'Pago por vencer';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago por vencer (${diasRestantes} días):`, proximoPago);
+        } else {
+          nuevoEstatusPago = 'Pendiente';
+          console.log(`✅ Pago ${numeroReciboPago} aplicado. Siguiente pago pendiente (${diasRestantes} días):`, proximoPago);
+        }
       } else {
         // No hay más pagos (Anual o último pago de fraccionado)
         nuevoEstatusPago = 'Pagado';
@@ -8170,10 +8223,18 @@ const estadoInicialFormulario = {
         };
         
         const numeroPago = calcularNumeroPago();
-        const fechaPagoFormateada = new Date(fechaUltimoPago).toLocaleDateString('es-MX', { 
+        // Formatear fechas correctamente agregando timezone offset para evitar cambio de día
+        const fechaPagoFormateada = new Date(fechaUltimoPago + 'T00:00:00').toLocaleDateString('es-MX', { 
           day: 'numeric', 
           month: 'long', 
-          year: 'numeric' 
+          year: 'numeric',
+          timeZone: 'America/Mexico_City'
+        });
+        const fechaCapturaFormateada = new Date(fechaActual + 'T00:00:00').toLocaleDateString('es-MX', { 
+          day: 'numeric', 
+          month: 'long', 
+          year: 'numeric',
+          timeZone: 'America/Mexico_City'
         });
         
         let comentario;
@@ -8181,6 +8242,7 @@ const estadoInicialFormulario = {
           // Hay siguiente pago pendiente
           comentario = `💰 Pago Registrado\n` +
                       `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
                       `📄 Recibo/Pago: ${numeroPago}\n` +
                       `🧾 Comprobante: ${comprobantePago.name}\n` +
                       `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
@@ -8190,6 +8252,7 @@ const estadoInicialFormulario = {
           // Póliza completamente pagada
           comentario = `💰 Pago Registrado (Final)\n` +
                       `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
+                      `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
                       `📄 Recibo/Pago: ${numeroPago}\n` +
                       `🧾 Comprobante: ${comprobantePago.name}\n` +
                       `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
@@ -8248,6 +8311,8 @@ const estadoInicialFormulario = {
       }
 
       // 🔄 RECARGAR expedientes desde BD para reflejar cambios en etapa_activa
+      // Pequeño delay para asegurar que el backend procesó la actualización
+      await new Promise(resolve => setTimeout(resolve, 300));
       await recargarExpedientes();
       console.log('✅ Expedientes recargados desde BD');
       
@@ -9856,64 +9921,8 @@ const estadoInicialFormulario = {
       setClientes(clientesData);
       setClientesMap(mapa);
       
-      // 5. Parsear coberturas si vienen como string JSON y normalizar alias (uso/servicio/movimiento)
-      const expedientesConCoberturasParsadas = expedientes.map(exp => {
-        if (exp.coberturas && typeof exp.coberturas === 'string') {
-          try {
-            exp.coberturas = JSON.parse(exp.coberturas);
-          } catch (error) {
-            console.error(`❌ Error parseando coberturas para ${exp.numero_poliza}:`, error);
-            exp.coberturas = null;
-          }
-        }
-        
-        // ✅ NORMALIZAR ESTATUS DE PAGO (igual que en cargarDatos)
-        let estatusPagoCalculado = exp.estatus_pago || exp.estatusPago;
-        const estatusNormalizado = (estatusPagoCalculado || '').toLowerCase().trim();
-        
-        if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-          estatusPagoCalculado = 'Pagado';
-        } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
-          estatusPagoCalculado = 'Cancelado';
-        } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
-          estatusPagoCalculado = 'Vencido';
-        } else if (estatusNormalizado === 'por vencer') {
-          estatusPagoCalculado = 'Por Vencer';
-        } else if (estatusNormalizado === 'pendiente') {
-          estatusPagoCalculado = 'Pendiente';
-        } else if (estatusPagoCalculado) {
-          // Preservar valores no reconocidos
-          estatusPagoCalculado = estatusPagoCalculado.charAt(0).toUpperCase() + estatusPagoCalculado.slice(1).toLowerCase();
-        } else {
-          // Solo calcular si viene vacío
-          const fechaVencimiento = exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago;
-          if (fechaVencimiento) {
-            const fechaVenc = new Date(fechaVencimiento);
-            const hoy = new Date();
-            hoy.setHours(0, 0, 0, 0);
-            fechaVenc.setHours(0, 0, 0, 0);
-            estatusPagoCalculado = fechaVenc < hoy ? 'Vencido' : 'Pendiente';
-          } else {
-            estatusPagoCalculado = 'Pendiente';
-          }
-        }
-        
-        exp.estatusPago = estatusPagoCalculado;
-        
-        // Normalizar alias para que edición y detalle los tengan listos
-        exp.uso = exp.uso || exp.uso_poliza || exp.Uso || exp.usoVehiculo || '';
-        exp.servicio = exp.servicio || exp.servicio_poliza || exp.Servicio || exp.servicioVehiculo || '';
-        exp.movimiento = exp.movimiento || exp.movimiento_poliza || exp.Movimiento || '';
-        // Montos y financieros: cubrir alias comunes del backend
-        exp.cargo_pago_fraccionado =
-          exp.cargo_pago_fraccionado ?? exp.cargoPagoFraccionado ?? exp.tasa_financiamiento ?? exp.tasaFinanciamiento ?? 0;
-        exp.gastos_expedicion =
-          exp.gastos_expedicion ?? exp.gastosExpedicion ?? exp.gastos ?? 0;
-        exp.subtotal = exp.subtotal ?? exp.sub_total ?? exp.subTotal ?? 0;
-        return exp;
-      });
-      
-      setExpedientes(expedientesConCoberturasParsadas);
+      // 🔥 Ya no normalizamos estatusPago - se calcula dinámicamente con calcularEstatusPagoActual()
+      setExpedientes(expedientes);
     } catch (err) {
       console.error('Error al recargar expedientes:', err);
     }
@@ -10482,7 +10491,7 @@ const eliminarExpediente = useCallback((id) => {
         const historial = data?.data || data || [];
         const historialArray = Array.isArray(historial) ? historial : [];
         setHistorialExpediente(historialArray);
-        console.log('📋 Historial cargado para CalendarioPagos:', historialArray.length, 'eventos', historialArray);
+        // Historial cargado para CalendarioPagos
       } else {
         setHistorialExpediente([]);
       }
@@ -10764,7 +10773,7 @@ const eliminarExpediente = useCallback((id) => {
                 <div className="mb-2">
                   <label className="form-label fw-bold mb-1" style={{ fontSize: '0.8rem' }}>
                     <Calendar size={14} className="me-1" />
-                    Fecha en que se realizó el pago *
+                    Fecha real del pago (cuando el cliente pagó) *
                   </label>
                   <input
                     type="date"
@@ -10777,9 +10786,9 @@ const eliminarExpediente = useCallback((id) => {
                     {(() => {
                       const fechaLimite = expedienteParaPago.fecha_vencimiento_pago || expedienteParaPago.proximo_pago;
                       if (fechaLimite) {
-                        return `Fecha límite de pago: ${new Date(fechaLimite).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+                        return `Fecha límite de pago: ${new Date(fechaLimite).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })} • La fecha de captura será hoy`;
                       }
-                      return 'Seleccione la fecha en que el cliente realizó el pago';
+                      return 'Ingrese la fecha en que el cliente realizó el pago. La fecha de captura será automática (hoy)';
                     })()}
                   </small>
                 </div>
