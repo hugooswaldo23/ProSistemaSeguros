@@ -1914,7 +1914,6 @@ const SistemaGestionPersonal = () => {
                               </div>
                             )}
                           </div>
-                          </>
                         )}
                       </div>
                     </div>
