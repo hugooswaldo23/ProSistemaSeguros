@@ -41,6 +41,10 @@ export const useEquipoDeTrabajo = () => {
         try { tiposProductosDisponibles = miembro.tiposProductosDisponibles ? (typeof miembro.tiposProductosDisponibles === 'string' ? JSON.parse(miembro.tiposProductosDisponibles) : miembro.tiposProductosDisponibles) : []; } catch (e) { tiposProductosDisponibles = []; }
         let ejecutivosPorProducto = {};
         try { ejecutivosPorProducto = miembro.ejecutivosPorProducto ? (typeof miembro.ejecutivosPorProducto === 'string' ? JSON.parse(miembro.ejecutivosPorProducto) : miembro.ejecutivosPorProducto) : {}; } catch (e) { ejecutivosPorProducto = {}; }
+        let productosAseguradoras = [];
+        try { productosAseguradoras = miembro.productosAseguradoras ? (typeof miembro.productosAseguradoras === 'string' ? JSON.parse(miembro.productosAseguradoras) : miembro.productosAseguradoras) : []; } catch (e) { productosAseguradoras = []; }
+        let comisionesCompartidas = [];
+        try { comisionesCompartidas = miembro.comisionesCompartidas ? (typeof miembro.comisionesCompartidas === 'string' ? JSON.parse(miembro.comisionesCompartidas) : miembro.comisionesCompartidas) : []; } catch (e) { comisionesCompartidas = []; }
 
         return {
           id: miembro.id,
@@ -68,7 +72,9 @@ export const useEquipoDeTrabajo = () => {
           agentesSupervisados: agentesSupervisados,
           ejecutivoAsignado: miembro.ejecutivoAsignado,
           ejecutivosPorProducto: ejecutivosPorProducto,
-          tiposProductosDisponibles: tiposProductosDisponibles
+          tiposProductosDisponibles: tiposProductosDisponibles,
+          productosAseguradoras: productosAseguradoras,
+          comisionesCompartidas: comisionesCompartidas
         };
       });
       setEquipoDeTrabajo(equipoTransformado);
@@ -116,14 +122,29 @@ export const useEquipoDeTrabajo = () => {
   }, [cargarEquipoDeTrabajo]);
 
   // Generar código automático
-  const generarCodigo = useCallback(() => {
-    if (equipoDeTrabajo.length === 0) {
-      return 'AG001';
+  const generarCodigo = useCallback((perfil = 'Agente') => {
+    // Determinar prefijo según el perfil
+    const prefijos = {
+      'Agente': 'AG',
+      'Vendedor': 'VE',
+      'Ejecutivo': 'EJ',
+      'Administrador': 'AD'
+    };
+    
+    const prefijo = prefijos[perfil] || 'AG';
+    
+    // Filtrar miembros con el mismo prefijo
+    const miembrosConPrefijo = equipoDeTrabajo.filter(m => 
+      m.codigo && m.codigo.startsWith(prefijo)
+    );
+    
+    if (miembrosConPrefijo.length === 0) {
+      return `${prefijo}001`;
     }
     
-    const numeros = equipoDeTrabajo
+    const numeros = miembrosConPrefijo
       .map(miembro => {
-        const match = miembro.codigoAgente ? miembro.codigoAgente.match(/AG(\d+)/) : null;
+        const match = miembro.codigo ? miembro.codigo.match(new RegExp(`${prefijo}(\\d+)`)) : null;
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(num => !isNaN(num));
@@ -131,7 +152,7 @@ export const useEquipoDeTrabajo = () => {
     const maxNumero = numeros.length > 0 ? Math.max(...numeros) : 0;
     const siguienteNumero = maxNumero + 1;
     
-    return `AG${siguienteNumero.toString().padStart(3, '0')}`;
+    return `${prefijo}${siguienteNumero.toString().padStart(3, '0')}`;
   }, [equipoDeTrabajo]);
 
   // Cargar datos al montar el componente
