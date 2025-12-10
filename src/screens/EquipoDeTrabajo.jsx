@@ -819,10 +819,18 @@ const SistemaGestionPersonal = () => {
       return;
     }
 
-    const payload = { ...formulario };
+    const payload = { 
+      ...formulario,
+      comisionesCompartidas: comisionesCompartidas // Incluir comisiones compartidas para Vendedores
+    };
     // No enviar campos auxiliares ni el mapping legacy de ejecutivosPorProducto
     delete payload.confirmarContrasena;
     delete payload.ejecutivosPorProducto;
+
+    console.log('=== GUARDANDO USUARIO ===');
+    console.log('Esquema compensación:', payload.esquemaCompensacion);
+    console.log('Comisiones compartidas:', payload.comisionesCompartidas);
+    console.log('Payload completo:', payload);
 
     if (modoEdicion) {
       const res = await actualizar(formulario.id, payload);
@@ -883,6 +891,7 @@ const SistemaGestionPersonal = () => {
 
     setModoEdicion(true);
     setMostrarFormulario(true);
+    setTabActiva('general'); // Abrir en Datos Generales al editar
     // Cargar asignaciones desde la tabla ejecutivos_por_producto para poblar el formulario
     (async () => {
       try {
@@ -921,9 +930,30 @@ const SistemaGestionPersonal = () => {
       }
     })();
     
-    // TODO: Cargar comisiones compartidas desde backend cuando exista la tabla
-    // Por ahora inicializar vacío
-    setComisionesCompartidas([]);
+    // Cargar comisiones compartidas desde el usuario
+    let comisiones = [];
+    try {
+      if (usuario.comisionesCompartidas) {
+        // Si es string, parsear como JSON
+        if (typeof usuario.comisionesCompartidas === 'string') {
+          comisiones = JSON.parse(usuario.comisionesCompartidas);
+        } 
+        // Si es array, usarlo directamente
+        else if (Array.isArray(usuario.comisionesCompartidas)) {
+          comisiones = usuario.comisionesCompartidas;
+        }
+        // Si es objeto pero no array, convertirlo a array
+        else if (typeof usuario.comisionesCompartidas === 'object') {
+          comisiones = Object.values(usuario.comisionesCompartidas);
+        }
+      }
+    } catch (e) {
+      console.error('Error parseando comisionesCompartidas:', e);
+      comisiones = [];
+    }
+    console.log('Usuario completo:', usuario);
+    console.log('Comisiones compartidas cargadas:', comisiones);
+    setComisionesCompartidas(comisiones);
   };
 
   // Cargar y mostrar detalles (incluye registros de ejecutivos_por_producto)
@@ -1471,8 +1501,8 @@ const SistemaGestionPersonal = () => {
                         )}
 
                         {/* Configuración de Comisiones Compartidas */}
-                        {(formulario.esquemaCompensacion === 'comision' || formulario.esquemaCompensacion === 'mixto') && 
-                         (formulario.perfil === 'Agente' || formulario.perfil === 'Vendedor') && (
+                        {((formulario.esquemaCompensacion === 'comision' || formulario.esquemaCompensacion === 'mixto' || comisionesCompartidas.length > 0) && 
+                         (formulario.perfil === 'Agente' || formulario.perfil === 'Vendedor')) && (
                           <>
                             <div className="col-12 mt-4">
                               <div className="d-flex justify-content-between align-items-center mb-3">
@@ -1753,49 +1783,76 @@ const SistemaGestionPersonal = () => {
                     </select>
                   </div>
                   
-                  {agenteSeleccionadoTemp && (
+                  {agenteSeleccionadoTemp && (() => {
+                    const agenteObj = usuarios.find(u => String(u.id) === String(agenteSeleccionadoTemp));
+                    const clavesAgente = agenteObj?.productosAseguradoras || [];
+                    
+                    return (
                     <div className="col-12 mt-3">
                       <h6>Claves disponibles del agente:</h6>
-                      <div className="alert alert-info">
-                        <small><strong>Nota:</strong> Por ahora se muestran claves de ejemplo. En la implementación final se cargarán desde la base de datos.</small>
-                      </div>
-                      {/* Lista de claves del agente - Por ahora simuladas */}
-                      <div className="list-group">
-                        {[
-                          { id: 1, aseguradoraId: 1, aseguradora: 'Qualitas', clave: 'QUA-AG001', comisionBase: 15 },
-                          { id: 2, aseguradoraId: 2, aseguradora: 'HDI', clave: 'HDI-AG001', comisionBase: 20 },
-                          { id: 3, aseguradoraId: 3, aseguradora: 'ABA', clave: 'ABA-AG001', comisionBase: 18 }
-                        ].map(clave => {
-                          const isSelected = clavesSeleccionadasTemp.some(c => c.id === clave.id);
-                          return (
-                            <div 
-                              key={clave.id}
-                              className={`list-group-item list-group-item-action ${isSelected ? 'active' : ''}`}
-                              style={{ cursor: 'pointer' }}
-                              onClick={() => {
-                                if (isSelected) {
-                                  setClavesSeleccionadasTemp(clavesSeleccionadasTemp.filter(c => c.id !== clave.id));
-                                } else {
-                                  setClavesSeleccionadasTemp([...clavesSeleccionadasTemp, clave]);
-                                }
-                              }}
-                            >
-                              <div className="d-flex w-100 justify-content-between align-items-center">
-                                <div>
-                                  <input
-                                    type="checkbox"
-                                    className="form-check-input me-2"
-                                    checked={isSelected}
-                                    readOnly
-                                  />
-                                  <strong>{clave.aseguradora}</strong> - {clave.clave}
+                      {clavesAgente.length === 0 ? (
+                        <div className="alert alert-warning">
+                          <AlertCircle size={16} className="me-2" />
+                          Este agente no tiene claves registradas. Debe agregar claves en la pestaña "Claves y Aseguradoras" del agente.
+                        </div>
+                      ) : (
+                        <>
+                          {/* Lista de claves del agente - Datos reales de BD */}
+                          <div className="list-group">
+                            {clavesAgente.map((productoAseg, index) => {
+                              const aseguradora = aseguradoras.find(a => String(a.id) === String(productoAseg.aseguradoraId));
+                              const producto = tiposProductos.find(p => String(p.id) === String(productoAseg.productoId));
+                              const clave = productoAseg.clave || 'Sin clave';
+                              const comisionBase = productoAseg.comisionPersonalizada || producto?.comisionBase || 0;
+                              
+                              const claveData = {
+                                id: productoAseg.id || index,
+                                aseguradoraId: productoAseg.aseguradoraId,
+                                aseguradora: aseguradora?.nombre || 'Sin aseguradora',
+                                clave: clave,
+                                comisionBase: comisionBase,
+                                productoId: productoAseg.productoId
+                              };
+                              
+                              const isSelected = clavesSeleccionadasTemp.some(c => 
+                                String(c.aseguradoraId) === String(claveData.aseguradoraId) && 
+                                c.clave === claveData.clave
+                              );
+                              
+                              return (
+                                <div 
+                                  key={`${productoAseg.aseguradoraId}-${clave}-${index}`}
+                                  className={`list-group-item list-group-item-action ${isSelected ? 'active' : ''}`}
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      setClavesSeleccionadasTemp(clavesSeleccionadasTemp.filter(c => 
+                                        !(String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave)
+                                      ));
+                                    } else {
+                                      setClavesSeleccionadasTemp([...clavesSeleccionadasTemp, claveData]);
+                                    }
+                                  }}
+                                >
+                                  <div className="d-flex w-100 justify-content-between align-items-center">
+                                    <div>
+                                      <input
+                                        type="checkbox"
+                                        className="form-check-input me-2"
+                                        checked={isSelected}
+                                        readOnly
+                                      />
+                                      <strong>{claveData.aseguradora}</strong> - <code>{clave}</code>
+                                    </div>
+                                    <span className="badge bg-primary">Comisión: {comisionBase}%</span>
+                                  </div>
                                 </div>
-                                <span className="badge bg-primary">Comisión: {clave.comisionBase}%</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                      
                       
                       {clavesSeleccionadasTemp.length > 0 && (
                         <div className="alert alert-success mt-3">
@@ -1803,7 +1860,8 @@ const SistemaGestionPersonal = () => {
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
               <div className="modal-footer">
