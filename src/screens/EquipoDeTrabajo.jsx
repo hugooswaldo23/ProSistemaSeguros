@@ -478,6 +478,9 @@ const SistemaGestionPersonal = () => {
   const [cargandoAsignaciones, setCargandoAsignaciones] = useState(false);
   const [mostrarAlerta, setMostrarAlerta] = useState({ show: false, message: '', type: 'success' });
   const [tabActiva, setTabActiva] = useState('general');
+  
+  // Estado para comisiones compartidas (relación agente-vendedor)
+  const [comisionesCompartidas, setComisionesCompartidas] = useState([]);
 
   // Estado del formulario con campos de compensación
   const [formulario, setFormulario] = useState({
@@ -609,6 +612,27 @@ const SistemaGestionPersonal = () => {
     setFormulario({ ...formulario, productosAseguradoras: nuevosProductos });
   };
 
+  // Funciones para gestionar comisiones compartidas
+  const agregarComisionCompartida = () => {
+    setComisionesCompartidas([...comisionesCompartidas, {
+      id: Date.now(),
+      agenteId: formulario.perfil === 'Vendedor' ? '' : formulario.id,
+      vendedorId: formulario.perfil === 'Agente' ? '' : formulario.id,
+      porcentajeVendedor: 50,
+      activo: true
+    }]);
+  };
+
+  const actualizarComisionCompartida = (index, field, value) => {
+    const nuevasComisiones = [...comisionesCompartidas];
+    nuevasComisiones[index][field] = value;
+    setComisionesCompartidas(nuevasComisiones);
+  };
+
+  const eliminarComisionCompartida = (index) => {
+    setComisionesCompartidas(comisionesCompartidas.filter((_, i) => i !== index));
+  };
+
   // Calcular ingresos estimados
   const calcularIngresosEstimados = () => {
     let ingresoMensualSueldo = 0;
@@ -721,6 +745,7 @@ const SistemaGestionPersonal = () => {
       fechaRegistro: new Date().toISOString().split('T')[0],
       notas: ''
     });
+    setComisionesCompartidas([]);
   };
 
   // Mostrar alerta
@@ -855,6 +880,10 @@ const SistemaGestionPersonal = () => {
         console.error('Error cargando asignaciones en editarUsuario:', err);
       }
     })();
+    
+    // TODO: Cargar comisiones compartidas desde backend cuando exista la tabla
+    // Por ahora inicializar vacío
+    setComisionesCompartidas([]);
   };
 
   // Cargar y mostrar detalles (incluye registros de ejecutivos_por_producto)
@@ -1089,22 +1118,12 @@ const SistemaGestionPersonal = () => {
                   </li>
                   <li className="nav-item">
                     <button 
-                      className={`nav-link ${tabActiva === 'perfil' ? 'active' : ''}`}
-                      onClick={() => setTabActiva('perfil')}
-                      type="button"
-                    >
-                      <Shield size={18} className="me-2" />
-                      Perfil y Asignaciones
-                    </button>
-                  </li>
-                  <li className="nav-item">
-                    <button 
                       className={`nav-link ${tabActiva === 'compensacion' ? 'active' : ''}`}
                       onClick={() => setTabActiva('compensacion')}
                       type="button"
                     >
                       <DollarSign size={18} className="me-2" />
-                      Compensación
+                      Compensación y Comisiones
                     </button>
                   </li>
                   <li className="nav-item">
@@ -1125,6 +1144,36 @@ const SistemaGestionPersonal = () => {
                   {tabActiva === 'general' && (
                     <div className="tab-pane fade show active">
                       <div className="row g-3">
+                        {/* Perfil del Usuario - Primero */}
+                        <div className="col-md-4">
+                          <label className="form-label">Perfil del Usuario *</label>
+                          <select 
+                            className="form-select"
+                            value={formulario.perfil}
+                            onChange={(e) => {
+                              const nuevoPerfil = e.target.value;
+                              setFormulario({
+                                ...formulario, 
+                                perfil: nuevoPerfil,
+                                codigo: generarCodigo(nuevoPerfil),
+                                productosAseguradoras: []
+                              });
+                            }}
+                          >
+                            <option value="Agente">Agente</option>
+                            <option value="Vendedor">Vendedor</option>
+                            <option value="Ejecutivo">Ejecutivo</option>
+                            <option value="Administrador">Administrador</option>
+                          </select>
+                        </div>
+                        
+                        <div className="col-md-8">
+                          <label className="form-label">Descripción del Perfil</label>
+                          <div className="alert alert-info mb-0">
+                            <small>{perfilesSistema[formulario.perfil]?.descripcion}</small>
+                          </div>
+                        </div>
+
                         <div className="col-md-3">
                           <label className="form-label">Código *</label>
                           <input
@@ -1200,97 +1249,9 @@ const SistemaGestionPersonal = () => {
                     </div>
                   )}
 
-                  {/* Tab Perfil y Asignaciones */}
-                  {tabActiva === 'perfil' && (
-                    <div className="tab-pane fade show active">
-                      <div className="row g-3">
-                        <div className="col-md-4">
-                          <label className="form-label">Perfil del Usuario *</label>
-                          <select 
-                            className="form-select"
-                            value={formulario.perfil}
-                            onChange={(e) => {
-                              const nuevoPerfil = e.target.value;
-                              setFormulario({
-                                ...formulario, 
-                                perfil: nuevoPerfil,
-                                codigo: generarCodigo(nuevoPerfil),
-                                productosAseguradoras: []
-                              });
-                            }}
-                          >
-                            <option value="Agente">Agente</option>
-                            <option value="Vendedor">Vendedor</option>
-                            <option value="Ejecutivo">Ejecutivo</option>
-                            <option value="Administrador">Administrador</option>
-                          </select>
-                        </div>
-                        
-                        <div className="col-md-8">
-                          <label className="form-label">Descripción del Perfil</label>
-                          <div className="alert alert-info mb-0">
-                            <small>{perfilesSistema[formulario.perfil]?.descripcion}</small>
-                          </div>
-                        </div>
-                        
-                        {/* Si es Agente o Vendedor */}
-                        {(formulario.perfil === 'Agente' || formulario.perfil === 'Vendedor') && (
-                          <div className="col-12">
-                            <div className="d-flex justify-content-between align-items-center mb-3">
-                              <h6 className="mb-0">
-                                <Package size={20} className="me-2" />
-                                Productos y Aseguradoras
-                              </h6>
-                              <button
-                                type="button"
-                                className="btn btn-primary btn-sm"
-                                onClick={() => setMostrarModalAseguradoras(true)}
-                              >
-                                <Plus size={16} className="me-2" />
-                                Agregar Aseguradora y Productos
-                              </button>
-                            </div>
-                            
-                            {formulario.productosAseguradoras.length === 0 ? (
-                              <div className="alert alert-warning">
-                                <AlertCircle size={20} className="me-2" />
-                                No hay productos asignados. Haga clic en "Agregar Aseguradora y Productos" para comenzar.
-                              </div>
-                            ) : (
-                              <>
-                                <AsignarEjecutivoPorProductoAseguradora
-                                  productosAseguradoras={formulario.productosAseguradoras}
-                                  ejecutivosDisponibles={ejecutivosDisponibles}
-                                  onChange={handleProductosAseguradorasChange}
-                                  onComisionChange={handleComisionChange}
-                                  usuarioId={formulario.id}
-                                  onAsignarEjecutivo={async ({ usuarioId, productoId, ejecutivoId, comisionPersonalizada = 0, clave = null }) => {
-                                    const res = await guardarEjecutivosPorProducto({ usuarioId, productoId, ejecutivoId, comisionPersonalizada, clave });
-                                    if (res && res.success) mostrarAlertaTemp('Asignación guardada', 'success');
-                                    else mostrarAlertaTemp('Error al guardar asignación', 'danger');
-                                  }}
-                                  aseguradoras={aseguradoras}
-                                  tiposProductos={tiposProductos}
-                                />
-                                <div className="mt-2">
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-danger btn-sm"
-                                    onClick={() => setFormulario({ ...formulario, productosAseguradoras: [] })}
-                                  >
-                                    <Trash2 size={16} className="me-2" />
-                                    Limpiar todo
-                                  </button>
-                                </div>
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
-                  {/* Tab Compensación */}
+
+                  {/* Tab Compensación y Comisiones */}
                   {tabActiva === 'compensacion' && (
                     <div className="tab-pane fade show active">
                       <div className="row g-3">
@@ -1434,60 +1395,170 @@ const SistemaGestionPersonal = () => {
                           </>
                         )}
 
-                        {/* Tabla Informativa de Comisiones - Solo lectura */}
-                        {(formulario.esquemaCompensacion === 'comision' || formulario.esquemaCompensacion === 'mixto') && (
+                        {/* Configuración de Comisiones Compartidas */}
+                        {(formulario.esquemaCompensacion === 'comision' || formulario.esquemaCompensacion === 'mixto') && 
+                         (formulario.perfil === 'Agente' || formulario.perfil === 'Vendedor') && (
                           <>
                             <div className="col-12 mt-4">
-                              <h6 className="mb-3">
-                                <Percent size={20} className="me-2" />
-                                Resumen de Comisiones Configuradas
-                              </h6>
-                              {formulario.productosAseguradoras.length === 0 ? (
-                                <div className="alert alert-warning">
+                              <div className="d-flex justify-content-between align-items-center mb-3">
+                                <h6 className="mb-0">
+                                  <Percent size={20} className="me-2" />
+                                  {formulario.perfil === 'Vendedor' 
+                                    ? 'Agentes con los que puedes trabajar'
+                                    : 'Vendedores autorizados a usar tu clave'
+                                  }
+                                </h6>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-sm"
+                                  onClick={agregarComisionCompartida}
+                                >
+                                  <Plus size={16} className="me-2" />
+                                  {formulario.perfil === 'Vendedor' ? 'Agregar Agente' : 'Agregar Vendedor'}
+                                </button>
+                              </div>
+
+                              {comisionesCompartidas.length === 0 ? (
+                                <div className="alert alert-info">
                                   <AlertCircle size={20} className="me-2" />
-                                  No hay productos asignados. Configure los productos y sus comisiones en la pestaña "Perfil y Asignaciones".
+                                  {formulario.perfil === 'Vendedor'
+                                    ? 'No hay agentes configurados. Agrega los agentes con los que trabajarás y define tu porcentaje de comisión.'
+                                    : 'No hay vendedores configurados. Agrega los vendedores que pueden usar tu clave y define su porcentaje de comisión.'
+                                  }
                                 </div>
                               ) : (
                                 <div className="table-responsive">
-                                  <table className="table table-bordered table-striped">
+                                  <table className="table table-bordered">
                                     <thead className="table-light">
                                       <tr>
-                                        <th>Aseguradora</th>
-                                        <th>Producto</th>
-                                        <th className="text-center">Comisión Configurada</th>
+                                        {formulario.perfil === 'Vendedor' ? (
+                                          <>
+                                            <th width="40%">Agente</th>
+                                            <th width="20%">Clave del Agente</th>
+                                            <th width="15%">Tú recibes</th>
+                                            <th width="15%">Agente recibe</th>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <th width="40%">Vendedor</th>
+                                            <th width="15%">Vendedor recibe</th>
+                                            <th width="15%">Tú recibes</th>
+                                          </>
+                                        )}
+                                        <th width="10%" className="text-center">Acciones</th>
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {formulario.productosAseguradoras.map((item, index) => {
-                                        const aseguradora = aseguradoras.find(a => a.id === item.aseguradoraId);
-                                        const producto = tiposProductos.find(p => p.id === item.productoId);
-                                        const comision = item.comisionPersonalizada || producto?.comisionBase || 0;
-                                        
+                                      {comisionesCompartidas.map((comision, index) => {
+                                        const agente = usuarios.find(u => String(u.id) === String(comision.agenteId));
+                                        const vendedor = usuarios.find(u => String(u.id) === String(comision.vendedorId));
+                                        const porcentajeAgente = 100 - comision.porcentajeVendedor;
+
                                         return (
-                                          <tr key={index}>
-                                            <td>
-                                              <Building2 size={16} className="me-2 text-primary" />
-                                              <span className="badge bg-info me-2">{aseguradora?.codigo}</span>
-                                              {aseguradora?.nombre}
-                                            </td>
-                                            <td>
-                                              <Package size={16} className="me-2 text-success" />
-                                              {producto?.nombre}
-                                            </td>
+                                          <tr key={comision.id || index}>
+                                            {formulario.perfil === 'Vendedor' ? (
+                                              <>
+                                                <td>
+                                                  <select
+                                                    className="form-select form-select-sm"
+                                                    value={comision.agenteId}
+                                                    onChange={(e) => actualizarComisionCompartida(index, 'agenteId', e.target.value)}
+                                                  >
+                                                    <option value="">Seleccionar agente...</option>
+                                                    {usuarios.filter(u => u.perfil === 'Agente' && u.activo).map(u => (
+                                                      <option key={u.id} value={u.id}>
+                                                        {u.codigo} - {u.nombre} {u.apellidoPaterno}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                </td>
+                                                <td>
+                                                  <input
+                                                    type="text"
+                                                    className="form-control form-control-sm"
+                                                    value={agente?.codigo || 'N/A'}
+                                                    readOnly
+                                                    placeholder="Clave del agente"
+                                                  />
+                                                </td>
+                                                <td>
+                                                  <div className="input-group input-group-sm">
+                                                    <input
+                                                      type="number"
+                                                      className="form-control"
+                                                      value={comision.porcentajeVendedor}
+                                                      onChange={(e) => actualizarComisionCompartida(index, 'porcentajeVendedor', parseFloat(e.target.value) || 0)}
+                                                      min="0"
+                                                      max="100"
+                                                      step="5"
+                                                    />
+                                                    <span className="input-group-text">%</span>
+                                                  </div>
+                                                </td>
+                                                <td className="text-center">
+                                                  <span className="badge bg-secondary fs-6">{porcentajeAgente}%</span>
+                                                </td>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <td>
+                                                  <select
+                                                    className="form-select form-select-sm"
+                                                    value={comision.vendedorId}
+                                                    onChange={(e) => actualizarComisionCompartida(index, 'vendedorId', e.target.value)}
+                                                  >
+                                                    <option value="">Seleccionar vendedor...</option>
+                                                    {usuarios.filter(u => u.perfil === 'Vendedor' && u.activo).map(u => (
+                                                      <option key={u.id} value={u.id}>
+                                                        {u.codigo} - {u.nombre} {u.apellidoPaterno}
+                                                      </option>
+                                                    ))}
+                                                  </select>
+                                                </td>
+                                                <td>
+                                                  <div className="input-group input-group-sm">
+                                                    <input
+                                                      type="number"
+                                                      className="form-control"
+                                                      value={comision.porcentajeVendedor}
+                                                      onChange={(e) => actualizarComisionCompartida(index, 'porcentajeVendedor', parseFloat(e.target.value) || 0)}
+                                                      min="0"
+                                                      max="100"
+                                                      step="5"
+                                                    />
+                                                    <span className="input-group-text">%</span>
+                                                  </div>
+                                                </td>
+                                                <td className="text-center">
+                                                  <span className="badge bg-secondary fs-6">{porcentajeAgente}%</span>
+                                                </td>
+                                              </>
+                                            )}
                                             <td className="text-center">
-                                              <span className="badge bg-primary fs-6">{comision}%</span>
+                                              <button
+                                                type="button"
+                                                className="btn btn-sm btn-outline-danger"
+                                                onClick={() => eliminarComisionCompartida(index)}
+                                                title="Eliminar"
+                                              >
+                                                <Trash2 size={14} />
+                                              </button>
                                             </td>
                                           </tr>
                                         );
                                       })}
                                     </tbody>
                                   </table>
-                                  <div className="alert alert-info mt-2">
-                                    <small>
-                                      <strong>Nota:</strong> Las comisiones se configuran en la pestaña "Perfil y Asignaciones". 
-                                      El agente recibirá el porcentaje completo configurado para cada producto.
-                                    </small>
-                                  </div>
+                                </div>
+                              )}
+
+                              {comisionesCompartidas.length > 0 && (
+                                <div className="alert alert-success mt-3">
+                                  <strong>Nota:</strong> 
+                                  {formulario.perfil === 'Vendedor'
+                                    ? ' Estos porcentajes se aplicarán por defecto cuando captures una póliza con estos agentes. Podrás ajustarlo en cada póliza individual si es necesario.'
+                                    : ' Estos porcentajes se aplicarán por defecto cuando estos vendedores capturen pólizas con tu clave. Podrás ajustarlo en cada póliza individual si es necesario.'
+                                  }
                                 </div>
                               )}
                             </div>
