@@ -41,6 +41,10 @@ export const useEquipoDeTrabajo = () => {
         try { tiposProductosDisponibles = miembro.tiposProductosDisponibles ? (typeof miembro.tiposProductosDisponibles === 'string' ? JSON.parse(miembro.tiposProductosDisponibles) : miembro.tiposProductosDisponibles) : []; } catch (e) { tiposProductosDisponibles = []; }
         let ejecutivosPorProducto = {};
         try { ejecutivosPorProducto = miembro.ejecutivosPorProducto ? (typeof miembro.ejecutivosPorProducto === 'string' ? JSON.parse(miembro.ejecutivosPorProducto) : miembro.ejecutivosPorProducto) : {}; } catch (e) { ejecutivosPorProducto = {}; }
+        let productosAseguradoras = [];
+        try { productosAseguradoras = miembro.productosAseguradoras ? (typeof miembro.productosAseguradoras === 'string' ? JSON.parse(miembro.productosAseguradoras) : miembro.productosAseguradoras) : []; } catch (e) { productosAseguradoras = []; }
+        let comisionesCompartidas = [];
+        try { comisionesCompartidas = miembro.comisionesCompartidas ? (typeof miembro.comisionesCompartidas === 'string' ? JSON.parse(miembro.comisionesCompartidas) : miembro.comisionesCompartidas) : []; } catch (e) { comisionesCompartidas = []; }
 
         return {
           id: miembro.id,
@@ -68,7 +72,9 @@ export const useEquipoDeTrabajo = () => {
           agentesSupervisados: agentesSupervisados,
           ejecutivoAsignado: miembro.ejecutivoAsignado,
           ejecutivosPorProducto: ejecutivosPorProducto,
-          tiposProductosDisponibles: tiposProductosDisponibles
+          tiposProductosDisponibles: tiposProductosDisponibles,
+          productosAseguradoras: productosAseguradoras,
+          comisionesCompartidas: comisionesCompartidas
         };
       });
       setEquipoDeTrabajo(equipoTransformado);
