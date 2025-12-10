@@ -1074,6 +1074,8 @@ const SistemaGestionPersonal = () => {
                     <th className="py-3">Perfil</th>
                     <th className="py-3">Usuario</th>
                     <th className="py-3">Contacto</th>
+                    <th className="py-3 text-center">Claves</th>
+                    <th className="py-3 text-center">Vendedores</th>
                     <th className="py-3">Estado</th>
                     <th className="py-3 text-center">Acciones</th>
                   </tr>
@@ -1081,11 +1083,11 @@ const SistemaGestionPersonal = () => {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan="7" className="text-center py-5">Cargando...</td>
+                      <td colSpan="9" className="text-center py-5">Cargando...</td>
                     </tr>
                   ) : usuariosFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan="7" className="text-center py-5">
+                      <td colSpan="9" className="text-center py-5">
                         <Users size={48} className="text-muted mb-3" />
                         <p className="text-muted mb-0">No hay usuarios registrados</p>
                         <button 
@@ -1097,13 +1099,45 @@ const SistemaGestionPersonal = () => {
                       </td>
                     </tr>
                   ) : (
-                    usuariosFiltrados.map(u => (
+                    usuariosFiltrados.map(u => {
+                      // Contar claves del agente (de productosAseguradoras si existe)
+                      const numClaves = u.perfil === 'Agente' ? (u.productosAseguradoras?.length || 0) : 0;
+                      
+                      // Contar vendedores asociados a este agente (revisar comisionesCompartidas de otros usuarios)
+                      const numVendedores = u.perfil === 'Agente' 
+                        ? usuarios.filter(vendedor => 
+                            vendedor.perfil === 'Vendedor' && 
+                            vendedor.comisionesCompartidas?.some(c => String(c.agenteId) === String(u.id))
+                          ).length
+                        : 0;
+                      
+                      return (
                       <tr key={u.id}>
                         <td className="align-middle">{u.codigo}</td>
                         <td className="align-middle">{`${u.nombre} ${u.apellidoPaterno} ${u.apellidoMaterno}`}</td>
                         <td className="align-middle">{u.perfil}</td>
                         <td className="align-middle">{u.usuario}</td>
                         <td className="align-middle">{u.email || u.telefono || '-'}</td>
+                        <td className="align-middle text-center">
+                          {u.perfil === 'Agente' ? (
+                            <span className="badge bg-info">
+                              <Hash size={12} className="me-1" />
+                              {numClaves}
+                            </span>
+                          ) : (
+                            <span className="text-muted">-</span>
+                          )}
+                        </td>
+                        <td className="align-middle text-center">
+                          {u.perfil === 'Agente' ? (
+                            <span className="badge bg-primary">
+                              <Users size={12} className="me-1" />
+                              {numVendedores}
+                            </span>
+                          ) : (
+                            <span className="text-muted">-</span>
+                          )}
+                        </td>
                         <td className="align-middle">{u.activo ? <span className="badge bg-success">Activo</span> : <span className="badge bg-secondary">Inactivo</span>}</td>
                         <td className="align-middle text-center">
                           <div className="btn-group" role="group">
@@ -1119,7 +1153,8 @@ const SistemaGestionPersonal = () => {
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
