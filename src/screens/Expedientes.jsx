@@ -394,6 +394,7 @@ const CalendarioPagos = React.memo(({
   
   // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
     // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
     pagos = expediente.recibos.map(r => ({
       numero: r.numero_recibo,
@@ -404,6 +405,7 @@ const CalendarioPagos = React.memo(({
       comprobante_nombre: r.comprobante_nombre,
       fecha_pago_real: r.fecha_pago_real
     }));
+    console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
   } else {
     // Fallback: Calcular recibos en el frontend (método antiguo)
     const periodoGracia = expediente.periodo_gracia 
@@ -454,6 +456,7 @@ const CalendarioPagos = React.memo(({
   const pagosProcesados = pagos.map((pago) => {
     // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
     if (pago.estatusBackend) {
+      console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
       const estatusNorm = pago.estatusBackend.toLowerCase();
       const pagado = estatusNorm === 'pagado';
       
@@ -478,13 +481,16 @@ const CalendarioPagos = React.memo(({
         badgeClass = 'bg-warning';
       }
       
+      console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
       return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
     }
     
     // Fallback: Calcular estatus en el frontend (método antiguo)
+    console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
     const [year, month, day] = pago.fecha.split('-');
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
+    console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
     
     let pagado = pago.numero <= ultimoReciboPagado;
     
@@ -522,6 +528,7 @@ const CalendarioPagos = React.memo(({
       badgeClass = 'bg-secondary';
     }
     
+    console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
     return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
