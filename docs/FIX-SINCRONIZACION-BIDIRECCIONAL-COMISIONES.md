@@ -178,10 +178,62 @@ for (const autorizacion of vendedoresAutorizados) {
 
 ---
 
+## ⚠️ PROBLEMA ADICIONAL: Sincronizar cambios en Comisión Base
+
+Cuando un Agente **modifica la Comisión Base de su clave** (en la sección "Claves y Aseguradoras"), ese cambio NO se refleja en los `comisionesCompartidas` de los Vendedores autorizados.
+
+### Ejemplo del problema:
+
+1. Alvaro tiene clave 25576 con comisión base 10%
+2. Mariana está autorizada para usar esa clave
+3. Alvaro edita su clave y cambia comisión base a 5%
+4. ❌ Mariana sigue viendo 10% en lugar de 5%
+
+### Solución requerida:
+
+Cuando un Agente guarda cambios en `productosAseguradoras`, Hugo debe:
+
+```javascript
+// Después de actualizar productosAseguradoras del Agente
+for (const producto of productosAseguradoras) {
+  // Buscar todos los Vendedores que tienen esta clave autorizada
+  const vendedoresConEsaClave = await db.query(`
+    SELECT id, comisionesCompartidas 
+    FROM equipo_trabajo 
+    WHERE perfil = 'Vendedor' 
+    AND comisionesCompartidas LIKE ?
+  `, [`%"clave":"${producto.clave}"%`]);
+  
+  for (const vendedor of vendedoresConEsaClave) {
+    let comisiones = JSON.parse(vendedor.comisionesCompartidas || '[]');
+    
+    // Actualizar comisionBase en las comisiones que coincidan
+    comisiones = comisiones.map(c => {
+      if (String(c.agenteId) === String(agenteId) && 
+          String(c.aseguradoraId) === String(producto.aseguradoraId) && 
+          c.clave === producto.clave) {
+        return {
+          ...c,
+          comisionBase: producto.comisionPersonalizada || productoInfo.comisionBase
+        };
+      }
+      return c;
+    });
+    
+    await db.query(`
+      UPDATE equipo_trabajo 
+      SET comisionesCompartidas = ? 
+      WHERE id = ?
+    `, [JSON.stringify(comisiones), vendedor.id]);
+  }
+}
+```
+
 ## ✅ CHECKLIST DE IMPLEMENTACIÓN
 
 - [x] Sincronización Vendedor → Agente (ya funciona)
-- [ ] Sincronización Agente → Vendedor (falta implementar)
+- [x] Sincronización Agente → Vendedor cuando cambia % Vendedor (ya funciona)
+- [ ] Sincronización cuando Agente cambia Comisión Base de su clave (falta implementar)
 - [ ] Eliminar autorización (cuando Agente borra, eliminar de Vendedor)
 - [ ] Mantener `comisionBase` actualizado en ambos lados
 
