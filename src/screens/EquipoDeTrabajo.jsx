@@ -2357,9 +2357,11 @@ const SistemaGestionPersonal = () => {
                                         <span className="input-group-text">%</span>
                                       </div>
                                       <small className="text-muted d-block mt-1">
-                                        <strong>Nota:</strong> El agente recibirá el {comisionBase - (clavesVendedorTemp.find(c => 
+                                        <strong>Nota:</strong> El vendedor recibirá el {clavesVendedorTemp.find(c => 
                                           String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
-                                        )?.porcentajeVendedor ?? 50)}% restante de la comisión base.
+                                        )?.porcentajeVendedor ?? 50}% de la comisión base. Ejemplo: Si la póliza es $1,000 y la comisión base es {comisionBase}%, la comisión total es ${(1000 * comisionBase / 100).toFixed(0)} y el vendedor recibirá ${(1000 * comisionBase / 100 * ((clavesVendedorTemp.find(c => 
+                                          String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
+                                        )?.porcentajeVendedor ?? 50) / 100)).toFixed(0)}.
                                       </small>
                                     </div>
                                   )}
