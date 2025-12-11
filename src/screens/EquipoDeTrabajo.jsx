@@ -1767,13 +1767,12 @@ const SistemaGestionPersonal = () => {
                                 <table className="table table-bordered">
                                   <thead className="table-light">
                                     <tr>
-                                      <th width="20%">Vendedor</th>
-                                      <th width="12%">Aseguradora</th>
-                                      <th width="12%">Clave</th>
-                                      <th width="10%">Comisión Base</th>
-                                      <th width="12%">Comisión Vendedor</th>
-                                      <th width="10%">Tú recibes</th>
-                                      <th width="18%">Ejecutivo</th>
+                                      <th width="25%">Vendedor</th>
+                                      <th width="15%">Aseguradora</th>
+                                      <th width="15%">Clave</th>
+                                      <th width="12%">Comisión Base</th>
+                                      <th width="15%">Comisión Vendedor</th>
+                                      <th width="12%">Ejecutivo</th>
                                       <th width="6%" className="text-center">Acciones</th>
                                     </tr>
                                   </thead>
@@ -1832,9 +1831,6 @@ const SistemaGestionPersonal = () => {
                                               />
                                               <span className="input-group-text">%</span>
                                             </div>
-                                          </td>
-                                          <td className="text-center">
-                                            <span className="badge bg-success fs-6">{porcentajeAgente}%</span>
                                           </td>
                                           <td>
                                             <select
@@ -2360,10 +2356,10 @@ const SistemaGestionPersonal = () => {
                                         />
                                         <span className="input-group-text">%</span>
                                       </div>
-                                      <small className="text-muted">
-                                        Tú recibirás: {comisionBase - (clavesVendedorTemp.find(c => 
+                                      <small className="text-muted d-block mt-1">
+                                        <strong>Nota:</strong> El agente recibirá el {comisionBase - (clavesVendedorTemp.find(c => 
                                           String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
-                                        )?.porcentajeVendedor ?? 50)}%
+                                        )?.porcentajeVendedor ?? 50)}% restante de la comisión base.
                                       </small>
                                     </div>
                                   )}
