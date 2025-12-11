@@ -998,7 +998,36 @@ const SistemaGestionPersonal = () => {
       console.error('Error parseando comisionesCompartidas:', e);
       comisiones = [];
     }
-    setComisionesCompartidas(comisiones);
+    
+    // 🔥 FIX: Reconstruir comisionBase desde las claves del agente
+    const comisionesConBase = comisiones.map(comision => {
+      // Si ya tiene comisionBase, usarlo
+      if (comision.comisionBase && comision.comisionBase > 0) {
+        return comision;
+      }
+      
+      // Si no, buscarlo en las claves del agente correspondiente
+      const agente = usuarios.find(u => String(u.id) === String(comision.agenteId));
+      if (agente && agente.productosAseguradoras) {
+        const claveAgente = agente.productosAseguradoras.find(pa => 
+          String(pa.aseguradoraId) === String(comision.aseguradoraId) && 
+          pa.clave === comision.clave
+        );
+        
+        if (claveAgente) {
+          const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
+          const comisionBase = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
+          return {
+            ...comision,
+            comisionBase: comisionBase
+          };
+        }
+      }
+      
+      return comision;
+    });
+    
+    setComisionesCompartidas(comisionesConBase);
 
     // Cargar vendedores autorizados para este agente
     let vendedores = [];
@@ -1019,7 +1048,33 @@ const SistemaGestionPersonal = () => {
           const comisionesDeEsteAgente = comisionesVendedor.filter(
             c => String(c.agenteId) === String(usuario.id)
           );
-          vendedores.push(...comisionesDeEsteAgente);
+          
+          // 🔥 FIX: Reconstruir comisionBase desde las claves del agente
+          const comisionesConBase = comisionesDeEsteAgente.map(comision => {
+            // Si ya tiene comisionBase, usarlo
+            if (comision.comisionBase && comision.comisionBase > 0) {
+              return comision;
+            }
+            
+            // Si no, buscarlo en las claves del agente
+            const claveAgente = usuario.productosAseguradoras?.find(pa => 
+              String(pa.aseguradoraId) === String(comision.aseguradoraId) && 
+              pa.clave === comision.clave
+            );
+            
+            if (claveAgente) {
+              const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
+              const comisionBase = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
+              return {
+                ...comision,
+                comisionBase: comisionBase
+              };
+            }
+            
+            return comision;
+          });
+          
+          vendedores.push(...comisionesConBase);
         }
       });
     }
@@ -1723,9 +1778,13 @@ const SistemaGestionPersonal = () => {
                                   </thead>
                                   <tbody>
                                     {vendedoresAutorizados.map((autorizacion, index) => {
+                                      console.log('🔍 [VENDEDOR AUTORIZADO]', autorizacion);
                                       const vendedor = usuarios.find(u => String(u.id) === String(autorizacion.vendedorId));
                                       const aseguradora = aseguradoras.find(a => String(a.id) === String(autorizacion.aseguradoraId));
-                                      const porcentajeAgente = autorizacion.comisionBase - autorizacion.porcentajeVendedor;
+                                      const comisionBase = parseFloat(autorizacion.comisionBase) || 0;
+                                      const porcentajeVendedor = parseFloat(autorizacion.porcentajeVendedor) || 0;
+                                      const porcentajeAgente = comisionBase - porcentajeVendedor;
+                                      console.log('💰 Cálculo:', { comisionBase, porcentajeVendedor, porcentajeAgente });
                                       
                                       return (
                                         <tr key={index}>
