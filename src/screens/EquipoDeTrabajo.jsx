@@ -2343,7 +2343,7 @@ const SistemaGestionPersonal = () => {
                                           onChange={(e) => {
                                             const inputValue = e.target.value;
                                             let valor = inputValue === '' ? 0 : Number(inputValue);
-                                            valor = Math.min(Math.max(valor, 0), comisionBase);
+                                            valor = Math.min(Math.max(valor, 0), 100);
                                             setClavesVendedorTemp(clavesVendedorTemp.map(c => 
                                               (String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave)
                                                 ? { ...c, porcentajeVendedor: valor }
@@ -2351,7 +2351,7 @@ const SistemaGestionPersonal = () => {
                                             ));
                                           }}
                                           min="0"
-                                          max={comisionBase}
+                                          max="100"
                                           step="1"
                                         />
                                         <span className="input-group-text">%</span>
