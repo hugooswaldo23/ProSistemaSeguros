@@ -7650,9 +7650,17 @@ const estadoInicialFormulario = {
       // Verificar que el cliente tenga teléfono móvil
       const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
       
+      // ✨ NUEVO: Si no tiene teléfono, abrir modal para capturarlo
       if (!telefono) {
-        toast.error('El cliente no tiene teléfono móvil registrado');
-        return;
+        console.log('⚠️ Cliente sin teléfono móvil, abriendo modal de captura para aviso de pago');
+        setClienteParaActualizar(cliente);
+        setTipoDatoFaltante('telefono_movil');
+        setCanalEnvio('WhatsApp');
+        setExpedienteEnEspera(expediente);
+        setPagoParaNotificar(pago); // Guardar el pago pendiente
+        setMostrarModalContacto(true);
+        cerrarModalAvisoPago(); // Cerrar modal de selección de canal
+        return; // Detener ejecución hasta que se capture el dato
       }
 
       // Limpiar el número de teléfono
@@ -7785,9 +7793,17 @@ const estadoInicialFormulario = {
       // Verificar que el cliente tenga email
       const email = cliente?.contacto_email || cliente?.email;
       
+      // ✨ NUEVO: Si no tiene email, abrir modal para capturarlo
       if (!email) {
-        toast.error('El cliente no tiene email registrado');
-        return;
+        console.log('⚠️ Cliente sin email, abriendo modal de captura para aviso de pago');
+        setClienteParaActualizar(cliente);
+        setTipoDatoFaltante('email');
+        setCanalEnvio('Email');
+        setExpedienteEnEspera(expediente);
+        setPagoParaNotificar(pago); // Guardar el pago pendiente
+        setMostrarModalContacto(true);
+        cerrarModalAvisoPago(); // Cerrar modal de selección de canal
+        return; // Detener ejecución hasta que se capture el dato
       }
       
       // Generar mensaje personalizado
@@ -10706,15 +10722,26 @@ const eliminarExpediente = useCallback((id) => {
             setTimeout(() => {
               console.log('🔄 Reintentando envío por', canalEnvio);
               if (canalEnvio === 'WhatsApp') {
-                compartirPorWhatsApp(expedienteEnEspera);
+                // Verificar si es envío de aviso de pago o compartir póliza
+                if (pagoParaNotificar) {
+                  enviarAvisoPagoWhatsApp(pagoParaNotificar, expedienteEnEspera);
+                } else {
+                  compartirPorWhatsApp(expedienteEnEspera);
+                }
               } else if (canalEnvio === 'Email') {
-                compartirPorEmail(expedienteEnEspera);
+                // Verificar si es envío de aviso de pago o compartir póliza
+                if (pagoParaNotificar) {
+                  enviarAvisoPagoEmail(pagoParaNotificar, expedienteEnEspera);
+                } else {
+                  compartirPorEmail(expedienteEnEspera);
+                }
               }
               // Limpieza diferida tras el reintento
               setTimeout(() => {
                 toast.dismiss(loadingId);
                 setCanalEnvio(null);
                 setExpedienteEnEspera(null);
+                setPagoParaNotificar(null);
               }, 300);
             }, 500);
           }
