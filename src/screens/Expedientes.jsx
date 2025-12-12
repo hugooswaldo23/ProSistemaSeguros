@@ -6581,14 +6581,21 @@ const ModuloExpedientes = () => {
         }
         
         // Agregar contacto principal si existe
-        if (cliente.contacto_principal_nombre) {
-          destinatarios.push({
-            id: 'contacto',
-            nombre: cliente.contacto_principal_nombre,
-            telefono: cliente.contacto_principal_telefono,
-            email: cliente.contacto_principal_email,
-            tipo: 'Contacto Principal'
-          });
+        const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+        if (tieneContactoPrincipal) {
+          const nombreContacto = `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim();
+          const telefonoContacto = cliente?.contacto_telefono_movil || cliente?.contactoTelefonoMovil;
+          const emailContacto = cliente?.contacto_email || cliente?.contactoEmail;
+          
+          if (nombreContacto) {
+            destinatarios.push({
+              id: 'contacto',
+              nombre: nombreContacto,
+              telefono: telefonoContacto,
+              email: emailContacto,
+              tipo: 'Contacto Principal'
+            });
+          }
         }
         
         setDestinatariosDisponibles(destinatarios);
