@@ -65,3 +65,19 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Estilos para SweetAlert2 - Botones en columna */
+.swal-actions-column {
+  flex-direction: column !important;
+  gap: 10px !important;
+  width: 100% !important;
+}
+
+.swal-actions-column .swal2-styled {
+  width: 100% !important;
+  margin: 0 !important;
+}
+
+.swal-cancel-bottom {
+  order: 3 !important;
+}

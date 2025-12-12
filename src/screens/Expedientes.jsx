@@ -54,6 +54,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
+import Swal from 'sweetalert2';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw, Calendar } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
 import BuscadorCliente from '../components/BuscadorCliente';
@@ -394,18 +395,21 @@ const CalendarioPagos = React.memo(({
   
   // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
+    // console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
     // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
-    pagos = expediente.recibos.map(r => ({
-      numero: r.numero_recibo,
-      fecha: r.fecha_vencimiento,
-      monto: parseFloat(r.monto).toFixed(2),
-      estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Pendiente
-      comprobante_url: r.comprobante_url,
-      comprobante_nombre: r.comprobante_nombre,
-      fecha_pago_real: r.fecha_pago_real
-    }));
-    console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
+    // 🔥 IMPORTANTE: Filtrar solo los recibos que corresponden al número de pagos según la frecuencia
+    pagos = expediente.recibos
+      .filter(r => r.numero_recibo <= numeroPagos) // Solo los recibos correspondientes a la frecuencia
+      .map(r => ({
+        numero: r.numero_recibo,
+        fecha: r.fecha_vencimiento,
+        monto: parseFloat(r.monto).toFixed(2),
+        estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Pendiente
+        comprobante_url: r.comprobante_url,
+        comprobante_nombre: r.comprobante_nombre,
+        fecha_pago_real: r.fecha_pago_real
+      }));
+    // console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
   } else {
     // Fallback: Calcular recibos en el frontend (método antiguo)
     const periodoGracia = expediente.periodo_gracia 
@@ -456,7 +460,7 @@ const CalendarioPagos = React.memo(({
   const pagosProcesados = pagos.map((pago) => {
     // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
     if (pago.estatusBackend) {
-      console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
+      // console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
       const estatusNorm = pago.estatusBackend.toLowerCase();
       const pagado = estatusNorm === 'pagado';
       
@@ -481,16 +485,16 @@ const CalendarioPagos = React.memo(({
         badgeClass = 'bg-warning';
       }
       
-      console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
+      // console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
       return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
     }
     
     // Fallback: Calcular estatus en el frontend (método antiguo)
-    console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
+    // console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
     const [year, month, day] = pago.fecha.split('-');
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
-    console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
+    // console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
     
     let pagado = pago.numero <= ultimoReciboPagado;
     
@@ -528,7 +532,7 @@ const CalendarioPagos = React.memo(({
       badgeClass = 'bg-secondary';
     }
     
-    console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
+    // console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
     return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
@@ -3605,64 +3609,83 @@ const ListaExpedientes = React.memo(({
         </button>
       </div>
 
-      {/* Carpetas Horizontales */}
-      <div className="mb-3" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
-        <div className="d-inline-flex gap-2">
+      {/* Carpetas en Grid Responsive */}
+      <div className="row g-2 mb-3">
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'todas' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'todas' ? 'btn-primary' : 'btn-outline-secondary'}`}
             onClick={() => setCarpetaSeleccionada('todas')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            📋 Todas
-            <span className="badge bg-white text-dark ms-2">{contadores.todas}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>📋 Todas</span>
+              <span className="badge bg-white text-dark">{contadores.todas}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'en_proceso' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'en_proceso' ? 'btn-primary' : 'btn-outline-secondary'}`}
             onClick={() => setCarpetaSeleccionada('en_proceso')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            📝 En Proceso
-            <span className="badge bg-secondary ms-2">{contadores.en_proceso}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>📝 En Proceso</span>
+              <span className="badge bg-secondary">{contadores.en_proceso}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'vigentes' ? 'btn-success' : 'btn-outline-success'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'vigentes' ? 'btn-success' : 'btn-outline-success'}`}
             onClick={() => setCarpetaSeleccionada('vigentes')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            ✅ Vigentes
-            <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-success' : 'bg-success text-white'} ms-2`}>{contadores.vigentes}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>✅ Vigentes</span>
+              <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-success' : 'bg-success text-white'}`}>{contadores.vigentes}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'renovadas' ? 'btn-info' : 'btn-outline-info'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'renovadas' ? 'btn-info' : 'btn-outline-info'}`}
             onClick={() => setCarpetaSeleccionada('renovadas')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            🔄 Renovadas
-            <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-info' : 'bg-info text-white'} ms-2`}>{contadores.renovadas}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>🔄 Renovadas</span>
+              <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-info' : 'bg-info text-white'}`}>{contadores.renovadas}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'por_renovar' ? 'btn-warning' : 'btn-outline-warning'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'por_renovar' ? 'btn-warning' : 'btn-outline-warning'}`}
             onClick={() => setCarpetaSeleccionada('por_renovar')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            ⏰ Por Renovar
-            <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'} ms-2`}>{contadores.por_renovar}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>⏰ Por Renovar</span>
+              <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'}`}>{contadores.por_renovar}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'vencidas' ? 'btn-danger' : 'btn-outline-danger'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'vencidas' ? 'btn-danger' : 'btn-outline-danger'}`}
             onClick={() => setCarpetaSeleccionada('vencidas')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            ⚠️ Vencidas
-            <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-danger' : 'bg-danger text-white'} ms-2`}>{contadores.vencidas}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>⚠️ Vencidas</span>
+              <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-danger' : 'bg-danger text-white'}`}>{contadores.vencidas}</span>
+            </div>
           </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
           <button
-            className={`btn ${carpetaSeleccionada === 'canceladas' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'canceladas' ? 'btn-secondary' : 'btn-outline-secondary'}`}
             onClick={() => setCarpetaSeleccionada('canceladas')}
-            style={{ whiteSpace: 'nowrap' }}
           >
-            🚫 Canceladas
-            <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-dark' : 'bg-secondary text-white'} ms-2`}>{contadores.canceladas}</span>
+            <div className="d-flex justify-content-between align-items-center">
+              <span>🚫 Canceladas</span>
+              <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-dark' : 'bg-secondary text-white'}`}>{contadores.canceladas}</span>
+            </div>
           </button>
         </div>
       </div>
@@ -6558,6 +6581,12 @@ const ModuloExpedientes = () => {
   const [destinatarioSeleccionado, setDestinatarioSeleccionado] = useState(null);
   
   const enviarAvisoPago = useCallback(async (pago, expediente) => {
+    // Validar que el expediente tenga cliente_id
+    if (!expediente?.cliente_id) {
+      toast.error('Esta póliza no tiene un cliente asociado');
+      return;
+    }
+    
     // Obtener datos del cliente para determinar destinatarios
     try {
       const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
@@ -6574,8 +6603,8 @@ const ModuloExpedientes = () => {
           destinatarios.push({
             id: 'cliente',
             nombre: nombreCliente,
-            telefono: cliente.contacto_telefono_movil || cliente.telefonoMovil || cliente.telefono_movil,
-            email: cliente.contacto_email || cliente.email,
+            telefono: cliente.telefonoMovil || cliente.telefono_movil,
+            email: cliente.email,
             tipo: 'Cliente'
           });
         }
@@ -6600,14 +6629,17 @@ const ModuloExpedientes = () => {
         
         setDestinatariosDisponibles(destinatarios);
         setDestinatarioSeleccionado(destinatarios[0]); // Seleccionar el primero por defecto
+        
+        setPagoParaNotificar(pago);
+        setExpedienteDelPago(expediente);
+        setMostrarModalAvisoPago(true);
+      } else {
+        toast.error('No se pudo obtener la información del cliente');
       }
     } catch (error) {
       console.error('Error al obtener destinatarios:', error);
+      toast.error('Error al cargar datos del cliente. Verifica que el cliente exista.');
     }
-    
-    setPagoParaNotificar(pago);
-    setExpedienteDelPago(expediente);
-    setMostrarModalAvisoPago(true);
   }, []);
   
   const cerrarModalAvisoPago = useCallback(() => {
@@ -6631,16 +6663,88 @@ const ModuloExpedientes = () => {
     const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
     const [subiendoPDF, setSubiendoPDF] = useState(false);
 
-  // Modal de compartir
+  // Modal de compartir unificado
   const [mostrarModalCompartir, setMostrarModalCompartir] = useState(false);
   const [expedienteParaCompartir, setExpedienteParaCompartir] = useState(null);
-  const abrirModalCompartir = useCallback((expediente) => {
-    setExpedienteParaCompartir(expediente);
-    setMostrarModalCompartir(true);
-  }, []);
+  const [destinatariosCompartir, setDestinatariosCompartir] = useState([]);
+  const [destinatarioCompartirSeleccionado, setDestinatarioCompartirSeleccionado] = useState(null);
+  const [tipoEnvio, setTipoEnvio] = useState('poliza'); // 'poliza' o 'pago'
+  const [pagoSeleccionado, setPagoSeleccionado] = useState(null);
+  
+  const abrirModalCompartir = useCallback(async (expediente) => {
+    // Validar que el expediente tenga cliente_id
+    if (!expediente?.cliente_id) {
+      toast.error('Esta póliza no tiene un cliente asociado');
+      return;
+    }
+    
+// Obtener datos del cliente para determinar destinatarios
+    try {
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (respCliente?.success) {
+        const cliente = respCliente.data;
+        const destinatarios = [];
+        
+        // Agregar cliente como opción
+        const nombreCliente = cliente.tipoPersona === 'Persona Moral'
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        
+        if (nombreCliente) {
+          destinatarios.push({
+            id: 'cliente',
+            nombre: nombreCliente,
+            telefono: cliente.telefonoMovil || cliente.telefono_movil,
+            email: cliente.email,
+            tipo: 'Cliente'
+          });
+        }
+        
+        // Agregar contacto principal si existe
+        const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
+        if (tieneContactoPrincipal) {
+          const nombreContacto = `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim();
+          const telefonoContacto = cliente?.contacto_telefono_movil || cliente?.contactoTelefonoMovil;
+          const emailContacto = cliente?.contacto_email || cliente?.contactoEmail;
+          
+          if (nombreContacto) {
+            destinatarios.push({
+              id: 'contacto',
+              nombre: nombreContacto,
+              telefono: telefonoContacto,
+              email: emailContacto,
+              tipo: 'Contacto Principal'
+            });
+          }
+        }
+        
+        setDestinatariosCompartir(destinatarios);
+        setDestinatarioCompartirSeleccionado(destinatarios[0]);
+        
+        // Configurar pago por defecto (primer pendiente)
+        const primerPagoPendiente = expediente.recibos?.find(r => r.estado_pago !== 'Pagado');
+        setPagoSeleccionado(primerPagoPendiente || expediente.recibos?.[0] || null);
+        
+        setTipoEnvio('poliza'); // Por defecto mostrar póliza
+        setExpedienteParaCompartir(expediente);
+        setMostrarModalCompartir(true);
+      } else {
+        toast.error('No se pudo obtener la información del cliente');
+      }
+    } catch (error) {
+      console.error('Error al obtener destinatarios:', error);
+      toast.error('Error al cargar datos del cliente. Verifica que el cliente exista.');
+    }
+  }, [enviarAvisoPago]);
+  
   const cerrarModalCompartir = useCallback(() => {
     setMostrarModalCompartir(false);
     setExpedienteParaCompartir(null);
+    setDestinatariosCompartir([]);
+    setDestinatarioCompartirSeleccionado(null);
+    setTipoEnvio('poliza');
+    setPagoSeleccionado(null);
+    setPagoSeleccionado(null);
   }, []);
 
   // ✨ NUEVO: Modal para capturar contacto faltante
@@ -7441,25 +7545,37 @@ const estadoInicialFormulario = {
 
   const compartirPorWhatsApp = useCallback(async (expediente) => {
     try {
-      // Obtener datos del cliente
-      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-      if (!respCliente?.success) {
-  toast.error('No se pudo obtener la información del cliente');
-        return;
-      }
-      const cliente = respCliente.data;
+      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      let telefono, nombreDestinatario;
       
-      // Verificar que el cliente tenga teléfono móvil
-      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+      if (destinatarioCompartirSeleccionado) {
+        telefono = destinatarioCompartirSeleccionado.telefono;
+        nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+      } else {
+        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (!respCliente?.success) {
+          toast.error('No se pudo obtener la información del cliente');
+          return;
+        }
+        const cliente = respCliente.data;
+        telefono = cliente?.telefonoMovil || cliente?.telefono_movil;
+        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      }
       
       // ✨ NUEVO: Si no tiene teléfono, abrir modal para capturarlo
       if (!telefono) {
-        console.log('⚠️ Cliente sin teléfono móvil, abriendo modal de captura');
-        setClienteParaActualizar(cliente);
-        setTipoDatoFaltante('telefono_movil');
-        setCanalEnvio('WhatsApp');
-        setExpedienteEnEspera(expediente);
-        setMostrarModalContacto(true);
+        console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura');
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (respCliente?.success) {
+          setClienteParaActualizar(respCliente.data);
+          setTipoDatoFaltante('telefono_movil');
+          setCanalEnvio('WhatsApp');
+          setExpedienteEnEspera(expediente);
+          setMostrarModalContacto(true);
+        }
         return; // Detener ejecución hasta que se capture el dato
       }
 
@@ -7495,22 +7611,6 @@ const estadoInicialFormulario = {
         utils, 
         pdfUrl
       );
-
-      // Obtener nombre del cliente (empresa o persona física)
-      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
-        ? cliente.razonSocial || cliente.razon_social
-        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
-
-      // Obtener nombre del contacto principal (si existe)
-      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
-      const nombreContactoPrincipal = tieneContactoPrincipal
-        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
-        : '';
-
-      // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
-      const nombreDestinatario = nombreContactoPrincipal 
-        ? `${nombreCliente} (${nombreContactoPrincipal})`
-        : nombreCliente;
 
       // Crear la URL de WhatsApp
       const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
@@ -7565,32 +7665,44 @@ const estadoInicialFormulario = {
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
-  toast.error('Error al compartir por WhatsApp. Intenta nuevamente.');
+      toast.error('Error al compartir por WhatsApp. Intenta nuevamente.');
     }
-  }, [cambiarEstadoExpediente]);
+  }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado]);
 
     // Compartir póliza por Email - PREPARADA PARA IMPLEMENTACIÓN FUTURA
     const compartirPorEmail = useCallback(async (expediente) => {
       try {
-        // Obtener datos del cliente
-        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-        if (!respCliente?.success) {
-          toast.error('No se pudo obtener la información del cliente');
-          return;
+        // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+        let email, nombreDestinatario;
+        
+        if (destinatarioCompartirSeleccionado) {
+          email = destinatarioCompartirSeleccionado.email;
+          nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+        } else {
+          // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
+          const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+          if (!respCliente?.success) {
+            toast.error('No se pudo obtener la información del cliente');
+            return;
+          }
+          const cliente = respCliente.data;
+          email = cliente?.email;
+          nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+            ? cliente.razonSocial || cliente.razon_social
+            : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
         }
-        const cliente = respCliente.data;
-      
-        // Verificar que el cliente tenga email
-        const email = cliente?.contacto_email || cliente?.email;
         
         // ✨ NUEVO: Si no tiene email, abrir modal para capturarlo
         if (!email) {
-          console.log('⚠️ Cliente sin email, abriendo modal de captura');
-          setClienteParaActualizar(cliente);
-          setTipoDatoFaltante('email');
-          setCanalEnvio('Email');
-          setExpedienteEnEspera(expediente);
-          setMostrarModalContacto(true);
+          console.log('⚠️ Destinatario sin email, abriendo modal de captura');
+          const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+          if (respCliente?.success) {
+            setClienteParaActualizar(respCliente.data);
+            setTipoDatoFaltante('email');
+            setCanalEnvio('Email');
+            setExpedienteEnEspera(expediente);
+            setMostrarModalContacto(true);
+          }
           return; // Detener ejecución hasta que se capture el dato
         }
 
@@ -7609,22 +7721,6 @@ const estadoInicialFormulario = {
 
         // Generar mensaje dinámico según el estado
         const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl);
-
-        // Obtener nombre del cliente (empresa o persona física)
-        const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
-          ? cliente.razonSocial || cliente.razon_social
-          : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
-
-        // Obtener nombre del contacto principal (si existe)
-        const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
-        const nombreContactoPrincipal = tieneContactoPrincipal
-          ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
-          : '';
-
-        // Construir el nombre del destinatario: Empresa (Contacto) o solo Nombre
-        const nombreDestinatario = nombreContactoPrincipal 
-          ? `${nombreCliente} (${nombreContactoPrincipal})`
-          : nombreCliente;
 
         // Opción 1: Usar mailto (cliente de correo local)
         const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
@@ -7684,9 +7780,9 @@ const estadoInicialFormulario = {
       
       } catch (error) {
         console.error('Error al compartir por Email:', error);
-  toast.error('Error al compartir por Email. Intenta nuevamente.');
+        toast.error('Error al compartir por Email. Intenta nuevamente.');
       }
-    }, [cambiarEstadoExpediente]);
+    }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado]);
 
   // 💰 Enviar aviso de pago por WhatsApp
   const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
@@ -10666,30 +10762,142 @@ const eliminarExpediente = useCallback((id) => {
       {/* Modal Compartir - global al módulo */}
       {mostrarModalCompartir && (
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-sm modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '90vw', width: 450 }}>
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Compartir póliza</h5>
+                <h5 className="modal-title">Compartir información</h5>
                 <button type="button" className="btn-close" onClick={cerrarModalCompartir} aria-label="Cerrar"></button>
               </div>
               <div className="modal-body">
                 {expedienteParaCompartir && (
-                  <div className="mb-3 small text-muted">
-                    <div><strong>Póliza:</strong> {expedienteParaCompartir.numero_poliza || 'Sin número'}</div>
-                    <div><strong>Aseguradora:</strong> {expedienteParaCompartir.compania || 'N/A'}</div>
-                  </div>
+                  <>
+                    <div className="mb-3 small">
+                      <div><strong>Póliza:</strong> {expedienteParaCompartir.numero_poliza || 'Sin número'}</div>
+                      <div><strong>Aseguradora:</strong> {expedienteParaCompartir.compania || 'N/A'}</div>
+                    </div>
+
+                    {/* Selector de tipo de envío */}
+                    <div className="mb-3">
+                      <label className="form-label mb-2"><strong>¿Qué deseas enviar?</strong></label>
+                      <div className="btn-group w-100" role="group">
+                        <input
+                          type="radio"
+                          className="btn-check"
+                          name="tipoEnvio"
+                          id="radioPoliza"
+                          checked={tipoEnvio === 'poliza'}
+                          onChange={() => setTipoEnvio('poliza')}
+                        />
+                        <label className="btn btn-outline-primary" htmlFor="radioPoliza">
+                          📄 Póliza Completa
+                        </label>
+
+                        <input
+                          type="radio"
+                          className="btn-check"
+                          name="tipoEnvio"
+                          id="radioPago"
+                          checked={tipoEnvio === 'pago'}
+                          onChange={() => setTipoEnvio('pago')}
+                        />
+                        <label className="btn btn-outline-success" htmlFor="radioPago">
+                          💰 Aviso de Pago
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Selector de pago (solo si tipo es 'pago') */}
+                    {tipoEnvio === 'pago' && expedienteParaCompartir.recibos && expedienteParaCompartir.recibos.length > 0 && (
+                      <div className="mb-3">
+                        <label className="form-label mb-1"><strong>Seleccionar Pago:</strong></label>
+                        <select
+                          className="form-select form-select-sm"
+                          value={pagoSeleccionado?.numero_recibo || ''}
+                          onChange={(e) => {
+                            const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
+                            setPagoSeleccionado(pago);
+                          }}
+                        >
+                          {expedienteParaCompartir.recibos.map(recibo => (
+                            <option key={recibo.numero_recibo} value={recibo.numero_recibo}>
+                              Pago #{recibo.numero_recibo} - Vence {utils.formatearFecha(recibo.fecha_vencimiento)} - ${utils.formatearMoneda(recibo.monto)}
+                              {recibo.estado_pago === 'Pagado' ? ' ✅' : recibo.estado_pago === 'Vencido' ? ' ⚠️' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    
+                    {/* Mostrar select si hay múltiples destinatarios, o solo el nombre si hay uno */}
+                    {destinatariosCompartir.length > 1 ? (
+                      <div className="mb-3">
+                        <label className="form-label mb-1"><strong>Enviar a:</strong></label>
+                        <select 
+                          className="form-select form-select-sm"
+                          value={destinatarioCompartirSeleccionado?.id || ''}
+                          onChange={(e) => {
+                            const dest = destinatariosCompartir.find(d => d.id === e.target.value);
+                            setDestinatarioCompartirSeleccionado(dest);
+                          }}
+                        >
+                          {destinatariosCompartir.map(dest => (
+                            <option key={dest.id} value={dest.id}>
+                              {dest.nombre} ({dest.tipo})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : destinatariosCompartir.length === 1 ? (
+                      <div className="mb-3"><strong>Enviar a:</strong> {destinatariosCompartir[0].nombre} ({destinatariosCompartir[0].tipo})</div>
+                    ) : null}
+                    
+                    {/* Mostrar teléfono y email del destinatario seleccionado */}
+                    {destinatarioCompartirSeleccionado && (
+                      <div className="mb-3 p-2 bg-light rounded border">
+                        {destinatarioCompartirSeleccionado.telefono && (
+                          <div className="small text-break">
+                            <strong>📱 Teléfono:</strong> <span className="text-primary">{destinatarioCompartirSeleccionado.telefono}</span>
+                          </div>
+                        )}
+                        {destinatarioCompartirSeleccionado.email && (
+                          <div className="small text-break">
+                            <strong>📧 Email:</strong> <span className="text-primary">{destinatarioCompartirSeleccionado.email}</span>
+                          </div>
+                        )}
+                        {!destinatarioCompartirSeleccionado.telefono && !destinatarioCompartirSeleccionado.email && (
+                          <div className="small text-muted">
+                            ⚠️ Sin datos de contacto registrados
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
 
                 <div className="d-grid gap-2">
                   <button
                     className="btn btn-success d-flex align-items-center justify-content-center"
-                    onClick={() => { compartirPorWhatsApp(expedienteParaCompartir); cerrarModalCompartir(); }}
+                    onClick={() => {
+                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
+                        enviarAvisoPagoWhatsApp(pagoSeleccionado, expedienteParaCompartir);
+                      } else {
+                        compartirPorWhatsApp(expedienteParaCompartir);
+                      }
+                      cerrarModalCompartir();
+                    }}
                   >
                     <Share2 size={16} className="me-2" /> WhatsApp
                   </button>
                   <button
                     className="btn btn-info d-flex align-items-center justify-content-center"
-                    onClick={() => { compartirPorEmail(expedienteParaCompartir); cerrarModalCompartir(); }}
+                    onClick={() => {
+                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
+                        enviarAvisoPagoEmail(pagoSeleccionado, expedienteParaCompartir);
+                      } else {
+                        compartirPorEmail(expedienteParaCompartir);
+                      }
+                      cerrarModalCompartir();
+                    }}
                     title="Envío por correo"
                   >
                     <Mail size={16} className="me-2" /> Email
@@ -10707,7 +10915,7 @@ const eliminarExpediente = useCallback((id) => {
       {/* 💰 Modal Aviso/Recordatorio de Pago */}
       {mostrarModalAvisoPago && pagoParaNotificar && expedienteDelPago && (
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-sm modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '90vw', width: 450 }}>
             <div className="modal-content">
               <div className={`modal-header text-white ${pagoParaNotificar.estado === 'Vencido' ? 'bg-danger' : 'bg-info'}`}>
                 <h5 className="modal-title">
@@ -10742,6 +10950,27 @@ const eliminarExpediente = useCallback((id) => {
                     <div><strong>Enviar a:</strong> {destinatariosDisponibles[0].nombre} ({destinatariosDisponibles[0].tipo})</div>
                   ) : (
                     <div><strong>Cliente:</strong> {expedienteDelPago.cliente_nombre || 'N/A'}</div>
+                  )}
+                  
+                  {/* Mostrar teléfono y email del destinatario seleccionado */}
+                  {destinatarioSeleccionado && (
+                    <div className="mt-2 p-2 bg-light rounded border">
+                      {destinatarioSeleccionado.telefono && (
+                        <div className="small text-break">
+                          <strong>📱 Teléfono:</strong> <span className="text-primary">{destinatarioSeleccionado.telefono}</span>
+                        </div>
+                      )}
+                      {destinatarioSeleccionado.email && (
+                        <div className="small text-break">
+                          <strong>📧 Email:</strong> <span className="text-primary">{destinatarioSeleccionado.email}</span>
+                        </div>
+                      )}
+                      {!destinatarioSeleccionado.telefono && !destinatarioSeleccionado.email && (
+                        <div className="small text-muted">
+                          ⚠️ Sin datos de contacto registrados
+                        </div>
+                      )}
+                    </div>
                   )}
                   
                   <div className="mt-2">

@@ -631,13 +631,38 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
   // ==================== PAGOS FRACCIONADOS ====================
   if (datos.tipo_pago === 'Fraccionado') {
     // Buscar montos de pagos: "1 de 15,067.21 y 1 de 14,429.60"
-    const matchPagos = textoCompleto.match(/Fracciones:\s*\n?\s*1\s+de\s+([\d,]+\.\d{2})\s+y\s+1\s+de\s+([\d,]+\.\d{2})/i);
+    // Probar diferentes patrones para capturar los montos de fraccionamiento
     
-    if (matchPagos) {
+    // Patrón 1: "Fracciones: 1 de 15,067.21 y 1 de 14,429.60" (con espacios y saltos de línea flexibles)
+    let matchPagos = textoCompleto.match(/Fracciones:\s*[\n\r]*\s*1\s+de\s+([\d,]+\.\d{2})\s+y\s+1\s+de\s+([\d,]+\.\d{2})/i);
+    
+    // Patrón 2: Buscar en la tabla "1 de" seguido de número
+    if (!matchPagos) {
+      matchPagos = textoCompleto.match(/1\s+de\s+([\d,]+\.\d{2})\s+y\s+1\s+de\s+([\d,]+\.\d{2})/i);
+    }
+    
+    // Patrón 3: En líneas separadas "1 de X" y "de X" (segunda parte)
+    if (!matchPagos) {
+      const match1 = textoCompleto.match(/(?:Fracciones:?\s*)?1\s+de\s+([\d,]+\.\d{2})/i);
+      const match2 = textoCompleto.match(/(?:y\s+)?1\s+de\s+([\d,]+\.\d{2})/i);
+      
+      if (match1 && match2 && match1.index !== match2.index) {
+        matchPagos = [null, match1[1], match2[1]];
+      }
+    }
+    
+    if (matchPagos && matchPagos[1] && matchPagos[2]) {
       datos.primer_pago = matchPagos[1].replace(/,/g, '');
       datos.pagos_subsecuentes = matchPagos[2].replace(/,/g, '');
       console.log('💳 Primer pago:', datos.primer_pago);
       console.log('💳 Pagos subsecuentes:', datos.pagos_subsecuentes);
+    } else {
+      console.log('⚠️ No se pudieron extraer los montos de pagos fraccionados');
+      console.log('📄 Buscando "Fracciones:" en el texto...');
+      const seccionFracciones = textoCompleto.match(/Fracciones:[\s\S]{0,200}/i);
+      if (seccionFracciones) {
+        console.log('📄 Texto encontrado:', seccionFracciones[0]);
+      }
     }
   }
 
