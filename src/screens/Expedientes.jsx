@@ -6554,7 +6554,50 @@ const ModuloExpedientes = () => {
   }, []);
   
   // 💰 Funciones para aviso/recordatorio de pago
-  const enviarAvisoPago = useCallback((pago, expediente) => {
+  const [destinatariosDisponibles, setDestinatariosDisponibles] = useState([]);
+  const [destinatarioSeleccionado, setDestinatarioSeleccionado] = useState(null);
+  
+  const enviarAvisoPago = useCallback(async (pago, expediente) => {
+    // Obtener datos del cliente para determinar destinatarios
+    try {
+      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+      if (respCliente?.success) {
+        const cliente = respCliente.data;
+        const destinatarios = [];
+        
+        // Agregar cliente como opción
+        const nombreCliente = cliente.tipoPersona === 'Persona Moral'
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        
+        if (nombreCliente) {
+          destinatarios.push({
+            id: 'cliente',
+            nombre: nombreCliente,
+            telefono: cliente.contacto_telefono_movil || cliente.telefonoMovil || cliente.telefono_movil,
+            email: cliente.contacto_email || cliente.email,
+            tipo: 'Cliente'
+          });
+        }
+        
+        // Agregar contacto principal si existe
+        if (cliente.contacto_principal_nombre) {
+          destinatarios.push({
+            id: 'contacto',
+            nombre: cliente.contacto_principal_nombre,
+            telefono: cliente.contacto_principal_telefono,
+            email: cliente.contacto_principal_email,
+            tipo: 'Contacto Principal'
+          });
+        }
+        
+        setDestinatariosDisponibles(destinatarios);
+        setDestinatarioSeleccionado(destinatarios[0]); // Seleccionar el primero por defecto
+      }
+    } catch (error) {
+      console.error('Error al obtener destinatarios:', error);
+    }
+    
     setPagoParaNotificar(pago);
     setExpedienteDelPago(expediente);
     setMostrarModalAvisoPago(true);
@@ -6564,6 +6607,8 @@ const ModuloExpedientes = () => {
     setMostrarModalAvisoPago(false);
     setPagoParaNotificar(null);
     setExpedienteDelPago(null);
+    setDestinatariosDisponibles([]);
+    setDestinatarioSeleccionado(null);
   }, []);
   
   const [vistaActual, setVistaActual] = useState('lista');
@@ -7639,20 +7684,31 @@ const estadoInicialFormulario = {
   // 💰 Enviar aviso de pago por WhatsApp
   const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
     try {
-      // Obtener datos del cliente
-      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-      if (!respCliente?.success) {
-        toast.error('No se pudo obtener la información del cliente');
-        return;
-      }
-      const cliente = respCliente.data;
+      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      let telefono, nombreDestinatario;
       
-      // Verificar que el cliente tenga teléfono móvil
-      const telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+      if (destinatarioSeleccionado) {
+        telefono = destinatarioSeleccionado.telefono;
+        nombreDestinatario = destinatarioSeleccionado.nombre;
+      } else {
+        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (!respCliente?.success) {
+          toast.error('No se pudo obtener la información del cliente');
+          return;
+        }
+        const cliente = respCliente.data;
+        telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
+        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      }
       
       // ✨ NUEVO: Si no tiene teléfono, abrir modal para capturarlo
       if (!telefono) {
-        console.log('⚠️ Cliente sin teléfono móvil, abriendo modal de captura para aviso de pago');
+        console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura para aviso de pago');
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        const cliente = respCliente?.success ? respCliente.data : null;
         setClienteParaActualizar(cliente);
         setTipoDatoFaltante('telefono_movil');
         setCanalEnvio('WhatsApp');
@@ -7674,11 +7730,8 @@ const estadoInicialFormulario = {
       
       // Generar mensaje personalizado
       const esVencido = pago.estado === 'Vencido';
-      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
-        ? cliente.razonSocial || cliente.razon_social
-        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
       
-      const mensaje = `Hola ${nombreCliente},\n\n` +
+      const mensaje = `Hola ${nombreDestinatario},\n\n` +
         `${esVencido ? '⚠️ *RECORDATORIO DE PAGO VENCIDO*' : '📋 *AVISO DE PAGO PRÓXIMO*'}\n\n` +
         `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
         `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
@@ -7698,16 +7751,6 @@ const estadoInicialFormulario = {
       
       // Abrir WhatsApp
       window.open(url, '_blank');
-      
-      // Obtener nombre del contacto principal
-      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
-      const nombreContactoPrincipal = tieneContactoPrincipal
-        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
-        : '';
-      
-      const nombreDestinatario = nombreContactoPrincipal 
-        ? `${nombreCliente} (${nombreContactoPrincipal})`
-        : nombreCliente;
       
       // Registrar la notificación en el sistema de notificaciones
       try {
@@ -7761,7 +7804,7 @@ const estadoInicialFormulario = {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
       
-      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por WhatsApp a ${nombreCliente}`);
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por WhatsApp a ${nombreDestinatario}`);
       cerrarModalAvisoPago();
       
       // 🔄 Recargar historial automáticamente después de 1.5 segundos
@@ -7777,25 +7820,36 @@ const estadoInicialFormulario = {
       console.error('Error al enviar aviso por WhatsApp:', error);
       toast.error('Error al enviar aviso por WhatsApp');
     }
-  }, [cerrarModalAvisoPago]);
+  }, [cerrarModalAvisoPago, destinatarioSeleccionado]);
 
   // 💰 Enviar aviso de pago por Email
   const enviarAvisoPagoEmail = useCallback(async (pago, expediente) => {
     try {
-      // Obtener datos del cliente
-      const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-      if (!respCliente?.success) {
-        toast.error('No se pudo obtener la información del cliente');
-        return;
-      }
-      const cliente = respCliente.data;
+      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      let email, nombreDestinatario;
       
-      // Verificar que el cliente tenga email
-      const email = cliente?.contacto_email || cliente?.email;
+      if (destinatarioSeleccionado) {
+        email = destinatarioSeleccionado.email;
+        nombreDestinatario = destinatarioSeleccionado.nombre;
+      } else {
+        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (!respCliente?.success) {
+          toast.error('No se pudo obtener la información del cliente');
+          return;
+        }
+        const cliente = respCliente.data;
+        email = cliente?.contacto_email || cliente?.email;
+        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+          ? cliente.razonSocial || cliente.razon_social
+          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      }
       
       // ✨ NUEVO: Si no tiene email, abrir modal para capturarlo
       if (!email) {
-        console.log('⚠️ Cliente sin email, abriendo modal de captura para aviso de pago');
+        console.log('⚠️ Destinatario sin email, abriendo modal de captura para aviso de pago');
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        const cliente = respCliente?.success ? respCliente.data : null;
         setClienteParaActualizar(cliente);
         setTipoDatoFaltante('email');
         setCanalEnvio('Email');
@@ -7808,15 +7862,12 @@ const estadoInicialFormulario = {
       
       // Generar mensaje personalizado
       const esVencido = pago.estado === 'Vencido';
-      const nombreCliente = cliente.tipoPersona === 'Persona Moral' 
-        ? cliente.razonSocial || cliente.razon_social
-        : `${cliente.nombre} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`;
       
       const asunto = esVencido 
         ? `⚠️ Recordatorio: Pago Vencido - Póliza ${expediente.numero_poliza}`
         : `📋 Aviso: Próximo Pago - Póliza ${expediente.numero_poliza}`;
       
-      const cuerpo = `Estimado/a ${nombreCliente},\n\n` +
+      const cuerpo = `Estimado/a ${nombreDestinatario},\n\n` +
         `${esVencido ? 'Le recordamos que tiene un pago vencido:' : 'Le notificamos sobre su próximo pago:'}\n\n` +
         `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
         `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
@@ -7830,16 +7881,6 @@ const estadoInicialFormulario = {
         }\n\n` +
         `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
         `Saludos cordiales`;
-      
-      // Obtener nombre del contacto principal
-      const tieneContactoPrincipal = !!(cliente?.contacto_nombre || cliente?.contactoNombre);
-      const nombreContactoPrincipal = tieneContactoPrincipal
-        ? `${cliente?.contacto_nombre || cliente?.contactoNombre || ''} ${cliente?.contacto_apellido_paterno || cliente?.contactoApellidoPaterno || ''} ${cliente?.contacto_apellido_materno || cliente?.contactoApellidoMaterno || ''}`.trim()
-        : '';
-      
-      const nombreDestinatario = nombreContactoPrincipal 
-        ? `${nombreCliente} (${nombreContactoPrincipal})`
-        : nombreCliente;
       
       // Registrar la notificación en el sistema de notificaciones
       try {
@@ -7899,7 +7940,7 @@ const estadoInicialFormulario = {
       const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
       window.location.href = mailtoUrl;
       
-      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por Email a ${nombreCliente}`);
+      toast.success(`✅ ${esVencido ? 'Recordatorio' : 'Aviso'} enviado por Email a ${nombreDestinatario}`);
       cerrarModalAvisoPago();
       
       // 🔄 Recargar historial automáticamente después de 1.5 segundos
@@ -7915,7 +7956,7 @@ const estadoInicialFormulario = {
       console.error('Error al enviar aviso por Email:', error);
       toast.error('Error al enviar aviso por Email');
     }
-  }, [cerrarModalAvisoPago]);
+  }, [cerrarModalAvisoPago, destinatarioSeleccionado]);
 
     // Manejar selección de archivo PDF
     const handleSeleccionarPDF = useCallback((event) => {
@@ -10670,7 +10711,32 @@ const eliminarExpediente = useCallback((id) => {
               <div className="modal-body">
                 <div className="mb-3 small">
                   <div><strong>Póliza:</strong> {expedienteDelPago.numero_poliza || 'Sin número'}</div>
-                  <div><strong>Cliente:</strong> {expedienteDelPago.cliente_nombre || 'N/A'}</div>
+                  
+                  {/* Mostrar select si hay múltiples destinatarios, o solo el nombre si hay uno */}
+                  {destinatariosDisponibles.length > 1 ? (
+                    <div className="mt-2">
+                      <label className="form-label mb-1"><strong>Enviar a:</strong></label>
+                      <select 
+                        className="form-select form-select-sm"
+                        value={destinatarioSeleccionado?.id || ''}
+                        onChange={(e) => {
+                          const dest = destinatariosDisponibles.find(d => d.id === e.target.value);
+                          setDestinatarioSeleccionado(dest);
+                        }}
+                      >
+                        {destinatariosDisponibles.map(dest => (
+                          <option key={dest.id} value={dest.id}>
+                            {dest.nombre} ({dest.tipo})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : destinatariosDisponibles.length === 1 ? (
+                    <div><strong>Enviar a:</strong> {destinatariosDisponibles[0].nombre} ({destinatariosDisponibles[0].tipo})</div>
+                  ) : (
+                    <div><strong>Cliente:</strong> {expedienteDelPago.cliente_nombre || 'N/A'}</div>
+                  )}
+                  
                   <div className="mt-2">
                     <strong>Pago #{pagoParaNotificar.numero}</strong>
                   </div>
