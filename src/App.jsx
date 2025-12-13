@@ -12,6 +12,7 @@ import Aseguradoras from "./screens/Aseguradoras";
 import DetallesProducto from "./screens/Productos/Detalles";
 import ConfiguracionTablas from "./screens/ConfiguracionTablas";
 import Configuracion from "./screens/Configuracion";
+import Reportes from "./screens/Reportes";
 import {
 	BrowserRouter as Router,
 	Route,
@@ -51,6 +52,7 @@ function App() {
           <Route path="/equipo-de-trabajo" element={<EquipoDeTrabajo/>}/>
           <Route path="/aseguradoras" element={<Aseguradoras/>}/>
           <Route path="/configuracion-tablas" element={<ConfiguracionTablas/>}/>
+          <Route path="/reportes" element={<Reportes/>}/>
           <Route path="/configuracion" element={<Configuracion/>}/>
         </Routes>
       </Layout>

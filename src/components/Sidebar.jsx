@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { LogOut, Menu, X } from 'lucide-react';
-import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2 } from 'lucide-react';
+import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2, BarChart3 } from 'lucide-react';
 import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
@@ -16,6 +16,7 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
         { key: '/equipo-de-trabajo', nombre: 'Equipo de Trabajo', icono: UserCheck, activo: true },
         { key: '/aseguradoras', nombre: 'Aseguradoras', icono: Building2, activo: true },
         { key: '/configuracion-tablas', nombre: 'Configuración de Tablas', icono: Database, activo: true },
+        { key: '/reportes', nombre: 'Reportes', icono: BarChart3, activo: true },
         { key: '/configuracion', nombre: 'Configuración', icono: Settings, activo: true }
     ], []);
 
