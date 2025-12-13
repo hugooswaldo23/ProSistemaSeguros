@@ -4689,6 +4689,114 @@ const Formulario = React.memo(({
   const [mostrarModalRFC, setMostrarModalRFC] = useState(false);
   const [rfcCapturado, setRfcCapturado] = useState('');
   const [datosTemporales, setDatosTemporales] = useState(null);
+  
+  // Estados locales para vendedores
+  const [vendedores, setVendedores] = useState([]);
+  const [agenteIdSeleccionado, setAgenteIdSeleccionado] = useState(null);
+
+  // Función para obtener vendedores por agente
+  const obtenerVendedoresPorAgente = async (agenteId) => {
+    if (!agenteId) {
+      setVendedores([]);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log('📋 Vendedores obtenidos:', data);
+        setVendedores(data.vendedores || []);
+      } else {
+        console.error('Error al obtener vendedores:', response.statusText);
+        setVendedores([]);
+      }
+    } catch (error) {
+      console.error('Error al obtener vendedores:', error);
+      setVendedores([]);
+    }
+  };
+
+  // Función para extraer ID del agente desde el texto del formulario
+  const extraerAgenteIdDelFormulario = (agenteTexto) => {
+    if (!agenteTexto || !agentes.length) {
+      console.log('🔍 No hay texto de agente o no hay agentes:', { agenteTexto, agentesLength: agentes.length });
+      return null;
+    }
+
+    console.log('🔍 Buscando agente en texto:', agenteTexto);
+    console.log('🔍 Agentes disponibles:', agentes.map(a => ({ id: a.id, nombre: a.nombre, codigoAgente: a.codigoAgente })));
+
+    // Método 1: Buscar por código de agente (primera palabra del texto)
+    const codigoAgente = agenteTexto.trim().split(' ')[0];
+    let agenteEncontrado = agentes.find(a => 
+      a.codigoAgente && a.codigoAgente.toString() === codigoAgente
+    );
+    
+    if (agenteEncontrado) {
+      console.log('✅ Agente encontrado por código:', agenteEncontrado);
+      return agenteEncontrado.id;
+    }
+
+    // Método 2: Buscar por nombre completo en el texto
+    const textoLimpio = agenteTexto.toLowerCase().trim();
+    agenteEncontrado = agentes.find(a => {
+      if (a.perfil !== 'Agente') return false;
+      const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase().trim();
+      return textoLimpio.includes(nombreCompleto) || nombreCompleto.includes(textoLimpio.replace(/^\d+\s*-?\s*/, ''));
+    });
+
+    if (agenteEncontrado) {
+      console.log('✅ Agente encontrado por nombre:', agenteEncontrado);
+      return agenteEncontrado.id;
+    }
+
+    // Método 3: Búsqueda flexible por palabras clave
+    agenteEncontrado = agentes.find(a => {
+      if (a.perfil !== 'Agente') return false;
+      const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase();
+      const palabrasTexto = textoLimpio.split(/\s+/);
+      return palabrasTexto.some(palabra => 
+        palabra.length > 2 && nombreCompleto.includes(palabra)
+      );
+    });
+
+    if (agenteEncontrado) {
+      console.log('✅ Agente encontrado por palabras clave:', agenteEncontrado);
+      return agenteEncontrado.id;
+    }
+
+    console.log('❌ No se encontró ningún agente para el texto:', agenteTexto);
+    return null;
+  };
+
+  // Efecto para cargar vendedores cuando se edita un expediente existente
+  useEffect(() => {
+    console.log('🔄 useEffect vendedores ejecutándose:', { 
+      agenteTexto: formulario.agente, 
+      agentesLength: agentes.length,
+      agenteIdSeleccionado 
+    });
+    
+    if (formulario.agente && agentes.length > 0) {
+      const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
+      console.log('🎯 Agente ID extraído:', agenteId);
+      
+      if (agenteId && agenteId !== agenteIdSeleccionado) {
+        console.log('📝 Actualizando agente seleccionado:', agenteId);
+        setAgenteIdSeleccionado(agenteId);
+        obtenerVendedoresPorAgente(agenteId);
+      } else if (!agenteId) {
+        console.log('🚫 No se encontró ID de agente, limpiando vendedores');
+        setAgenteIdSeleccionado(null);
+        setVendedores([]);
+      }
+    } else {
+      console.log('⚠️ Condiciones no cumplidas para buscar vendedores');
+      setAgenteIdSeleccionado(null);
+      setVendedores([]);
+    }
+  }, [formulario.agente, agentes]);
 
   const handleDataExtracted = useCallback(async (datosExtraidos) => {
     try {
@@ -5667,14 +5775,46 @@ const Formulario = React.memo(({
             <h5 className="card-title border-bottom pb-2">Datos Adicionales</h5>
             <div className="row g-3">
               <div className="col-md-6">
-                <label className="form-label">Agente</label>
+                <label className="form-label">
+                  Agente 
+                  {agenteIdSeleccionado && <span className="text-success ms-2">✅ Detectado</span>}
+                </label>
                 <input
                   type="text"
-                  className="form-control"
+                  className={`form-control ${agenteIdSeleccionado ? 'is-valid' : formulario.agente ? 'is-invalid' : ''}`}
                   value={formulario.agente ?? ''}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, agente: e.target.value }))}
-                  placeholder="Clave y nombre del agente"
+                  onChange={(e) => {
+                    const nuevoAgente = e.target.value;
+                    console.log('📝 Cambiando agente a:', nuevoAgente);
+                    setFormulario(prev => ({ ...prev, agente: nuevoAgente, sub_agente: '' }));
+                    
+                    // Limpiar vendedores inmediatamente al cambiar
+                    setVendedores([]);
+                    
+                    // Extraer ID del agente y obtener vendedores
+                    if (nuevoAgente && agentes.length > 0) {
+                      const agenteId = extraerAgenteIdDelFormulario(nuevoAgente);
+                      console.log('🔍 ID extraído inmediatamente:', agenteId);
+                      setAgenteIdSeleccionado(agenteId);
+                      if (agenteId) {
+                        obtenerVendedoresPorAgente(agenteId);
+                      }
+                    } else {
+                      setAgenteIdSeleccionado(null);
+                    }
+                  }}
+                  placeholder="Ej: 12345 - Juan Pérez"
                 />
+                {agenteIdSeleccionado && (
+                  <small className="text-success mt-1">
+                    💡 Agente reconocido - Los vendedores están disponibles
+                  </small>
+                )}
+                {formulario.agente && !agenteIdSeleccionado && (
+                  <small className="text-warning mt-1">
+                    ⚠️ Agente no reconocido - Verifica el formato: "Código - Nombre"
+                  </small>
+                )}
               </div>
               <div className="col-md-6">
                 <label className="form-label">Vendedor / Sub Agente</label>
@@ -5682,9 +5822,39 @@ const Formulario = React.memo(({
                   className="form-select"
                   value={formulario.sub_agente || ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, sub_agente: e.target.value }))}
+                  disabled={!agenteIdSeleccionado || vendedores.length === 0}
                 >
-                  <option value="">Seleccionar vendedor</option>
+                  <option value="">
+                    {!agenteIdSeleccionado ? 'Primero selecciona un agente' : 
+                     vendedores.length === 0 ? 'No hay vendedores disponibles' : 
+                     'Seleccionar vendedor'}
+                  </option>
+                  {vendedores.map(vendedor => {
+                    const nombreCompleto = `${vendedor.nombre} ${vendedor.apellidoPaterno || ''} ${vendedor.apellidoMaterno || ''}`.trim();
+                    const comisionInfo = vendedor.comisionesCompartidas && vendedor.comisionesCompartidas[agenteIdSeleccionado] 
+                      ? ` (${vendedor.comisionesCompartidas[agenteIdSeleccionado]}%)` 
+                      : '';
+                    
+                    return (
+                      <option key={vendedor.id} value={`${vendedor.id} - ${nombreCompleto}`}>
+                        {nombreCompleto}{comisionInfo}
+                      </option>
+                    );
+                  })}
                 </select>
+                {agenteIdSeleccionado && (
+                  <small className={`mt-1 ${vendedores.length > 0 ? 'text-success' : 'text-info'}`}>
+                    {vendedores.length > 0 
+                      ? `💡 ${vendedores.length} vendedor(es) autorizado(s) para este agente`
+                      : '🔄 Cargando vendedores...'
+                    }
+                  </small>
+                )}
+                {!agenteIdSeleccionado && formulario.agente && (
+                  <small className="text-warning mt-1">
+                    ⚠️ Para ver vendedores, el agente debe estar en el formato correcto
+                  </small>
+                )}
               </div>
               <div className="col-md-6">
                 <label className="form-label">Prima Pagada</label>
@@ -6600,7 +6770,7 @@ const ModuloExpedientes = () => {
       delete window.recargarAgentes;
     };
   }, []);
-  
+
   // Cargar expedientes y clientes desde el backend
   useEffect(() => {
     const cargarDatos = async () => {
@@ -9131,6 +9301,8 @@ const ModuloExpedientes = () => {
     // ✅ CRÍTICO: Usar 'formulario' (estado actual) para estatus_pago, no 'formularioParaGuardar'
     expedientePayload.estatus_pago = formulario.estatusPago || formulario.estatus_pago || 'Pendiente';
     expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
+    // ✅ GARANTIZAR que se guarde el vendedor/sub agente
+    expedientePayload.sub_agente = formularioParaGuardar.sub_agente || null;
     
     // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
     if (expedientePayload.estatus_pago === 'Pagado') {
@@ -9149,6 +9321,7 @@ const ModuloExpedientes = () => {
     console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
     console.log('🚨 [PAYLOAD SIMPLE] estatus_pago FORZADO:', expedientePayload.estatus_pago);
     console.log('📅 [PAYLOAD SIMPLE] fecha_aviso_renovacion:', expedientePayload.fecha_aviso_renovacion);
+    console.log('👤 [PAYLOAD SIMPLE] sub_agente ENVIANDO:', expedientePayload.sub_agente);
     console.log('📅 [PAYLOAD FINAL] fecha_emision:', expedientePayload.fecha_emision);
     console.log('📅 [PAYLOAD FINAL] inicio_vigencia:', expedientePayload.inicio_vigencia);
     console.log('📅 [PAYLOAD FINAL] termino_vigencia:', expedientePayload.termino_vigencia);
@@ -9190,6 +9363,8 @@ const ModuloExpedientes = () => {
 
     // Debug: Verificar campos clave antes de guardar
     console.log(`💾 Guardando expediente | Cliente: ${formularioParaGuardar.cliente_id} | Póliza: ${formularioParaGuardar.numero_poliza}`);
+    console.log('🔍 PAYLOAD FINAL - sub_agente:', expedientePayload.sub_agente);
+    console.log('🔍 FORMULARIO ORIGINAL - sub_agente:', formularioParaGuardar.sub_agente);
 
     if (modoEdicion) {
       // ✅ VERIFICACIÓN FINAL OBLIGATORIA - Asegurar que los campos estén ahí
@@ -10463,6 +10638,13 @@ const ModuloExpedientes = () => {
   fecha_cancelacion: formatearFechaParaInput(expedienteCompleto.fecha_cancelacion) || '',
   // Asegurar que campos numéricos no sean undefined (aceptar snake_case y camelCase del backend)
   prima_pagada: (expedienteCompleto.prima_pagada ?? expedienteCompleto.primaPagada ?? 0),
+  
+  // 🚨 DEBUG específico para sub_agente
+  sub_agente: (() => {
+    const valor = expedienteCompleto.sub_agente;
+    console.log('👤 [FORMULARIO INIT] sub_agente - valor desde BD:', valor);
+    return valor || '';
+  })(),
   
   // 🚨 DEBUG específico para cargo_pago_fraccionado
   cargo_pago_fraccionado: (() => {
