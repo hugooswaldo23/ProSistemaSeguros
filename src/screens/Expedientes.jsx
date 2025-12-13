@@ -5580,7 +5580,7 @@ const Formulario = React.memo(({
                   <label className="form-label">Tipo de Cobertura</label>
                   <select
                     className="form-select"
-                    value={formulario.tipo_cobertura}
+                    value={formulario.tipo_cobertura || ''}
                     onChange={(e) => setFormulario(prev => ({ ...prev, tipo_cobertura: e.target.value }))}
                   >
                     <option value="">Seleccionar cobertura</option>
@@ -5677,14 +5677,14 @@ const Formulario = React.memo(({
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">Sub Agente</label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={formulario.sub_agente ?? ''}
+                <label className="form-label">Vendedor / Sub Agente</label>
+                <select
+                  className="form-select"
+                  value={formulario.sub_agente || ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, sub_agente: e.target.value }))}
-                  placeholder="Código o nombre del sub agente"
-                />
+                >
+                  <option value="">Seleccionar vendedor</option>
+                </select>
               </div>
               <div className="col-md-6">
                 <label className="form-label">Prima Pagada</label>
@@ -6460,6 +6460,90 @@ const DetallesExpediente = React.memo(({
   );
 });
 
+// Estado inicial del formulario (definido fuera del componente)
+const estadoInicialFormulario = {
+  cliente_id: null,
+  nombre: '',
+  apellido_paterno: '',
+  apellido_materno: '',
+  razon_social: '',
+  nombre_comercial: '',
+  telefono_fijo: '',
+  telefono_movil: '',
+  email: '',
+  rfc: '',
+  // Campos de contacto adicional (Persona Física) o contacto principal (Persona Moral)
+  contacto_nombre: '',
+  contacto_apellido_paterno: '',
+  contacto_apellido_materno: '',
+  contacto_email: '',
+  contacto_telefono_fijo: '',
+  contacto_telefono_movil: '',
+  compania: '',
+  producto: '',
+  etapa_activa: 'Emitida',
+  agente: '',
+  sub_agente: null,
+  fecha_emision: new Date().toISOString().split('T')[0],
+  inicio_vigencia: '',
+  termino_vigencia: '',
+  prima_pagada: '',
+  cargo_pago_fraccionado: '',
+  cargoPagoFraccionado: '',
+  iva: '',
+  total: '',
+  motivo_cancelacion: null,
+  motivoCancelacion: null,
+  tipo_pago: 'Anual',
+  frecuencia_pago: null,
+  frecuenciaPago: null,
+  periodo_gracia: 14,
+  proximo_pago: null,
+  proximoPago: null,
+  estatus_pago: 'Pendiente',
+  estatusPago: 'Pendiente',
+  fecha_ultimo_pago: '',
+  fecha_pago: '',
+  plazo_pago_dias: '',
+  gastos_expedicion: '',
+  gastosExpedicion: '',
+  subtotal: null,
+  pago_unico: '',
+  marca: '',
+  modelo: '',
+  anio: '',
+  numero_serie: '',
+  motor: '',
+  placas: '',
+  color: '',
+  tipo_vehiculo: '',
+  codigo_vehiculo: '',
+  numero_poliza: '',
+  endoso: '000000',
+  inciso: '0001',
+  plan: '',
+  tipo_cobertura: '',
+  deducible: '',
+  suma_asegurada: '',
+  conductor_habitual: '',
+  edad_conductor: '',
+  licencia_conducir: '',
+  coberturas: null,
+  tipo_persona: '',
+  razonSocial: '',
+  curp: '',
+  domicilio: '',
+  fecha_creacion: new Date().toISOString().split('T')[0],
+  id: null,
+  // Campos adicionales para pagos fraccionados y datos de póliza
+  primer_pago: '',
+  pagos_subsecuentes: '',
+  forma_pago: '',
+  uso: null,
+  servicio: null,
+  movimiento: null
+};
+
 // ============= COMPONENTE PRINCIPAL =============
 const ModuloExpedientes = () => {
   const [expedientes, setExpedientes] = useState([]);
@@ -6491,10 +6575,9 @@ const ModuloExpedientes = () => {
     const fetchAgentes = async () => {
       const resultado = await obtenerAgentesEquipo();
       if (resultado.success) {
-        // Ordenar agentes alfabéticamente por nombre
         const agentesOrdenados = resultado.data.sort((a, b) => {
-          const nombreA = `${a.nombre} ${a.apellido_paterno}`.toLowerCase();
-          const nombreB = `${b.nombre} ${b.apellido_paterno}`.toLowerCase();
+          const nombreA = `${a.nombre} ${a.apellidoPaterno}`.toLowerCase();
+          const nombreB = `${b.nombre} ${b.apellidoPaterno}`.toLowerCase();
           return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
         });
         setAgentes(agentesOrdenados);
@@ -6505,8 +6588,8 @@ const ModuloExpedientes = () => {
     // Exponer función global para recargar agentes desde el modal de extracción
     window.recargarAgentes = (nuevosAgentes) => {
       const agentesOrdenados = nuevosAgentes.sort((a, b) => {
-        const nombreA = `${a.nombre} ${a.apellido_paterno}`.toLowerCase();
-        const nombreB = `${b.nombre} ${b.apellido_paterno}`.toLowerCase();
+        const nombreA = `${a.nombre} ${a.apellidoPaterno}`.toLowerCase();
+        const nombreB = `${b.nombre} ${b.apellidoPaterno}`.toLowerCase();
         return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
       });
       setAgentes(agentesOrdenados);
@@ -6879,88 +6962,6 @@ const ModuloExpedientes = () => {
     'Mitsubishi', 'Nissan', 'Peugeot', 'Porsche', 'Renault', 'Seat', 
     'Suzuki', 'Toyota', 'Volkswagen', 'Volvo', 'Otra'
   ], []);
-const estadoInicialFormulario = {
-  cliente_id: null,
-  nombre: '',
-  apellido_paterno: '',
-  apellido_materno: '',
-  razon_social: '',
-  nombre_comercial: '',
-  telefono_fijo: '',
-  telefono_movil: '',
-  email: '',
-  rfc: '',
-  // Campos de contacto adicional (Persona Física) o contacto principal (Persona Moral)
-  contacto_nombre: '',
-  contacto_apellido_paterno: '',
-  contacto_apellido_materno: '',
-  contacto_email: '',
-  contacto_telefono_fijo: '',
-  contacto_telefono_movil: '',
-  compania: '',
-  producto: '',
-  etapa_activa: 'Emitida',
-  agente: '',
-  sub_agente: null,
-  fecha_emision: new Date().toISOString().split('T')[0],
-  inicio_vigencia: '',
-  termino_vigencia: '',
-  prima_pagada: '',
-  cargo_pago_fraccionado: '',
-  cargoPagoFraccionado: '',
-  iva: '',
-  total: '',
-  motivo_cancelacion: null,
-  motivoCancelacion: null,
-  tipo_pago: 'Anual',
-  frecuencia_pago: null,
-  frecuenciaPago: null,
-  periodo_gracia: 14,
-  proximo_pago: null,
-  proximoPago: null,
-  estatus_pago: 'Pendiente',
-  estatusPago: 'Pendiente',
-  fecha_ultimo_pago: '',
-  fecha_pago: '',
-  plazo_pago_dias: '',
-  gastos_expedicion: '',
-  gastosExpedicion: '',
-  subtotal: null,
-  pago_unico: '',
-  marca: '',
-  modelo: '',
-  anio: '',
-  numero_serie: '',
-  motor: '',
-  placas: '',
-  color: '',
-  tipo_vehiculo: '',
-  codigo_vehiculo: '',
-  numero_poliza: '',
-  endoso: '000000',
-  inciso: '0001',
-  plan: '',
-  tipo_cobertura: '',
-  deducible: '',
-  suma_asegurada: '',
-  conductor_habitual: '',
-  edad_conductor: '',
-  licencia_conducir: '',
-  coberturas: null,
-  tipo_persona: '',
-  razonSocial: '',
-  curp: '',
-  domicilio: '',
-  fecha_creacion: new Date().toISOString().split('T')[0],
-  id: null,
-  // Campos adicionales para pagos fraccionados y datos de póliza
-  primer_pago: '',
-  pagos_subsecuentes: '',
-  forma_pago: '',
-  uso: null,
-  servicio: null,
-  movimiento: null
-};
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
   const [formularioOriginal, setFormularioOriginal] = useState(null); // Snapshot al abrir edición
