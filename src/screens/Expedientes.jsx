@@ -68,6 +68,7 @@ import * as clientesService from '../services/clientesService';
 import * as historialService from '../services/historialExpedienteService';
 import { registrarNotificacion, TIPOS_NOTIFICACION, TIPOS_MENSAJE } from '../services/notificacionesService';
 import TimelineExpediente from '../components/TimelineExpediente';
+import * as estatusPagosUtils from '../utils/estatusPagos';
 
 // Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
@@ -402,21 +403,22 @@ const CalendarioPagos = React.memo(({
   
   // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    // console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
-    // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
-    // 🔥 IMPORTANTE: Filtrar solo los recibos que corresponden al número de pagos según la frecuencia
     pagos = expediente.recibos
-      .filter(r => r.numero_recibo <= numeroPagos) // Solo los recibos correspondientes a la frecuencia
-      .map(r => ({
-        numero: r.numero_recibo,
-        fecha: r.fecha_vencimiento,
-        monto: parseFloat(r.monto).toFixed(2),
-        estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Por Pagar
-        comprobante_url: r.comprobante_url,
-        comprobante_nombre: r.comprobante_nombre,
-        fecha_pago_real: r.fecha_pago_real
-      }));
-    // console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
+      .filter(r => r.numero_recibo <= numeroPagos)
+      .map(r => {
+        // Usar función centralizada para calcular estatus
+        const estatusCalculado = estatusPagosUtils.calcularEstatusRecibo(r.fecha_vencimiento, r.fecha_pago_real);
+        
+        return {
+          numero: r.numero_recibo,
+          fecha: r.fecha_vencimiento,
+          monto: parseFloat(r.monto).toFixed(2),
+          estatusBackend: estatusCalculado,
+          comprobante_url: r.comprobante_url,
+          comprobante_nombre: r.comprobante_nombre,
+          fecha_pago_real: r.fecha_pago_real
+        };
+      });
   } else {
     // Fallback: Calcular recibos en el frontend (método antiguo)
     const periodoGracia = expediente.periodo_gracia 
