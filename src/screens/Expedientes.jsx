@@ -144,6 +144,7 @@ const utils = {
         'Vencido': 'bg-danger',
         'Por Vencer': 'bg-warning',
         'Pendiente': 'bg-info',
+        'Por Pagar': 'bg-warning',
         'Cancelado': 'bg-dark',
         'Sin definir': 'bg-secondary'
       },
@@ -295,15 +296,61 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
   );
 });
 
-// Obtener estatus de pago desde backend (calculado en SQL)
-const obtenerEstatusGeneralPago = (expediente) => {
-  // Leer directamente del backend
-  return expediente.estatus_pago || expediente.estatusPago || 'Sin calcular';
+// 🔥 Función para leer el estatus de pago desde el backend
+// OPCIÓN A: Si el expediente trae array de recibos desde el backend
+// OPCIÓN B: Si solo trae estatus_pago calculado
+const obtenerEstatusPagoDesdeBackend = (expediente) => {
+  console.log('🚀 [ESTATUS] Calculando para póliza:', expediente.numero_poliza);
+  
+  // Si ya está marcado como pagado en el backend, respetarlo
+  const estatusBackend = (expediente.estatus_pago || '').toLowerCase().trim();
+  if (estatusBackend === 'pagado') {
+    console.log('✅ [ESTATUS] Ya está pagado según backend');
+    return 'Pagado';
+  }
+  
+  // SIEMPRE calcular estatus basándose en fecha_vencimiento_pago
+  if (expediente.fecha_vencimiento_pago) {
+    const fechaVencimiento = new Date(expediente.fecha_vencimiento_pago);
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    fechaVencimiento.setHours(0, 0, 0, 0);
+    
+    const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+    
+    console.log('📅 [ESTATUS] Cálculo:', {
+      poliza: expediente.numero_poliza,
+      fecha_vencimiento: expediente.fecha_vencimiento_pago,
+      diasRestantes,
+      hoy: hoy.toISOString().split('T')[0]
+    });
+    
+    let nuevoEstatus;
+    if (diasRestantes < 0) {
+      nuevoEstatus = 'Vencido';
+    } else if (diasRestantes <= 15) {
+      nuevoEstatus = 'Por Pagar';
+    } else {
+      nuevoEstatus = 'Pendiente';
+    }
+    
+    console.log('✅ [ESTATUS] Resultado:', nuevoEstatus, 'para', expediente.numero_poliza);
+    return nuevoEstatus;
+  }
+  
+  console.log('⚠️ [ESTATUS] Sin fecha_vencimiento_pago, usando backend:', estatusBackend);
+  
+  // Fallback: normalizar estatus del backend
+  if (estatusBackend === 'vencido') return 'Vencido';
+  if (estatusBackend === 'cancelado') return 'Cancelado';
+  
+  // Por defecto
+  return 'Pendiente';
 };
 
 const EstadoPago = React.memo(({ expediente }) => {
-  // ✅ Usar función centralizada
-  const estatusGeneral = obtenerEstatusGeneralPago(expediente);
+  // 🔥 Leer estatus directamente del backend (NO calcular)
+  const estatusDesdeBackend = obtenerEstatusPagoDesdeBackend(expediente);
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -312,7 +359,7 @@ const EstadoPago = React.memo(({ expediente }) => {
         <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
       )}
       <div className="mt-1">
-        <Badge tipo="pago" valor={estatusGeneral} className="badge-sm" />
+        <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
       </div>
     </div>
   );
@@ -353,61 +400,32 @@ const CalendarioPagos = React.memo(({
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
   let pagos = [];
   
-  // PRIORIDAD 1: Leer recibos desde backend (tabla recibos_pago)
+  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    // console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
+    // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
+    // 🔥 IMPORTANTE: Filtrar solo los recibos que corresponden al número de pagos según la frecuencia
     pagos = expediente.recibos
-      .filter(r => r.numero_recibo <= numeroPagos)
-      .map(r => {
-        // 🔧 TEMPORAL: Recalcular estatus en frontend hasta que backend lo calcule correctamente
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const fechaVenc = new Date(r.fecha_vencimiento + 'T00:00:00');
-        fechaVenc.setHours(0, 0, 0, 0);
-        const diasRestantes = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-        
-        let estatusCalculado;
-        if (r.fecha_pago_real) {
-          estatusCalculado = 'Pagado';
-        } else if (diasRestantes < 0) {
-          estatusCalculado = 'Vencido';
-        } else if (diasRestantes <= 15) {
-          estatusCalculado = 'Por Vencer';
-        } else {
-          estatusCalculado = 'Pendiente';
-        }
-        
-        return {
-          numero: r.numero_recibo,
-          fecha: r.fecha_vencimiento,
-          monto: parseFloat(r.monto).toFixed(2),
-          estatusBackend: estatusCalculado, // Usar estatus calculado temporalmente
-          comprobante_url: r.comprobante_url,
-          comprobante_nombre: r.comprobante_nombre,
-          fecha_pago_real: r.fecha_pago_real
-        };
-      });
+      .filter(r => r.numero_recibo <= numeroPagos) // Solo los recibos correspondientes a la frecuencia
+      .map(r => ({
+        numero: r.numero_recibo,
+        fecha: r.fecha_vencimiento,
+        monto: parseFloat(r.monto).toFixed(2),
+        estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Por Pagar
+        comprobante_url: r.comprobante_url,
+        comprobante_nombre: r.comprobante_nombre,
+        fecha_pago_real: r.fecha_pago_real
+      }));
+    // console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
   } else {
-    // Si estamos CREANDO una póliza nueva (sin ID), calcular calendario en frontend
-    const esNuevaPóliza = !expediente.id;
-    
-    if (!esNuevaPóliza) {
-      // Póliza existente sin recibos del backend - ERROR
-      return (
-        <div className="alert alert-warning" role="alert">
-          <strong>⚠️ Configuración pendiente</strong><br/>
-          Los recibos de pago deben ser generados por el backend.
-          <br/><small>Contacte al administrador del sistema.</small>
-        </div>
-      );
-    }
-    
-    // FALLBACK: Calcular recibos en frontend (solo para pólizas nuevas)
+    // Fallback: Calcular recibos en el frontend (método antiguo)
     const periodoGracia = expediente.periodo_gracia 
       ? parseInt(expediente.periodo_gracia, 10)
       : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
     
     const primerPagoField = expediente.primer_pago || expediente.primerPago;
     const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+    
     const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
     const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
     const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
@@ -415,7 +433,12 @@ const CalendarioPagos = React.memo(({
     
     for (let i = 1; i <= numeroPagos; i++) {
       const fechaPago = calcularProximoPago(
-        expediente.inicio_vigencia, tipoPago, frecuencia, expediente.compania, i, periodoGracia
+        expediente.inicio_vigencia,
+        tipoPago,
+        frecuencia,
+        expediente.compania,
+        i,
+        periodoGracia
       );
       
       if (fechaPago) {
@@ -424,23 +447,10 @@ const CalendarioPagos = React.memo(({
           monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
         }
         
-        // Calcular estatus
-        const hoy = new Date();
-        hoy.setHours(0, 0, 0, 0);
-        const fechaVenc = new Date(fechaPago + 'T00:00:00');
-        fechaVenc.setHours(0, 0, 0, 0);
-        const diasRestantes = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-        
-        let estatusCalculado;
-        if (diasRestantes < 0) estatusCalculado = 'Vencido';
-        else if (diasRestantes <= 15) estatusCalculado = 'Por Vencer';
-        else estatusCalculado = 'Pendiente';
-        
         pagos.push({
           numero: i,
           fecha: fechaPago,
-          monto: monto,
-          estatusBackend: estatusCalculado
+          monto: monto
         });
       }
     }
@@ -455,47 +465,82 @@ const CalendarioPagos = React.memo(({
   let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
-    // ✅ LEER DIRECTAMENTE del backend (sin calcular)
-    const estaPagado = pago.numero <= ultimoReciboPagado;
+    // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
+    if (pago.estatusBackend) {
+      // console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
+      const estatusNorm = pago.estatusBackend.toLowerCase();
+      const pagado = estatusNorm === 'pagado';
+      
+      if (pagado) {
+        totalPagado += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'vencido') {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (estatusNorm === 'pago por vencer') {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
+      
+      let estado = pago.estatusBackend;
+      let badgeClass = 'bg-secondary';
+      
+      if (estatusNorm === 'pagado') {
+        badgeClass = 'bg-success';
+      } else if (estatusNorm === 'vencido') {
+        badgeClass = 'bg-danger';
+      } else if (estatusNorm === 'pago por vencer') {
+        badgeClass = 'bg-warning';
+      }
+      
+      // console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
+      return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
+    }
     
-    let estatus, badgeClass;
+    // Fallback: Calcular estatus en el frontend (método antiguo)
+    // console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
+    const [year, month, day] = pago.fecha.split('-');
+    const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+    const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
+    // console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
     
-    if (estaPagado) {
-      estatus = 'Pagado';
+    let pagado = pago.numero <= ultimoReciboPagado;
+    
+    if (pagado) {
+      totalPagado += parseFloat(pago.monto) || 0;
+    } else {
+      if (diasRestantes < 0) {
+        totalVencido += parseFloat(pago.monto) || 0;
+      } else if (diasRestantes <= 15) {
+        totalPorVencer += parseFloat(pago.monto) || 0;
+      } else {
+        totalPendiente += parseFloat(pago.monto) || 0;
+      }
+    }
+    
+    let estado = 'Pendiente';
+    let badgeClass = 'bg-secondary';
+    
+    if (pagado) {
+      estado = 'Pagado';
       badgeClass = 'bg-success';
-    } else if (pago.estatusBackend) {
-      // Si el backend envió el estatus, usarlo directamente
-      estatus = pago.estatusBackend;
-      const estatusNorm = estatus.toLowerCase();
-      badgeClass = estatusNorm === 'vencido' ? 'bg-danger' :
-                   estatusNorm === 'por vencer' || estatusNorm === 'pago por vencer' ? 'bg-warning' :
-                   estatusNorm === 'pendiente' ? 'bg-info' : 'bg-secondary';
+    } else if (diasRestantes < 0) {
+      estado = 'Vencido';
+      badgeClass = 'bg-danger';
+    } else if (diasRestantes === 0) {
+      estado = 'Vence hoy';
+      badgeClass = 'bg-danger';
+    } else if (diasRestantes <= 15) {
+      // Por Pagar: cuando faltan 15 días o menos (listo para cobrar)
+      estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por Pagar';
+      badgeClass = 'bg-warning';
     } else {
-      // Si no hay estatus del backend, marcar como "Sin calcular"
-      estatus = 'Pendiente';
+      // Pendiente: cuando falta más de 15 días (aún no urgente)
+      estado = 'Pendiente';
       badgeClass = 'bg-secondary';
-      console.warn(`⚠️ Recibo #${pago.numero} sin estatus del backend`);
     }
     
-    // Acumular totales
-    const monto = parseFloat(pago.monto) || 0;
-    if (estaPagado) {
-      totalPagado += monto;
-    } else if (estatus === 'Vencido') {
-      totalVencido += monto;
-    } else if (estatus === 'Por Vencer' || estatus === 'Pago por vencer') {
-      totalPorVencer += monto;
-    } else {
-      totalPendiente += monto;
-    }
-    
-    return { 
-      ...pago, 
-      estado: estatus, 
-      badgeClass: badgeClass, 
-      pagado: estaPagado, 
-      totalPagos: numeroPagos 
-    };
+    // console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
+    return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
   if (compacto) {
@@ -2073,7 +2118,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-
+      console.log('🔍 DEBUG aplicarDatos:');
       console.log('   - clienteEncontrado:', clienteEncontrado);
       console.log('   - clienteEncontrado.id:', clienteEncontrado?.id);
       console.log('   - datosExtraidos.cliente_id:', datosExtraidos.cliente_id);
@@ -2207,6 +2252,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Si el extractor trae fecha_limite_pago (como Chubb), usarla como fecha_vencimiento_pago
       if (datosConCliente.fecha_limite_pago) {
         datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
+        datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
         console.log('📅 Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
       }
       
@@ -3091,13 +3137,38 @@ const ListaExpedientes = React.memo(({
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
           
-          // Para pago único (Anual): mostrar si no está pagado
+          // Para pago único (Anual): verificar si está dentro de 15 días Y no está pagado
           if (!esFraccionado) {
+            if (estatusPago === 'pagado') return false; // Si ya está pagado, no va a "En Proceso"
+            
+            // Verificar si la fecha de vencimiento está dentro de 15 días
+            if (exp.fecha_vencimiento_pago) {
+              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+              fechaVencimientoPago.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+              
+              // Solo mostrar en "En Proceso" si está dentro de 15 días
+              return diasRestantes <= 15 && diasRestantes >= 0;
+            }
+            
+            // Si no tiene fecha de vencimiento, usar el estatus
             return estatusPago !== 'pagado';
           }
           
           // Para pago fraccionado: verificar si hay recibos pendientes o próximos
           const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          
+          // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Mostrar en "En Proceso" si está por vencer (≤ 15 días) pero NO vencido
+            return diasRestantes <= 15 && diasRestantes >= 0;
+          }
+          
+          // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
           if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
           
           const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
@@ -3126,8 +3197,8 @@ const ListaExpedientes = React.memo(({
           fechaProximoRecibo.setHours(0, 0, 0, 0);
           const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
           
-          // Mostrar en "En Proceso" si está vencido o por vencer (≤ 15 días)
-          return diasRestantes <= 15;
+          // Mostrar en "En Proceso" SOLO si está por vencer (≤ 15 días) pero NO vencido
+          return diasRestantes <= 15 && diasRestantes >= 0;
         });
       
       case 'vigentes':
@@ -3140,47 +3211,76 @@ const ListaExpedientes = React.memo(({
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
           
-          // Para pago único: debe estar pagado
+          // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
           if (!esFraccionado) {
-            if (estatusPago !== 'pagado') return false;
+            if (estatusPago === 'pagado') {
+              // Si está pagado, está en vigentes
+            } else if (exp.fecha_vencimiento_pago) {
+              // Si no está pagado, verificar si faltan > 15 días para vencimiento
+              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+              fechaVencimientoPago.setHours(0, 0, 0, 0);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+              
+              // Solo va a vigentes si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            } else {
+              // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
+              return false;
+            }
           } else {
             // Para fraccionado: verificar que próximo pago > 15 días
-            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
             
-            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-            
-            // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
-            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-            
-            // Si no ha pagado nada, no está en vigentes
-            if (pagosRealizados === 0) return false;
-            
-            const mesesPorFrecuencia = {
-              'Mensual': 1,
-              'Trimestral': 3,
-              'Semestral': 6
-            };
-            
-            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-            
-            // Si ya pagó todos, está en vigentes
-            if (pagosRealizados >= numeroPagos) {
-              // Continuar para verificar si no está en periodo de renovación
-            } else {
-              // Calcular días hasta próximo pago
-              const proximoRecibo = pagosRealizados + 1;
-              const fechaInicio = new Date(exp.inicio_vigencia);
-              const fechaProximoRecibo = new Date(fechaInicio);
-              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+            // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+            if (exp.fecha_vencimiento_pago) {
+              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+              fechaVencimientoPago.setHours(0, 0, 0, 0);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
               
-              const hoyLocal = new Date();
-              hoyLocal.setHours(0, 0, 0, 0);
-              fechaProximoRecibo.setHours(0, 0, 0, 0);
-              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-              
-              // Solo está en vigentes si faltan > 15 días
+              // Solo va a vigentes si faltan > 15 días
               if (diasRestantes <= 15) return false;
+            } else {
+              // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
+              const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+              if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+              
+              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+              
+              // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+              const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+              
+              // Si no ha pagado nada, no está en vigentes
+              if (pagosRealizados === 0) return false;
+              
+              const mesesPorFrecuencia = {
+                'Mensual': 1,
+                'Trimestral': 3,
+                'Semestral': 6
+              };
+              
+              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+              
+              // Si ya pagó todos, está en vigentes
+              if (pagosRealizados >= numeroPagos) {
+                // Continuar para verificar si no está en periodo de renovación
+              } else {
+                // Calcular días hasta próximo pago
+                const proximoRecibo = pagosRealizados + 1;
+                const fechaInicio = new Date(exp.inicio_vigencia);
+                const fechaProximoRecibo = new Date(fechaInicio);
+                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+                
+                const hoyLocal = new Date();
+                hoyLocal.setHours(0, 0, 0, 0);
+                fechaProximoRecibo.setHours(0, 0, 0, 0);
+                const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+                
+                // Solo está en vigentes si faltan > 15 días
+                if (diasRestantes <= 15) return false;
+              }
             }
           }
           
@@ -3291,22 +3391,52 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'vencidas':
-        // Pólizas vencidas: pago vencido O vigencia terminada
+        // Pólizas vencidas (termino_vigencia < hoy O recibos fraccionados vencidos)
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           
-          // 1. Verificar si el pago está vencido
-          if (exp.fecha_vencimiento_pago) {
-            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-            fechaVencimientoPago.setHours(0, 0, 0, 0);
-            if (fechaVencimientoPago < hoy) return true; // Pago vencido
-          }
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
           
-          // 2. Verificar si la vigencia completa terminó
+          // Verificar si la póliza completa está vencida (termino_vigencia)
           if (exp.termino_vigencia) {
             const fechaVencimiento = new Date(exp.termino_vigencia);
-            fechaVencimiento.setHours(0, 0, 0, 0);
-            if (fechaVencimiento < hoy) return true; // Vigencia terminada
+            if (fechaVencimiento < hoy) return true;
+          }
+          
+          // Para pólizas fraccionadas, verificar si tienen recibos vencidos
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+          if (esFraccionado) {
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return false;
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            
+            // Si ya pagó todos los recibos, no está vencida
+            if (pagosRealizados >= numeroPagos) return false;
+            
+            const mesesPorFrecuencia = {
+              'Mensual': 1,
+              'Trimestral': 3,
+              'Semestral': 6
+            };
+            
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            // Calcular fecha del próximo recibo
+            const proximoRecibo = pagosRealizados + 1;
+            const fechaInicio = new Date(exp.inicio_vigencia);
+            const fechaProximoRecibo = new Date(fechaInicio);
+            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+            
+            const hoyLocal = new Date();
+            hoyLocal.setHours(0, 0, 0, 0);
+            fechaProximoRecibo.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+            
+            // Está vencida si los días restantes son negativos
+            return diasRestantes < 0;
           }
           
           return false;
@@ -3342,13 +3472,38 @@ const ListaExpedientes = React.memo(({
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
         
-        // Para pago único (Anual): mostrar si no está pagado
+        // Para pago único (Anual): verificar si está dentro de 15 días Y no está pagado
         if (!esFraccionado) {
+          if (estatusPago === 'pagado') return false; // Si ya está pagado, no va a "En Proceso"
+          
+          // Verificar si la fecha de vencimiento está dentro de 15 días
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Solo mostrar en "En Proceso" si está dentro de 15 días
+            return diasRestantes <= 15 && diasRestantes >= 0;
+          }
+          
+          // Si no tiene fecha de vencimiento, usar el estatus
           return estatusPago !== 'pagado';
         }
         
-        // Para pago fraccionado: verificar si hay recibos vencidos o por vencer
+        // Para pago fraccionado: verificar si hay recibos pendientes o próximos
         const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+        
+        // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+        if (exp.fecha_vencimiento_pago) {
+          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+          fechaVencimientoPago.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+          
+          // Mostrar en "En Proceso" si está por vencer (≤ 15 días) pero NO vencido
+          return diasRestantes <= 15 && diasRestantes >= 0;
+        }
+        
+        // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
         if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
         
         const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
@@ -3379,8 +3534,8 @@ const ListaExpedientes = React.memo(({
         fechaProximoRecibo.setHours(0, 0, 0, 0);
         const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
         
-        // Mostrar en "En Proceso" si está vencido o por vencer (≤ 15 días)
-        return diasRestantes <= 15;
+        // Mostrar en "En Proceso" SOLO si está por vencer (≤ 15 días) pero NO vencido
+        return diasRestantes <= 15 && diasRestantes >= 0;
       }).length,
       
       vigentes: expedientes.filter(exp => {
@@ -3390,34 +3545,61 @@ const ListaExpedientes = React.memo(({
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
         
+        // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
         if (!esFraccionado) {
-          if (estatusPago !== 'pagado') return false;
-        } else {
-          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-          if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
-          
-          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-          // 🔥 Usar el contador directo de recibos pagados
-          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-          const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
-          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-          
-          if (pagosRealizados === 0) {
+          if (estatusPago === 'pagado') {
+            // Si está pagado, está en vigentes
+          } else if (exp.fecha_vencimiento_pago) {
+            // Si no está pagado, verificar si faltan > 15 días para vencimiento
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Solo va a vigentes si faltan > 15 días
+            if (diasRestantes <= 15) return false;
+          } else {
+            // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
             return false;
           }
+        } else {
+          // Para fraccionado: verificar que próximo pago > 15 días
           
-          if (pagosRealizados < numeroPagos) {
-            const proximoRecibo = pagosRealizados + 1;
-            const fechaInicio = new Date(exp.inicio_vigencia);
-            const fechaProximoRecibo = new Date(fechaInicio);
-            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+          // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
             
-            const hoyLocal = new Date();
-            hoyLocal.setHours(0, 0, 0, 0);
-            fechaProximoRecibo.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-            
+            // Solo va a vigentes si faltan > 15 días
             if (diasRestantes <= 15) return false;
+          } else {
+            // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            // 🔥 Usar el contador directo de recibos pagados
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            if (pagosRealizados === 0) {
+              return false;
+            }
+            
+            if (pagosRealizados < numeroPagos) {
+              const proximoRecibo = pagosRealizados + 1;
+              const fechaInicio = new Date(exp.inicio_vigencia);
+              const fechaProximoRecibo = new Date(fechaInicio);
+              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+              
+              const hoyLocal = new Date();
+              hoyLocal.setHours(0, 0, 0, 0);
+              fechaProximoRecibo.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+              
+              if (diasRestantes <= 15) return false;
+            }
           }
         }
         
@@ -3508,18 +3690,45 @@ const ListaExpedientes = React.memo(({
       vencidas: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         
-        // 1. Verificar si el pago está vencido
-        if (exp.fecha_vencimiento_pago) {
-          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-          fechaVencimientoPago.setHours(0, 0, 0, 0);
-          if (fechaVencimientoPago < hoy) return true;
-        }
-        
-        // 2. Verificar si la vigencia completa terminó
+        // Verificar si la póliza completa está vencida (termino_vigencia)
         if (exp.termino_vigencia) {
           const fechaVencimiento = new Date(exp.termino_vigencia);
-          fechaVencimiento.setHours(0, 0, 0, 0);
           if (fechaVencimiento < hoy) return true;
+        }
+        
+        // Para pólizas fraccionadas, verificar si tienen recibos vencidos
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        if (esFraccionado) {
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return false;
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          
+          // Si ya pagó todos los recibos, no está vencida
+          if (pagosRealizados >= numeroPagos) return false;
+          
+          const mesesPorFrecuencia = {
+            'Mensual': 1,
+            'Trimestral': 3,
+            'Semestral': 6
+          };
+          
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          // Calcular fecha del próximo recibo
+          const proximoRecibo = pagosRealizados + 1;
+          const fechaInicio = new Date(exp.inicio_vigencia);
+          const fechaProximoRecibo = new Date(fechaInicio);
+          fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+          
+          const hoyLocal = new Date();
+          hoyLocal.setHours(0, 0, 0, 0);
+          fechaProximoRecibo.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+          
+          // Está vencida si los días restantes son negativos
+          return diasRestantes < 0;
         }
         
         return false;
@@ -3998,16 +4207,30 @@ const ListaExpedientes = React.memo(({
                             {/* Tipo y Estatus de Pago */}
                             <EstadoPago expediente={expediente} />
                             
-                            {/* ✅ Estado del próximo recibo (LEER del backend) */}
+                            {/* Estado del próximo recibo pendiente (solo para fraccionado) */}
                             {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
-                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && (
+                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
+                             expediente.inicio_vigencia && (
                               (() => {
+                                // Normalizar campos
                                 const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
                                 const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                
+                                // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
                                 const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
+                                
+                                const mesesPorFrecuencia = {
+                                  'Mensual': 1,
+                                  'Trimestral': 3,
+                                  'Semestral': 6
+                                };
+                                
+                                const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                                
+                                // Determinar el próximo recibo pendiente
                                 const proximoRecibo = pagosRealizados + 1;
                                 
-                                // Si ya se pagaron todos
+                                // Si ya se pagaron todos los recibos
                                 if (pagosRealizados >= numeroPagos) {
                                   return (
                                     <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
@@ -4016,24 +4239,38 @@ const ListaExpedientes = React.memo(({
                                   );
                                 }
                                 
-                                // ✅ LEER estatus del backend (recibos[])
-                                let estatus = 'Pendiente';
-                                let colorClass = 'text-info';
+                                // Calcular fecha de vencimiento del próximo recibo
+                                const fechaInicio = new Date(expediente.inicio_vigencia);
+                                const fechaProximoRecibo = new Date(fechaInicio);
+                                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
                                 
-                                if (expediente.recibos && Array.isArray(expediente.recibos)) {
-                                  const reciboProximo = expediente.recibos.find(r => r.numero_recibo === proximoRecibo);
-                                  if (reciboProximo && reciboProximo.estatus) {
-                                    estatus = reciboProximo.estatus;
-                                    const estatusNorm = estatus.toLowerCase();
-                                    colorClass = estatusNorm === 'vencido' ? 'text-danger fw-bold' :
-                                               estatusNorm === 'por vencer' || estatusNorm === 'pago por vencer' ? 'text-warning fw-bold' :
-                                               'text-info';
-                                  }
+                                // Calcular días restantes
+                                const hoy = new Date();
+                                hoy.setHours(0, 0, 0, 0);
+                                fechaProximoRecibo.setHours(0, 0, 0, 0);
+                                const diasRestantes = Math.floor((fechaProximoRecibo - hoy) / (1000 * 60 * 60 * 24));
+                                
+                                // Determinar estado y color
+                                let estado = '';
+                                let colorClass = '';
+                                
+                                if (diasRestantes < 0) {
+                                  estado = 'Vencido';
+                                  colorClass = 'text-danger fw-bold';
+                                } else if (diasRestantes === 0) {
+                                  estado = 'Vence Hoy';
+                                  colorClass = 'text-danger fw-bold';
+                                } else if (diasRestantes <= 15) {
+                                  estado = 'Por Vencer';
+                                  colorClass = 'text-warning fw-bold';
+                                } else {
+                                  estado = 'Pendiente';
+                                  colorClass = 'text-info';
                                 }
                                 
                                 return (
                                   <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
-                                    <span className={colorClass}>{proximoRecibo}/{numeroPagos} {estatus}</span>
+                                    <span className={colorClass}>{proximoRecibo}/{numeroPagos} {estado}</span>
                                   </div>
                                 );
                               })()
@@ -4878,9 +5115,9 @@ const Formulario = React.memo(({
       console.log('🎯 Agente ID extraído:', agenteId, 'Clave:', claveAgente);
       
       if (agenteId && agenteId !== agenteIdSeleccionado) {
-        console.log('📝 Actualizando agente seleccionado:', agenteId, 'clave:', claveAgente, 'aseguradora:', formulario.compania);
+        console.log('📝 Actualizando agente seleccionado:', agenteId);
         setAgenteIdSeleccionado(agenteId);
-        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
+        obtenerVendedoresPorAgente(agenteId);
       } else if (!agenteId) {
         console.log('🚫 No se encontró ID de agente, limpiando vendedores');
         setAgenteIdSeleccionado(null);
@@ -5889,11 +6126,10 @@ const Formulario = React.memo(({
                     // Extraer ID del agente y obtener vendedores
                     if (nuevoAgente && agentes.length > 0) {
                       const agenteId = extraerAgenteIdDelFormulario(nuevoAgente);
-                      const claveAgente = nuevoAgente.trim().split(' ')[0];
-                      console.log('🔍 ID extraído inmediatamente:', agenteId, 'Clave:', claveAgente);
+                      console.log('🔍 ID extraído inmediatamente:', agenteId);
                       setAgenteIdSeleccionado(agenteId);
                       if (agenteId) {
-                        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
+                        obtenerVendedoresPorAgente(agenteId);
                       }
                     } else {
                       setAgenteIdSeleccionado(null);
@@ -6203,7 +6439,7 @@ const Formulario = React.memo(({
                       
                       setFormulario(prev => {
                         // Si tiene inicio_vigencia, recalcular fecha_pago
-                        let nuevaFechaPago = prev.fecha_vencimiento_pago;
+                        let nuevaFechaPago = prev.fecha_vencimiento_pago || prev.fecha_pago;
                         
                         if (prev.inicio_vigencia) {
                           const fechaInicio = new Date(prev.inicio_vigencia);
@@ -6233,6 +6469,7 @@ const Formulario = React.memo(({
                           ...prev,
                           periodo_gracia: diasGracia,
                           fecha_vencimiento_pago: nuevaFechaPago,
+                          fecha_pago: nuevaFechaPago,
                           estatusPago: nuevoEstatus
                         };
                       });
@@ -6253,13 +6490,94 @@ const Formulario = React.memo(({
               </div>
               
               <div className="col-md-3">
-                <label className="form-label">Fecha Límite de Pago</label>
+                <label className="form-label">Fecha límite de pago (Último recibo)</label>
                 <input
                   type="date"
                   className="form-control"
                   value={formulario.fecha_vencimiento_pago || ''}
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const nuevaFecha = e.target.value;
+                    
+                    // 🔥 ACTUALIZAR EL RECIBO PENDIENTE en la base de datos
+                    if (modoEdicion && formulario.id && nuevaFecha) {
+                      try {
+                        console.log('🔄 [FECHA MANUAL] Actualizando fecha del recibo pendiente...', {
+                          expediente_id: formulario.id,
+                          nueva_fecha: nuevaFecha
+                        });
+                        
+                        // Obtener el recibo pendiente actual
+                        const recibosResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}`);
+                        console.log('📡 [FECHA MANUAL] Respuesta de recibos:', recibosResponse.status);
+                        
+                        if (recibosResponse.ok) {
+                          const recibosData = await recibosResponse.json();
+                          console.log('📋 [FECHA MANUAL] Datos de recibos:', recibosData);
+                          
+                          if (recibosData.success && recibosData.data) {
+                            // Encontrar el primer recibo pendiente
+                            const recibosPendientes = recibosData.data
+                              .filter(recibo => 
+                                recibo.estatus !== 'Pagado' && 
+                                recibo.estatus !== 'pagado' &&
+                                recibo.estatus !== 'PAGADO'
+                              )
+                              .sort((a, b) => parseInt(a.numero_recibo) - parseInt(b.numero_recibo));
+                            
+                            console.log('🎯 [FECHA MANUAL] Recibos pendientes:', recibosPendientes);
+                            const reciboPendiente = recibosPendientes[0];
+                            
+                            if (reciboPendiente) {
+                              console.log('🔄 [FECHA MANUAL] Actualizando recibo:', {
+                                numero_recibo: reciboPendiente.numero_recibo,
+                                fecha_anterior: reciboPendiente.fecha_vencimiento,
+                                fecha_nueva: nuevaFecha,
+                                url: `${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}/fecha-vencimiento`
+                              });
+                              
+                              // Actualizar directamente en la tabla recibos_pago
+                              const updateResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}/fecha-vencimiento`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ 
+                                  fecha_vencimiento: nuevaFecha
+                                })
+                              });
+                              
+                              console.log('📡 [FECHA MANUAL] Respuesta de actualización:', updateResponse.status);
+                              
+                              if (updateResponse.ok) {
+                                const updateData = await updateResponse.json();
+                                console.log('✅ [FECHA MANUAL] Recibo actualizado exitosamente:', updateData);
+                                
+                                // Verificar que se actualizó correctamente
+                                setTimeout(async () => {
+                                  try {
+                                    const verificarResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}`);
+                                    if (verificarResponse.ok) {
+                                      const reciboVerificado = await verificarResponse.json();
+                                      console.log('🔍 [FECHA MANUAL] Verificación del recibo:', reciboVerificado);
+                                    }
+                                  } catch (e) {
+                                    console.log('⚠️ [FECHA MANUAL] No se pudo verificar la actualización');
+                                  }
+                                }, 500);
+                                
+                              } else {
+                                const errorText = await updateResponse.text();
+                                console.error('❌ [FECHA MANUAL] Error en actualización:', errorText);
+                              }
+                            } else {
+                              console.log('ℹ️ [FECHA MANUAL] No hay recibos pendientes para actualizar');
+                            }
+                          }
+                        } else {
+                          console.error('❌ [FECHA MANUAL] Error al obtener recibos:', recibosResponse.status);
+                        }
+                      } catch (error) {
+                        console.error('❌ [FECHA MANUAL] Error completo:', error);
+                      }
+                    }
                     
                     setFormulario(prev => {
                       // Calcular periodo de gracia basado en la diferencia con inicio_vigencia
@@ -6296,6 +6614,7 @@ const Formulario = React.memo(({
                       return {
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
+                        fecha_pago: nuevaFecha,
                         periodo_gracia: nuevoPeriodoGracia,
                         estatusPago: nuevoEstatus,
                         _fechaManual: true // Bandera para evitar recálculo automático
@@ -6767,6 +7086,7 @@ const estadoInicialFormulario = {
   estatus_pago: 'Pendiente',
   estatusPago: 'Pendiente',
   fecha_ultimo_pago: '',
+  fecha_pago: '',
   plazo_pago_dias: '',
   gastos_expedicion: '',
   gastosExpedicion: '',
@@ -7050,7 +7370,7 @@ const ModuloExpedientes = () => {
       return;
     }
     
-// Obtener datos del cliente para determinar destinatarios
+  // Obtener datos del cliente para determinar destinatarios
     try {
       const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
       if (respCliente?.success) {
@@ -7340,7 +7660,7 @@ const ModuloExpedientes = () => {
         tipo_pago: f.tipo_pago ?? '',
         frecuenciaPago: f.frecuenciaPago ?? '',
         periodo_gracia: f.periodo_gracia ?? '',
-        fecha_vencimiento_pago: f.fecha_vencimiento_pago ?? '',
+        fecha_vencimiento_pago: f.fecha_vencimiento_pago ?? f.fecha_pago ?? '',
         estatusPago: f.estatusPago ?? '',
         // Montos
         prima_pagada: f.prima_pagada ?? '',
@@ -7379,6 +7699,12 @@ const ModuloExpedientes = () => {
   useEffect(() => {
     // Solo recalcular si estamos en el formulario y hay fechas válidas
     if (vistaActual !== 'formulario' || !formulario.inicio_vigencia) return;
+    
+    // 🔥 NO recalcular si la fecha viene de recibo real
+    if (formulario._no_recalcular_fecha_vencimiento) {
+      console.log('🔒 [USEEFFECT] Saltando recálculo - fecha viene de recibo real');
+      return;
+    }
     
     const recalcularCamposDependientes = () => {
       // 1. Calcular término de vigencia (inicio + 1 año)
@@ -7430,7 +7756,10 @@ const ModuloExpedientes = () => {
           fecha_aviso_renovacion: nuevoAviso,
           proximoPago: nuevoProximoPago,
           fecha_pago: nuevoProximoPago,
-          fecha_vencimiento_pago: nuevoProximoPago,
+          // 🔥 PROTEGER fecha_vencimiento_pago si viene de recibo real
+          fecha_vencimiento_pago: prev._no_recalcular_fecha_vencimiento 
+            ? prev.fecha_vencimiento_pago 
+            : nuevoProximoPago,
           estatusPago: nuevoEstatus
         }));
       }
@@ -7472,6 +7801,20 @@ const ModuloExpedientes = () => {
     if (tipo_pago === 'Anual') return '';
     
     if (tipo_pago === 'Fraccionado' && frecuenciaPago) {
+      // ✅ Verificar que no exceda el número total de pagos permitidos
+      const numeroPagosMaximo = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuenciaPago] || 0;
+      console.log('🔥 DEBUG calcularProximoPago - Validando límites:', {
+        numeroPago,
+        numeroPagosMaximo,
+        frecuenciaPago,
+        excedeLimite: numeroPago > numeroPagosMaximo
+      });
+      
+      if (numeroPago > numeroPagosMaximo) {
+        console.log('🔥 DEBUG calcularProximoPago - Excede límite, retornando vacío');
+        return ''; // No hay más pagos después del último
+      }
+      
       // ✅ Pagos subsecuentes: fecha inicio + N meses (SIN periodo de gracia)
       // Trimestral: Pago #2 = inicio + 3 meses, Pago #3 = inicio + 6 meses, etc.
       const fechaPagoSubsecuente = new Date(fechaInicio);
@@ -7503,10 +7846,10 @@ const ModuloExpedientes = () => {
     // Si la fecha ya pasó, está vencido
     if (diasRestantes < 0) return 'Vencido';
     
-    // Si faltan 15 días o menos, está por vencer (para alertar)
-    if (diasRestantes <= 15) return 'Por Vencer';
+    // Si faltan 15 días o menos, está por pagar (listo para cobrar)
+    if (diasRestantes <= 15) return 'Por Pagar';
     
-    // Si aún faltan más de 15 días, está pendiente
+    // Si aún faltan más de 15 días, está pendiente (aún no urgente)
     return 'Pendiente';
   }, []);
 
@@ -7532,6 +7875,18 @@ const ModuloExpedientes = () => {
         periodo_gracia: periodoGracia
       };
       delete resultado._fechaManual; // Limpiar bandera temporal
+      return resultado;
+    }
+    
+    // 🔥 Si la fecha viene de recibo real, NO recalcular
+    if (formularioActual._no_recalcular_fecha_vencimiento) {
+      console.log('🔒 [CÁLCULOS] Protegiendo fecha_vencimiento_pago que viene de recibo real:', formularioActual.fecha_vencimiento_pago);
+      const resultado = {
+        ...formularioActual,
+        termino_vigencia,
+        periodo_gracia: periodoGracia
+      };
+      // Mantener las fechas tal como están
       return resultado;
     }
     
@@ -7578,7 +7933,10 @@ const ModuloExpedientes = () => {
       termino_vigencia, 
       proximoPago, 
       fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
-      fecha_vencimiento_pago: proximoPago, // Asegurar que fecha_vencimiento_pago esté sincronizada
+      // 🔥 PROTEGER fecha_vencimiento_pago si viene de recibo real
+      fecha_vencimiento_pago: formularioActual._no_recalcular_fecha_vencimiento 
+        ? formularioActual.fecha_vencimiento_pago 
+        : proximoPago,
       estatusPago, 
       periodo_gracia: periodoGracia,
       fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
@@ -8460,7 +8818,17 @@ const ModuloExpedientes = () => {
     }, [expedienteSeleccionado]);
 
   const calcularSiguientePago = useCallback((expediente) => {
-    if (!expediente.inicio_vigencia || expediente.tipo_pago === 'Anual') return '';
+    console.log('🔥 DEBUG calcularSiguientePago - Entrada:', {
+      inicio_vigencia: expediente.inicio_vigencia,
+      tipo_pago: expediente.tipo_pago,
+      frecuenciaPago: expediente.frecuenciaPago,
+      ultimo_recibo_pagado: expediente.ultimo_recibo_pagado
+    });
+    
+    if (!expediente.inicio_vigencia || expediente.tipo_pago === 'Anual') {
+      console.log('🔥 DEBUG calcularSiguientePago - Retornando vacío (Anual o sin inicio)');
+      return '';
+    }
     
     if (expediente.tipo_pago === 'Fraccionado' && expediente.frecuenciaPago) {
       // 🔧 Usar periodo de gracia del expediente (convertir a número) o calcular según compañía
@@ -8486,7 +8854,13 @@ const ModuloExpedientes = () => {
       // El siguiente recibo es el número siguiente al último pagado
       const siguienteNumeroRecibo = ultimoReciboPagado + 1;
       
-      return calcularProximoPago(
+      console.log('🔥 DEBUG calcularSiguientePago - Calculando recibo:', {
+        ultimoReciboPagado,
+        siguienteNumeroRecibo,
+        periodoGracia
+      });
+      
+      const resultado = calcularProximoPago(
         expediente.inicio_vigencia,
         expediente.tipo_pago,
         expediente.frecuenciaPago,
@@ -8494,6 +8868,9 @@ const ModuloExpedientes = () => {
         siguienteNumeroRecibo,
         periodoGracia  // 🔥 Pasar periodo de gracia
       );
+      
+      console.log('🔥 DEBUG calcularSiguientePago - Resultado final:', resultado);
+      return resultado;
     }
     
     return '';
@@ -8543,11 +8920,24 @@ const ModuloExpedientes = () => {
       const fechaActual = new Date().toISOString().split('T')[0];
       const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
       
-      // 🔥 Calcular el próximo pago basándose en el número de recibo que se acaba de pagar
-      const proximoPago = calcularSiguientePago({
+      // 🔥 Calcular el próximo pago basándose en el número de recibo que se acaba de pago
+      const expTestPago = {
         ...expedienteParaPago,
         ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1
+      };
+      
+      console.log('🔥 DEBUG PAGO - Datos para calcular siguiente pago:', {
+        esFraccionado,
+        numeroReciboPago,
+        ultimoReciboPagado: expTestPago.ultimo_recibo_pagado,
+        frecuencia: expTestPago.frecuenciaPago || expTestPago.frecuencia_pago,
+        tipo_pago: expTestPago.tipo_pago,
+        inicio_vigencia: expTestPago.inicio_vigencia
       });
+      
+      const proximoPago = calcularSiguientePago(expTestPago);
+      
+      console.log('🔥 DEBUG PAGO - Próximo pago calculado:', proximoPago);
 
       // 🔥 Para fraccionados, verificar si hay más recibos pendientes
       let hayMasRecibosPendientes = false;
@@ -8555,15 +8945,74 @@ const ModuloExpedientes = () => {
         const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
         const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
         hayMasRecibosPendientes = numeroReciboPago < numeroPagos;
+        
+        console.log('🔥 DEBUG - Verificación fraccionado:', {
+          numeroReciboPago,
+          numeroPagos,
+          hayMasRecibosPendientes,
+          frecuencia
+        });
       }
 
       // Determinar el nuevo estatus basado en si hay o no próximo pago
       let nuevoEstatusPago = 'Pagado';
       let nuevaFechaVencimiento = null;
       
-      if (hayMasRecibosPendientes || (proximoPago && proximoPago.trim() !== '')) {
-        // Hay un siguiente pago pendiente
+      // 🔥 LÓGICA SIMPLIFICADA: Para fraccionados, si numeroReciboPago < totalRecibos = NO es pago final
+      let esUltimoPago = false;
+      if (esFraccionado) {
+        const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+        esUltimoPago = numeroReciboPago >= numeroPagos;
+        
+        console.log('🔥 DEBUG - Lógica simplificada:', {
+          numeroReciboPago,
+          numeroPagos,
+          frecuencia,
+          esUltimoPago,
+          hayMasRecibosPendientes,
+          proximoPago
+        });
+      } else {
+        // Para pago único (Anual), siempre es el último
+        esUltimoPago = true;
+      }
+      
+      if (!esUltimoPago) {
+        // Hay un siguiente pago pendiente - asegurar que tenemos la fecha
         nuevaFechaVencimiento = proximoPago;
+        
+        // 🔥 Obtener la fecha real del siguiente recibo pendiente de la BD
+        try {
+          console.log('🔥 DEBUG - Obteniendo siguiente recibo pendiente...');
+          const recibosResponse = await fetch(`${API_URL}/api/recibos/${expedienteParaPago.id}`);
+          if (recibosResponse.ok) {
+            const recibosData = await recibosResponse.json();
+            if (recibosData.success && recibosData.data) {
+              // Encontrar el siguiente recibo pendiente (estatus != 'Pagado')
+              const siguienteRecibo = recibosData.data.find(recibo => 
+                recibo.numero_recibo > numeroReciboPago && 
+                recibo.estatus !== 'Pagado'
+              );
+              
+              if (siguienteRecibo) {
+                nuevaFechaVencimiento = siguienteRecibo.fecha_vencimiento.split('T')[0];
+                console.log('✅ Siguiente recibo encontrado:', {
+                  numero: siguienteRecibo.numero_recibo,
+                  fecha: nuevaFechaVencimiento,
+                  estatus: siguienteRecibo.estatus
+                });
+              } else {
+                console.log('ℹ️ No hay más recibos pendientes');
+                nuevaFechaVencimiento = null;
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error al obtener recibos:', error);
+          // Fallback: usar proximoPago si falla la consulta
+          console.warn('⚠️ Usando proximoPago como fallback:', proximoPago);
+        }
         
         // 🔥 Calcular estatus usando LA MISMA LÓGICA del calendario de pagos
         const hoy = new Date();
@@ -8595,8 +9044,16 @@ const ModuloExpedientes = () => {
         fecha_vencimiento_pago: nuevaFechaVencimiento,
         fecha_ultimo_pago: fechaUltimoPago, // 🔥 Fecha REAL en que se pagó
         ultimo_recibo_pagado: esFraccionado ? numeroReciboPago : 1, // 🔥 Para anuales siempre es 1
-        proximo_pago: proximoPago
+        proximo_pago: nuevaFechaVencimiento // 🔥 Usar nuevaFechaVencimiento en lugar de proximoPago
       };
+      
+      console.log('🔥 DEBUG - Datos de actualización del expediente:', {
+        esUltimoPago,
+        nuevoEstatusPago,
+        nuevaFechaVencimiento,
+        proximoReciboPago: numeroReciboPago,
+        datosActualizacion
+      });
       
       // Solo cambiar a "En Vigencia" si está COMPLETAMENTE pagado (todos los recibos)
       if (nuevoEstatusPago === 'Pagado' && !hayMasRecibosPendientes && expedienteParaPago.etapa_activa !== 'En Vigencia') {
@@ -8627,6 +9084,16 @@ const ModuloExpedientes = () => {
       }
 
       console.log('✅ Pago registrado en BD');
+
+      // 1.5. Actualizar inmediatamente el estado local para reflejar cambios en la UI
+      setExpedientes(prevExpedientes => 
+        prevExpedientes.map(exp => 
+          exp.id === expedienteParaPago.id 
+            ? { ...exp, ...datosActualizacion }
+            : exp
+        )
+      );
+      console.log('✅ Estado local de expedientes actualizado');
 
       // 2. Subir comprobante de pago a S3
       let comprobanteUrl = null;
@@ -8663,7 +9130,41 @@ const ModuloExpedientes = () => {
         // Continuar sin bloquear el proceso
       }
 
-      // 3. Agregar comentario al historial con información del comprobante
+      // 3. Actualizar el estatus del recibo específico en recibos_pago
+      try {
+        console.log('💰 Actualizando estatus del recibo en BD...');
+        const reciboResponse = await fetch(`${API_URL}/api/recibos/${expedienteParaPago.id}/${numeroReciboPago}/pago`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fecha_pago_real: fechaUltimoPago,
+            comprobante_nombre: comprobantePago.name,
+            comprobante_url: comprobanteUrl // Incluir URL si se subió correctamente
+          })
+        });
+
+        if (reciboResponse.ok) {
+          console.log('✅ Estatus del recibo actualizado a "Pagado"');
+          
+          // Verificar que el recibo se actualizó correctamente
+          try {
+            const verificacionResponse = await fetch(`${API_URL}/api/recibos/${expedienteParaPago.id}/${numeroReciboPago}`);
+            if (verificacionResponse.ok) {
+              const verificacionData = await verificacionResponse.json();
+              console.log('🔍 Verificación del recibo actualizado:', verificacionData.data);
+            }
+          } catch (error) {
+            console.warn('⚠️ No se pudo verificar la actualización del recibo');
+          }
+        } else {
+          console.warn('⚠️ No se pudo actualizar el estatus del recibo:', await reciboResponse.text());
+        }
+      } catch (errorRecibo) {
+        console.error('❌ Error al actualizar recibo:', errorRecibo);
+        // No bloquear el proceso si falla la actualización del recibo
+      }
+
+      // 4. Agregar comentario al historial con información del comprobante
       try {
         // Construir descripción consolidada con formato en columna
         const etapaFinal = datosActualizacion.etapa_activa || expedienteParaPago.etapa_activa;
@@ -8694,26 +9195,85 @@ const ModuloExpedientes = () => {
           timeZone: 'America/Mexico_City'
         });
         
+        // 🔥 Obtener el monto real del recibo específico desde la BD
+        let montoRecibo = expedienteParaPago.total || 0;
+        let estatusReciboActual = 'Pendiente';
+        
+        try {
+          console.log('🔥 DEBUG - Consultando recibo:', {expedienteId: expedienteParaPago.id, numeroRecibo: numeroReciboPago});
+          
+          // Consultar el monto específico del recibo en la tabla recibos_pago
+          const responseRecibo = await fetch(`${API_URL}/api/recibos/${expedienteParaPago.id}/${numeroReciboPago}`);
+          
+          if (responseRecibo.ok) {
+            const reciboResponse = await responseRecibo.json();
+            console.log('🔥 DEBUG - Respuesta del recibo:', reciboResponse);
+            
+            if (reciboResponse.success && reciboResponse.data && reciboResponse.data.monto) {
+              montoRecibo = parseFloat(reciboResponse.data.monto);
+              
+              // 🔥 También obtener el estatus real del recibo que se está pagando
+              estatusReciboActual = reciboResponse.data.estatus || 'Pendiente';
+              console.log('🔥 DEBUG - Datos del recibo obtenidos:', {
+                monto: montoRecibo,
+                estatus: estatusReciboActual,
+                fecha_vencimiento: reciboResponse.data.fecha_vencimiento
+              });
+            } else {
+              console.warn('⚠️ Respuesta de recibo sin monto válido, calculando proporcional');
+              // Fallback: calcular proporcional
+              if (esFraccionado && (expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago)) {
+                const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 1;
+                montoRecibo = parseFloat(expedienteParaPago.total || 0) / numeroPagos;
+                console.log('🔥 DEBUG - Monto proporcional calculado:', montoRecibo);
+              }
+            }
+          } else {
+            console.warn('⚠️ Error en API de recibos (status:', responseRecibo.status, '), calculando proporcional');
+            // Fallback: calcular proporcional
+            if (esFraccionado && (expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago)) {
+              const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 1;
+              montoRecibo = parseFloat(expedienteParaPago.total || 0) / numeroPagos;
+              console.log('🔥 DEBUG - Monto proporcional calculado (fallback):', montoRecibo);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error al obtener monto del recibo:', error);
+          // Fallback: calcular proporcional
+          if (esFraccionado && (expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago)) {
+            const frecuencia = expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago;
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 1;
+            montoRecibo = parseFloat(expedienteParaPago.total || 0) / numeroPagos;
+            console.log('🔥 DEBUG - Monto proporcional calculado (error fallback):', montoRecibo);
+          }
+        }
+        
         let comentario;
-        if (proximoPago && proximoPago.trim() !== '') {
-          // Hay siguiente pago pendiente
+        if (!esUltimoPago) {
+          // Hay más recibos pendientes
+          let siguienteVencimientoTexto = '';
+          if (proximoPago && proximoPago.trim() !== '') {
+            siguienteVencimientoTexto = `\n📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+          }
+          
           comentario = `💰 Pago Registrado\n` +
                       `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
                       `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
                       `📄 Recibo/Pago: ${numeroPago}\n` +
                       `🧾 Comprobante: ${comprobantePago.name}\n` +
-                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
-                      `📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' })}\n` +
-                      `📊 Estado: ${etapaFinal} | ${nuevoEstatusPago}`;
+                      `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}${siguienteVencimientoTexto}\n` +
+                      `📊 Estado: ${etapaFinal} | ${estatusReciboActual}`;
         } else {
-          // Póliza completamente pagada
+          // Póliza completamente pagada (último recibo)
           comentario = `💰 Pago Registrado (Final)\n` +
                       `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
                       `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
                       `📄 Recibo/Pago: ${numeroPago}\n` +
                       `🧾 Comprobante: ${comprobantePago.name}\n` +
-                      `💵 Monto: $${parseFloat(expedienteParaPago.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
-                      `✅ Póliza completamente pagada → ${etapaFinal} | ${nuevoEstatusPago}\n` +
+                      `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                      `✅ Póliza completamente pagada → ${etapaFinal} | ${estatusReciboActual}\n` +
                       `📂 Movida a carpeta: Vigentes Pagadas`;
         }
 
@@ -9346,7 +9906,10 @@ const ModuloExpedientes = () => {
             resultado[snakeKey] = valorNuevo;
           }
           
-
+          // Debug específico para campos problemáticos
+          if (key.includes('cargo_pago_fraccionado') || key.includes('gastos_expedicion') || snakeKey.includes('cargo_pago_fraccionado') || snakeKey.includes('gastos_expedicion')) {
+            console.log(`🔍 DEBUG convertirASnakeCase: ${key} = "${obj[key]}" → ${snakeKey} = "${resultado[snakeKey]}" (existía: ${existeEnSnake})`);
+          }
         });      return resultado;
     };
 
@@ -10092,7 +10655,12 @@ const ModuloExpedientes = () => {
               const etapaActual = expedientePayload.etapa_activa || 'En cotización';
               const capturadoConExtractorPDF = formularioParaGuardar._capturado_con_extractor_pdf === true;
               const nombreArchivoPDF = formularioParaGuardar._nombre_archivo_pdf || 'PDF importado';
-
+              
+              console.log('🔍 DEBUG captura evento:', {
+                capturadoConExtractorPDF,
+                nombreArchivoPDF,
+                tiene_datos_originales: !!formularioParaGuardar._datos_originales_pdf
+              });
               
               // 🔍 DETECTAR CAMPOS MODIFICADOS MANUALMENTE
               // ✅ LÓGICA SIMPLE: Si existe snapshot (formularioOriginal), comparar todo el formulario
@@ -10100,7 +10668,22 @@ const ModuloExpedientes = () => {
               let huboModificacionesManuales = false;
               
               if (formularioOriginal) {
-
+                console.log('✅ Snapshot disponible - detectando cambios desde el estado inicial completo');
+                console.log('📸 Campos en snapshot:', Object.keys(formularioOriginal).filter(k => !k.startsWith('_')).length);
+                console.log('🔍 DEBUG - Valores clave en snapshot:', {
+                  contacto_nombre: formularioOriginal.contacto_nombre,
+                  contacto_telefono_fijo: formularioOriginal.contacto_telefono_fijo,
+                  conductor_habitual: formularioOriginal.conductor_habitual,
+                  fecha_emision: formularioOriginal.fecha_emision,
+                  fecha_captura: formularioOriginal.fecha_captura
+                });
+                console.log('🔍 DEBUG - Valores clave en formulario actual:', {
+                  contacto_nombre: formularioParaGuardar.contacto_nombre,
+                  contacto_telefono_fijo: formularioParaGuardar.contacto_telefono_fijo,
+                  conductor_habitual: formularioParaGuardar.conductor_habitual,
+                  fecha_emision: formularioParaGuardar.fecha_emision,
+                  fecha_captura: formularioParaGuardar.fecha_captura
+                });
                 
                 // Normalizar valores para comparación
                 const normalizar = (valor) => {
@@ -10275,7 +10858,8 @@ const ModuloExpedientes = () => {
                   })
                 }
               };
-
+              
+              console.log('🔍 DEBUG: Registrando evento en historial con datos:', eventoData);
               await historialService.registrarEvento(eventoData);
               
               console.log(`✅ Captura registrada en historial: ${metodCaptura} - ${aseguradoraNombre}`);
@@ -10733,6 +11317,60 @@ const ModuloExpedientes = () => {
         return fecha;
       }
     };
+
+    // 🔥 OBTENER FECHA LÍMITE REAL DEL RECIBO PENDIENTE
+    let fechaVencimientoPagoReal = formatearFechaParaInput(expedienteCompleto.fecha_vencimiento_pago) || '';
+    
+    try {
+      console.log('🔍 [EDITAR] Obteniendo recibos para determinar fecha límite real...');
+      const recibosResponse = await fetch(`${API_URL}/api/recibos/${expedienteCompleto.id}`);
+      if (recibosResponse.ok) {
+        const recibosData = await recibosResponse.json();
+        if (recibosData.success && recibosData.data && Array.isArray(recibosData.data)) {
+          console.log('📋 [EDITAR] Recibos encontrados:', recibosData.data.map(r => ({
+            numero: r.numero_recibo,
+            fecha: r.fecha_vencimiento,
+            estatus: r.estatus,
+            monto: r.monto
+          })));
+          
+          // Filtrar recibos NO pagados y ordenar por número de recibo
+          const recibosPendientes = recibosData.data
+            .filter(recibo => 
+              recibo.estatus !== 'Pagado' && 
+              recibo.estatus !== 'pagado' &&
+              recibo.estatus !== 'PAGADO'
+            )
+            .sort((a, b) => parseInt(a.numero_recibo) - parseInt(b.numero_recibo));
+          
+          console.log('🎯 [EDITAR] Recibos pendientes ordenados:', recibosPendientes.map(r => ({
+            numero: r.numero_recibo,
+            fecha: r.fecha_vencimiento,
+            estatus: r.estatus
+          })));
+          
+          // Tomar el PRIMER recibo pendiente (el más próximo)
+          const reciboPendiente = recibosPendientes[0];
+          
+          if (reciboPendiente && reciboPendiente.fecha_vencimiento) {
+            fechaVencimientoPagoReal = formatearFechaParaInput(reciboPendiente.fecha_vencimiento);
+            console.log('✅ [EDITAR] Fecha límite obtenida del recibo pendiente:', {
+              recibo_numero: reciboPendiente.numero_recibo,
+              fecha_vencimiento: fechaVencimientoPagoReal,
+              estatus: reciboPendiente.estatus,
+              monto: reciboPendiente.monto,
+              total_pendientes: recibosPendientes.length
+            });
+          } else {
+            console.log('ℹ️ [EDITAR] No hay recibos pendientes, todos están pagados');
+          }
+        }
+      } else {
+        console.warn('⚠️ [EDITAR] No se pudieron obtener recibos, usando fecha del expediente');
+      }
+    } catch (error) {
+      console.warn('⚠️ [EDITAR] Error al obtener recibos:', error);
+    }
     
     // Construir formulario base normalizado
     const formularioBase = {
@@ -10741,10 +11379,10 @@ const ModuloExpedientes = () => {
   fecha_emision: formatearFechaParaInput(expedienteCompleto.fecha_emision) || formatearFechaParaInput(expedienteCompleto.created_at) || new Date().toISOString().split('T')[0],
   inicio_vigencia: formatearFechaParaInput(expedienteCompleto.inicio_vigencia) || '',
   termino_vigencia: formatearFechaParaInput(expedienteCompleto.termino_vigencia) || '',
-      // NOTA: fecha_vencimiento_pago se recalcula automáticamente según inicio_vigencia + periodo_gracia.
-  fecha_vencimiento_pago: formatearFechaParaInput(expedienteCompleto.fecha_vencimiento_pago) || '',
-      // Unificar nombre de campo: backend puede enviar proximo_pago; el estado interno usa proximoPago
-  proximoPago: formatearFechaParaInput(expedienteCompleto.proximo_pago || expedienteCompleto.proximoPago) || '',
+      // 🔥 USAR FECHA LÍMITE REAL DEL RECIBO PENDIENTE
+  fecha_vencimiento_pago: fechaVencimientoPagoReal,
+      // 🔥 USAR LA MISMA FECHA LÍMITE REAL PARA PRÓXIMO PAGO
+  proximoPago: fechaVencimientoPagoReal,
   fecha_cancelacion: formatearFechaParaInput(expedienteCompleto.fecha_cancelacion) || '',
   // Asegurar que campos numéricos no sean undefined (aceptar snake_case y camelCase del backend)
   prima_pagada: (expedienteCompleto.prima_pagada ?? expedienteCompleto.primaPagada ?? 0),
@@ -10820,6 +11458,11 @@ const ModuloExpedientes = () => {
     const estatusPagoDesdeBD = formularioBase.estatus_pago || formularioBase.estatusPago || 'Pendiente';
     formularioConCalculos.estatusPago = estatusPagoDesdeBD;
     formularioConCalculos.estatus_pago = estatusPagoDesdeBD;
+    
+    // 🔥 PROTEGER LA FECHA DE VENCIMIENTO REAL DEL RECIBO
+    // Marcar que la fecha viene de un recibo real para evitar recálculos automáticos
+    formularioConCalculos._fecha_vencimiento_desde_recibo = true;
+    formularioConCalculos._no_recalcular_fecha_vencimiento = true;
     
     console.log('📊 [EDITAR] Estatus de pago cargado desde BD:', {
       estatus_pago_bd: formularioBase.estatus_pago,
