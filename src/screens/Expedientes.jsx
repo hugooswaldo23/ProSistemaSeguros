@@ -3083,6 +3083,7 @@ const ModalCancelacion = React.memo(({
 const ListaExpedientes = React.memo(({ 
   expedientes,
   agentes,
+  vendedoresMap,
   limpiarFormulario,
   setVistaActual,
   setModoEdicion,
@@ -3831,7 +3832,7 @@ const ListaExpedientes = React.memo(({
                       <div>Etapa</div>
                       <div>Activa</div>
                     </th>
-                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
+                    <th style={{ width: '130px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
                     <th style={{ width: '200px', textAlign: 'center' }}>
                       <div>Estatus Pago</div>
                       <div>y Progreso</div>
@@ -3845,7 +3846,9 @@ const ListaExpedientes = React.memo(({
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
-                    const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
+                    // Extraer clave del agente del campo expediente.agente
+                    const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                    const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
                     
                     // Detectar tipo de duplicado para este expediente
                     const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
@@ -3935,29 +3938,55 @@ const ListaExpedientes = React.memo(({
                             <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
                         </td>
-                        <td style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                        <td style={{ fontSize: '0.7rem', textAlign: 'center', lineHeight: '1.3' }}>
                           {(() => {
+                            const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
                             if (agenteInfo) {
-                              const nombreCompleto = agenteInfo.nombre || '';
-                              const palabras = nombreCompleto.trim().split(/\s+/);
-                              const primerNombre = palabras[0] || '';
-                              const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
-                              return `${agenteInfo.codigoAgente} - ${primerNombre} ${primerApellido}`.trim();
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
                             } else if (expediente.agente) {
-                              // Si no hay agenteInfo, procesar el texto del expediente
                               const textoAgente = expediente.agente || '';
                               const partes = textoAgente.split('-');
                               if (partes.length >= 2) {
-                                const codigo = partes[0].trim();
+                                claveAgente = partes[0].trim();
                                 const nombreCompleto = partes.slice(1).join('-').trim();
                                 const palabras = nombreCompleto.split(/\s+/);
-                                const primerNombre = palabras[0] || '';
-                                const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
-                                return `${codigo} - ${primerNombre} ${primerApellido}`.trim();
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
                               }
-                              return textoAgente;
                             }
-                            return '-';
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.65rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '2px' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
                           })()}
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -4207,7 +4236,10 @@ const ListaExpedientes = React.memo(({
             {/* Vista Móvil - Cards */}
             <div className="d-lg-none p-3">
               {paginacion.itemsPaginados.map((expediente) => {
-                const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
+                // Extraer clave del agente del campo expediente.agente
+                const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
                 const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
                 const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
                 const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
@@ -4289,9 +4321,54 @@ const ListaExpedientes = React.memo(({
                       {expediente.agente && (
                         <div className="mb-2">
                           <small className="text-muted d-block">Agente</small>
-                          <span style={{ fontSize: '0.875rem' }}>
-                            {agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente}
-                          </span>
+                          {(() => {
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
+                            if (agenteInfo) {
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
+                            } else if (expediente.agente) {
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                claveAgente = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
+                              }
+                            }
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div style={{ fontSize: '0.875rem' }}><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.75rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 
@@ -6763,6 +6840,8 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  const [todosLosVendedores, setTodosLosVendedores] = useState([]);
+  const [vendedoresMap, setVendedoresMap] = useState({});
   
   // 💰 Estados para aviso/recordatorio de pago
   const [pagoParaNotificar, setPagoParaNotificar] = useState(null);
@@ -6797,6 +6876,35 @@ const ModuloExpedientes = () => {
         setAgentes(agentesOrdenados);
       }
       
+      // 2. Cargar todos los vendedores desde el endpoint correcto
+      try {
+        const resVendedores = await fetch(`${API_URL}/api/equipoDeTrabajo`);
+        const equipoData = await resVendedores.json();
+        
+        console.log('🔍 [VENDEDORES] Equipo de trabajo:', equipoData.length, 'miembros');
+        if (equipoData.length > 0) {
+          console.log('🔍 [VENDEDORES] Ejemplo de miembro:', equipoData[0]);
+        }
+        
+        // Filtrar solo los vendedores - todos los que NO son Agente
+        const vendedoresData = equipoData.filter(miembro => miembro.rol !== 'Agente');
+        
+        console.log('🔍 [VENDEDORES] Después del filtro:', vendedoresData.length);
+        
+        // Crear mapa de vendedores por ID
+        const mapaVendedores = {};
+        vendedoresData.forEach(vendedor => {
+          mapaVendedores[vendedor.id] = vendedor;
+        });
+        
+        setTodosLosVendedores(vendedoresData);
+        setVendedoresMap(mapaVendedores);
+        console.log('✅ Vendedores cargados:', vendedoresData.length);
+      } catch (error) {
+        console.error('Error al cargar vendedores:', error);
+        setTodosLosVendedores([]);
+        setVendedoresMap({});
+      }
 
     };
     fetchDatos();
@@ -6824,6 +6932,11 @@ const ModuloExpedientes = () => {
         // 1. Obtener expedientes
         const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
         const expedientesData = await resExpedientes.json();
+        
+        // 🔍 DEBUG: Verificar si los expedientes traen vendedor_id
+        console.log('🔍 [CARGA] Primer expediente:', expedientesData[0]);
+        const expedientesConVendedor = expedientesData.filter(exp => exp.vendedor_id);
+        console.log(`🔍 [CARGA] Expedientes con vendedor_id: ${expedientesConVendedor.length} de ${expedientesData.length}`);
         
         // 2. Obtener todos los clientes
         const resClientes = await fetch(`${API_URL}/api/clientes`);
@@ -9350,6 +9463,23 @@ const ModuloExpedientes = () => {
     // ✅ GARANTIZAR que se guarde el vendedor/sub agente
     expedientePayload.sub_agente = formularioParaGuardar.sub_agente || null;
     
+    // ✅ EXTRAER vendedor_id del campo sub_agente (formato: "123 - Nombre Apellido")
+    console.log('🔍 [VENDEDOR] sub_agente en formulario:', formularioParaGuardar.sub_agente);
+    if (formularioParaGuardar.sub_agente) {
+      const vendedorIdMatch = formularioParaGuardar.sub_agente.split('-')[0].trim();
+      console.log('🔍 [VENDEDOR] vendedorIdMatch extraído:', vendedorIdMatch);
+      if (vendedorIdMatch && !isNaN(vendedorIdMatch)) {
+        expedientePayload.vendedor_id = parseInt(vendedorIdMatch);
+        console.log('✅ [VENDEDOR] vendedor_id final:', expedientePayload.vendedor_id);
+      } else {
+        console.log('⚠️ [VENDEDOR] No se pudo extraer ID numérico');
+        expedientePayload.vendedor_id = null;
+      }
+    } else {
+      console.log('⚠️ [VENDEDOR] No hay sub_agente en formulario');
+      expedientePayload.vendedor_id = null;
+    }
+    
     // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
     if (expedientePayload.estatus_pago === 'Pagado') {
       expedientePayload.fecha_ultimo_pago = formularioParaGuardar.fecha_ultimo_pago || new Date().toISOString().split('T')[0];
@@ -10296,6 +10426,14 @@ const ModuloExpedientes = () => {
       const resExpedientes = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
       const expedientes = await resExpedientes.json();
       
+      // 🔍 DEBUG: Verificar vendedor_id después de recargar
+      console.log('🔄 [RECARGA] Expedientes recargados:', expedientes.length);
+      const conVendedor = expedientes.filter(exp => exp.vendedor_id);
+      console.log(`🔄 [RECARGA] Con vendedor_id: ${conVendedor.length}`);
+      if (conVendedor.length > 0) {
+        console.log('🔄 [RECARGA] Ejemplo con vendedor:', conVendedor[0].numero_poliza, 'vendedor_id:', conVendedor[0].vendedor_id);
+      }
+      
       // 2. Obtener todos los clientes
       const resClientes = await fetch(`${API_URL}/api/clientes`);
       const clientesData = await resClientes.json();
@@ -10909,6 +11047,7 @@ const eliminarExpediente = useCallback((id) => {
           <ListaExpedientes 
             expedientes={expedientes}
             agentes={agentes}
+            vendedoresMap={vendedoresMap}
             limpiarFormulario={limpiarFormulario}
             setVistaActual={setVistaActual}
             setModoEdicion={setModoEdicion}
