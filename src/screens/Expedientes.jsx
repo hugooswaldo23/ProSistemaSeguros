@@ -4694,25 +4694,65 @@ const Formulario = React.memo(({
   const [vendedores, setVendedores] = useState([]);
   const [agenteIdSeleccionado, setAgenteIdSeleccionado] = useState(null);
 
-  // Función para obtener vendedores por agente
-  const obtenerVendedoresPorAgente = async (agenteId) => {
+  // Función para obtener vendedores filtrados por clave de agente y aseguradora
+  const obtenerVendedoresPorAgente = async (agenteId, claveAgente = null, aseguradora = null) => {
     if (!agenteId) {
       setVendedores([]);
       return;
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`);
+      // Construir URL con parámetros de filtro
+      let url = `${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`;
+      const params = new URLSearchParams();
+      
+      if (claveAgente) {
+        params.append('clave', claveAgente);
+      }
+      
+      if (aseguradora) {
+        params.append('aseguradora', aseguradora);
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+      
+      console.log('🔍 Solicitando vendedores:', { url, agenteId, claveAgente, aseguradora });
+      
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        console.log('📋 Vendedores obtenidos:', data);
-        setVendedores(data.vendedores || []);
+        console.log('📋 Vendedores obtenidos del backend:', data);
+        
+        // El backend devuelve { agenteId, vendedores: [...], total }
+        let vendedoresArray = data.vendedores || [];
+        console.log('✅ Total vendedores antes de filtrar:', vendedoresArray.length);
+        
+        // Filtrar por clave si se especificó (doble validación por si el backend no filtra bien)
+        if (claveAgente && vendedoresArray.length > 0) {
+          vendedoresArray = vendedoresArray.filter(vendedor => {
+            // Verificar si tiene la clave en comisionesCompartidas
+            const comisiones = vendedor.comisionesCompartidas || [];
+            const tieneClave = comisiones.some(com => 
+              com.clave && com.clave.toString() === claveAgente.toString()
+            );
+            
+            console.log(`🔍 ${vendedor.nombre}: tiene clave ${claveAgente}?`, tieneClave, 
+              'claves:', comisiones.map(c => c.clave));
+            
+            return tieneClave;
+          });
+          console.log('✅ Vendedores después de filtrar por clave:', vendedoresArray.length);
+        }
+        
+        setVendedores(vendedoresArray);
       } else {
-        console.error('Error al obtener vendedores:', response.statusText);
+        console.error('❌ Error al obtener vendedores:', response.statusText);
         setVendedores([]);
       }
     } catch (error) {
-      console.error('Error al obtener vendedores:', error);
+      console.error('❌ Error al obtener vendedores:', error);
       setVendedores([]);
     }
   };
@@ -4780,12 +4820,14 @@ const Formulario = React.memo(({
     
     if (formulario.agente && agentes.length > 0) {
       const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
-      console.log('🎯 Agente ID extraído:', agenteId);
+      // Extraer clave del agente (primera parte del texto)
+      const claveAgente = formulario.agente.trim().split(' ')[0];
+      console.log('🎯 Agente ID extraído:', agenteId, 'Clave:', claveAgente);
       
       if (agenteId && agenteId !== agenteIdSeleccionado) {
-        console.log('📝 Actualizando agente seleccionado:', agenteId);
+        console.log('📝 Actualizando agente seleccionado:', agenteId, 'clave:', claveAgente, 'aseguradora:', formulario.compania);
         setAgenteIdSeleccionado(agenteId);
-        obtenerVendedoresPorAgente(agenteId);
+        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
       } else if (!agenteId) {
         console.log('🚫 No se encontró ID de agente, limpiando vendedores');
         setAgenteIdSeleccionado(null);
@@ -4796,7 +4838,7 @@ const Formulario = React.memo(({
       setAgenteIdSeleccionado(null);
       setVendedores([]);
     }
-  }, [formulario.agente, agentes]);
+  }, [formulario.agente, formulario.compania, agentes]);
 
   const handleDataExtracted = useCallback(async (datosExtraidos) => {
     try {
@@ -5794,10 +5836,11 @@ const Formulario = React.memo(({
                     // Extraer ID del agente y obtener vendedores
                     if (nuevoAgente && agentes.length > 0) {
                       const agenteId = extraerAgenteIdDelFormulario(nuevoAgente);
-                      console.log('🔍 ID extraído inmediatamente:', agenteId);
+                      const claveAgente = nuevoAgente.trim().split(' ')[0];
+                      console.log('🔍 ID extraído inmediatamente:', agenteId, 'Clave:', claveAgente);
                       setAgenteIdSeleccionado(agenteId);
                       if (agenteId) {
-                        obtenerVendedoresPorAgente(agenteId);
+                        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
                       }
                     } else {
                       setAgenteIdSeleccionado(null);
@@ -6742,7 +6785,8 @@ const ModuloExpedientes = () => {
   });
   
   useEffect(() => {
-    const fetchAgentes = async () => {
+    const fetchDatos = async () => {
+      // 1. Cargar agentes usando el servicio original
       const resultado = await obtenerAgentesEquipo();
       if (resultado.success) {
         const agentesOrdenados = resultado.data.sort((a, b) => {
@@ -6752,8 +6796,10 @@ const ModuloExpedientes = () => {
         });
         setAgentes(agentesOrdenados);
       }
+      
+
     };
-    fetchAgentes();
+    fetchDatos();
     
     // Exponer función global para recargar agentes desde el modal de extracción
     window.recargarAgentes = (nuevosAgentes) => {
