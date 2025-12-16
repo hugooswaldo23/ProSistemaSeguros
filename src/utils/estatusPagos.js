@@ -234,3 +234,39 @@ export function estaEnPeriodoRenovacion(expediente) {
 export function obtenerEstatusGeneralPago(expediente) {
   return expediente.estatus_pago || expediente.estatusPago || 'Sin calcular';
 }
+
+/**
+ * Verifica si una póliza debe ir a carpeta VIGENTES
+ * @param {object} expediente - Objeto del expediente
+ * @returns {boolean} true si debe ir a vigentes
+ */
+export function esVigente(expediente) {
+  if (expediente.etapa_activa === 'Cancelada') return false;
+  if (expediente.etapa_activa === 'Renovada') return false; // Las renovadas van a su carpeta
+  
+  // Debe estar al corriente
+  if (!estaAlCorriente(expediente)) return false;
+  
+  // No debe estar en periodo de renovación
+  if (estaEnPeriodoRenovacion(expediente)) return false;
+  
+  return true;
+}
+
+/**
+ * Verifica si una póliza debe ir a carpeta RENOVADAS
+ * @param {object} expediente - Objeto del expediente
+ * @returns {boolean} true si debe ir a renovadas
+ */
+export function esRenovada(expediente) {
+  if (expediente.etapa_activa !== 'Renovada') return false;
+  if (expediente.etapa_activa === 'Cancelada') return false;
+  
+  // Debe estar al corriente
+  if (!estaAlCorriente(expediente)) return false;
+  
+  // No debe estar en periodo de renovación
+  if (estaEnPeriodoRenovacion(expediente)) return false;
+  
+  return true;
+}
