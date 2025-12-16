@@ -295,55 +295,15 @@ const InfoCliente = React.memo(({ expediente, cliente }) => {
   );
 });
 
-// 🔥 Función para leer el estatus de pago desde el backend
-// OPCIÓN A: Si el expediente trae array de recibos desde el backend
-// OPCIÓN B: Si solo trae estatus_pago calculado
-const obtenerEstatusPagoDesdeBackend = (expediente) => {
-  // OPCIÓN A: Si el backend envía los recibos en el array
-  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
-    
-    // Buscar el próximo recibo pendiente (siguiente al último pagado)
-    const proximoReciboPendiente = expediente.recibos.find(r => r.numero_recibo === ultimoReciboPagado + 1);
-    
-    if (proximoReciboPendiente) {
-      return proximoReciboPendiente.estatus; // Vencido, Pago por vencer, Pendiente, Pagado
-    }
-    
-    // Si no hay próximo recibo, está completamente pagado
-    return 'Pagado';
-  }
-  
-  // OPCIÓN B: Leer directamente el campo estatus_pago del expediente
-  const estatusBackend = expediente.estatus_pago || expediente.estatusPago;
-  
-  if (!estatusBackend) {
-    console.warn(`⚠️ Póliza ${expediente.numero_poliza} sin estatus_pago en BD`);
-    return 'Sin definir';
-  }
-  
-  // Normalizar formato (backend puede enviar minúsculas)
-  const estatusNormalizado = estatusBackend.toLowerCase().trim();
-  
-  if (estatusNormalizado === 'pagado' || estatusNormalizado === 'pagada') {
-    return 'Pagado';
-  } else if (estatusNormalizado === 'vencido' || estatusNormalizado === 'vencida') {
-    return 'Vencido';
-  } else if (estatusNormalizado === 'pago por vencer' || estatusNormalizado === 'por vencer') {
-    return 'Pago por vencer';
-  } else if (estatusNormalizado === 'pendiente') {
-    return 'Pendiente';
-  } else if (estatusNormalizado === 'cancelado' || estatusNormalizado === 'cancelada') {
-    return 'Cancelado';
-  }
-  
-  // Si no reconocemos el valor, devolverlo capitalizado
-  return estatusBackend.charAt(0).toUpperCase() + estatusBackend.slice(1).toLowerCase();
+// Obtener estatus de pago desde backend (calculado en SQL)
+const obtenerEstatusGeneralPago = (expediente) => {
+  // Leer directamente del backend
+  return expediente.estatus_pago || expediente.estatusPago || 'Sin calcular';
 };
 
 const EstadoPago = React.memo(({ expediente }) => {
-  // 🔥 Leer estatus directamente del backend (NO calcular)
-  const estatusDesdeBackend = obtenerEstatusPagoDesdeBackend(expediente);
+  // ✅ Usar función centralizada
+  const estatusGeneral = obtenerEstatusGeneralPago(expediente);
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -352,7 +312,7 @@ const EstadoPago = React.memo(({ expediente }) => {
         <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
       )}
       <div className="mt-1">
-        <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
+        <Badge tipo="pago" valor={estatusGeneral} className="badge-sm" />
       </div>
     </div>
   );
@@ -393,32 +353,61 @@ const CalendarioPagos = React.memo(({
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
   let pagos = [];
   
-  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
+  // PRIORIDAD 1: Leer recibos desde backend (tabla recibos_pago)
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    // console.log('📊 [CALENDARIO] Recibos desde BACKEND:', expediente.recibos);
-    // Usar recibos del backend (ya vienen con fecha, monto y estatus calculados)
-    // 🔥 IMPORTANTE: Filtrar solo los recibos que corresponden al número de pagos según la frecuencia
     pagos = expediente.recibos
-      .filter(r => r.numero_recibo <= numeroPagos) // Solo los recibos correspondientes a la frecuencia
-      .map(r => ({
-        numero: r.numero_recibo,
-        fecha: r.fecha_vencimiento,
-        monto: parseFloat(r.monto).toFixed(2),
-        estatusBackend: r.estatus, // Pagado, Vencido, Pago por vencer, Pendiente
-        comprobante_url: r.comprobante_url,
-        comprobante_nombre: r.comprobante_nombre,
-        fecha_pago_real: r.fecha_pago_real
-      }));
-    // console.log('📊 [CALENDARIO] Pagos mapeados con estatusBackend:', pagos);
+      .filter(r => r.numero_recibo <= numeroPagos)
+      .map(r => {
+        // 🔧 TEMPORAL: Recalcular estatus en frontend hasta que backend lo calcule correctamente
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const fechaVenc = new Date(r.fecha_vencimiento + 'T00:00:00');
+        fechaVenc.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+        
+        let estatusCalculado;
+        if (r.fecha_pago_real) {
+          estatusCalculado = 'Pagado';
+        } else if (diasRestantes < 0) {
+          estatusCalculado = 'Vencido';
+        } else if (diasRestantes <= 15) {
+          estatusCalculado = 'Por Vencer';
+        } else {
+          estatusCalculado = 'Pendiente';
+        }
+        
+        return {
+          numero: r.numero_recibo,
+          fecha: r.fecha_vencimiento,
+          monto: parseFloat(r.monto).toFixed(2),
+          estatusBackend: estatusCalculado, // Usar estatus calculado temporalmente
+          comprobante_url: r.comprobante_url,
+          comprobante_nombre: r.comprobante_nombre,
+          fecha_pago_real: r.fecha_pago_real
+        };
+      });
   } else {
-    // Fallback: Calcular recibos en el frontend (método antiguo)
+    // Si estamos CREANDO una póliza nueva (sin ID), calcular calendario en frontend
+    const esNuevaPóliza = !expediente.id;
+    
+    if (!esNuevaPóliza) {
+      // Póliza existente sin recibos del backend - ERROR
+      return (
+        <div className="alert alert-warning" role="alert">
+          <strong>⚠️ Configuración pendiente</strong><br/>
+          Los recibos de pago deben ser generados por el backend.
+          <br/><small>Contacte al administrador del sistema.</small>
+        </div>
+      );
+    }
+    
+    // FALLBACK: Calcular recibos en frontend (solo para pólizas nuevas)
     const periodoGracia = expediente.periodo_gracia 
       ? parseInt(expediente.periodo_gracia, 10)
       : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
     
     const primerPagoField = expediente.primer_pago || expediente.primerPago;
     const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
-    
     const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
     const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
     const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
@@ -426,12 +415,7 @@ const CalendarioPagos = React.memo(({
     
     for (let i = 1; i <= numeroPagos; i++) {
       const fechaPago = calcularProximoPago(
-        expediente.inicio_vigencia,
-        tipoPago,
-        frecuencia,
-        expediente.compania,
-        i,
-        periodoGracia
+        expediente.inicio_vigencia, tipoPago, frecuencia, expediente.compania, i, periodoGracia
       );
       
       if (fechaPago) {
@@ -440,10 +424,23 @@ const CalendarioPagos = React.memo(({
           monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
         }
         
+        // Calcular estatus
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        const fechaVenc = new Date(fechaPago + 'T00:00:00');
+        fechaVenc.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+        
+        let estatusCalculado;
+        if (diasRestantes < 0) estatusCalculado = 'Vencido';
+        else if (diasRestantes <= 15) estatusCalculado = 'Por Vencer';
+        else estatusCalculado = 'Pendiente';
+        
         pagos.push({
           numero: i,
           fecha: fechaPago,
-          monto: monto
+          monto: monto,
+          estatusBackend: estatusCalculado
         });
       }
     }
@@ -458,82 +455,47 @@ const CalendarioPagos = React.memo(({
   let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
-    // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
-    if (pago.estatusBackend) {
-      // console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
-      const estatusNorm = pago.estatusBackend.toLowerCase();
-      const pagado = estatusNorm === 'pagado';
-      
-      if (pagado) {
-        totalPagado += parseFloat(pago.monto) || 0;
-      } else if (estatusNorm === 'vencido') {
-        totalVencido += parseFloat(pago.monto) || 0;
-      } else if (estatusNorm === 'pago por vencer') {
-        totalPorVencer += parseFloat(pago.monto) || 0;
-      } else {
-        totalPendiente += parseFloat(pago.monto) || 0;
-      }
-      
-      let estado = pago.estatusBackend;
-      let badgeClass = 'bg-secondary';
-      
-      if (estatusNorm === 'pagado') {
-        badgeClass = 'bg-success';
-      } else if (estatusNorm === 'vencido') {
-        badgeClass = 'bg-danger';
-      } else if (estatusNorm === 'pago por vencer') {
-        badgeClass = 'bg-warning';
-      }
-      
-      // console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
-      return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
-    }
+    // ✅ LEER DIRECTAMENTE del backend (sin calcular)
+    const estaPagado = pago.numero <= ultimoReciboPagado;
     
-    // Fallback: Calcular estatus en el frontend (método antiguo)
-    // console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
-    const [year, month, day] = pago.fecha.split('-');
-    const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-    const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
-    // console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
+    let estatus, badgeClass;
     
-    let pagado = pago.numero <= ultimoReciboPagado;
-    
-    if (pagado) {
-      totalPagado += parseFloat(pago.monto) || 0;
-    } else {
-      if (diasRestantes < 0) {
-        totalVencido += parseFloat(pago.monto) || 0;
-      } else if (diasRestantes <= 15) {
-        totalPorVencer += parseFloat(pago.monto) || 0;
-      } else {
-        totalPendiente += parseFloat(pago.monto) || 0;
-      }
-    }
-    
-    let estado = 'Pendiente';
-    let badgeClass = 'bg-secondary';
-    
-    if (pagado) {
-      estado = 'Pagado';
+    if (estaPagado) {
+      estatus = 'Pagado';
       badgeClass = 'bg-success';
-    } else if (diasRestantes < 0) {
-      estado = 'Vencido';
-      badgeClass = 'bg-danger';
-    } else if (diasRestantes === 0) {
-      estado = 'Vence hoy';
-      badgeClass = 'bg-danger';
-    } else if (diasRestantes <= 15) {
-      // Por vencer: cuando faltan 15 días o menos
-      estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por vencer';
-      badgeClass = 'bg-warning';
+    } else if (pago.estatusBackend) {
+      // Si el backend envió el estatus, usarlo directamente
+      estatus = pago.estatusBackend;
+      const estatusNorm = estatus.toLowerCase();
+      badgeClass = estatusNorm === 'vencido' ? 'bg-danger' :
+                   estatusNorm === 'por vencer' || estatusNorm === 'pago por vencer' ? 'bg-warning' :
+                   estatusNorm === 'pendiente' ? 'bg-info' : 'bg-secondary';
     } else {
-      // Pendiente: cuando falta más de 15 días
-      estado = 'Pendiente';
+      // Si no hay estatus del backend, marcar como "Sin calcular"
+      estatus = 'Pendiente';
       badgeClass = 'bg-secondary';
+      console.warn(`⚠️ Recibo #${pago.numero} sin estatus del backend`);
     }
     
-    // console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
-    return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
+    // Acumular totales
+    const monto = parseFloat(pago.monto) || 0;
+    if (estaPagado) {
+      totalPagado += monto;
+    } else if (estatus === 'Vencido') {
+      totalVencido += monto;
+    } else if (estatus === 'Por Vencer' || estatus === 'Pago por vencer') {
+      totalPorVencer += monto;
+    } else {
+      totalPendiente += monto;
+    }
+    
+    return { 
+      ...pago, 
+      estado: estatus, 
+      badgeClass: badgeClass, 
+      pagado: estaPagado, 
+      totalPagos: numeroPagos 
+    };
   });
 
   if (compacto) {
@@ -2111,7 +2073,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-      console.log('🔍 DEBUG aplicarDatos:');
+
       console.log('   - clienteEncontrado:', clienteEncontrado);
       console.log('   - clienteEncontrado.id:', clienteEncontrado?.id);
       console.log('   - datosExtraidos.cliente_id:', datosExtraidos.cliente_id);
@@ -2245,7 +2207,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Si el extractor trae fecha_limite_pago (como Chubb), usarla como fecha_vencimiento_pago
       if (datosConCliente.fecha_limite_pago) {
         datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
-        datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
         console.log('📅 Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
       }
       
@@ -3083,6 +3044,7 @@ const ModalCancelacion = React.memo(({
 const ListaExpedientes = React.memo(({ 
   expedientes,
   agentes,
+  vendedoresMap,
   limpiarFormulario,
   setVistaActual,
   setModoEdicion,
@@ -3115,8 +3077,16 @@ const ListaExpedientes = React.memo(({
       case 'en_proceso':
         // 1. Pólizas con estatus anterior al primer pago (nuevas o renovaciones)
         // 2. Pólizas fraccionadas que regresan dinámicamente (próximo pago ≤ 15 días)
+        // 3. NO incluye pólizas con pago vencido (van a Vencidas)
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
+          
+          // Excluir si el pago está vencido
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            if (fechaVencimientoPago < hoy) return false; // Vencido = NO en proceso
+          }
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
@@ -3321,11 +3291,25 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'vencidas':
-        // Pólizas vencidas (termino_vigencia < hoy)
+        // Pólizas vencidas: pago vencido O vigencia terminada
         return expedientes.filter(exp => {
-          if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
-          const fechaVencimiento = new Date(exp.termino_vigencia);
-          return fechaVencimiento < hoy;
+          if (exp.etapa_activa === 'Cancelada') return false;
+          
+          // 1. Verificar si el pago está vencido
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            if (fechaVencimientoPago < hoy) return true; // Pago vencido
+          }
+          
+          // 2. Verificar si la vigencia completa terminó
+          if (exp.termino_vigencia) {
+            const fechaVencimiento = new Date(exp.termino_vigencia);
+            fechaVencimiento.setHours(0, 0, 0, 0);
+            if (fechaVencimiento < hoy) return true; // Vigencia terminada
+          }
+          
+          return false;
         });
       
       case 'canceladas':
@@ -3347,6 +3331,13 @@ const ListaExpedientes = React.memo(({
       
       en_proceso: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
+        
+        // Excluir si el pago está vencido
+        if (exp.fecha_vencimiento_pago) {
+          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+          fechaVencimientoPago.setHours(0, 0, 0, 0);
+          if (fechaVencimientoPago < hoy) return false;
+        }
         
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
@@ -3515,9 +3506,23 @@ const ListaExpedientes = React.memo(({
       }).length,
       
       vencidas: expedientes.filter(exp => {
-        if (!exp.termino_vigencia || exp.etapa_activa === 'Cancelada') return false;
-        const fechaVencimiento = new Date(exp.termino_vigencia);
-        return fechaVencimiento < hoy;
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
+        // 1. Verificar si el pago está vencido
+        if (exp.fecha_vencimiento_pago) {
+          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+          fechaVencimientoPago.setHours(0, 0, 0, 0);
+          if (fechaVencimientoPago < hoy) return true;
+        }
+        
+        // 2. Verificar si la vigencia completa terminó
+        if (exp.termino_vigencia) {
+          const fechaVencimiento = new Date(exp.termino_vigencia);
+          fechaVencimiento.setHours(0, 0, 0, 0);
+          if (fechaVencimiento < hoy) return true;
+        }
+        
+        return false;
       }).length,
       
       canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
@@ -3831,7 +3836,7 @@ const ListaExpedientes = React.memo(({
                       <div>Etapa</div>
                       <div>Activa</div>
                     </th>
-                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
+                    <th style={{ width: '130px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
                     <th style={{ width: '200px', textAlign: 'center' }}>
                       <div>Estatus Pago</div>
                       <div>y Progreso</div>
@@ -3845,7 +3850,9 @@ const ListaExpedientes = React.memo(({
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
-                    const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
+                    // Extraer clave del agente del campo expediente.agente
+                    const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                    const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
                     
                     // Detectar tipo de duplicado para este expediente
                     const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
@@ -3935,29 +3942,55 @@ const ListaExpedientes = React.memo(({
                             <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
                         </td>
-                        <td style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                        <td style={{ fontSize: '0.7rem', textAlign: 'center', lineHeight: '1.3' }}>
                           {(() => {
+                            const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
                             if (agenteInfo) {
-                              const nombreCompleto = agenteInfo.nombre || '';
-                              const palabras = nombreCompleto.trim().split(/\s+/);
-                              const primerNombre = palabras[0] || '';
-                              const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
-                              return `${agenteInfo.codigoAgente} - ${primerNombre} ${primerApellido}`.trim();
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
                             } else if (expediente.agente) {
-                              // Si no hay agenteInfo, procesar el texto del expediente
                               const textoAgente = expediente.agente || '';
                               const partes = textoAgente.split('-');
                               if (partes.length >= 2) {
-                                const codigo = partes[0].trim();
+                                claveAgente = partes[0].trim();
                                 const nombreCompleto = partes.slice(1).join('-').trim();
                                 const palabras = nombreCompleto.split(/\s+/);
-                                const primerNombre = palabras[0] || '';
-                                const primerApellido = palabras.length >= 3 ? palabras[2] : palabras[1] || '';
-                                return `${codigo} - ${primerNombre} ${primerApellido}`.trim();
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
                               }
-                              return textoAgente;
                             }
-                            return '-';
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.65rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '2px' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
                           })()}
                         </td>
                         <td style={{ textAlign: 'center' }}>
@@ -3965,30 +3998,16 @@ const ListaExpedientes = React.memo(({
                             {/* Tipo y Estatus de Pago */}
                             <EstadoPago expediente={expediente} />
                             
-                            {/* Estado del próximo recibo pendiente (solo para fraccionado) */}
+                            {/* ✅ Estado del próximo recibo (LEER del backend) */}
                             {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
-                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
-                             expediente.inicio_vigencia && (
+                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && (
                               (() => {
-                                // Normalizar campos
                                 const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
                                 const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-                                
-                                // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
                                 const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
-                                
-                                const mesesPorFrecuencia = {
-                                  'Mensual': 1,
-                                  'Trimestral': 3,
-                                  'Semestral': 6
-                                };
-                                
-                                const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-                                
-                                // Determinar el próximo recibo pendiente
                                 const proximoRecibo = pagosRealizados + 1;
                                 
-                                // Si ya se pagaron todos los recibos
+                                // Si ya se pagaron todos
                                 if (pagosRealizados >= numeroPagos) {
                                   return (
                                     <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
@@ -3997,38 +4016,24 @@ const ListaExpedientes = React.memo(({
                                   );
                                 }
                                 
-                                // Calcular fecha de vencimiento del próximo recibo
-                                const fechaInicio = new Date(expediente.inicio_vigencia);
-                                const fechaProximoRecibo = new Date(fechaInicio);
-                                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+                                // ✅ LEER estatus del backend (recibos[])
+                                let estatus = 'Pendiente';
+                                let colorClass = 'text-info';
                                 
-                                // Calcular días restantes
-                                const hoy = new Date();
-                                hoy.setHours(0, 0, 0, 0);
-                                fechaProximoRecibo.setHours(0, 0, 0, 0);
-                                const diasRestantes = Math.floor((fechaProximoRecibo - hoy) / (1000 * 60 * 60 * 24));
-                                
-                                // Determinar estado y color
-                                let estado = '';
-                                let colorClass = '';
-                                
-                                if (diasRestantes < 0) {
-                                  estado = 'Vencido';
-                                  colorClass = 'text-danger fw-bold';
-                                } else if (diasRestantes === 0) {
-                                  estado = 'Vence Hoy';
-                                  colorClass = 'text-danger fw-bold';
-                                } else if (diasRestantes <= 15) {
-                                  estado = 'Por Vencer';
-                                  colorClass = 'text-warning fw-bold';
-                                } else {
-                                  estado = 'Pendiente';
-                                  colorClass = 'text-info';
+                                if (expediente.recibos && Array.isArray(expediente.recibos)) {
+                                  const reciboProximo = expediente.recibos.find(r => r.numero_recibo === proximoRecibo);
+                                  if (reciboProximo && reciboProximo.estatus) {
+                                    estatus = reciboProximo.estatus;
+                                    const estatusNorm = estatus.toLowerCase();
+                                    colorClass = estatusNorm === 'vencido' ? 'text-danger fw-bold' :
+                                               estatusNorm === 'por vencer' || estatusNorm === 'pago por vencer' ? 'text-warning fw-bold' :
+                                               'text-info';
+                                  }
                                 }
                                 
                                 return (
                                   <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
-                                    <span className={colorClass}>{proximoRecibo}/{numeroPagos} {estado}</span>
+                                    <span className={colorClass}>{proximoRecibo}/{numeroPagos} {estatus}</span>
                                   </div>
                                 );
                               })()
@@ -4207,7 +4212,10 @@ const ListaExpedientes = React.memo(({
             {/* Vista Móvil - Cards */}
             <div className="d-lg-none p-3">
               {paginacion.itemsPaginados.map((expediente) => {
-                const agenteInfo = agentes.find(a => a.codigoAgente === expediente.agente);
+                // Extraer clave del agente del campo expediente.agente
+                const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
                 const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
                 const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
                 const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
@@ -4289,9 +4297,54 @@ const ListaExpedientes = React.memo(({
                       {expediente.agente && (
                         <div className="mb-2">
                           <small className="text-muted d-block">Agente</small>
-                          <span style={{ fontSize: '0.875rem' }}>
-                            {agenteInfo ? `${agenteInfo.codigoAgente} - ${agenteInfo.nombre}` : expediente.agente}
-                          </span>
+                          {(() => {
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
+                            if (agenteInfo) {
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
+                            } else if (expediente.agente) {
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                claveAgente = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
+                              }
+                            }
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div style={{ fontSize: '0.875rem' }}><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.75rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 
@@ -4694,25 +4747,65 @@ const Formulario = React.memo(({
   const [vendedores, setVendedores] = useState([]);
   const [agenteIdSeleccionado, setAgenteIdSeleccionado] = useState(null);
 
-  // Función para obtener vendedores por agente
-  const obtenerVendedoresPorAgente = async (agenteId) => {
+  // Función para obtener vendedores filtrados por clave de agente y aseguradora
+  const obtenerVendedoresPorAgente = async (agenteId, claveAgente = null, aseguradora = null) => {
     if (!agenteId) {
       setVendedores([]);
       return;
     }
 
     try {
-      const response = await fetch(`${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`);
+      // Construir URL con parámetros de filtro
+      let url = `${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`;
+      const params = new URLSearchParams();
+      
+      if (claveAgente) {
+        params.append('clave', claveAgente);
+      }
+      
+      if (aseguradora) {
+        params.append('aseguradora', aseguradora);
+      }
+      
+      if (params.toString()) {
+        url += `?${params.toString()}`;
+      }
+      
+      console.log('🔍 Solicitando vendedores:', { url, agenteId, claveAgente, aseguradora });
+      
+      const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        console.log('📋 Vendedores obtenidos:', data);
-        setVendedores(data.vendedores || []);
+        console.log('📋 Vendedores obtenidos del backend:', data);
+        
+        // El backend devuelve { agenteId, vendedores: [...], total }
+        let vendedoresArray = data.vendedores || [];
+        console.log('✅ Total vendedores antes de filtrar:', vendedoresArray.length);
+        
+        // Filtrar por clave si se especificó (doble validación por si el backend no filtra bien)
+        if (claveAgente && vendedoresArray.length > 0) {
+          vendedoresArray = vendedoresArray.filter(vendedor => {
+            // Verificar si tiene la clave en comisionesCompartidas
+            const comisiones = vendedor.comisionesCompartidas || [];
+            const tieneClave = comisiones.some(com => 
+              com.clave && com.clave.toString() === claveAgente.toString()
+            );
+            
+            console.log(`🔍 ${vendedor.nombre}: tiene clave ${claveAgente}?`, tieneClave, 
+              'claves:', comisiones.map(c => c.clave));
+            
+            return tieneClave;
+          });
+          console.log('✅ Vendedores después de filtrar por clave:', vendedoresArray.length);
+        }
+        
+        setVendedores(vendedoresArray);
       } else {
-        console.error('Error al obtener vendedores:', response.statusText);
+        console.error('❌ Error al obtener vendedores:', response.statusText);
         setVendedores([]);
       }
     } catch (error) {
-      console.error('Error al obtener vendedores:', error);
+      console.error('❌ Error al obtener vendedores:', error);
       setVendedores([]);
     }
   };
@@ -4780,12 +4873,14 @@ const Formulario = React.memo(({
     
     if (formulario.agente && agentes.length > 0) {
       const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
-      console.log('🎯 Agente ID extraído:', agenteId);
+      // Extraer clave del agente (primera parte del texto)
+      const claveAgente = formulario.agente.trim().split(' ')[0];
+      console.log('🎯 Agente ID extraído:', agenteId, 'Clave:', claveAgente);
       
       if (agenteId && agenteId !== agenteIdSeleccionado) {
-        console.log('📝 Actualizando agente seleccionado:', agenteId);
+        console.log('📝 Actualizando agente seleccionado:', agenteId, 'clave:', claveAgente, 'aseguradora:', formulario.compania);
         setAgenteIdSeleccionado(agenteId);
-        obtenerVendedoresPorAgente(agenteId);
+        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
       } else if (!agenteId) {
         console.log('🚫 No se encontró ID de agente, limpiando vendedores');
         setAgenteIdSeleccionado(null);
@@ -4796,7 +4891,7 @@ const Formulario = React.memo(({
       setAgenteIdSeleccionado(null);
       setVendedores([]);
     }
-  }, [formulario.agente, agentes]);
+  }, [formulario.agente, formulario.compania, agentes]);
 
   const handleDataExtracted = useCallback(async (datosExtraidos) => {
     try {
@@ -5794,10 +5889,11 @@ const Formulario = React.memo(({
                     // Extraer ID del agente y obtener vendedores
                     if (nuevoAgente && agentes.length > 0) {
                       const agenteId = extraerAgenteIdDelFormulario(nuevoAgente);
-                      console.log('🔍 ID extraído inmediatamente:', agenteId);
+                      const claveAgente = nuevoAgente.trim().split(' ')[0];
+                      console.log('🔍 ID extraído inmediatamente:', agenteId, 'Clave:', claveAgente);
                       setAgenteIdSeleccionado(agenteId);
                       if (agenteId) {
-                        obtenerVendedoresPorAgente(agenteId);
+                        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
                       }
                     } else {
                       setAgenteIdSeleccionado(null);
@@ -6107,7 +6203,7 @@ const Formulario = React.memo(({
                       
                       setFormulario(prev => {
                         // Si tiene inicio_vigencia, recalcular fecha_pago
-                        let nuevaFechaPago = prev.fecha_vencimiento_pago || prev.fecha_pago;
+                        let nuevaFechaPago = prev.fecha_vencimiento_pago;
                         
                         if (prev.inicio_vigencia) {
                           const fechaInicio = new Date(prev.inicio_vigencia);
@@ -6137,7 +6233,6 @@ const Formulario = React.memo(({
                           ...prev,
                           periodo_gracia: diasGracia,
                           fecha_vencimiento_pago: nuevaFechaPago,
-                          fecha_pago: nuevaFechaPago,
                           estatusPago: nuevoEstatus
                         };
                       });
@@ -6201,7 +6296,6 @@ const Formulario = React.memo(({
                       return {
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
-                        fecha_pago: nuevaFecha,
                         periodo_gracia: nuevoPeriodoGracia,
                         estatusPago: nuevoEstatus,
                         _fechaManual: true // Bandera para evitar recálculo automático
@@ -6673,7 +6767,6 @@ const estadoInicialFormulario = {
   estatus_pago: 'Pendiente',
   estatusPago: 'Pendiente',
   fecha_ultimo_pago: '',
-  fecha_pago: '',
   plazo_pago_dias: '',
   gastos_expedicion: '',
   gastosExpedicion: '',
@@ -6720,6 +6813,8 @@ const ModuloExpedientes = () => {
   const [clientes, setClientes] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
   const [agentes, setAgentes] = useState([]);
+  const [todosLosVendedores, setTodosLosVendedores] = useState([]);
+  const [vendedoresMap, setVendedoresMap] = useState({});
   
   // 💰 Estados para aviso/recordatorio de pago
   const [pagoParaNotificar, setPagoParaNotificar] = useState(null);
@@ -6742,7 +6837,8 @@ const ModuloExpedientes = () => {
   });
   
   useEffect(() => {
-    const fetchAgentes = async () => {
+    const fetchDatos = async () => {
+      // 1. Cargar agentes usando el servicio original
       const resultado = await obtenerAgentesEquipo();
       if (resultado.success) {
         const agentesOrdenados = resultado.data.sort((a, b) => {
@@ -6752,8 +6848,31 @@ const ModuloExpedientes = () => {
         });
         setAgentes(agentesOrdenados);
       }
+      
+      // 2. Cargar todos los vendedores desde el endpoint correcto
+      try {
+        const resVendedores = await fetch(`${API_URL}/api/equipoDeTrabajo`);
+        const equipoData = await resVendedores.json();
+        
+        // Filtrar solo los vendedores - todos los que NO son Agente
+        const vendedoresData = equipoData.filter(miembro => miembro.rol !== 'Agente');
+        
+        // Crear mapa de vendedores por ID
+        const mapaVendedores = {};
+        vendedoresData.forEach(vendedor => {
+          mapaVendedores[vendedor.id] = vendedor;
+        });
+        
+        setTodosLosVendedores(vendedoresData);
+        setVendedoresMap(mapaVendedores);
+      } catch (error) {
+        console.error('Error al cargar vendedores:', error);
+        setTodosLosVendedores([]);
+        setVendedoresMap({});
+      }
+
     };
-    fetchAgentes();
+    fetchDatos();
     
     // Exponer función global para recargar agentes desde el modal de extracción
     window.recargarAgentes = (nuevosAgentes) => {
@@ -7221,7 +7340,7 @@ const ModuloExpedientes = () => {
         tipo_pago: f.tipo_pago ?? '',
         frecuenciaPago: f.frecuenciaPago ?? '',
         periodo_gracia: f.periodo_gracia ?? '',
-        fecha_vencimiento_pago: f.fecha_vencimiento_pago ?? f.fecha_pago ?? '',
+        fecha_vencimiento_pago: f.fecha_vencimiento_pago ?? '',
         estatusPago: f.estatusPago ?? '',
         // Montos
         prima_pagada: f.prima_pagada ?? '',
@@ -9227,10 +9346,7 @@ const ModuloExpedientes = () => {
             resultado[snakeKey] = valorNuevo;
           }
           
-          // Debug específico para campos problemáticos
-          if (key.includes('cargo_pago_fraccionado') || key.includes('gastos_expedicion') || snakeKey.includes('cargo_pago_fraccionado') || snakeKey.includes('gastos_expedicion')) {
-            console.log(`🔍 DEBUG convertirASnakeCase: ${key} = "${obj[key]}" → ${snakeKey} = "${resultado[snakeKey]}" (existía: ${existeEnSnake})`);
-          }
+
         });      return resultado;
     };
 
@@ -9303,6 +9419,23 @@ const ModuloExpedientes = () => {
     expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
     // ✅ GARANTIZAR que se guarde el vendedor/sub agente
     expedientePayload.sub_agente = formularioParaGuardar.sub_agente || null;
+    
+    // ✅ EXTRAER vendedor_id del campo sub_agente (formato: "123 - Nombre Apellido")
+    console.log('🔍 [VENDEDOR] sub_agente en formulario:', formularioParaGuardar.sub_agente);
+    if (formularioParaGuardar.sub_agente) {
+      const vendedorIdMatch = formularioParaGuardar.sub_agente.split('-')[0].trim();
+      console.log('🔍 [VENDEDOR] vendedorIdMatch extraído:', vendedorIdMatch);
+      if (vendedorIdMatch && !isNaN(vendedorIdMatch)) {
+        expedientePayload.vendedor_id = parseInt(vendedorIdMatch);
+        console.log('✅ [VENDEDOR] vendedor_id final:', expedientePayload.vendedor_id);
+      } else {
+        console.log('⚠️ [VENDEDOR] No se pudo extraer ID numérico');
+        expedientePayload.vendedor_id = null;
+      }
+    } else {
+      console.log('⚠️ [VENDEDOR] No hay sub_agente en formulario');
+      expedientePayload.vendedor_id = null;
+    }
     
     // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
     if (expedientePayload.estatus_pago === 'Pagado') {
@@ -9959,12 +10092,7 @@ const ModuloExpedientes = () => {
               const etapaActual = expedientePayload.etapa_activa || 'En cotización';
               const capturadoConExtractorPDF = formularioParaGuardar._capturado_con_extractor_pdf === true;
               const nombreArchivoPDF = formularioParaGuardar._nombre_archivo_pdf || 'PDF importado';
-              
-              console.log('🔍 DEBUG captura evento:', {
-                capturadoConExtractorPDF,
-                nombreArchivoPDF,
-                tiene_datos_originales: !!formularioParaGuardar._datos_originales_pdf
-              });
+
               
               // 🔍 DETECTAR CAMPOS MODIFICADOS MANUALMENTE
               // ✅ LÓGICA SIMPLE: Si existe snapshot (formularioOriginal), comparar todo el formulario
@@ -9972,22 +10100,7 @@ const ModuloExpedientes = () => {
               let huboModificacionesManuales = false;
               
               if (formularioOriginal) {
-                console.log('✅ Snapshot disponible - detectando cambios desde el estado inicial completo');
-                console.log('📸 Campos en snapshot:', Object.keys(formularioOriginal).filter(k => !k.startsWith('_')).length);
-                console.log('🔍 DEBUG - Valores clave en snapshot:', {
-                  contacto_nombre: formularioOriginal.contacto_nombre,
-                  contacto_telefono_fijo: formularioOriginal.contacto_telefono_fijo,
-                  conductor_habitual: formularioOriginal.conductor_habitual,
-                  fecha_emision: formularioOriginal.fecha_emision,
-                  fecha_captura: formularioOriginal.fecha_captura
-                });
-                console.log('🔍 DEBUG - Valores clave en formulario actual:', {
-                  contacto_nombre: formularioParaGuardar.contacto_nombre,
-                  contacto_telefono_fijo: formularioParaGuardar.contacto_telefono_fijo,
-                  conductor_habitual: formularioParaGuardar.conductor_habitual,
-                  fecha_emision: formularioParaGuardar.fecha_emision,
-                  fecha_captura: formularioParaGuardar.fecha_captura
-                });
+
                 
                 // Normalizar valores para comparación
                 const normalizar = (valor) => {
@@ -10162,8 +10275,7 @@ const ModuloExpedientes = () => {
                   })
                 }
               };
-              
-              console.log('🔍 DEBUG: Registrando evento en historial con datos:', eventoData);
+
               await historialService.registrarEvento(eventoData);
               
               console.log(`✅ Captura registrada en historial: ${metodCaptura} - ${aseguradoraNombre}`);
@@ -10629,9 +10741,7 @@ const ModuloExpedientes = () => {
   fecha_emision: formatearFechaParaInput(expedienteCompleto.fecha_emision) || formatearFechaParaInput(expedienteCompleto.created_at) || new Date().toISOString().split('T')[0],
   inicio_vigencia: formatearFechaParaInput(expedienteCompleto.inicio_vigencia) || '',
   termino_vigencia: formatearFechaParaInput(expedienteCompleto.termino_vigencia) || '',
-      // NOTA: fecha_pago y fecha_vencimiento_pago se recalcularán automáticamente según inicio_vigencia + periodo_gracia.
-      // Se cargan temporalmente por si el backend trae valores; luego se sincronizan.
-  fecha_pago: formatearFechaParaInput(expedienteCompleto.fecha_pago) || '',
+      // NOTA: fecha_vencimiento_pago se recalcula automáticamente según inicio_vigencia + periodo_gracia.
   fecha_vencimiento_pago: formatearFechaParaInput(expedienteCompleto.fecha_vencimiento_pago) || '',
       // Unificar nombre de campo: backend puede enviar proximo_pago; el estado interno usa proximoPago
   proximoPago: formatearFechaParaInput(expedienteCompleto.proximo_pago || expedienteCompleto.proximoPago) || '',
@@ -10863,6 +10973,7 @@ const eliminarExpediente = useCallback((id) => {
           <ListaExpedientes 
             expedientes={expedientes}
             agentes={agentes}
+            vendedoresMap={vendedoresMap}
             limpiarFormulario={limpiarFormulario}
             setVistaActual={setVistaActual}
             setModoEdicion={setModoEdicion}
