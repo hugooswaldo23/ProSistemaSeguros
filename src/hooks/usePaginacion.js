@@ -1,5 +1,18 @@
-import { useState, useMemo } from 'react';
+/**
+ * ====================================================================
+ * HOOK DE PAGINACIÓN
+ * ====================================================================
+ * Hook personalizado para manejo de paginación y búsqueda en listas
+ */
 
+import { useState, useEffect, useMemo, useCallback } from 'react';
+
+/**
+ * Hook para paginación con búsqueda integrada
+ * @param {Array} items - Array de items a paginar
+ * @param {number} itemsPorPagina - Cantidad de items por página
+ * @returns {object} Estado y funciones de paginación
+ */
 export const usePaginacion = (items, itemsPorPagina = 10) => {
   const [paginaActual, setPaginaActual] = useState(1);
   const [busqueda, setBusqueda] = useState('');
@@ -14,31 +27,30 @@ export const usePaginacion = (items, itemsPorPagina = 10) => {
   }, [items, busqueda]);
 
   const totalPaginas = Math.ceil(itemsFiltrados.length / itemsPorPagina);
-
-  const paginas = useMemo(() => {
-    let inicio = Math.max(1, paginaActual - 2);
-    let fin = Math.min(totalPaginas, inicio + 4);
-    
-    if (fin - inicio < 4) {
-      inicio = Math.max(1, fin - 4);
-    }
-    
-    return Array.from({length: fin - inicio + 1}, (_, i) => inicio + i);
-  }, [paginaActual, totalPaginas]);
-
+  
   const itemsPaginados = useMemo(() => {
     const inicio = (paginaActual - 1) * itemsPorPagina;
-    return itemsFiltrados.slice(inicio, inicio + itemsPorPagina);
+    const fin = inicio + itemsPorPagina;
+    return itemsFiltrados.slice(inicio, fin);
   }, [itemsFiltrados, paginaActual, itemsPorPagina]);
 
+  const irAPagina = useCallback((pagina) => {
+    setPaginaActual(Math.max(1, Math.min(pagina, totalPaginas)));
+  }, [totalPaginas]);
+
+  useEffect(() => {
+    setPaginaActual(1);
+  }, [busqueda]);
+
   return {
-    paginaActual,
-    setPaginaActual,
-    totalPaginas,
-    paginas,
     itemsPaginados,
+    paginaActual,
+    totalPaginas,
+    setPaginaActual: irAPagina,
     busqueda,
     setBusqueda,
     totalItems: itemsFiltrados.length
   };
 };
+
+export default usePaginacion;
