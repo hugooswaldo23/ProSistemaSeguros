@@ -1,0 +1,1714 @@
+/**
+ * ====================================================================
+ * COMPONENTE: LISTA DE EXPEDIENTES
+ * ====================================================================
+ * Tabla principal de expedientes con filtros por carpetas
+ * - Sistema de carpetas (vigentes, renovadas, por renovar, etc.)
+ * - Detección de duplicados
+ * - Acciones por expediente (ver, editar, eliminar, compartir, pagar)
+ * - Vista responsive (desktop y móvil)
+ */
+
+import React from 'react';
+import { Plus, Edit, Trash2, Eye, FileText, Upload, DollarSign, Share2, AlertCircle, Search, XCircle } from 'lucide-react';
+import { CONSTANTS } from '../../utils/expedientesConstants';
+import utils from '../../utils/expedientesUtils';
+import * as estatusPagosUtils from '../../utils/estatusPagos';
+import { Badge, InfoCliente, EstadoPago, BarraBusqueda } from './UIComponents';
+import { usePaginacion } from '../../hooks/usePaginacion';
+import Paginacion from '../common/Paginacion';
+import CalendarioPagos from './CalendarioPagos';
+
+// 👇 COPIAR AQUÍ desde Expedientes.jsx líneas 2677 hasta 4393
+const ListaExpedientes = React.memo(({ 
+  expedientes,
+  agentes,
+  vendedoresMap,
+  limpiarFormulario,
+  setVistaActual,
+  setModoEdicion,
+  mostrarModalMetodoCaptura,
+  setMostrarModalMetodoCaptura,
+  mostrarExtractorPDF,
+  setMostrarExtractorPDF,
+  aplicarPago,
+  puedeAvanzarEstado,
+  avanzarEstado,
+  obtenerSiguienteEstado,
+  puedeCancelar,
+  iniciarCancelacion,
+  verDetalles,
+  editarExpediente,
+  eliminarExpediente,
+  calcularProximoPago,
+  clientesMap,
+  abrirModalCompartir
+}) => {
+  // Estado para carpeta/categoría seleccionada
+  const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
+  
+  // Filtrar expedientes según la carpeta seleccionada
+  const expedientesFiltrados = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    switch (carpetaSeleccionada) {
+      case 'en_proceso':
+        // Pólizas con pagos por vencer (≤ 15 días): usar función centralizada
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          // Excluir vencidas (van a carpeta Vencidas)
+          if (estatusPagosUtils.tienePagosVencidos(exp)) return false;
+          // Incluir solo las que tienen pagos por vencer
+          return estatusPagosUtils.tienePagosPorVencer(exp);
+        });
+      
+      case 'vigentes':
+        // Pólizas vigentes: usar función centralizada
+        return expedientes.filter(exp => {
+          
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+          
+          // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
+          if (!esFraccionado) {
+            if (estatusPago === 'pagado') {
+              // Si está pagado, está en vigentes
+            } else if (exp.fecha_vencimiento_pago) {
+              // Si no está pagado, verificar si faltan > 15 días para vencimiento
+              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+              fechaVencimientoPago.setHours(0, 0, 0, 0);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+              
+              // Solo va a vigentes si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            } else {
+              // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
+              return false;
+            }
+          } else {
+            // Para fraccionado: verificar que próximo pago > 15 días
+            
+            // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+            if (exp.fecha_vencimiento_pago) {
+              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+              fechaVencimientoPago.setHours(0, 0, 0, 0);
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+              
+              // Solo va a vigentes si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            } else {
+              // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
+              const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+              if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+              
+              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+              
+              // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+              const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+              
+              // Si no ha pagado nada, no está en vigentes
+              if (pagosRealizados === 0) return false;
+              
+              const mesesPorFrecuencia = {
+                'Mensual': 1,
+                'Trimestral': 3,
+                'Semestral': 6
+              };
+              
+              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+              
+              // Si ya pagó todos, está en vigentes
+              if (pagosRealizados >= numeroPagos) {
+                // Continuar para verificar si no está en periodo de renovación
+              } else {
+                // Calcular días hasta próximo pago
+                const proximoRecibo = pagosRealizados + 1;
+                const fechaInicio = new Date(exp.inicio_vigencia);
+                const fechaProximoRecibo = new Date(fechaInicio);
+                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+                
+                const hoyLocal = new Date();
+                hoyLocal.setHours(0, 0, 0, 0);
+                fechaProximoRecibo.setHours(0, 0, 0, 0);
+                const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+                
+                // Solo está en vigentes si faltan > 15 días
+                if (diasRestantes <= 15) return false;
+              }
+            }
+          }
+          
+          // Verificar que NO esté en periodo de renovación (> 30 días para término)
+          if (!exp.termino_vigencia) return true;
+          
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
+          
+          return estatusPagosUtils.esVigente(exp);
+        });
+      
+      case 'renovadas':
+        // Pólizas renovadas: usar función centralizada
+        return expedientes.filter(exp => {
+          
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+          
+          // Para pago único: debe estar pagado
+          if (!esFraccionado) {
+            if (estatusPago !== 'pagado') return false;
+          } else {
+            // Para fraccionado: verificar que próximo pago > 15 días
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            
+            // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            
+            // Si no ha pagado nada, no está en renovadas
+            if (pagosRealizados === 0) return false;
+            
+            const mesesPorFrecuencia = {
+              'Mensual': 1,
+              'Trimestral': 3,
+              'Semestral': 6
+            };
+            
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            // Si ya pagó todos, está en renovadas
+            if (pagosRealizados >= numeroPagos) {
+              // Continuar para verificar si no está en periodo de renovación
+            } else {
+              // Calcular días hasta próximo pago
+              const proximoRecibo = pagosRealizados + 1;
+              const fechaInicio = new Date(exp.inicio_vigencia);
+              const fechaProximoRecibo = new Date(fechaInicio);
+              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+              
+              const hoyLocal = new Date();
+              hoyLocal.setHours(0, 0, 0, 0);
+              fechaProximoRecibo.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+              
+              // Solo está en renovadas si faltan > 15 días
+              if (diasRestantes <= 15) return false;
+            }
+          }
+          
+          // Verificar que NO esté en periodo de renovación (> 30 días para término)
+          if (!exp.termino_vigencia) return true;
+          
+          let fechaAviso;
+          if (exp.fecha_aviso_renovacion) {
+            fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          } else {
+            const fechaTermino = new Date(exp.termino_vigencia);
+            fechaAviso = new Date(fechaTermino);
+            fechaAviso.setDate(fechaAviso.getDate() - 30);
+          }
+          
+          return estatusPagosUtils.esRenovada(exp);
+        });
+      
+      case 'por_renovar':
+        // Pólizas en periodo de renovación: usar función centralizada
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          return estatusPagosUtils.estaEnPeriodoRenovacion(exp);
+        });
+      
+      case 'vencidas':
+        // Pólizas vencidas: usar funciones centralizadas
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          
+          // Usar funciones centralizadas
+          return estatusPagosUtils.estaVigenciaVencida(exp) || estatusPagosUtils.tienePagosVencidos(exp);
+        });
+      
+      case 'canceladas':
+        return expedientes.filter(exp => exp.etapa_activa === 'Cancelada');
+      
+      case 'todas':
+      default:
+        return expedientes;
+    }
+  }, [expedientes, carpetaSeleccionada]);
+  
+  // Contadores para cada carpeta
+  const contadores = React.useMemo(() => {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    
+    return {
+      todas: expedientes.length,
+      
+      en_proceso: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
+        // Excluir si el pago está vencido
+        if (exp.fecha_vencimiento_pago) {
+          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+          fechaVencimientoPago.setHours(0, 0, 0, 0);
+          if (fechaVencimientoPago < hoy) return false;
+        }
+        
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        // Para pago único (Anual): verificar si está dentro de 15 días Y no está pagado
+        if (!esFraccionado) {
+          if (estatusPago === 'pagado') return false; // Si ya está pagado, no va a "En Proceso"
+          
+          // Verificar si la fecha de vencimiento está dentro de 15 días
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Solo mostrar en "En Proceso" si está dentro de 15 días
+            return diasRestantes <= 15 && diasRestantes >= 0;
+          }
+          
+          // Si no tiene fecha de vencimiento, usar el estatus
+          return estatusPago !== 'pagado';
+        }
+        
+        // Para pago fraccionado: verificar si hay recibos pendientes o próximos
+        const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+        
+        // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+        if (exp.fecha_vencimiento_pago) {
+          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+          fechaVencimientoPago.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+          
+          // Mostrar en "En Proceso" si está por vencer (≤ 15 días) pero NO vencido
+          return diasRestantes <= 15 && diasRestantes >= 0;
+        }
+        
+        // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
+        if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
+        
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+        
+        // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
+        const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+        
+        // Si ya pagó todos los recibos, NO va a "En Proceso"
+        if (pagosRealizados >= numeroPagos) return false;
+        
+        const mesesPorFrecuencia = {
+          'Mensual': 1,
+          'Trimestral': 3,
+          'Semestral': 6
+        };
+        
+        const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+        
+        // Calcular fecha del próximo recibo
+        const proximoRecibo = pagosRealizados + 1;
+        const fechaInicio = new Date(exp.inicio_vigencia);
+        const fechaProximoRecibo = new Date(fechaInicio);
+        fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+        
+        // Calcular días hasta el vencimiento
+        const hoyLocal = new Date();
+        hoyLocal.setHours(0, 0, 0, 0);
+        fechaProximoRecibo.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+        
+        // Mostrar en "En Proceso" SOLO si está por vencer (≤ 15 días) pero NO vencido
+        return diasRestantes <= 15 && diasRestantes >= 0;
+      }).length,
+      
+      vigentes: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
+        if (!esFraccionado) {
+          if (estatusPago === 'pagado') {
+            // Si está pagado, está en vigentes
+          } else if (exp.fecha_vencimiento_pago) {
+            // Si no está pagado, verificar si faltan > 15 días para vencimiento
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Solo va a vigentes si faltan > 15 días
+            if (diasRestantes <= 15) return false;
+          } else {
+            // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
+            return false;
+          }
+        } else {
+          // Para fraccionado: verificar que próximo pago > 15 días
+          
+          // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
+          if (exp.fecha_vencimiento_pago) {
+            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
+            fechaVencimientoPago.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
+            
+            // Solo va a vigentes si faltan > 15 días
+            if (diasRestantes <= 15) return false;
+          } else {
+            // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
+            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+            
+            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+            // 🔥 Usar el contador directo de recibos pagados
+            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+            const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
+            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+            
+            if (pagosRealizados === 0) {
+              return false;
+            }
+            
+            if (pagosRealizados < numeroPagos) {
+              const proximoRecibo = pagosRealizados + 1;
+              const fechaInicio = new Date(exp.inicio_vigencia);
+              const fechaProximoRecibo = new Date(fechaInicio);
+              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+              
+              const hoyLocal = new Date();
+              hoyLocal.setHours(0, 0, 0, 0);
+              fechaProximoRecibo.setHours(0, 0, 0, 0);
+              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+              
+              if (diasRestantes <= 15) return false;
+            }
+          }
+        }
+        
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
+        return hoy < fechaAviso;
+      }).length,
+      
+      renovadas: expedientes.filter(exp => {
+        if (exp.etapa_activa !== 'Renovada') return false;
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        if (!esFraccionado) {
+          if (estatusPago !== 'pagado') return false;
+        } else {
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          // 🔥 Usar el contador directo de recibos pagados
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          
+          const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          if (pagosRealizados === 0) {
+            return false;
+          }
+          
+          if (pagosRealizados < numeroPagos) {
+            const proximoRecibo = pagosRealizados + 1;
+            const fechaInicio = new Date(exp.inicio_vigencia);
+            const fechaProximoRecibo = new Date(fechaInicio);
+            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+            
+            const hoyLocal = new Date();
+            hoyLocal.setHours(0, 0, 0, 0);
+            fechaProximoRecibo.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+            
+            if (diasRestantes <= 15) return false;
+          }
+        }
+        
+        if (!exp.termino_vigencia) return true;
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
+        return hoy < fechaAviso;
+      }).length,
+      
+      por_renovar: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (!exp.termino_vigencia) return false;
+        
+        const fechaTermino = new Date(exp.termino_vigencia);
+        
+        let fechaAviso;
+        if (exp.fecha_aviso_renovacion) {
+          fechaAviso = new Date(exp.fecha_aviso_renovacion);
+        } else {
+          fechaAviso = new Date(fechaTermino);
+          fechaAviso.setDate(fechaAviso.getDate() - 30);
+        }
+        
+        return hoy >= fechaAviso && hoy < fechaTermino;
+      }).length,
+      
+      vencidas: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        
+        // Verificar si la póliza completa está vencida (termino_vigencia)
+        if (exp.termino_vigencia) {
+          const fechaVencimiento = new Date(exp.termino_vigencia);
+          if (fechaVencimiento < hoy) return true;
+        }
+        
+        // Para pólizas fraccionadas, verificar si tienen recibos vencidos
+        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        if (esFraccionado) {
+          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
+          if (!frecuencia || !exp.inicio_vigencia) return false;
+          
+          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
+          
+          // Si ya pagó todos los recibos, no está vencida
+          if (pagosRealizados >= numeroPagos) return false;
+          
+          const mesesPorFrecuencia = {
+            'Mensual': 1,
+            'Trimestral': 3,
+            'Semestral': 6
+          };
+          
+          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+          
+          // Calcular fecha del próximo recibo
+          const proximoRecibo = pagosRealizados + 1;
+          const fechaInicio = new Date(exp.inicio_vigencia);
+          const fechaProximoRecibo = new Date(fechaInicio);
+          fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
+          
+          const hoyLocal = new Date();
+          hoyLocal.setHours(0, 0, 0, 0);
+          fechaProximoRecibo.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
+          
+          // Está vencida si los días restantes son negativos
+          return diasRestantes < 0;
+        }
+        
+        return false;
+      }).length,
+      
+      canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
+    };
+  }, [expedientes]);
+  
+  const paginacion = usePaginacion(expedientesFiltrados, 10);
+
+  // Detectar 3 tipos de duplicados
+  const analisisDuplicados = React.useMemo(() => {
+    const polizasDuplicadas = [];
+    const vinsDuplicados = [];
+    const polizasVinDistinto = [];
+
+    expedientes.forEach((exp, index) => {
+      // Solo analizar si tiene número de póliza
+      if (!exp.numero_poliza) return;
+
+      const vin = exp.numero_serie?.trim() || '';
+
+      // Buscar otros expedientes
+      expedientes.forEach((otro, otroIndex) => {
+        if (index >= otroIndex || !otro.numero_poliza) return;
+
+        const otroVin = otro.numero_serie?.trim() || '';
+
+        // Regla 1: Misma póliza + mismo VIN (duplicada completa)
+        if (exp.numero_poliza === otro.numero_poliza &&
+            exp.compania === otro.compania &&
+            vin !== '' && otroVin !== '' &&
+            vin === otroVin) {
+          if (!polizasDuplicadas.find(d => d.id === exp.id)) {
+            polizasDuplicadas.push({ id: exp.id, tipo: 'completa', poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasDuplicadas.find(d => d.id === otro.id)) {
+            polizasDuplicadas.push({ id: otro.id, tipo: 'completa', poliza: otro.numero_poliza, vin: otroVin });
+          }
+        }
+        // Regla 2: Mismo VIN, diferente póliza
+        else if (vin !== '' && otroVin !== '' &&
+                 vin === otroVin &&
+                 exp.numero_poliza !== otro.numero_poliza) {
+          if (!vinsDuplicados.find(d => d.id === exp.id)) {
+            vinsDuplicados.push({ id: exp.id, vin, poliza: exp.numero_poliza });
+          }
+          if (!vinsDuplicados.find(d => d.id === otro.id)) {
+            vinsDuplicados.push({ id: otro.id, vin: otroVin, poliza: otro.numero_poliza });
+          }
+        }
+        // Regla 3: Misma póliza, diferente VIN
+        else if (exp.numero_poliza === otro.numero_poliza &&
+                 exp.compania === otro.compania &&
+                 vin !== '' && otroVin !== '' &&
+                 vin !== otroVin) {
+          if (!polizasVinDistinto.find(d => d.id === exp.id)) {
+            polizasVinDistinto.push({ id: exp.id, poliza: exp.numero_poliza, vin });
+          }
+          if (!polizasVinDistinto.find(d => d.id === otro.id)) {
+            polizasVinDistinto.push({ id: otro.id, poliza: otro.numero_poliza, vin: otroVin });
+          }
+        }
+      });
+    });
+
+    return { polizasDuplicadas, vinsDuplicados, polizasVinDistinto };
+  }, [expedientes]);
+
+  return (
+    <div className="p-3">
+      {/* Estilos globales para normalizar fuentes */}
+      <style>{`
+        .table-sm { font-size: 0.875rem !important; }
+        .table-sm small { font-size: 0.75rem !important; }
+        .table-sm .badge { font-size: 0.75rem !important; }
+        .table-sm .text-muted { font-size: 0.75rem !important; }
+      `}</style>
+      
+      {/* Header Compacto */}
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h4 className="mb-0">Gestión de Pólizas</h4>
+        <button
+          onClick={() => {
+            setMostrarModalMetodoCaptura(true);
+          }}
+          className="btn btn-primary"
+        >
+          <Plus size={16} className="me-2" />
+          Nueva Póliza
+        </button>
+      </div>
+
+      {/* Carpetas en Grid Responsive */}
+      <div className="row g-2 mb-3">
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'todas' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('todas')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>📋 Todas</span>
+              <span className="badge bg-white text-dark">{contadores.todas}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'en_proceso' ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('en_proceso')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>📝 En Proceso</span>
+              <span className="badge bg-secondary">{contadores.en_proceso}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'vigentes' ? 'btn-success' : 'btn-outline-success'}`}
+            onClick={() => setCarpetaSeleccionada('vigentes')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>✅ Vigentes</span>
+              <span className={`badge ${carpetaSeleccionada === 'vigentes' ? 'bg-white text-success' : 'bg-success text-white'}`}>{contadores.vigentes}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'renovadas' ? 'btn-info' : 'btn-outline-info'}`}
+            onClick={() => setCarpetaSeleccionada('renovadas')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>🔄 Renovadas</span>
+              <span className={`badge ${carpetaSeleccionada === 'renovadas' ? 'bg-white text-info' : 'bg-info text-white'}`}>{contadores.renovadas}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'por_renovar' ? 'btn-warning' : 'btn-outline-warning'}`}
+            onClick={() => setCarpetaSeleccionada('por_renovar')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>⏰ Por Renovar</span>
+              <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'}`}>{contadores.por_renovar}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'vencidas' ? 'btn-danger' : 'btn-outline-danger'}`}
+            onClick={() => setCarpetaSeleccionada('vencidas')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>⚠️ Vencidas</span>
+              <span className={`badge ${carpetaSeleccionada === 'vencidas' ? 'bg-white text-danger' : 'bg-danger text-white'}`}>{contadores.vencidas}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'canceladas' ? 'btn-secondary' : 'btn-outline-secondary'}`}
+            onClick={() => setCarpetaSeleccionada('canceladas')}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>🚫 Canceladas</span>
+              <span className={`badge ${carpetaSeleccionada === 'canceladas' ? 'bg-white text-dark' : 'bg-secondary text-white'}`}>{contadores.canceladas}</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Alertas de duplicados */}
+      {(analisisDuplicados.polizasDuplicadas.length > 0 || 
+        analisisDuplicados.vinsDuplicados.length > 0 || 
+        analisisDuplicados.polizasVinDistinto.length > 0) && (
+        <div className="mb-3">
+          {analisisDuplicados.polizasDuplicadas.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas Duplicadas:</strong> {analisisDuplicados.polizasDuplicadas.length} registro(s) con misma póliza y mismo VIN
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas duplicadas
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasDuplicadas.forEach(d => {
+                      const clave = `${d.poliza}-${d.vin}`;
+                      if (!grupos[clave]) grupos[clave] = [];
+                      grupos[clave].push(d);
+                    });
+                    return Object.entries(grupos).map(([clave, items]) => (
+                      <li key={clave} className="mb-1">
+                        <strong>Póliza: {items[0].poliza}</strong> | VIN: {items[0].vin} 
+                        <span className="text-muted"> ({items.length} registros)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.vinsDuplicados.length > 0 && (
+            <div className="alert alert-warning mb-2" role="alert" style={{borderLeft: '4px solid #fd7e14'}}>
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ VINs Duplicados:</strong> {analisisDuplicados.vinsDuplicados.length} registro(s) con VIN repetido en diferentes pólizas
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver VINs duplicados - revisar
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.vinsDuplicados.forEach(d => {
+                      if (!grupos[d.vin]) grupos[d.vin] = [];
+                      grupos[d.vin].push(d);
+                    });
+                    return Object.entries(grupos).map(([vin, items]) => (
+                      <li key={vin} className="mb-1">
+                        <strong>VIN: {vin}</strong> aparece en pólizas: {items.map(i => i.poliza).join(', ')}
+                        <span className="text-muted"> ({items.length} pólizas)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+          {analisisDuplicados.polizasVinDistinto.length > 0 && (
+            <div className="alert alert-danger mb-2" role="alert">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <strong>⚠️ Pólizas con VIN Distinto:</strong> {analisisDuplicados.polizasVinDistinto.length} registro(s) con mismo número de póliza pero VIN diferente
+                </div>
+              </div>
+              <details className="mt-2">
+                <summary style={{cursor: 'pointer'}} className="text-decoration-underline">
+                  Ver pólizas con VIN distinto - revisar urgente
+                </summary>
+                <ul className="mt-2 mb-0" style={{fontSize: '0.9rem'}}>
+                  {(() => {
+                    const grupos = {};
+                    analisisDuplicados.polizasVinDistinto.forEach(d => {
+                      if (!grupos[d.poliza]) grupos[d.poliza] = [];
+                      grupos[d.poliza].push(d);
+                    });
+                    return Object.entries(grupos).map(([poliza, items]) => (
+                      <li key={poliza} className="mb-1">
+                        <strong>Póliza: {poliza}</strong> tiene VINs: {items.map(i => i.vin).join(', ')}
+                        <span className="text-muted"> ({items.length} VINs diferentes)</span>
+                      </li>
+                    ));
+                  })()}
+                </ul>
+              </details>
+            </div>
+          )}
+        </div>
+      )}
+
+      {expedientes.length > 0 && (
+        <div className="row mb-3 g-2">
+          <div className="col-12 col-md-8">
+            <BarraBusqueda 
+              busqueda={paginacion.busqueda}
+              setBusqueda={paginacion.setBusqueda}
+              placeholder="Buscar pólizas..."
+            />
+          </div>
+          <div className="col-12 col-md-4 text-md-end">
+            <small className="text-muted d-block mt-2 mt-md-0">
+              Mostrando {paginacion.itemsPaginados.length} de {paginacion.totalItems} pólizas
+            </small>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        {expedientes.length === 0 ? (
+          <div className="card-body text-center py-5">
+            <FileText size={48} className="text-muted mb-3" />
+            <h5 className="text-muted">No hay pólizas registradas</h5>
+            <p className="text-muted">Crea tu primera póliza para comenzar</p>
+          </div>
+        ) : paginacion.itemsPaginados.length === 0 ? (
+          <div className="card-body text-center py-5">
+            <Search size={48} className="text-muted mb-3" />
+            <h5 className="text-muted">No se encontraron resultados</h5>
+            <p className="text-muted">Intenta con otros términos de búsqueda</p>
+          </div>
+        ) : (
+          <>
+            {/* Vista Desktop - Tabla */}
+            <div className="table-responsive d-none d-lg-block">
+              <table className="table table-hover table-sm mb-0" style={{ fontSize: '0.875rem' }}>
+                <thead className="table-light">
+                  <tr>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Póliza</th>
+                    <th style={{ width: '240px', verticalAlign: 'middle', textAlign: 'center' }}>Cliente</th>
+                    <th style={{ width: '100px', verticalAlign: 'middle', textAlign: 'center' }}>Compañía</th>
+                    <th style={{ width: '210px', verticalAlign: 'middle', textAlign: 'center' }}>Producto</th>
+                    <th style={{ width: '80px', textAlign: 'center' }}>
+                      <div>Etapa</div>
+                      <div>Activa</div>
+                    </th>
+                    <th style={{ width: '130px', verticalAlign: 'middle', textAlign: 'center' }}>Agente</th>
+                    <th style={{ width: '200px', textAlign: 'center' }}>
+                      <div>Estatus Pago</div>
+                      <div>y Progreso</div>
+                    </th>
+                    <th style={{ width: '100px', textAlign: 'center' }}>
+                      <div>Vigencia</div>
+                      <div>Pago</div>
+                    </th>
+                    <th width="150" style={{ verticalAlign: 'middle', textAlign: 'center' }}>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginacion.itemsPaginados.map((expediente) => {
+                    // Extraer clave del agente del campo expediente.agente
+                    const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                    const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                    
+                    // Detectar tipo de duplicado para este expediente
+                    const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
+                    const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
+                    const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
+                    
+                    return (
+                      <tr key={expediente.id} style={{ verticalAlign: 'middle' }}>
+                        <td style={{ verticalAlign: 'middle' }}>
+                          <div>
+                            <strong className="text-primary">{expediente.numero_poliza || '-'}</strong>
+                            {esDuplicadaCompleta && (
+                              <div>
+                                <span className="badge bg-warning text-dark" title="Póliza duplicada (misma póliza + mismo VIN)">
+                                  ⚠️ Duplicada
+                                </span>
+                              </div>
+                            )}
+                            {esVinDuplicado && (
+                              <div>
+                                <span className="badge" style={{ backgroundColor: '#fd7e14', color: 'white' }} title="VIN duplicado en otra póliza - Revisar">
+                                  ⚠️ VIN Duplicado
+                                </span>
+                              </div>
+                            )}
+                            {esPolizaVinDistinto && (
+                              <div>
+                                <span className="badge bg-danger" title="Mismo número de póliza con VIN diferente - Revisar urgente">
+                                  ⚠️ Póliza VIN Distinto
+                                </span>
+                              </div>
+                            )}
+                            {expediente.endoso && (
+                              <div><small className="text-muted">End: {expediente.endoso}</small></div>
+                            )}
+                            {expediente.inciso && (
+                              <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
+                            )}
+                            {/* Fechas de captura y emisión */}
+                            <div style={{ marginTop: '4px', fontSize: '0.7rem', lineHeight: '1.3' }}>
+                              {expediente.created_at && (
+                                <div>
+                                  <div className="text-muted">Captura</div>
+                                  <div>{utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                                </div>
+                              )}
+                              {expediente.fecha_emision && (
+                                <div style={{ marginTop: '2px' }}>
+                                  <div className="text-muted">Emisión</div>
+                                  <div>{utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                        <td><InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} /></td>
+                        <td style={{ textAlign: 'center' }}>{expediente.compania}</td>
+                        <td style={{ fontSize: '0.7rem' }}>
+                          <div>
+                            <strong>{expediente.producto}</strong>
+                            {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos') || expediente.producto?.includes('Auto')) && (
+                              <>
+                                {expediente.tipo_cobertura && (
+                                  <div className="text-muted">
+                                    {expediente.tipo_cobertura}
+                                  </div>
+                                )}
+                                {(expediente.marca || expediente.modelo) && (
+                                  <div>
+                                    {expediente.marca} {expediente.modelo}
+                                  </div>
+                                )}
+                                {(expediente.anio || expediente.numero_serie) && (
+                                  <div className="text-muted">
+                                    {expediente.anio && <>Año: {expediente.anio}</>}
+                                    {expediente.anio && expediente.numero_serie && <> | </>}
+                                    {expediente.numero_serie && <>VIN: {expediente.numero_serie}</>}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', fontSize: '0.7rem' }}>
+                          <Badge tipo="etapa" valor={expediente.etapa_activa} />
+                          {expediente.motivoCancelacion && (
+                            <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '0.7rem', textAlign: 'center', lineHeight: '1.3' }}>
+                          {(() => {
+                            const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
+                            if (agenteInfo) {
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
+                            } else if (expediente.agente) {
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                claveAgente = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
+                              }
+                            }
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.65rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.65rem', color: '#6c757d', marginTop: '2px' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div>
+                            {/* Tipo y Estatus de Pago */}
+                            <EstadoPago expediente={expediente} />
+                            
+                            {/* Estado del próximo recibo pendiente (solo para fraccionado) */}
+                            {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
+                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
+                             expediente.inicio_vigencia && (
+                              (() => {
+                                // 🎯 SOLO CONSULTAR CAMPOS DE BD - SIN CÁLCULOS
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
+                                const estatusPago = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase();
+                                
+                                // Determinar color según estatus de BD
+                                let colorClass = 'text-info';
+                                if (estatusPago === 'pagado' || pagosRealizados >= numeroPagos) {
+                                  colorClass = 'text-success fw-bold';
+                                } else if (estatusPago === 'vencido') {
+                                  colorClass = 'text-danger fw-bold';
+                                } else if (estatusPago.includes('vencer') || estatusPago === 'por vencer') {
+                                  colorClass = 'text-warning fw-bold';
+                                }
+                                
+                                // Mostrar progreso y estatus
+                                const proximoRecibo = pagosRealizados + 1;
+                                const estatusDisplay = pagosRealizados >= numeroPagos ? 'Pagado' : 
+                                                      (expediente.estatus_pago || expediente.estatusPago || 'Pendiente');
+                                
+                                return (
+                                  <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                                    <span className={colorClass}>
+                                      {pagosRealizados >= numeroPagos ? numeroPagos : proximoRecibo}/{numeroPagos} {estatusDisplay}
+                                    </span>
+                                  </div>
+                                );
+                              })()
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '0.7rem', lineHeight: '1.4', textAlign: 'center' }}>
+                          <div>
+                            {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
+                          </div>
+                          <div>
+                            {expediente.termino_vigencia ? utils.formatearFecha(expediente.termino_vigencia, 'cortaY') : '-'}
+                          </div>
+                          <div className="fw-semibold" style={{ marginTop: '2px', color: '#f59e0b' }}>
+                            {(() => {
+                              // 🎯 USAR CAMPO DEL EXPEDIENTE (ya no vienen recibos en listado)
+                              return expediente.fecha_vencimiento_pago ? utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY') : 
+                                     expediente.proximoPago ? utils.formatearFecha(expediente.proximoPago, 'cortaY') :
+                                     expediente.fecha_pago ? utils.formatearFecha(expediente.fecha_pago, 'cortaY') : '-';
+                            })()}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', maxWidth: '120px' }}>
+                            {/* === BOTONES DE RENOVACIÓN === */}
+                            {(() => {
+                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                              
+                              if (!estaPorRenovar) return null;
+                              
+                              const etapaActual = expediente.etapa_activa || '';
+                              
+                              // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
+                              const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                              !etapaActual.includes('Cotización') && 
+                                                              !etapaActual.includes('Enviada') &&
+                                                              !etapaActual.includes('Pendiente de Emisión');
+                              
+                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                             etapaActual === 'Renovación Enviada';
+                              
+                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                              
+                              return (
+                                <>
+                                  {puedeIniciarCotizacion && (
+                                    <button
+                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                      className="btn btn-primary btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Cotizar Renovación"
+                                    >
+                                      <FileText size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeMarcarAutorizado && (
+                                    <button
+                                      onClick={() => marcarRenovacionAutorizada(expediente)}
+                                      className="btn btn-success btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Marcar como Autorizado"
+                                    >
+                                      <CheckCircle size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeAgregarRenovada && (
+                                    <button
+                                      onClick={() => abrirModalPolizaRenovada(expediente)}
+                                      className="btn btn-info btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Agregar Póliza Renovada"
+                                    >
+                                      <RefreshCw size={12} />
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
+
+                            <button
+                              onClick={() => abrirModalCompartir(expediente)}
+                              className="btn btn-success btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Compartir"
+                            >
+                              <Share2 size={12} />
+                            </button>
+
+                            {(() => {
+                              // ✅ El botón de pago debe estar disponible independientemente de la etapa
+                              // Solo se oculta si ya está pagado o si la póliza está cancelada
+                              const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                              
+                              // ✅ Verificar estatus_pago tanto en camelCase como snake_case
+                              const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
+                              const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                              
+                              // 🔥 Para pagos fraccionados, verificar si hay pagos pendientes usando contador directo
+                              const esFraccionado = (expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO');
+                              let tienePagosPendientes = false;
+                              
+                              if (esFraccionado && (expediente.frecuenciaPago || expediente.frecuencia_pago)) {
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
+                                
+                                // Si no ha completado todos los pagos, tiene pendientes
+                                tienePagosPendientes = pagosRealizados < numeroPagos;
+                              }
+                              
+                              // ✅ CRÍTICO: No mostrar botón si el pago YA está aplicado (preservar integridad financiera)
+                              // Para fraccionados: mostrar si tiene pagos pendientes
+                              // Para pago único: mostrar si no está pagado
+                              const noPagado = esFraccionado 
+                                ? tienePagosPendientes
+                                : (estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado');
+                              
+                              return etapaValida && noPagado ? (
+                                <button
+                                  onClick={() => aplicarPago(expediente.id)}
+                                  className="btn btn-success btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                  title="Aplicar Pago"
+                                >
+                                  <DollarSign size={12} />
+                                </button>
+                              ) : null;
+                            })()}
+
+                            
+                            {expediente.etapa_activa !== 'Cancelada' && (
+                              <button
+                                onClick={() => iniciarCancelacion(expediente)}
+                                className="btn btn-danger btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Cancelar Póliza"
+                              >
+                                <XCircle size={12} />
+                              </button>
+                            )}
+                            
+                            <button
+                              onClick={() => verDetalles(expediente)}
+                              className="btn btn-outline-primary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Ver detalles"
+                            >
+                              <Eye size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => editarExpediente(expediente)}
+                              className="btn btn-outline-secondary btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Editar"
+                            >
+                              <Edit size={12} />
+                            </button>
+                            
+                            <button
+                              onClick={() => eliminarExpediente(expediente.id)}
+                              className="btn btn-outline-danger btn-sm"
+                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                              title="Eliminar"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Vista Móvil - Cards */}
+            <div className="d-lg-none p-3">
+              {paginacion.itemsPaginados.map((expediente) => {
+                // Extraer clave del agente del campo expediente.agente
+                const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+                const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
+                const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
+                const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
+                const esPolizaVinDistinto = analisisDuplicados.polizasVinDistinto.find(d => d.id === expediente.id);
+                
+                return (
+                  <div key={expediente.id} className="card mb-3 shadow-sm">
+                    <div className="card-body p-3">
+                      {/* Header - Número de Póliza */}
+                      <div className="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                          <h6 className="mb-1">
+                            <strong className="text-primary">{expediente.numero_poliza || 'Sin número'}</strong>
+                          </h6>
+                          {(expediente.endoso || expediente.inciso) && (
+                            <small className="text-muted">
+                              {expediente.endoso && `End: ${expediente.endoso}`}
+                              {expediente.endoso && expediente.inciso && ' | '}
+                              {expediente.inciso && `Inc: ${expediente.inciso}`}
+                            </small>
+                          )}
+                        </div>
+                        <Badge tipo="etapa" valor={expediente.etapa_activa} />
+                      </div>
+
+                      {/* Alertas de duplicados */}
+                      {(esDuplicadaCompleta || esVinDuplicado || esPolizaVinDistinto) && (
+                        <div className="mb-2">
+                          {esDuplicadaCompleta && (
+                            <span className="badge bg-warning text-dark me-1" style={{ fontSize: '0.7rem' }}>
+                              ⚠️ Duplicada
+                            </span>
+                          )}
+                          {esVinDuplicado && (
+                            <span className="badge me-1" style={{ fontSize: '0.7rem', backgroundColor: '#fd7e14', color: 'white' }}>
+                              ⚠️ VIN Duplicado
+                            </span>
+                          )}
+                          {esPolizaVinDistinto && (
+                            <span className="badge bg-danger" style={{ fontSize: '0.7rem' }}>
+                              ⚠️ Póliza VIN Distinto
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Cliente */}
+                      <div className="mb-2 pb-2 border-bottom">
+                        <small className="text-muted d-block">Cliente</small>
+                        <InfoCliente expediente={expediente} cliente={clientesMap[expediente.cliente_id]} />
+                      </div>
+
+                      {/* Compañía y Producto */}
+                      <div className="row g-2 mb-2">
+                        <div className="col-6">
+                          <small className="text-muted d-block">Compañía</small>
+                          <strong style={{ fontSize: '0.875rem' }}>{expediente.compania}</strong>
+                        </div>
+                        <div className="col-6">
+                          <small className="text-muted d-block">Producto</small>
+                          <strong style={{ fontSize: '0.875rem' }}>{expediente.producto}</strong>
+                          {(expediente.producto === 'Autos' || expediente.producto?.includes('Autos') || expediente.producto?.includes('Auto')) && (
+                            <>
+                              {expediente.tipo_cobertura && (
+                                <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                                  {expediente.tipo_cobertura}
+                                </div>
+                              )}
+                              {(expediente.marca || expediente.modelo) && (
+                                <div style={{ fontSize: '0.75rem' }}>
+                                  {expediente.marca} {expediente.modelo}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Agente */}
+                      {expediente.agente && (
+                        <div className="mb-2">
+                          <small className="text-muted d-block">Agente</small>
+                          {(() => {
+                            let claveAgente = '';
+                            let nombreAgente = '';
+                            let apellidoAgente = '';
+                            let nombreVendedor = '';
+                            let apellidoVendedor = '';
+                            
+                            // Obtener información del agente
+                            if (agenteInfo) {
+                              claveAgente = agenteInfo.codigoAgente || '';
+                              const nombreCompleto = (agenteInfo.nombre || '').trim();
+                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || '';
+                            } else if (expediente.agente) {
+                              const textoAgente = expediente.agente || '';
+                              const partes = textoAgente.split('-');
+                              if (partes.length >= 2) {
+                                claveAgente = partes[0].trim();
+                                const nombreCompleto = partes.slice(1).join('-').trim();
+                                const palabras = nombreCompleto.split(/\s+/);
+                                nombreAgente = palabras[0] || '';
+                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
+                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
+                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                              } else {
+                                claveAgente = textoAgente;
+                              }
+                            }
+                            
+                            // Obtener información del vendedor
+                            if (vendedorInfo) {
+                              const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
+                              nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
+                              apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            }
+                            
+                            return (
+                              <div>
+                                <div style={{ fontSize: '0.875rem' }}><strong>{claveAgente || '-'}</strong></div>
+                                {nombreAgente && <div style={{ fontSize: '0.75rem' }}>{nombreAgente} {apellidoAgente}</div>}
+                                {nombreVendedor && (
+                                  <div style={{ fontSize: '0.75rem', color: '#6c757d' }}>
+                                    V: {nombreVendedor} {apellidoVendedor}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Estado de Pago */}
+                      <div className="mb-2">
+                        <small className="text-muted d-block">Estado de Pago</small>
+                        <EstadoPago expediente={expediente} />
+                        <CalendarioPagos 
+                          expediente={expediente} 
+                          calcularProximoPago={calcularProximoPago}
+                          compacto={true}
+                        />
+                      </div>
+
+                      {/* Vigencia */}
+                      <div className="row g-2 mb-3">
+                        <div className="col-6">
+                          <small className="text-muted d-block">Inicio Vigencia</small>
+                          <span style={{ fontSize: '0.875rem' }}>
+                            {expediente.inicio_vigencia ? utils.formatearFecha(expediente.inicio_vigencia, 'cortaY') : '-'}
+                          </span>
+                        </div>
+                        <div className="col-6">
+                          <small className="text-muted d-block">Fin Vigencia</small>
+                          <span style={{ fontSize: '0.875rem' }}>
+                            {expediente.termino_vigencia ? utils.formatearFecha(expediente.termino_vigencia, 'cortaY') : '-'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Fechas */}
+                      {(expediente.created_at || expediente.fecha_emision) && (
+                        <div className="mb-3" style={{ fontSize: '0.75rem', color: '#6c757d' }}>
+                          {expediente.created_at && (
+                            <div>📝 Capturada: {utils.formatearFecha(expediente.created_at, 'cortaY')}</div>
+                          )}
+                          {expediente.fecha_emision && (
+                            <div>📄 Emitida: {utils.formatearFecha(expediente.fecha_emision, 'cortaY')}</div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Botones de Acción */}
+                      <div className="d-flex flex-wrap gap-2">
+                        {/* Botones de renovación */}
+                        {(() => {
+                          const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                          if (!estaPorRenovar) return null;
+                          
+                          const etapaActual = expediente.etapa_activa || '';
+                          const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
+                                                          !etapaActual.includes('Cotización') && 
+                                                          !etapaActual.includes('Enviada') &&
+                                                          !etapaActual.includes('Pendiente de Emisión');
+                          
+                          const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                         etapaActual === 'Renovación Enviada';
+                          
+                          const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                          
+                          return (
+                            <>
+                              {puedeIniciarCotizacion && (
+                                <button
+                                  onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                  className="btn btn-primary btn-sm"
+                                  title="Cotizar Renovación"
+                                >
+                                  <FileText size={14} className="me-1" />
+                                  Cotizar
+                                </button>
+                              )}
+                              {puedeMarcarAutorizado && (
+                                <button
+                                  onClick={() => marcarRenovacionAutorizada(expediente)}
+                                  className="btn btn-success btn-sm"
+                                  title="Marcar como Autorizado"
+                                >
+                                  <CheckCircle size={14} className="me-1" />
+                                  Autorizar
+                                </button>
+                              )}
+                              {puedeAgregarRenovada && (
+                                <button
+                                  onClick={() => abrirModalPolizaRenovada(expediente)}
+                                  className="btn btn-info btn-sm"
+                                  title="Agregar Póliza Renovada"
+                                >
+                                  <RefreshCw size={14} className="me-1" />
+                                  Renovar
+                                </button>
+                              )}
+                            </>
+                          );
+                        })()}
+
+                        <button
+                          onClick={() => abrirModalCompartir(expediente)}
+                          className="btn btn-success btn-sm"
+                          title="Compartir"
+                        >
+                          <Share2 size={14} className="me-1" />
+                          Compartir
+                        </button>
+
+                        {(() => {
+                          const etapaValida = expediente.etapa_activa !== 'Cancelada';
+                          const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
+                          const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
+                          
+                          // 🔥 Para pagos fraccionados, verificar si hay pagos pendientes
+                          const esFraccionado = (expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO');
+                          let tienePagosPendientes = false;
+                          
+                          if (esFraccionado && (expediente.frecuenciaPago || expediente.frecuencia_pago)) {
+                            const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                            const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
+                            
+                            let pagosRealizados = 0;
+                            if (fechaUltimoPago && expediente.inicio_vigencia) {
+                              const fechaUltimo = new Date(fechaUltimoPago);
+                              const fechaInicio = new Date(expediente.inicio_vigencia);
+                              
+                              const mesesPorFrecuencia = {
+                                'Mensual': 1,
+                                'Trimestral': 3,
+                                'Semestral': 6
+                              };
+                              
+                              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
+                              const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
+                                                          (fechaUltimo.getMonth() - fechaInicio.getMonth());
+                              
+                              pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
+                              pagosRealizados = Math.min(pagosRealizados, numeroPagos);
+                            }
+                            
+                            // Si no ha completado todos los pagos, tiene pendientes
+                            tienePagosPendientes = pagosRealizados < numeroPagos;
+                          }
+                          
+                          // Para fraccionados: mostrar si tiene pagos pendientes
+                          // Para pago único: mostrar si no está pagado
+                          const noPagado = esFraccionado 
+                            ? tienePagosPendientes
+                            : (estatusPagoDB !== 'pagado' && estatusPagoNorm !== 'pagado');
+                          
+                          return etapaValida && noPagado ? (
+                            <button
+                              onClick={() => aplicarPago(expediente.id)}
+                              className="btn btn-success btn-sm"
+                              title="Aplicar Pago"
+                            >
+                              <DollarSign size={14} className="me-1" />
+                              Pagar
+                            </button>
+                          ) : null;
+                        })()}
+
+                        <button
+                          onClick={() => verDetalles(expediente)}
+                          className="btn btn-outline-primary btn-sm"
+                          title="Ver detalles"
+                        >
+                          <Eye size={14} className="me-1" />
+                          Ver
+                        </button>
+                        
+                        <button
+                          onClick={() => editarExpediente(expediente)}
+                          className="btn btn-outline-secondary btn-sm"
+                          title="Editar"
+                        >
+                          <Edit size={14} className="me-1" />
+                          Editar
+                        </button>
+
+                        {expediente.etapa_activa !== 'Cancelada' && (
+                          <button
+                            onClick={() => iniciarCancelacion(expediente)}
+                            className="btn btn-danger btn-sm"
+                            title="Cancelar Póliza"
+                          >
+                            <XCircle size={14} className="me-1" />
+                            Cancelar
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => eliminarExpediente(expediente.id)}
+                          className="btn btn-outline-danger btn-sm"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {paginacion.totalPaginas > 1 && (
+              <div className="card-footer">
+                <Paginacion 
+                  paginaActual={paginacion.paginaActual}
+                  totalPaginas={paginacion.totalPaginas}
+                  setPaginaActual={paginacion.setPaginaActual}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Modal de Selección de Método de Captura */}
+      {mostrarModalMetodoCaptura && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header border-0 pb-0">
+                <h5 className="modal-title w-100 text-center">
+                  📋 Selecciona el Método de Captura
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close"
+                  onClick={() => setMostrarModalMetodoCaptura(false)}
+                ></button>
+              </div>
+              
+              <div className="modal-body pt-2">
+                <p className="text-center text-muted mb-4">
+                  ¿Cómo deseas agregar la nueva póliza?
+                </p>
+
+                {/* Input file oculto para PDF */}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  id="pdfFileInput"
+                  ref={(input) => {
+                    if (input) {
+                      input.onclick = () => {
+                        // Guardar referencia para poder procesar el archivo después
+                        window._pdfInputForExtractor = input;
+                      };
+                    }
+                  }}
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                      // Cerrar modal de selección
+                      setMostrarModalMetodoCaptura(false);
+                      // Cambiar a vista formulario
+                      setVistaActual('formulario');
+                      setModoEdicion(false);
+                      limpiarFormulario();
+                      // Guardar archivo y abrir el extractor directamente en modo automático
+                      window._selectedPDFFile = file;
+                      window._autoExtractorMode = true;
+                      setTimeout(() => {
+                        setMostrarExtractorPDF(true);
+                      }, 100);
+                    }
+                    // NO resetear el input todavía
+                  }}
+                />
+
+                <div className="row g-3">
+                  {/* Opción Captura Manual */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-primary text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        setMostrarModalMetodoCaptura(false);
+                        setVistaActual('formulario');
+                        setModoEdicion(false);
+                        limpiarFormulario();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(13,110,253,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          ✍️
+                        </div>
+                        <h5 className="card-title text-primary mb-2">Captura Manual</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Llena el formulario campo por campo
+                        </p>
+                        <button 
+                          className="btn btn-primary w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMostrarModalMetodoCaptura(false);
+                            setVistaActual('formulario');
+                            setModoEdicion(false);
+                            limpiarFormulario();
+                          }}
+                        >
+                          Captura Manual
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opción Extractor PDF */}
+                  <div className="col-md-6">
+                    <div 
+                      className="card h-100 border-success text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        document.getElementById('pdfFileInput')?.click();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,135,84,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body">
+                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                          📄
+                        </div>
+                        <h5 className="card-title text-success mb-2">Extractor PDF</h5>
+                        <p className="card-text text-muted small mb-3">
+                          Importa datos automáticamente desde el PDF
+                        </p>
+                        <button 
+                          className="btn btn-success w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('pdfFileInput')?.click();
+                          }}
+                        >
+                          <Upload size={16} className="me-2" />
+                          Importar PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="alert alert-info mt-4 mb-0">
+                  <small>
+                    <strong>💡 Recomendación:</strong> Usa el extractor PDF para mayor velocidad y precisión. 
+                    La captura manual es útil cuando no tienes el PDF de la póliza.
+                  </small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+export default ListaExpedientes;
+
+

@@ -4,6 +4,41 @@
  */
 
 /**
+ * Normaliza el estatus del backend al formato del frontend
+ * Backend usa: 'Pago por vencer' | 'Pendiente' | 'Vencido' | 'Pagado'
+ * Frontend usa: 'Por Vencer' | 'Pendiente' | 'Vencido' | 'Pagado'
+ */
+export function normalizarEstatusBackend(estatusBackend) {
+  if (!estatusBackend) return 'Pendiente';
+  
+  const estatusLower = estatusBackend.toLowerCase();
+  
+  // Mapeo de variantes del backend
+  if (estatusLower === 'pago por vencer' || estatusLower === 'por vencer') {
+    return 'Por Vencer';
+  }
+  
+  // Capitalizar primera letra para consistencia
+  return estatusBackend.charAt(0).toUpperCase() + estatusBackend.slice(1).toLowerCase();
+}
+
+/**
+ * Convierte estatus del frontend al formato del backend
+ * Para cuando necesitamos enviar datos al backend
+ */
+export function convertirEstatusParaBackend(estatusFrontend) {
+  if (!estatusFrontend) return 'Pendiente';
+  
+  const estatusLower = estatusFrontend.toLowerCase();
+  
+  if (estatusLower === 'por vencer') {
+    return 'Pago por vencer'; // Backend espera este formato
+  }
+  
+  return estatusFrontend;
+}
+
+/**
  * Calcula días restantes hasta una fecha
  * @param {string|Date} fechaVencimiento - Fecha de vencimiento
  * @returns {number} Días restantes (negativo si ya pasó)
