@@ -16,7 +16,7 @@ import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-export function usePagos({ expedientes, setExpedientes, cargarExpedientes }) {
+export function usePagos({ expedientes, setExpedientes, cargarExpedientes, onPagoAplicado }) {
   // Estados del modal de pagos
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
@@ -168,10 +168,13 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes }) {
       setTimeout(async () => {
         if (cargarExpedientes) {
           await cargarExpedientes();
-        } else {
-          window.location.reload();
         }
-      }, 1000);
+        
+        // Ejecutar callback adicional (para recargar vista de detalles si es necesario)
+        if (onPagoAplicado) {
+          await onPagoAplicado(expedienteParaPago);
+        }
+      }, 500);
 
     } catch (error) {
       console.error('❌ Error al procesar pago:', error);

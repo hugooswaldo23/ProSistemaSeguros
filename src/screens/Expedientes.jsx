@@ -89,6 +89,7 @@ import Paginacion from '../components/common/Paginacion';
 import CalendarioPagos from '../components/expedientes/CalendarioPagos';
 import ModalCancelacion from '../components/expedientes/ModalCancelacion';
 import ListaExpedientes from '../components/expedientes/ListaExpedientes';
+import DetallesExpediente from '../components/expedientes/DetallesExpediente';
 import Formulario from '../components/expedientes/FormularioExpediente';
 import ExtractorPolizasPDF from '../components/expedientes/ExtractorPolizasPDF';
 
@@ -99,221 +100,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/b
 // ============= COMPONENTES DE VISTA =============
 
 
-
-const DetallesExpediente = React.memo(({ 
-  expedienteSeleccionado,
-  setExpedienteSeleccionado,
-  setVistaActual,
-  aplicarPago,
-  puedeAvanzarEstado,
-  avanzarEstado,
-  obtenerSiguienteEstado,
-  puedeCancelar,
-  iniciarCancelacion,
-  editarExpediente,
-  calcularSiguientePago,
-  calculartermino_vigencia,
-  calcularProximoPago,
-  abrirModalCompartir,
-  enviarAvisoPago,
-  historial = [] // Historial del expediente
-}) => {
-  const [clienteInfo, setClienteInfo] = useState(null);
-  
-  // Debug: verificar que el historial llega correctamente
-  useEffect(() => {
-    console.log('🔍 DetallesExpediente - Historial recibido:', {
-      cantidad: historial?.length || 0,
-      historial: historial,
-      expediente_id: expedienteSeleccionado?.id
-    });
-  }, [historial, expedienteSeleccionado?.id]);
-  
-  // Estados para controlar secciones colapsables (todas cerradas por defecto)
-  const [mostrarAsegurado, setMostrarAsegurado] = useState(false);
-  const [mostrarPoliza, setMostrarPoliza] = useState(false);
-  const [mostrarVigencia, setMostrarVigencia] = useState(false);
-  const [mostrarVehiculo, setMostrarVehiculo] = useState(false);
-  const [mostrarFinanciera, setMostrarFinanciera] = useState(false);
-  const [mostrarCoberturas, setMostrarCoberturas] = useState(false);
-  const [mostrarHistorial, setMostrarHistorial] = useState(false);
-  
-  // Helper: parsear coberturas de forma segura
-  const obtenerCoberturas = useMemo(() => {
-    if (!expedienteSeleccionado?.coberturas) return [];
-    
-    // Si ya es un array, devolverlo
-    if (Array.isArray(expedienteSeleccionado.coberturas)) {
-      return expedienteSeleccionado.coberturas;
-    }
-    
-    // Si es un string JSON, parsearlo
-    if (typeof expedienteSeleccionado.coberturas === 'string') {
-      try {
-        const parsed = JSON.parse(expedienteSeleccionado.coberturas);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (e) {
-        console.error('Error parseando coberturas:', e);
-        return [];
-      }
-    }
-    
-    return [];
-  }, [expedienteSeleccionado?.coberturas]);
-  
-  // Debug: ver qué coberturas tiene el expediente
-  useEffect(() => {
-    if (expedienteSeleccionado) {
-      console.log('🔍 Expediente seleccionado para detalles:', {
-        numero_poliza: expedienteSeleccionado.numero_poliza,
-        tiene_coberturas: !!expedienteSeleccionado.coberturas,
-        cantidad_coberturas: expedienteSeleccionado.coberturas?.length || 0,
-        coberturas: expedienteSeleccionado.coberturas,
-        tipo_cobertura: expedienteSeleccionado.tipo_cobertura,
-        suma_asegurada: expedienteSeleccionado.suma_asegurada,
-        deducible: expedienteSeleccionado.deducible
-      });
-    }
-  }, [expedienteSeleccionado]);
-  
-  // Cargar información del cliente cuando se selecciona un expediente
-  useEffect(() => {
-    const cargarCliente = async () => {
-      if (expedienteSeleccionado?.cliente_id) {
-        try {
-          const response = await fetch(`${API_URL}/api/clientes`);
-          const clientes = await response.json();
-          const cliente = clientes.find(c => c.id === expedienteSeleccionado.cliente_id);
-          setClienteInfo(cliente);
-        } catch (error) {
-          console.error('Error al cargar cliente:', error);
-        }
-      } else {
-        setClienteInfo(null);
-      }
-    };
-    
-    cargarCliente();
-  }, [expedienteSeleccionado?.cliente_id]);
-  
-  return (
-  <div className="p-4">
-    <div className="d-flex justify-content-between align-items-center mb-4">
-      <h3 className="mb-0">Detalles del Expediente</h3>
-      <div className="d-flex gap-3">
-        {expedienteSeleccionado && 
-         ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida'].includes(expedienteSeleccionado.etapa_activa) && 
-         ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
-          <button
-            onClick={() => {
-              aplicarPago(expedienteSeleccionado.id);
-              const fechaActual = new Date().toISOString().split('T')[0];
-              const proximoPagoNuevo = calcularSiguientePago(expedienteSeleccionado);
-              
-              setExpedienteSeleccionado({
-                ...expedienteSeleccionado,
-                estatusPago: 'Pagado',
-                fechaUltimoPago: fechaActual,
-                proximoPago: proximoPagoNuevo
-              });
-              
-              if (proximoPagoNuevo) {
-                toast.success(`Pago aplicado. Próximo pago: ${new Date(proximoPagoNuevo).toLocaleDateString('es-MX')}`);
-              } else {
-                toast.success('Pago aplicado. No hay más pagos pendientes');
-              }
-            }}
-            className="btn btn-success d-flex align-items-center"
-          >
-            <DollarSign size={16} className="me-2" />
-            Aplicar Pago
-          </button>
-        )}
-
-        {expedienteSeleccionado && (
-          <button
-            onClick={() => abrirModalCompartir(expedienteSeleccionado)}
-            className="btn btn-success d-flex align-items-center"
-          >
-            <Share2 size={16} className="me-2" />
-            Compartir
-          </button>
-        )}
-
-        {expedienteSeleccionado && expedienteSeleccionado.etapa_activa !== 'Cancelada' && (
-          <button
-            onClick={() => iniciarCancelacion(expedienteSeleccionado)}
-            className="btn btn-danger d-flex align-items-center"
-          >
-            <XCircle size={16} className="me-2" />
-            Cancelar Póliza
-          </button>
-        )}
-        
-        <button
-          onClick={() => editarExpediente(expedienteSeleccionado)}
-          className="btn btn-primary d-flex align-items-center"
-        >
-          <Edit size={16} className="me-2" />
-          Editar
-        </button>
-        <button
-          onClick={() => setVistaActual('lista')}
-          className="btn btn-outline-secondary"
-        >
-          Volver
-        </button>
-      </div>
-    </div>
-
-    {expedienteSeleccionado && (
-      <div className="card">
-        <div className="card-body p-3">
-          <div className="row g-3">
-            <div className="col-12">
-              <DetalleExpediente
-                datos={expedienteSeleccionado}
-                coberturas={obtenerCoberturas}
-                utils={utils}
-                modo="caratula"
-                historialSlot={(
-                  <>
-                    {/* SECCIÓN ÚNICA: Timeline Unificado (Trazabilidad + Comunicaciones) */}
-                    <div className="mb-3">
-                      <TimelineExpediente 
-                        expedienteId={expedienteSeleccionado.id}
-                        expedienteData={expedienteSeleccionado}
-                      />
-                    </div>
-                  </>
-                )}
-              />
-            </div>
-            {/* Mostrar calendario para Fraccionado y Anual */}
-            {expedienteSeleccionado.inicio_vigencia && (
-              (expedienteSeleccionado.tipo_pago === 'Fraccionado' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
-              expedienteSeleccionado.tipo_pago === 'Anual' ||
-              (expedienteSeleccionado.forma_pago?.toUpperCase() === 'FRACCIONADO' && (expedienteSeleccionado.frecuenciaPago || expedienteSeleccionado.frecuencia_pago)) ||
-              expedienteSeleccionado.forma_pago?.toUpperCase() === 'ANUAL'
-            ) && (
-              <div className="col-12">
-                <CalendarioPagos 
-                  key={`calendario-${expedienteSeleccionado?.id}-${historial?.length || 0}`}
-                  expediente={expedienteSeleccionado}
-                  calcularProximoPago={calcularProximoPago}
-                  mostrarResumen={true}
-                  onEnviarAviso={enviarAvisoPago}
-                  historial={historial}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-  );
-});
 
 // Estado inicial del formulario (definido fuera del componente)
 const estadoInicialFormulario = {
@@ -739,7 +525,31 @@ const ModuloExpedientes = () => {
     procesandoPago,
     abrirModalAplicarPago,
     procesarPagoConComprobante
-  } = usePagos({ expedientes, setExpedientes, cargarExpedientes });
+  } = usePagos({ 
+    expedientes, 
+    setExpedientes, 
+    cargarExpedientes,
+    onPagoAplicado: useCallback(async (expediente) => {
+      // Si estamos en vista de detalles, solo recargar los recibos
+      if (vistaActual === 'detalles' && expedienteSeleccionado) {
+        try {
+          // Recargar solo los recibos para actualizar el calendario
+          const recibosResponse = await fetch(`${API_URL}/api/recibos/${expediente.id}`);
+          if (recibosResponse.ok) {
+            const recibosData = await recibosResponse.json();
+            const recibosArray = recibosData?.data || recibosData || [];
+            
+            setExpedienteSeleccionado(prev => ({
+              ...prev,
+              recibos: Array.isArray(recibosArray) ? recibosArray : []
+            }));
+          }
+        } catch (error) {
+          console.error('❌ Error al recargar recibos:', error);
+        }
+      }
+    }, [vistaActual, expedienteSeleccionado])
+  });
   
   useEffect(() => {
   fetch(`${API_URL}/api/aseguradoras`)
@@ -2827,6 +2637,40 @@ const ModuloExpedientes = () => {
             }
             
             console.log('💾 Procesamiento de recibos completado');
+            
+            // 📅 Actualizar fecha_vencimiento_pago del expediente con la fecha del próximo recibo pendiente
+            if (formularioParaGuardar.recibos && formularioParaGuardar.recibos.length > 0) {
+              const recibosPendientes = formularioParaGuardar.recibos
+                .filter(r => !r.fecha_pago_real)
+                .sort((a, b) => a.numero_recibo - b.numero_recibo);
+              
+              if (recibosPendientes.length > 0) {
+                const proximoRecibo = recibosPendientes[0];
+                const nuevaFechaVencimiento = proximoRecibo.fecha_vencimiento;
+                
+                // Solo actualizar si cambió la fecha
+                if (nuevaFechaVencimiento && nuevaFechaVencimiento !== formularioParaGuardar.fecha_vencimiento_pago) {
+                  console.log(`📅 Actualizando fecha_vencimiento_pago: ${formularioParaGuardar.fecha_vencimiento_pago} → ${nuevaFechaVencimiento}`);
+                  
+                  try {
+                    await fetch(`${API_URL}/api/expedientes/${formularioParaGuardar.id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ 
+                        fecha_vencimiento_pago: nuevaFechaVencimiento,
+                        fecha_pago: nuevaFechaVencimiento // Sincronizar fecha_pago también
+                      })
+                    });
+                    console.log('✅ Fecha de vencimiento actualizada correctamente');
+                  } catch (error) {
+                    console.error('❌ Error al actualizar fecha de vencimiento:', error);
+                  }
+                }
+              } else {
+                // Si no hay recibos pendientes, todos están pagados
+                console.log('✅ Todos los recibos están pagados');
+              }
+            }
           }
           
           // ✨ Registrar actualización de datos en historial (trazabilidad)
@@ -3015,18 +2859,80 @@ const ModuloExpedientes = () => {
               }
             }
             
-            // 💰 DETECTAR cambio manual en estatus de pago para agregarlo a camposModificados
+            // 💰 DETECTAR cambio manual en estatus de pago Y cambios en recibos (aplicar/remover pagos)
             let cambioEstatusPago = null;
             let etapaAfectadaPorPago = null;
             
+            // 🔍 DETECTAR pagos aplicados o removidos comparando recibos directamente
+            let reciboAfectado = null;
+            let pagoAplicado = false;
+            let pagoRemovido = false;
+            
+            if (formularioOriginal?.recibos && formularioParaGuardar.recibos) {
+              console.log('🔍 [PAGO LOG] Comparando recibos...');
+              
+              // Buscar recibos con cambios en fecha_pago_real
+              for (const reciboOriginal of formularioOriginal.recibos) {
+                const reciboNuevo = formularioParaGuardar.recibos.find(r => r.numero_recibo === reciboOriginal.numero_recibo);
+                if (!reciboNuevo) continue;
+                
+                const teniaPago = !!reciboOriginal.fecha_pago_real;
+                const tienePago = !!reciboNuevo.fecha_pago_real;
+                
+                // Detectar si se removió un pago
+                if (teniaPago && !tienePago) {
+                  pagoRemovido = true;
+                  reciboAfectado = {
+                    numero: reciboOriginal.numero_recibo,
+                    monto: reciboOriginal.monto || reciboOriginal.monto_recibo,
+                    fecha_vencimiento: reciboOriginal.fecha_vencimiento,
+                    comprobante_nombre: reciboOriginal.comprobante_nombre,
+                    comprobante_url: reciboOriginal.comprobante_url,
+                    fecha_pago_real: reciboOriginal.fecha_pago_real
+                  };
+                  console.log('🔍 [PAGO LOG] Pago removido detectado:', reciboAfectado);
+                  break;
+                }
+                
+                // Detectar si se aplicó un pago
+                if (!teniaPago && tienePago) {
+                  pagoAplicado = true;
+                  reciboAfectado = {
+                    numero: reciboNuevo.numero_recibo,
+                    monto: reciboNuevo.monto || reciboNuevo.monto_recibo,
+                    fecha_vencimiento: reciboNuevo.fecha_vencimiento,
+                    comprobante_nombre: reciboNuevo.comprobante_nombre,
+                    comprobante_url: reciboNuevo.comprobante_url,
+                    fecha_pago_real: reciboNuevo.fecha_pago_real
+                  };
+                  console.log('🔍 [PAGO LOG] Pago aplicado detectado:', reciboAfectado);
+                  break;
+                }
+              }
+            }
+            
+            // 🔍 Buscar próximo recibo pendiente (para pago removido o aplicado)
+            let proximoReciboPendiente = null;
+            if ((pagoRemovido || pagoAplicado) && formularioParaGuardar.recibos) {
+              const recibosPendientes = formularioParaGuardar.recibos
+                .filter(r => !r.fecha_pago_real)
+                .sort((a, b) => a.numero_recibo - b.numero_recibo);
+              
+              if (recibosPendientes.length > 0) {
+                const proximo = recibosPendientes[0];
+                proximoReciboPendiente = {
+                  numero: proximo.numero_recibo,
+                  monto: proximo.monto || proximo.monto_recibo,
+                  fecha_vencimiento: proximo.fecha_vencimiento,
+                  estatus: proximo.estatus
+                };
+              }
+            }
+            
             if (expedienteEnBD) {
               console.log('🔍 [PAGO LOG] Verificando cambio en estatus de pago...');
-              console.log('🔍 [PAGO LOG] expedienteEnBD:', expedienteEnBD);
-              console.log('🔍 [PAGO LOG] expedientePayload:', expedientePayload);
-              console.log('🔍 [PAGO LOG] estatusRecalculado:', estatusRecalculado);
               
               // Comparar BD actual vs lo que se va a guardar
-              // USAR formularioParaGuardar en lugar de expedientePayload
               const estatusPagoAnterior = estatusRecalculado 
                 ? normalizar(estatusRecalculado.anterior)
                 : normalizar(expedienteEnBD.estatusPago || expedienteEnBD.estatus_pago);
@@ -3034,14 +2940,20 @@ const ModuloExpedientes = () => {
                 ? normalizar(estatusRecalculado.nuevo)
                 : normalizar(formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago);
               
-              console.log('🔍 [PAGO LOG] estatusPagoAnterior (normalizado):', estatusPagoAnterior);
-              console.log('🔍 [PAGO LOG] estatusPagoNuevo (normalizado):', estatusPagoNuevo);
-              console.log('🔍 [PAGO LOG] Son diferentes?:', estatusPagoAnterior !== estatusPagoNuevo);
-              console.log('🔍 [PAGO LOG] Ambos tienen valor?:', !!(estatusPagoAnterior && estatusPagoNuevo));
+              console.log('🔍 [PAGO LOG] estatusPagoAnterior:', estatusPagoAnterior);
+              console.log('🔍 [PAGO LOG] estatusPagoNuevo:', estatusPagoNuevo);
               
-              if (estatusPagoAnterior !== estatusPagoNuevo && estatusPagoAnterior && estatusPagoNuevo) {
-                const pagoAplicado = estatusPagoNuevo.toLowerCase() === 'pagado';
-                const pagoRemovido = estatusPagoAnterior.toLowerCase() === 'pagado' && estatusPagoNuevo.toLowerCase() !== 'pagado';
+              // Si hubo cambio en recibos (pago aplicado/removido), crear cambioEstatusPago
+              if (pagoAplicado || pagoRemovido) {
+                console.log('🔍 [PAGO LOG] Cambio detectado en recibos');
+                cambioEstatusPago = {
+                  anterior: estatusPagoAnterior,
+                  nuevo: estatusPagoNuevo,
+                  pagoAplicado,
+                  pagoRemovido,
+                  reciboAfectado,
+                  proximoReciboPendiente
+                };
                 
                 // Si se removió el pago y estaba "En Vigencia", revertir a "Emitida"
                 if (pagoRemovido && expedienteEnBD.etapa_activa === 'En Vigencia') {
@@ -3057,14 +2969,6 @@ const ModuloExpedientes = () => {
                     console.warn('⚠️ No se pudo revertir etapa:', e);
                   }
                 }
-                
-                // Guardar info del cambio para incluir en el log consolidado
-                cambioEstatusPago = {
-                  anterior: estatusPagoAnterior,
-                  nuevo: estatusPagoNuevo,
-                  pagoAplicado,
-                  pagoRemovido
-                };
                 
                 // ⚠️ NO agregar a camposModificados aquí - se mostrará en el badge destacado
                 // Solo agregamos si es un cambio entre estados no-pagado (ej: Pendiente → Vencido)
@@ -3117,10 +3021,47 @@ const ModuloExpedientes = () => {
                 if (cambioEstatusPago.pagoAplicado) {
                   descripcion = '🟢 PAGO APLICADO MANUALMENTE';
                 } else if (cambioEstatusPago.pagoRemovido) {
-                  descripcion = '⚠️ PAGO REMOVIDO';
+                  descripcion = '⚠️ PAGO REMOVIDO MANUALMENTE';
+                  
+                  // Agregar detalles del recibo removido
+                  if (cambioEstatusPago.reciboAfectado) {
+                    const recibo = cambioEstatusPago.reciboAfectado;
+                    descripcion += `\n\n📋 Recibo removido: #${recibo.numero}`;
+                    if (recibo.monto) {
+                      descripcion += `\n💵 Monto: $${Number(recibo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    }
+                    if (recibo.fecha_pago_real) {
+                      // 🔧 Formatear fecha sin problemas de zona horaria
+                      const fechaStr = recibo.fecha_pago_real.split('T')[0]; // Obtener solo YYYY-MM-DD
+                      const [year, month, day] = fechaStr.split('-');
+                      descripcion += `\n📅 Fecha de pago original: ${day}/${month}/${year}`;
+                    }
+                    if (recibo.comprobante_nombre) {
+                      descripcion += `\n🧾 Comprobante guardado: ${recibo.comprobante_nombre}`;
+                    }
+                  }
+                  
+                  // Agregar información del próximo recibo pendiente
+                  if (cambioEstatusPago.proximoReciboPendiente) {
+                    const proximo = cambioEstatusPago.proximoReciboPendiente;
+                    descripcion += `\n\n📊 Próximo recibo pendiente: #${proximo.numero}`;
+                    if (proximo.monto) {
+                      descripcion += `\n💵 Monto: $${Number(proximo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    }
+                    if (proximo.fecha_vencimiento) {
+                      // 🔧 Formatear fecha sin problemas de zona horaria
+                      const fechaStr = proximo.fecha_vencimiento.split('T')[0]; // Obtener solo YYYY-MM-DD
+                      const [year, month, day] = fechaStr.split('-');
+                      descripcion += `\n📅 Vencimiento: ${day}/${month}/${year}`;
+                    }
+                    if (proximo.estatus) {
+                      descripcion += `\n⚡ Estatus: ${proximo.estatus}`;
+                    }
+                  }
+                  
                   // Si además cambió a vencida automáticamente, agregar ese badge también
                   if (cambioAutomaticoPorVigencia && etapaFinalReal === 'Vencida') {
-                    descripcion += '\n🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
+                    descripcion += '\n\n🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
                   }
                 }
               } else if (cambioAutomaticoPorVigencia) {
@@ -3181,7 +3122,28 @@ const ModuloExpedientes = () => {
                     cambio_pago: {
                       anterior: cambioEstatusPago.anterior,
                       nuevo: cambioEstatusPago.nuevo,
-                      tipo: cambioEstatusPago.pagoAplicado ? 'aplicado_manual' : cambioEstatusPago.pagoRemovido ? 'removido_manual' : 'cambio_estatus'
+                      tipo: cambioEstatusPago.pagoAplicado ? 'aplicado_manual' : cambioEstatusPago.pagoRemovido ? 'removido_manual' : 'cambio_estatus',
+                      // 📋 Información detallada del recibo afectado (para pago removido)
+                      ...(cambioEstatusPago.pagoRemovido && cambioEstatusPago.reciboAfectado && {
+                        recibo_removido: {
+                          numero: cambioEstatusPago.reciboAfectado.numero,
+                          monto: cambioEstatusPago.reciboAfectado.monto,
+                          fecha_vencimiento: cambioEstatusPago.reciboAfectado.fecha_vencimiento,
+                          fecha_pago_real: cambioEstatusPago.reciboAfectado.fecha_pago_real,
+                          // 🧾 Mantener referencia del comprobante para aclaraciones
+                          comprobante_nombre: cambioEstatusPago.reciboAfectado.comprobante_nombre,
+                          comprobante_url: cambioEstatusPago.reciboAfectado.comprobante_url
+                        }
+                      }),
+                      // 📊 Información del próximo recibo pendiente (para pago removido)
+                      ...(cambioEstatusPago.pagoRemovido && cambioEstatusPago.proximoReciboPendiente && {
+                        proximo_recibo_pendiente: {
+                          numero: cambioEstatusPago.proximoReciboPendiente.numero,
+                          monto: cambioEstatusPago.proximoReciboPendiente.monto,
+                          fecha_vencimiento: cambioEstatusPago.proximoReciboPendiente.fecha_vencimiento,
+                          estatus: cambioEstatusPago.proximoReciboPendiente.estatus
+                        }
+                      })
                     }
                   })
                 }
@@ -4363,6 +4325,7 @@ const eliminarExpediente = useCallback((id) => {
             setExpedienteSeleccionado={setExpedienteSeleccionado}
             setVistaActual={setVistaActual}
             aplicarPago={abrirModalAplicarPago}
+            cargarExpedientes={cargarExpedientes}
             puedeAvanzarEstado={puedeAvanzarEstado}
             avanzarEstado={avanzarEstado}
             obtenerSiguienteEstado={obtenerSiguienteEstado}
@@ -4375,6 +4338,7 @@ const eliminarExpediente = useCallback((id) => {
             abrirModalCompartir={abrirModalCompartir}
             enviarAvisoPago={enviarAvisoPago}
             historial={historialExpediente}
+            setHistorialExpediente={setHistorialExpediente}
           />
         )}
       </div>
