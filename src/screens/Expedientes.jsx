@@ -2780,28 +2780,41 @@ const ModuloExpedientes = () => {
             console.log('✅ PUT completado | ID:', formularioParaGuardar.id);
           }
           
-          // 💰 Guardar solo los recibos que tienen pago (fecha_pago_real)
-          // Los recibos sin pagar no necesitan POST porque el backend calcula su estatus automáticamente
+          // 💰 Guardar TODOS los recibos que tienen cambios (con o sin pago)
+          // Esto incluye tanto aplicar pagos como eliminar pagos existentes
           if (formularioParaGuardar.recibos && Array.isArray(formularioParaGuardar.recibos)) {
             for (const recibo of formularioParaGuardar.recibos) {
-              // Solo enviar POST si el recibo tiene fecha de pago
-              if (recibo.fecha_pago_real) {
+              // Verificar si el recibo original tenía pago
+              const reciboOriginal = formularioOriginal?.recibos?.find(r => r.numero_recibo === recibo.numero_recibo);
+              const teniaPago = reciboOriginal?.fecha_pago_real;
+              const tienePago = recibo.fecha_pago_real;
+              
+              // Enviar POST si:
+              // 1. El recibo tiene pago ahora (aplicar pago), O
+              // 2. El recibo tenía pago antes pero ahora no (eliminar pago)
+              if (tienePago || (teniaPago && !tienePago)) {
                 try {
-                  await fetch(
+                  const response = await fetch(
                     `${API_URL}/api/recibos/${formularioParaGuardar.id}/${recibo.numero_recibo}/pago`,
                     {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         estatus: recibo.estatus,
-                        fecha_pago_real: recibo.fecha_pago_real,
+                        fecha_pago_real: recibo.fecha_pago_real, // Puede ser null para eliminar
                         comprobante_nombre: recibo.comprobante_nombre || null,
                         comprobante_url: recibo.comprobante_url || null
                       })
                     }
                   );
+                  
+                  if (response.ok) {
+                    console.log(`✅ Recibo ${recibo.numero_recibo} ${tienePago ? 'aplicado' : 'eliminado'} correctamente`);
+                  } else {
+                    console.error(`❌ Error al ${tienePago ? 'aplicar' : 'eliminar'} pago del recibo ${recibo.numero_recibo}:`, await response.text());
+                  }
                 } catch (error) {
-                  console.error(`Error al guardar recibo ${recibo.numero_recibo}:`, error);
+                  console.error(`❌ Error al procesar recibo ${recibo.numero_recibo}:`, error);
                 }
               }
             }
