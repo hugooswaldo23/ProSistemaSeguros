@@ -47,197 +47,45 @@ const ListaExpedientes = React.memo(({
   // Estado para carpeta/categoría seleccionada
   const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
   
-  // Filtrar expedientes según la carpeta seleccionada
+  // � FILTROS DE PÓLIZAS POR CARPETA
   const expedientesFiltrados = React.useMemo(() => {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
     switch (carpetaSeleccionada) {
       case 'en_proceso':
-        // Pólizas con pagos por vencer (≤ 15 días): usar función centralizada
+        // Pólizas con estatus "Pendiente" o "Por vencer"
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
-          // Excluir vencidas (van a carpeta Vencidas)
-          if (estatusPagosUtils.tienePagosVencidos(exp)) return false;
-          // Incluir solo las que tienen pagos por vencer
-          return estatusPagosUtils.tienePagosPorVencer(exp);
+          
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          
+          return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
         });
       
       case 'vigentes':
-        // Pólizas vigentes: usar función centralizada
+        // Pólizas pagadas (total o parcialmente)
         return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
           
-          // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
-          if (!esFraccionado) {
-            if (estatusPago === 'pagado') {
-              // Si está pagado, está en vigentes
-            } else if (exp.fecha_vencimiento_pago) {
-              // Si no está pagado, verificar si faltan > 15 días para vencimiento
-              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-              fechaVencimientoPago.setHours(0, 0, 0, 0);
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-              
-              // Solo va a vigentes si faltan > 15 días
-              if (diasRestantes <= 15) return false;
-            } else {
-              // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
-              return false;
-            }
-          } else {
-            // Para fraccionado: verificar que próximo pago > 15 días
-            
-            // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
-            if (exp.fecha_vencimiento_pago) {
-              const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-              fechaVencimientoPago.setHours(0, 0, 0, 0);
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-              
-              // Solo va a vigentes si faltan > 15 días
-              if (diasRestantes <= 15) return false;
-            } else {
-              // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
-              const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-              if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
-              
-              const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-              
-              // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
-              const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-              
-              // Si no ha pagado nada, no está en vigentes
-              if (pagosRealizados === 0) return false;
-              
-              const mesesPorFrecuencia = {
-                'Mensual': 1,
-                'Trimestral': 3,
-                'Semestral': 6
-              };
-              
-              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-              
-              // Si ya pagó todos, está en vigentes
-              if (pagosRealizados >= numeroPagos) {
-                // Continuar para verificar si no está en periodo de renovación
-              } else {
-                // Calcular días hasta próximo pago
-                const proximoRecibo = pagosRealizados + 1;
-                const fechaInicio = new Date(exp.inicio_vigencia);
-                const fechaProximoRecibo = new Date(fechaInicio);
-                fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-                
-                const hoyLocal = new Date();
-                hoyLocal.setHours(0, 0, 0, 0);
-                fechaProximoRecibo.setHours(0, 0, 0, 0);
-                const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-                
-                // Solo está en vigentes si faltan > 15 días
-                if (diasRestantes <= 15) return false;
-              }
-            }
-          }
-          
-          // Verificar que NO esté en periodo de renovación (> 30 días para término)
-          if (!exp.termino_vigencia) return true;
-          
-          let fechaAviso;
-          if (exp.fecha_aviso_renovacion) {
-            fechaAviso = new Date(exp.fecha_aviso_renovacion);
-          } else {
-            const fechaTermino = new Date(exp.termino_vigencia);
-            fechaAviso = new Date(fechaTermino);
-            fechaAviso.setDate(fechaAviso.getDate() - 30);
-          }
-          
-          return estatusPagosUtils.esVigente(exp);
+          return estatusPago === 'pagado' || estatusPago === 'pagada';
         });
       
       case 'renovadas':
-        // Pólizas renovadas: usar función centralizada
-        return expedientes.filter(exp => {
-          
-          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
-          
-          // Para pago único: debe estar pagado
-          if (!esFraccionado) {
-            if (estatusPago !== 'pagado') return false;
-          } else {
-            // Para fraccionado: verificar que próximo pago > 15 días
-            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
-            
-            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-            
-            // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
-            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-            
-            // Si no ha pagado nada, no está en renovadas
-            if (pagosRealizados === 0) return false;
-            
-            const mesesPorFrecuencia = {
-              'Mensual': 1,
-              'Trimestral': 3,
-              'Semestral': 6
-            };
-            
-            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-            
-            // Si ya pagó todos, está en renovadas
-            if (pagosRealizados >= numeroPagos) {
-              // Continuar para verificar si no está en periodo de renovación
-            } else {
-              // Calcular días hasta próximo pago
-              const proximoRecibo = pagosRealizados + 1;
-              const fechaInicio = new Date(exp.inicio_vigencia);
-              const fechaProximoRecibo = new Date(fechaInicio);
-              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-              
-              const hoyLocal = new Date();
-              hoyLocal.setHours(0, 0, 0, 0);
-              fechaProximoRecibo.setHours(0, 0, 0, 0);
-              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-              
-              // Solo está en renovadas si faltan > 15 días
-              if (diasRestantes <= 15) return false;
-            }
-          }
-          
-          // Verificar que NO esté en periodo de renovación (> 30 días para término)
-          if (!exp.termino_vigencia) return true;
-          
-          let fechaAviso;
-          if (exp.fecha_aviso_renovacion) {
-            fechaAviso = new Date(exp.fecha_aviso_renovacion);
-          } else {
-            const fechaTermino = new Date(exp.termino_vigencia);
-            fechaAviso = new Date(fechaTermino);
-            fechaAviso.setDate(fechaAviso.getDate() - 30);
-          }
-          
-          return estatusPagosUtils.esRenovada(exp);
-        });
+        // TODO: Implementar reglas para Renovadas
+        return expedientes.filter(exp => exp.etapa_activa === 'Renovada');
       
       case 'por_renovar':
-        // Pólizas en periodo de renovación: usar función centralizada
-        return expedientes.filter(exp => {
-          if (exp.etapa_activa === 'Cancelada') return false;
-          return estatusPagosUtils.estaEnPeriodoRenovacion(exp);
-        });
+        // TODO: Implementar reglas para Por Renovar
+        return expedientes.filter(exp => exp.etapa_activa !== 'Cancelada');
       
       case 'vencidas':
-        // Pólizas vencidas: usar funciones centralizadas
+        // Pólizas con estatus "Vencido"
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           
-          // Usar funciones centralizadas
-          return estatusPagosUtils.estaVigenciaVencida(exp) || estatusPagosUtils.tienePagosVencidos(exp);
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          
+          return estatusPago === 'vencido' || estatusPago === 'vencida';
         });
       
       case 'canceladas':
@@ -249,287 +97,33 @@ const ListaExpedientes = React.memo(({
     }
   }, [expedientes, carpetaSeleccionada]);
   
-  // Contadores para cada carpeta
+  // � CONTADORES DE PÓLIZAS POR CARPETA
   const contadores = React.useMemo(() => {
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    
     return {
       todas: expedientes.length,
       
+      // Pólizas con estatus "Pendiente" o "Por vencer"
       en_proceso: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
-        
-        // Excluir si el pago está vencido
-        if (exp.fecha_vencimiento_pago) {
-          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-          fechaVencimientoPago.setHours(0, 0, 0, 0);
-          if (fechaVencimientoPago < hoy) return false;
-        }
-        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
-        
-        // Para pago único (Anual): verificar si está dentro de 15 días Y no está pagado
-        if (!esFraccionado) {
-          if (estatusPago === 'pagado') return false; // Si ya está pagado, no va a "En Proceso"
-          
-          // Verificar si la fecha de vencimiento está dentro de 15 días
-          if (exp.fecha_vencimiento_pago) {
-            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-            fechaVencimientoPago.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-            
-            // Solo mostrar en "En Proceso" si está dentro de 15 días
-            return diasRestantes <= 15 && diasRestantes >= 0;
-          }
-          
-          // Si no tiene fecha de vencimiento, usar el estatus
-          return estatusPago !== 'pagado';
-        }
-        
-        // Para pago fraccionado: verificar si hay recibos pendientes o próximos
-        const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-        
-        // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
-        if (exp.fecha_vencimiento_pago) {
-          const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-          fechaVencimientoPago.setHours(0, 0, 0, 0);
-          const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-          
-          // Mostrar en "En Proceso" si está por vencer (≤ 15 días) pero NO vencido
-          return diasRestantes <= 15 && diasRestantes >= 0;
-        }
-        
-        // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
-        if (!frecuencia || !exp.inicio_vigencia) return estatusPago !== 'pagado';
-        
-        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-        
-        // 🔥 Usar ultimo_recibo_pagado en lugar de calcular por fechas
-        const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-        
-        // Si ya pagó todos los recibos, NO va a "En Proceso"
-        if (pagosRealizados >= numeroPagos) return false;
-        
-        const mesesPorFrecuencia = {
-          'Mensual': 1,
-          'Trimestral': 3,
-          'Semestral': 6
-        };
-        
-        const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-        
-        // Calcular fecha del próximo recibo
-        const proximoRecibo = pagosRealizados + 1;
-        const fechaInicio = new Date(exp.inicio_vigencia);
-        const fechaProximoRecibo = new Date(fechaInicio);
-        fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-        
-        // Calcular días hasta el vencimiento
-        const hoyLocal = new Date();
-        hoyLocal.setHours(0, 0, 0, 0);
-        fechaProximoRecibo.setHours(0, 0, 0, 0);
-        const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-        
-        // Mostrar en "En Proceso" SOLO si está por vencer (≤ 15 días) pero NO vencido
-        return diasRestantes <= 15 && diasRestantes >= 0;
+        return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
       }).length,
       
+      // Pólizas pagadas (total o parcialmente)
       vigentes: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
-        if (exp.etapa_activa === 'Renovada') return false;
-        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
-        
-        // Para pago único: debe estar pagado O tener fecha de vencimiento > 15 días
-        if (!esFraccionado) {
-          if (estatusPago === 'pagado') {
-            // Si está pagado, está en vigentes
-          } else if (exp.fecha_vencimiento_pago) {
-            // Si no está pagado, verificar si faltan > 15 días para vencimiento
-            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-            fechaVencimientoPago.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-            
-            // Solo va a vigentes si faltan > 15 días
-            if (diasRestantes <= 15) return false;
-          } else {
-            // Sin fecha de vencimiento, debe estar pagado para ir a vigentes
-            return false;
-          }
-        } else {
-          // Para fraccionado: verificar que próximo pago > 15 días
-          
-          // 🔥 PRIORIDAD: Si existe fecha_vencimiento_pago, usarla directamente
-          if (exp.fecha_vencimiento_pago) {
-            const fechaVencimientoPago = new Date(exp.fecha_vencimiento_pago);
-            fechaVencimientoPago.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.floor((fechaVencimientoPago - hoy) / (1000 * 60 * 60 * 24));
-            
-            // Solo va a vigentes si faltan > 15 días
-            if (diasRestantes <= 15) return false;
-          } else {
-            // FALLBACK: Cálculo tradicional si no hay fecha_vencimiento_pago
-            const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-            if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
-            
-            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-            // 🔥 Usar el contador directo de recibos pagados
-            const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-            const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
-            const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-            
-            if (pagosRealizados === 0) {
-              return false;
-            }
-            
-            if (pagosRealizados < numeroPagos) {
-              const proximoRecibo = pagosRealizados + 1;
-              const fechaInicio = new Date(exp.inicio_vigencia);
-              const fechaProximoRecibo = new Date(fechaInicio);
-              fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-              
-              const hoyLocal = new Date();
-              hoyLocal.setHours(0, 0, 0, 0);
-              fechaProximoRecibo.setHours(0, 0, 0, 0);
-              const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-              
-              if (diasRestantes <= 15) return false;
-            }
-          }
-        }
-        
-        if (!exp.termino_vigencia) return true;
-        
-        let fechaAviso;
-        if (exp.fecha_aviso_renovacion) {
-          fechaAviso = new Date(exp.fecha_aviso_renovacion);
-        } else {
-          const fechaTermino = new Date(exp.termino_vigencia);
-          fechaAviso = new Date(fechaTermino);
-          fechaAviso.setDate(fechaAviso.getDate() - 30);
-        }
-        
-        return hoy < fechaAviso;
+        return estatusPago === 'pagado' || estatusPago === 'pagada';
       }).length,
       
-      renovadas: expedientes.filter(exp => {
-        if (exp.etapa_activa !== 'Renovada') return false;
-        if (exp.etapa_activa === 'Cancelada') return false;
-        
-        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
-        
-        if (!esFraccionado) {
-          if (estatusPago !== 'pagado') return false;
-        } else {
-          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-          if (!frecuencia || !exp.inicio_vigencia) return estatusPago === 'pagado';
-          
-          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-          // 🔥 Usar el contador directo de recibos pagados
-          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-          
-          const mesesPorFrecuencia = { 'Mensual': 1, 'Trimestral': 3, 'Semestral': 6 };
-          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-          
-          if (pagosRealizados === 0) {
-            return false;
-          }
-          
-          if (pagosRealizados < numeroPagos) {
-            const proximoRecibo = pagosRealizados + 1;
-            const fechaInicio = new Date(exp.inicio_vigencia);
-            const fechaProximoRecibo = new Date(fechaInicio);
-            fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-            
-            const hoyLocal = new Date();
-            hoyLocal.setHours(0, 0, 0, 0);
-            fechaProximoRecibo.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-            
-            if (diasRestantes <= 15) return false;
-          }
-        }
-        
-        if (!exp.termino_vigencia) return true;
-        
-        let fechaAviso;
-        if (exp.fecha_aviso_renovacion) {
-          fechaAviso = new Date(exp.fecha_aviso_renovacion);
-        } else {
-          const fechaTermino = new Date(exp.termino_vigencia);
-          fechaAviso = new Date(fechaTermino);
-          fechaAviso.setDate(fechaAviso.getDate() - 30);
-        }
-        
-        return hoy < fechaAviso;
-      }).length,
+      renovadas: expedientes.filter(exp => exp.etapa_activa === 'Renovada').length,
+      por_renovar: 0, // TODO: Implementar contador
       
-      por_renovar: expedientes.filter(exp => {
-        if (exp.etapa_activa === 'Cancelada') return false;
-        if (!exp.termino_vigencia) return false;
-        
-        const fechaTermino = new Date(exp.termino_vigencia);
-        
-        let fechaAviso;
-        if (exp.fecha_aviso_renovacion) {
-          fechaAviso = new Date(exp.fecha_aviso_renovacion);
-        } else {
-          fechaAviso = new Date(fechaTermino);
-          fechaAviso.setDate(fechaAviso.getDate() - 30);
-        }
-        
-        return hoy >= fechaAviso && hoy < fechaTermino;
-      }).length,
-      
+      // Pólizas con estatus "Vencido"
       vencidas: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
-        
-        // Verificar si la póliza completa está vencida (termino_vigencia)
-        if (exp.termino_vigencia) {
-          const fechaVencimiento = new Date(exp.termino_vigencia);
-          if (fechaVencimiento < hoy) return true;
-        }
-        
-        // Para pólizas fraccionadas, verificar si tienen recibos vencidos
-        const esFraccionado = (exp.tipo_pago === 'Fraccionado') || (exp.forma_pago?.toUpperCase() === 'FRACCIONADO');
-        if (esFraccionado) {
-          const frecuencia = exp.frecuenciaPago || exp.frecuencia_pago;
-          if (!frecuencia || !exp.inicio_vigencia) return false;
-          
-          const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-          const pagosRealizados = exp.ultimo_recibo_pagado || 0;
-          
-          // Si ya pagó todos los recibos, no está vencida
-          if (pagosRealizados >= numeroPagos) return false;
-          
-          const mesesPorFrecuencia = {
-            'Mensual': 1,
-            'Trimestral': 3,
-            'Semestral': 6
-          };
-          
-          const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-          
-          // Calcular fecha del próximo recibo
-          const proximoRecibo = pagosRealizados + 1;
-          const fechaInicio = new Date(exp.inicio_vigencia);
-          const fechaProximoRecibo = new Date(fechaInicio);
-          fechaProximoRecibo.setMonth(fechaProximoRecibo.getMonth() + (proximoRecibo - 1) * mesesPorPago);
-          
-          const hoyLocal = new Date();
-          hoyLocal.setHours(0, 0, 0, 0);
-          fechaProximoRecibo.setHours(0, 0, 0, 0);
-          const diasRestantes = Math.floor((fechaProximoRecibo - hoyLocal) / (1000 * 60 * 60 * 24));
-          
-          // Está vencida si los días restantes son negativos
-          return diasRestantes < 0;
-        }
-        
-        return false;
+        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+        return estatusPago === 'vencido' || estatusPago === 'vencida';
       }).length,
       
       canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
@@ -1051,7 +645,22 @@ const ListaExpedientes = React.memo(({
                           </div>
                           <div className="fw-semibold" style={{ marginTop: '2px', color: '#f59e0b' }}>
                             {(() => {
-                              // 🎯 USAR CAMPO DEL EXPEDIENTE (ya no vienen recibos en listado)
+                              // 🎯 PRIORIDAD: Consultar directamente los recibos si están disponibles
+                              if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+                                // Buscar el primer recibo sin pago (ordenados por número)
+                                const proximoReciboPendiente = expediente.recibos
+                                  .filter(r => !r.fecha_pago_real)
+                                  .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
+                                
+                                if (proximoReciboPendiente?.fecha_vencimiento) {
+                                  return utils.formatearFecha(proximoReciboPendiente.fecha_vencimiento, 'cortaY');
+                                }
+                                
+                                // Si no hay recibos pendientes, mostrar que están todos pagados
+                                return '✓ Pagado';
+                              }
+                              
+                              // FALLBACK: Usar campo del expediente si no hay recibos
                               return expediente.fecha_vencimiento_pago ? utils.formatearFecha(expediente.fecha_vencimiento_pago, 'cortaY') : 
                                      expediente.proximoPago ? utils.formatearFecha(expediente.proximoPago, 'cortaY') :
                                      expediente.fecha_pago ? utils.formatearFecha(expediente.fecha_pago, 'cortaY') : '-';

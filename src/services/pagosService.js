@@ -109,33 +109,58 @@ export async function aplicarPago(expediente, datosPago) {
       throw new Error(`Error al actualizar expediente: ${response.status}`);
     }
 
-    // 6. Obtener monto del recibo desde el backend
-    let montoRecibo = 0;
+    // 6. Obtener TODOS los recibos del expediente para tener montos exactos
+    let recibos = [];
     try {
-      const responseRecibo = await fetch(
-        `${API_URL}/api/expedientes/${expediente.id}/recibos/${numeroReciboPago}`
-      );
+      const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`);
       
-      if (responseRecibo.ok) {
-        const reciboData = await responseRecibo.json();
-        if (reciboData.monto && !isNaN(parseFloat(reciboData.monto))) {
-          montoRecibo = parseFloat(reciboData.monto);
-        }
+      if (responseRecibos.ok) {
+        const recibosData = await responseRecibos.json();
+        recibos = recibosData?.data || recibosData || [];
+        console.log('✅ Recibos obtenidos:', recibos.length);
       }
     } catch (error) {
-      console.error('❌ Error al obtener monto del recibo:', error);
+      console.error('❌ Error al obtener recibos:', error);
     }
 
-    // Fallback: calcular monto proporcional si no se obtuvo del backend
-    if (!montoRecibo && esFraccionado) {
-      const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-      const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 1;
-      montoRecibo = parseFloat(expediente.total || 0) / numeroPagos;
-    } else if (!montoRecibo) {
-      montoRecibo = parseFloat(expediente.total || 0);
+    // 7. Obtener monto del recibo que se está pagando
+    let montoRecibo = 0;
+    const reciboActual = recibos.find(r => r.numero_recibo === numeroReciboPago);
+    
+    if (reciboActual && reciboActual.monto) {
+      montoRecibo = parseFloat(reciboActual.monto);
+      console.log(`💵 Monto del recibo ${numeroReciboPago}:`, montoRecibo);
+    } else {
+      // Fallback: calcular monto proporcional si no se obtuvo del backend
+      if (esFraccionado) {
+        const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+        const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 1;
+        montoRecibo = parseFloat(expediente.total || 0) / numeroPagos;
+      } else {
+        montoRecibo = parseFloat(expediente.total || 0);
+      }
+      console.warn('⚠️ Usando monto calculado (no encontrado en recibos):', montoRecibo);
     }
 
-    // 7. Registrar evento en trazabilidad
+    // 8. Obtener información del próximo recibo (si existe)
+    let proximoReciboInfo = null;
+    if (!esUltimoPago) {
+      const siguienteNumeroRecibo = numeroPago + 1;
+      const proximoRecibo = recibos.find(r => r.numero_recibo === siguienteNumeroRecibo);
+      
+      if (proximoRecibo) {
+        proximoReciboInfo = {
+          numero: siguienteNumeroRecibo,
+          monto: parseFloat(proximoRecibo.monto || 0),
+          fecha_vencimiento: proximoRecibo.fecha_vencimiento || proximoPago
+        };
+        console.log('📋 Próximo recibo encontrado:', proximoReciboInfo);
+      } else {
+        console.warn('⚠️ No se encontró el próximo recibo en la lista');
+      }
+    }
+
+    // 9. Registrar evento en trazabilidad
     const fechaPagoFormateada = new Date(fechaUltimoPago).toLocaleDateString('es-MX', { 
       day: 'numeric', month: 'long', year: 'numeric' 
     });
@@ -146,11 +171,20 @@ export async function aplicarPago(expediente, datosPago) {
 
     let comentario;
     if (!esUltimoPago) {
-      let siguienteVencimientoTexto = '';
-      if (proximoPago) {
-        siguienteVencimientoTexto = `\n📅 Siguiente vencimiento: ${new Date(proximoPago).toLocaleDateString('es-MX', { 
+      let siguienteReciboTexto = '';
+      if (proximoReciboInfo) {
+        const fechaProximoRecibo = new Date(proximoReciboInfo.fecha_vencimiento).toLocaleDateString('es-MX', { 
           day: 'numeric', month: 'long', year: 'numeric' 
-        })}`;
+        });
+        siguienteReciboTexto = `\n\n📋 Próximo Recibo a Pagar:\n` +
+                              `   • Recibo: ${proximoReciboInfo.numero}\n` +
+                              `   • Monto: $${parseFloat(proximoReciboInfo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
+                              `   • Vencimiento: ${fechaProximoRecibo}`;
+      } else if (proximoPago) {
+        const fechaProxima = new Date(proximoPago).toLocaleDateString('es-MX', { 
+          day: 'numeric', month: 'long', year: 'numeric' 
+        });
+        siguienteReciboTexto = `\n📅 Siguiente vencimiento: ${fechaProxima}`;
       }
       
       comentario = `💰 Pago Registrado\n` +
@@ -158,7 +192,7 @@ export async function aplicarPago(expediente, datosPago) {
                   `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
                   `📄 Recibo/Pago: ${numeroPago}\n` +
                   `🧾 Comprobante: ${comprobantePago?.name || 'N/A'}\n` +
-                  `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}${siguienteVencimientoTexto}\n` +
+                  `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}${siguienteReciboTexto}\n` +
                   `📊 Estado: ${etapaFinal} | ${estatusReciboActual}`;
     } else {
       comentario = `💰 Pago Registrado (Final)\n` +
@@ -189,6 +223,9 @@ export async function aplicarPago(expediente, datosPago) {
         comprobante_nombre: comprobantePago?.name || null,
         comprobante_url: comprobanteUrl || null,
         siguiente_vencimiento: proximoPago || null,
+        proximo_recibo_numero: proximoReciboInfo?.numero || null,
+        proximo_recibo_monto: proximoReciboInfo?.monto || null,
+        proximo_recibo_fecha: proximoReciboInfo?.fecha_vencimiento || null,
         estatus_pago_nuevo: nuevoEstatusPago,
         etapa_activa: etapaFinal,
         tipo_pago: expediente.tipo_pago,

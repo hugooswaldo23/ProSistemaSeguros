@@ -15,7 +15,8 @@ const DetalleExpediente = ({
   autoOpenHistorial = false,
   showResumenChips = true,
   highlightPago = true,
-  caratulaColapsable = true
+  caratulaColapsable = true,
+  onHistorialClick
 }) => {
   // Estados controlados en React para no depender del JS de Bootstrap
   const [openGeneral, setOpenGeneral] = useState(false);
@@ -533,7 +534,13 @@ const DetalleExpediente = ({
               type="button"
               aria-expanded={openHistorial}
               aria-controls="collapseHistorialComunicacion"
-              onClick={() => setOpenHistorial(v => !v)}
+              onClick={() => {
+                setOpenHistorial(v => !v);
+                // Si se está abriendo la pestaña, recargar el historial
+                if (!openHistorial && onHistorialClick) {
+                  onHistorialClick();
+                }
+              }}
             >
               📋 Historial y Trazabilidad del Expediente
             </button>
