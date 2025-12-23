@@ -164,17 +164,35 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
     console.groupCollapsed(`📊 Estatus: ${expediente.numero_poliza}`);
   }
   
-  // Si ya está marcado como pagado en el backend, respetarlo
-  const estatusBackend = (expediente.estatus_pago || '').toLowerCase().trim();
-  if (estatusBackend === 'pagado') {
+  // 🔧 CORREGIDO: Respetar el estatus_pago del backend SIEMPRE
+  // Solo recalcular si no existe o está vacío
+  const estatusBackend = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase().trim();
+  
+  if (estatusBackend) {
+    // Normalizar y retornar el estatus del backend
+    let estatusNormalizado;
+    if (estatusBackend === 'pagado') {
+      estatusNormalizado = 'Pagado';
+    } else if (estatusBackend === 'vencido') {
+      estatusNormalizado = 'Vencido';
+    } else if (estatusBackend === 'por vencer' || estatusBackend === 'pago por vencer') {
+      estatusNormalizado = 'Por Pagar';
+    } else if (estatusBackend === 'pendiente') {
+      estatusNormalizado = 'Pendiente';
+    } else if (estatusBackend === 'cancelado') {
+      estatusNormalizado = 'Cancelado';
+    } else {
+      estatusNormalizado = estatusBackend.charAt(0).toUpperCase() + estatusBackend.slice(1);
+    }
+    
     if (process.env.NODE_ENV === 'development') {
-      console.log('✅ Ya está pagado según backend');
+      console.log('✅ Usando estatus del backend:', estatusNormalizado);
       console.groupEnd();
     }
-    return 'Pagado';
+    return estatusNormalizado;
   }
   
-  // SIEMPRE calcular estatus basándose en fecha_vencimiento_pago
+  // Solo calcular si NO hay estatus en el backend
   if (expediente.fecha_vencimiento_pago) {
     const fechaVencimiento = new Date(expediente.fecha_vencimiento_pago);
     const hoy = new Date();
@@ -184,7 +202,7 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
     const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
     
     if (process.env.NODE_ENV === 'development') {
-      console.log('📅 Cálculo:', {
+      console.log('📅 Calculando (sin estatus en BD):', {
         poliza: expediente.numero_poliza,
         fecha_vencimiento: expediente.fecha_vencimiento_pago,
         diasRestantes,
@@ -202,20 +220,16 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
     }
     
     if (process.env.NODE_ENV === 'development') {
-      console.log('✅ Resultado:', nuevoEstatus);
+      console.log('✅ Resultado calculado:', nuevoEstatus);
       console.groupEnd();
     }
     return nuevoEstatus;
   }
   
   if (process.env.NODE_ENV === 'development') {
-    console.log('⚠️ Sin fecha_vencimiento_pago, usando backend:', estatusBackend);
+    console.log('⚠️ Sin estatus ni fecha, usando Pendiente por defecto');
     console.groupEnd();
   }
-  
-  // Fallback: normalizar estatus del backend
-  if (estatusBackend === 'vencido') return 'Vencido';
-  if (estatusBackend === 'cancelado') return 'Cancelado';
   
   // Por defecto
   return 'Pendiente';

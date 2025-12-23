@@ -898,13 +898,27 @@ const ModuloExpedientes = () => {
       const recibosPagados = recibosActualizados.filter(r => r.fecha_pago_real).length;
       const totalRecibos = recibosActualizados.length;
       
+      // 🔧 Calcular estatus del expediente basándose en el estado de los recibos
       let nuevoEstatusPago = 'Pendiente';
-      if (recibosPagados === 0) {
-        nuevoEstatusPago = 'Pendiente';
-      } else if (recibosPagados < totalRecibos) {
+      
+      if (recibosPagados === totalRecibos) {
+        // Todos los recibos pagados
+        nuevoEstatusPago = 'Pagado';
+      } else if (recibosPagados > 0) {
+        // Algunos recibos pagados, otros pendientes
         nuevoEstatusPago = 'Pago por vencer';
       } else {
-        nuevoEstatusPago = 'Pagado';
+        // Ningún recibo pagado: determinar estatus por el recibo más crítico
+        const tieneVencidos = recibosActualizados.some(r => r.estatus === 'Vencido');
+        const tienePorVencer = recibosActualizados.some(r => r.estatus === 'Por Vencer');
+        
+        if (tieneVencidos) {
+          nuevoEstatusPago = 'Vencido';
+        } else if (tienePorVencer) {
+          nuevoEstatusPago = 'Pago por vencer';
+        } else {
+          nuevoEstatusPago = 'Pendiente';
+        }
       }
       
       return {
