@@ -2783,6 +2783,8 @@ const ModuloExpedientes = () => {
           // 💰 Guardar TODOS los recibos que tienen cambios (con o sin pago)
           // Esto incluye tanto aplicar pagos como eliminar pagos existentes
           if (formularioParaGuardar.recibos && Array.isArray(formularioParaGuardar.recibos)) {
+            console.log('💾 Procesando recibos para guardar...');
+            
             for (const recibo of formularioParaGuardar.recibos) {
               // Verificar si el recibo original tenía pago
               const reciboOriginal = formularioOriginal?.recibos?.find(r => r.numero_recibo === recibo.numero_recibo);
@@ -2793,6 +2795,9 @@ const ModuloExpedientes = () => {
               // 1. El recibo tiene pago ahora (aplicar pago), O
               // 2. El recibo tenía pago antes pero ahora no (eliminar pago)
               if (tienePago || (teniaPago && !tienePago)) {
+                const accion = tienePago ? 'aplicar pago' : 'eliminar pago';
+                console.log(`📤 Recibo #${recibo.numero_recibo}: ${accion} (${teniaPago ? 'tenía' : 'no tenía'} → ${tienePago ? 'tiene' : 'no tiene'})`);
+                
                 try {
                   const response = await fetch(
                     `${API_URL}/api/recibos/${formularioParaGuardar.id}/${recibo.numero_recibo}/pago`,
@@ -2816,8 +2821,12 @@ const ModuloExpedientes = () => {
                 } catch (error) {
                   console.error(`❌ Error al procesar recibo ${recibo.numero_recibo}:`, error);
                 }
+              } else {
+                console.log(`⏭️ Recibo #${recibo.numero_recibo}: sin cambios (${teniaPago ? 'tenía' : 'no tenía'} → ${tienePago ? 'tiene' : 'no tiene'})`);
               }
             }
+            
+            console.log('💾 Procesamiento de recibos completado');
           }
           
           // ✨ Registrar actualización de datos en historial (trazabilidad)
