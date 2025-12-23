@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Aplicar/Remover Pagos</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      padding: 30px;
+    }
+    
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    
+    .config {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 25px;
+      border-left: 4px solid #667eea;
+    }
+    
+    .config-row {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+      align-items: center;
+    }
+    
+    .config-row label {
+      font-weight: 600;
+      color: #555;
+      min-width: 120px;
+    }
+    
+    .config-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    
+    .config-row input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    .buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    
+    button:active {
+      transform: translateY(0);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-success {
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+    }
+    
+    .btn-danger {
+      background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+      color: white;
+    }
+    
+    .btn-warning {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      color: white;
+    }
+    
+    .results {
+      margin-top: 30px;
+    }
+    
+    .log-container {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      border-radius: 8px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      max-height: 500px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    
+    .log-entry {
+      margin-bottom: 8px;
+      padding: 4px 0;
+    }
+    
+    .log-success { color: #4ec9b0; }
+    .log-error { color: #f48771; }
+    .log-warning { color: #ce9178; }
+    .log-info { color: #569cd6; }
+    .log-data { color: #9cdcfe; }
+    
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 20px;
+    }
+    
+    .summary-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    
+    .summary-card h3 {
+      font-size: 32px;
+      margin-bottom: 5px;
+    }
+    
+    .summary-card p {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 Test: Aplicar y Remover Pagos de Recibos</h1>
+    <p class="subtitle">Verifica que los endpoints de Hugo estén funcionando correctamente</p>
+    
+    <div class="config">
+      <div class="config-row">
+        <label>🔗 API URL:</label>
+        <input type="text" id="apiUrl" value="https://apiseguros.proordersistem.com.mx">
+      </div>
+      <div class="config-row">
+        <label>📋 Expediente ID:</label>
+        <input type="text" id="expedienteId" value="514" placeholder="Ej: 514">
+      </div>
+      <div class="config-row">
+        <label>📄 Número Recibo:</label>
+        <input type="number" id="numeroRecibo" value="1" min="1">
+      </div>
+    </div>
+    
+    <div class="buttons">
+      <button class="btn-primary" onclick="testGetRecibos()">
+        <span>📋</span> 1. Obtener Recibos
+      </button>
+      <button class="btn-success" onclick="testAplicarPago()">
+        <span>💰</span> 2. Aplicar Pago
+      </button>
+      <button class="btn-danger" onclick="testRemoverPago()">
+        <span>🔙</span> 3. Remover Pago
+      </button>
+      <button class="btn-warning" onclick="ejecutarTodosSuite()">
+        <span>🎯</span> Ejecutar Suite Completo
+      </button>
+      <button class="btn-secondary" onclick="limpiarLog()">
+        <span>🗑️</span> Limpiar
+      </button>
+    </div>
+    
+    <div class="results">
+      <h2>📊 Resultados</h2>
+      <div id="logContainer" class="log-container">
+        <div class="log-info">Esperando acción...</div>
+      </div>
+    </div>
+    
+    <div class="summary" id="summary" style="display: none;">
+      <div class="summary-card">
+        <h3 id="totalTests">0</h3>
+        <p>Tests Ejecutados</p>
+      </div>
+      <div class="summary-card" style="background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);">
+        <h3 id="passedTests">0</h3>
+        <p>Tests Exitosos</p>
+      </div>
+      <div class="summary-card" style="background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);">
+        <h3 id="failedTests">0</h3>
+        <p>Tests Fallidos</p>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    let logContainer = document.getElementById('logContainer');
+    let testsPassed = 0;
+    let testsFailed = 0;
+    let testsTotal = 0;
+    
+    function log(emoji, message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = `${emoji} ${message}`;
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    function logData(data) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry log-data';
+      entry.textContent = JSON.stringify(data, null, 2);
+      logContainer.appendChild(entry);
+      logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    function limpiarLog() {
+      logContainer.innerHTML = '<div class="log-info">Log limpiado. Esperando acción...</div>';
+      testsPassed = 0;
+      testsFailed = 0;
+      testsTotal = 0;
+      updateSummary();
+    }
+    
+    function updateSummary() {
+      document.getElementById('totalTests').textContent = testsTotal;
+      document.getElementById('passedTests').textContent = testsPassed;
+      document.getElementById('failedTests').textContent = testsFailed;
+      document.getElementById('summary').style.display = testsTotal > 0 ? 'grid' : 'none';
+    }
+    
+    function getConfig() {
+      return {
+        apiUrl: document.getElementById('apiUrl').value.trim(),
+        expedienteId: document.getElementById('expedienteId').value.trim(),
+        numeroRecibo: parseInt(document.getElementById('numeroRecibo').value)
+      };
+    }
+    
+    async function testGetRecibos() {
+      const { apiUrl, expedienteId } = getConfig();
+      
+      log('📋', `TEST: Obteniendo recibos del expediente ${expedienteId}...`, 'info');
+      testsTotal++;
+      
+      try {
+        const response = await fetch(`${apiUrl}/api/recibos/${expedienteId}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.success || !Array.isArray(data.data)) {
+          throw new Error('Formato de respuesta incorrecto');
+        }
+        
+        log('✅', `GET recibos OK | Total: ${data.data.length} recibos`, 'success');
+        testsPassed++;
+        
+        data.data.forEach(recibo => {
+          const isPagado = recibo.fecha_pago_real ? '💰' : '⏳';
+          log(isPagado, `Recibo #${recibo.numero_recibo} | ${recibo.estatus} | Vence: ${recibo.fecha_vencimiento}`, 'data');
+          if (recibo.fecha_pago_real) {
+            log('  ', `└─ Pagado: ${recibo.fecha_pago_real} | ${recibo.comprobante_nombre || 'Sin comprobante'}`, 'data');
+          }
+        });
+        
+        return data.data;
+        
+      } catch (error) {
+        log('❌', `ERROR: ${error.message}`, 'error');
+        testsFailed++;
+        throw error;
+      } finally {
+        updateSummary();
+      }
+    }
+    
+    async function testAplicarPago() {
+      const { apiUrl, expedienteId, numeroRecibo } = getConfig();
+      
+      log('💰', `TEST: Aplicando pago al recibo #${numeroRecibo}...`, 'info');
+      testsTotal++;
+      
+      try {
+        const fechaPago = new Date().toISOString().split('T')[0];
+        
+        const response = await fetch(
+          `${apiUrl}/api/recibos/${expedienteId}/${numeroRecibo}/pago`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              estatus: 'Pagado',
+              fecha_pago_real: fechaPago,
+              comprobante_nombre: 'test-comprobante.pdf',
+              comprobante_url: 'https://s3.example.com/test.pdf'
+            })
+          }
+        );
+        
+        const responseText = await response.text();
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${responseText}`);
+        }
+        
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`Respuesta no es JSON válido: ${responseText}`);
+        }
+        
+        if (!data.success) {
+          throw new Error('Backend respondió con success: false');
+        }
+        
+        log('✅', `POST aplicar pago OK | Recibo #${numeroRecibo} marcado como pagado`, 'success');
+        testsPassed++;
+        return data;
+        
+      } catch (error) {
+        log('❌', `ERROR: ${error.message}`, 'error');
+        testsFailed++;
+        throw error;
+      } finally {
+        updateSummary();
+      }
+    }
+    
+    async function testRemoverPago() {
+      const { apiUrl, expedienteId, numeroRecibo } = getConfig();
+      
+      log('🔙', `TEST: Removiendo pago del recibo #${numeroRecibo}...`, 'info');
+      testsTotal++;
+      
+      try {
+        const response = await fetch(
+          `${apiUrl}/api/recibos/${expedienteId}/${numeroRecibo}/pago`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              estatus: 'Vencido',
+              fecha_pago_real: null,
+              comprobante_nombre: null,
+              comprobante_url: null
+            })
+          }
+        );
+        
+        const responseText = await response.text();
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${responseText}`);
+        }
+        
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (e) {
+          throw new Error(`Respuesta no es JSON válido: ${responseText}`);
+        }
+        
+        if (!data.success) {
+          throw new Error('Backend respondió con success: false');
+        }
+        
+        log('✅', `POST remover pago OK | Recibo #${numeroRecibo} ahora sin pago`, 'success');
+        testsPassed++;
+        return data;
+        
+      } catch (error) {
+        log('❌', `ERROR: ${error.message}`, 'error');
+        testsFailed++;
+        throw error;
+      } finally {
+        updateSummary();
+      }
+    }
+    
+    async function ejecutarTodosSuite() {
+      limpiarLog();
+      log('🧪', '==================== SUITE COMPLETO ====================', 'info');
+      
+      const { expedienteId, numeroRecibo } = getConfig();
+      
+      try {
+        // Test 1: Obtener recibos iniciales
+        log('', '', 'info');
+        const recibosIniciales = await testGetRecibos();
+        
+        if (recibosIniciales.length === 0) {
+          log('⚠️', 'No hay recibos en este expediente', 'warning');
+          return;
+        }
+        
+        // Test 2: Aplicar pago
+        log('', '', 'info');
+        await testAplicarPago();
+        
+        // Verificar que se aplicó
+        log('', '', 'info');
+        log('🔍', 'Verificando que el pago se aplicó...', 'info');
+        const recibosConPago = await testGetRecibos();
+        testsTotal--; // No contar esta verificación
+        const reciboModificado = recibosConPago.find(r => r.numero_recibo === numeroRecibo);
+        if (reciboModificado?.fecha_pago_real) {
+          log('✅', 'Verificado: El recibo ahora tiene pago registrado', 'success');
+        } else {
+          log('⚠️', 'ADVERTENCIA: El recibo no muestra el pago aplicado', 'warning');
+        }
+        
+        // Test 3: Remover pago
+        log('', '', 'info');
+        await testRemoverPago();
+        
+        // Verificar que se removió
+        log('', '', 'info');
+        log('🔍', 'Verificando que el pago se removió...', 'info');
+        const recibosSinPago = await testGetRecibos();
+        testsTotal--; // No contar esta verificación
+        const reciboLimpio = recibosSinPago.find(r => r.numero_recibo === numeroRecibo);
+        if (!reciboLimpio?.fecha_pago_real) {
+          log('✅', 'Verificado: El recibo ya no tiene pago registrado', 'success');
+        } else {
+          log('⚠️', 'ADVERTENCIA: El recibo aún muestra el pago', 'warning');
+        }
+        
+        log('', '', 'info');
+        log('🎉', '==================== SUITE COMPLETADO ====================', 'success');
+        
+      } catch (error) {
+        log('', '', 'info');
+        log('💥', '==================== SUITE FALLÓ ====================', 'error');
+        console.error(error);
+      }
+      
+      updateSummary();
+    }
+  </script>
+</body>
+</html>
