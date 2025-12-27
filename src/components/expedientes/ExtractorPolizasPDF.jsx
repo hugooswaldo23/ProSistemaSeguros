@@ -19,6 +19,9 @@ import * as estatusPagosUtils from '../../utils/estatusPagos';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Configurar worker de PDF.js
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
+
 // 👇 COPIAR AQUÍ desde Expedientes.jsx líneas 96 hasta 2258
 // ============= COMPONENTE EXTRACTOR PDF =============
 const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {

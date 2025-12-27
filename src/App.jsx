@@ -6,7 +6,7 @@ import Dashboard from "./screens/Dashboard";
 import EquipoDeTrabajo from "./screens/EquipoDeTrabajo";
 import Productos from "./screens/Productos";
 import Clientes from "./screens/Clientes";
-import Expedientes from "./screens/Expedientes";
+import NvoExpedientes from "./screens/NvoExpedientes";
 import Tramites from "./screens/Tramites";
 import Aseguradoras from "./screens/Aseguradoras";
 import DetallesProducto from "./screens/Productos/Detalles";
@@ -47,7 +47,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard/>}/>
           <Route path="/clientes" element={<Clientes/>}/>
-          <Route path="/polizas" element={<Expedientes/>}/>
+          <Route path="/polizas" element={<NvoExpedientes/>}/>
           <Route path="/tramites" element={<Tramites/>}/>
           <Route path="/equipo-de-trabajo" element={<EquipoDeTrabajo/>}/>
           <Route path="/aseguradoras" element={<Aseguradoras/>}/>

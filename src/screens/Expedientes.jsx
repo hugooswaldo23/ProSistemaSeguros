@@ -1,5 +1,30 @@
 /**
  * ====================================================================
+ * ⚠️ ⚠️ ⚠️ ARCHIVO DE RESPALDO - NO USAR EN DESARROLLO ⚠️ ⚠️ ⚠️
+ * ====================================================================
+ * 
+ * Este archivo es la versión ANTERIOR del módulo de Expedientes.
+ * 
+ * 🆕 NUEVO MÓDULO: src/screens/NvoExpedientes.jsx
+ * 
+ * El nuevo módulo tiene:
+ * - Formularios separados (Agregar vs Editar)
+ * - Lógica simplificada y limpia
+ * - Componentes modulares
+ * - Mejor mantenibilidad
+ * 
+ * Este archivo (Expedientes.jsx) se mantiene como RESPALDO mientras
+ * se valida completamente la nueva versión.
+ * 
+ * ⛔ NO REALIZAR CAMBIOS EN ESTE ARCHIVO
+ * ✅ Todos los cambios deben hacerse en: NvoExpedientes.jsx
+ * 
+ * Pendiente: Eliminar este archivo cuando NvoExpedientes.jsx esté 100% validado
+ * ====================================================================
+ * 
+ * 
+ * 
+ * ====================================================================
  * COMPONENTE: Gestión de Expedientes (Pólizas)
  * TRAZABILIDAD COMPLETA DEL CICLO DE VIDA
  * ====================================================================
@@ -1242,6 +1267,13 @@ const ModuloExpedientes = () => {
       fechaAvisoRenovacion = fechaTermino.toISOString().split('T')[0];
     }
     
+    // 🔥 Si cambió inicio_vigencia, limpiar recibos para forzar recálculo en CalendarioPagos
+    let recibosActualizados = formularioActual.recibos;
+    if (formularioActual._inicio_vigencia_changed) {
+      console.log('🔄 Inicio de vigencia cambió - limpiando recibos para recálculo');
+      recibosActualizados = undefined; // Forzar recálculo en frontend
+    }
+    
     // Retornar con todos los campos sincronizados
     const resultado = { 
       ...formularioActual, 
@@ -1251,10 +1283,12 @@ const ModuloExpedientes = () => {
       fecha_vencimiento_pago: proximoPago, // Siempre recalcular cuando se llama esta función
       estatusPago, 
       periodo_gracia: periodoGracia,
-      fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
+      fecha_aviso_renovacion: fechaAvisoRenovacion, // Precalcular fecha de aviso
+      recibos: recibosActualizados // Usar recibos actualizados o undefined
     };
     
-
+    // Limpiar bandera temporal
+    delete resultado._inicio_vigencia_changed;
     
     return resultado;
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
