@@ -309,20 +309,52 @@ export const useCompartirExpediente = ({
       }
       
       // Generar mensaje personalizado
-      const esVencido = pago.estado === 'Vencido';
+      // Verificar si está vencido comparando fecha o estado
+      const fechaVencimiento = new Date(pago.fecha);
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      fechaVencimiento.setHours(0, 0, 0, 0);
+      
+      const esVencido = pago.estado === 'Vencido' || fechaVencimiento < hoy;
+      const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+      const esPorVencer = !esVencido && diasRestantes >= 0 && diasRestantes <= 7;
+      const esPendiente = !esVencido && diasRestantes > 7;
+      const estadoFinal = esVencido ? 'Vencido' : esPorVencer ? 'Por Vencer' : 'Pendiente';
+      
+      console.log('📤 Enviando aviso de pago WhatsApp:', {
+        numero: pago.numero,
+        fecha: pago.fecha,
+        estado_original: pago.estado,
+        estado_calculado: estadoFinal,
+        diasRestantes,
+        esVencido,
+        esPorVencer,
+        esPendiente
+      });
+      
+      // Construir mensaje según el estado
+      let titulo, mensajeImportante;
+      
+      if (esVencido) {
+        titulo = '🚨 *RECORDATORIO DE PAGO VENCIDO*';
+        mensajeImportante = '⚠️ *IMPORTANTE:* Este pago está vencido. En caso de algún siniestro, *no tendremos cobertura de la compañía aseguradora*. Por favor, regulariza tu situación lo antes posible para reactivar tu protección.';
+      } else if (esPorVencer) {
+        titulo = '⏰ *AVISO: PAGO PRÓXIMO A VENCER*';
+        mensajeImportante = `📅 *IMPORTANTE:* Tu pago vence ${diasRestantes === 0 ? '*HOY*' : diasRestantes === 1 ? 'mañana' : `en ${diasRestantes} días`}. Es fundamental registrar tu pago a tiempo para *no perder la cobertura* de tu póliza y mantener tu protección activa.`;
+      } else {
+        titulo = '📋 *AVISO DE PAGO*';
+        mensajeImportante = '💡 *Te recordamos* que tienes un pago pendiente. Mantén tu póliza al día para garantizar tu cobertura sin interrupciones.';
+      }
       
       const mensaje = `Hola ${nombreDestinatario},\n\n` +
-        `${esVencido ? '⚠️ *RECORDATORIO DE PAGO VENCIDO*' : '📋 *AVISO DE PAGO PRÓXIMO*'}\n\n` +
+        `${titulo}\n\n` +
         `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
         `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
         `*Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}*\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
-        `Monto: *$${pago.monto}*\n` +
-        `Estado: ${pago.estado}\n\n` +
-        `${esVencido 
-          ? '⚠️ *IMPORTANTE:* Este pago está vencido. En caso de algún siniestro, *no tendremos cobertura de la compañía aseguradora*. Por favor, regulariza tu situación lo antes posible para reactivar tu protección.' 
-          : '📅 *IMPORTANTE:* Te recordamos que tu próximo pago está próximo a vencer. Es fundamental registrar tu pago a tiempo para *no perder la cobertura* de tu póliza y mantener tu protección activa.'
-        }\n\n` +
+        `Monto: *$${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}*\n` +
+        `Estado: ${estadoFinal}\n\n` +
+        `${mensajeImportante}\n\n` +
         `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
         `Saludos cordiales`;
       
@@ -442,24 +474,54 @@ export const useCompartirExpediente = ({
       }
       
       // Generar mensaje personalizado
-      const esVencido = pago.estado === 'Vencido';
+      // Verificar si está vencido comparando fecha o estado
+      const fechaVencimiento = new Date(pago.fecha);
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      fechaVencimiento.setHours(0, 0, 0, 0);
       
-      const asunto = esVencido 
-        ? `⚠️ Recordatorio: Pago Vencido - Póliza ${expediente.numero_poliza}`
-        : `📋 Aviso: Próximo Pago - Póliza ${expediente.numero_poliza}`;
+      const esVencido = pago.estado === 'Vencido' || fechaVencimiento < hoy;
+      const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+      const esPorVencer = !esVencido && diasRestantes >= 0 && diasRestantes <= 7;
+      const esPendiente = !esVencido && diasRestantes > 7;
+      const estadoFinal = esVencido ? 'Vencido' : esPorVencer ? 'Por Vencer' : 'Pendiente';
+      
+      console.log('📧 Enviando aviso de pago Email:', {
+        numero: pago.numero,
+        fecha: pago.fecha,
+        estado_original: pago.estado,
+        estado_calculado: estadoFinal,
+        diasRestantes,
+        esVencido,
+        esPorVencer
+      });
+      
+      // Construir asunto y mensaje según el estado
+      let asunto, titulo, mensajeImportante;
+      
+      if (esVencido) {
+        asunto = `🚨 URGENTE: Pago Vencido - Póliza ${expediente.numero_poliza}`;
+        titulo = 'RECORDATORIO DE PAGO VENCIDO';
+        mensajeImportante = `⚠️ IMPORTANTE: Este pago está vencido. En caso de presentarse algún siniestro, NO TENDREMOS COBERTURA de la compañía aseguradora. Le solicitamos regularizar su situación lo antes posible para reactivar su protección y evitar inconvenientes.`;
+      } else if (esPorVencer) {
+        asunto = `⏰ Aviso: Pago Próximo a Vencer - Póliza ${expediente.numero_poliza}`;
+        titulo = 'AVISO: PAGO PRÓXIMO A VENCER';
+        mensajeImportante = `📅 IMPORTANTE: Su pago vence ${diasRestantes === 0 ? 'HOY' : diasRestantes === 1 ? 'mañana' : `en ${diasRestantes} días`}. Es fundamental realizar su pago en tiempo y forma para NO PERDER LA COBERTURA de su póliza y mantener su protección activa sin interrupciones.`;
+      } else {
+        asunto = `📋 Aviso de Pago - Póliza ${expediente.numero_poliza}`;
+        titulo = 'AVISO DE PAGO';
+        mensajeImportante = `Le recordamos que tiene un pago pendiente. Mantener su póliza al día garantiza su cobertura sin interrupciones.`;
+      }
       
       const cuerpo = `Estimado/a ${nombreDestinatario},\n\n` +
-        `${esVencido ? 'Le recordamos que tiene un pago vencido:' : 'Le notificamos sobre su próximo pago:'}\n\n` +
+        `${titulo}\n\n` +
         `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
         `Aseguradora: ${expediente.compania || 'N/A'}\n\n` +
         `Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
-        `Monto: $${pago.monto}\n` +
-        `Estado: ${pago.estado}\n\n` +
-        `${esVencido 
-          ? '⚠️ IMPORTANTE: Este pago está vencido. En caso de presentarse algún siniestro, NO TENDREMOS COBERTURA de la compañía aseguradora. Le solicitamos regularizar su situación lo antes posible para reactivar su protección y evitar inconvenientes.' 
-          : '📋 IMPORTANTE: Le recordamos que este pago está próximo a vencer. Es fundamental realizar su pago en tiempo y forma para NO PERDER LA COBERTURA de su póliza y mantener su protección activa sin interrupciones.'
-        }\n\n` +
+        `Monto: $${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}\n` +
+        `Estado: ${estadoFinal}\n\n` +
+        `${mensajeImportante}\n\n` +
         `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
         `Saludos cordiales`;
       

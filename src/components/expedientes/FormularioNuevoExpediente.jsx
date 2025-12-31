@@ -135,6 +135,10 @@ const FormularioNuevoExpediente = ({
           fecha_emision: aplicarSiVacio(datosPoliza.fecha_emision, prev.fecha_emision) || new Date().toISOString().split('T')[0],
           inicio_vigencia: aplicarSiVacio(datosPoliza.inicio_vigencia, prev.inicio_vigencia),
           termino_vigencia: aplicarSiVacio(datosPoliza.termino_vigencia, prev.termino_vigencia),
+          fecha_aviso_renovacion: aplicarSiVacio(datosPoliza.fecha_aviso_renovacion, prev.fecha_aviso_renovacion),
+          fecha_vencimiento_pago: aplicarSiVacio(datosPoliza.fecha_vencimiento_pago, prev.fecha_vencimiento_pago),
+          fecha_pago: aplicarSiVacio(datosPoliza.fecha_pago, prev.fecha_pago),
+          proximoPago: aplicarSiVacio(datosPoliza.proximoPago, prev.proximoPago),
           
           // Montos
           prima_neta: aplicarSiVacio(datosPoliza.prima_neta, prev.prima_neta),
@@ -147,6 +151,13 @@ const FormularioNuevoExpediente = ({
           // ⚠️ FORZAR montos de pagos fraccionados desde PDF
           primer_pago: datosPoliza.primer_pago || prev.primer_pago,
           pagos_subsecuentes: datosPoliza.pagos_subsecuentes || prev.pagos_subsecuentes,
+          
+          // ⚠️ FORZAR período de gracia desde PDF (extraído del documento)
+          periodo_gracia: datosPoliza.periodo_gracia || prev.periodo_gracia,
+          
+          // ⚠️ FORZAR estatus de pago calculado desde el extractor
+          estatusPago: datosPoliza.estatusPago || datosPoliza.estatus_pago || prev.estatusPago,
+          estatus_pago: datosPoliza.estatus_pago || datosPoliza.estatusPago || prev.estatus_pago,
           
           uso: aplicarSiVacio(datosPoliza.uso, prev.uso),
           servicio: aplicarSiVacio(datosPoliza.servicio, prev.servicio),
@@ -169,10 +180,9 @@ const FormularioNuevoExpediente = ({
           etapa_activa: datosExtraidos.etapa_activa || 'Emitida',
         };
 
-        // 5. RECALCULAR automáticamente
-        const formularioConCalculos = actualizarCalculosAutomaticos(nuevosDatos);
-        
-        return formularioConCalculos;
+        // 5. NO recalcular automáticamente - usar datos del PDF tal cual
+        // Los cálculos solo se aplican cuando el usuario edita campos manualmente
+        return nuevosDatos;
       });
 
       // 6. GUARDAR INFO DE IMPORTACIÓN para el banner

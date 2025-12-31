@@ -1608,7 +1608,7 @@ const Formulario = React.memo(({
                 </div>
                 <small className="text-muted">
                   {formulario.compania?.toLowerCase().includes('qualitas') 
-                    ? 'Sugerido Qualitas: 14 días' 
+                    ? 'Sugerido Qualitas: 14 días (captura manual) - El PDF puede tener otro valor' 
                     : formulario.compania 
                       ? 'Sugerido otras aseguradoras: 30 días'
                       : 'Editable para pruebas'}

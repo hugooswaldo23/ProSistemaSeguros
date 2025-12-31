@@ -14,7 +14,7 @@ export const expedienteOpciones = {
   ],
   tiposPago: ['Anual', 'Fraccionado'],
   frecuenciasPago: ['Mensual', 'Trimestral', 'Semestral'],
-  periodosGracia: [14, 30],
+  periodosGracia: [3, 14, 30],
   estatusPago: [
     'Sin definir',
     'Pago en período de gracia',

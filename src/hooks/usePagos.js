@@ -142,39 +142,22 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, onPag
         toast.error('Pago aplicado pero error al actualizar recibo en BD');
       }
 
-      // 4. Actualizar estado local
-      setExpedientes(prevExpedientes => 
-        prevExpedientes.map(exp => 
-          exp.id === expedienteParaPago.id 
-            ? { 
-                ...exp, 
-                estatus_pago: resultado.nuevoEstatusPago,
-                etapa_activa: resultado.etapaFinal,
-                ultimo_recibo_pagado: numeroReciboPago,
-                fecha_ultimo_pago: fechaUltimoPago
-              }
-            : exp
-        )
-      );
-
-      // 5. Cerrar modal y mostrar éxito
+      // 4. Cerrar modal y mostrar éxito
       toast.success('✅ Pago aplicado correctamente');
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
       setNumeroReciboPago(1);
 
-      // 6. Recargar expedientes desde BD
-      setTimeout(async () => {
-        if (cargarExpedientes) {
-          await cargarExpedientes();
-        }
-        
-        // Ejecutar callback adicional (para recargar vista de detalles si es necesario)
-        if (onPagoAplicado) {
-          await onPagoAplicado(expedienteParaPago);
-        }
-      }, 500);
+      // 5. Recargar expedientes desde BD para obtener el estatus correcto calculado por el backend
+      if (cargarExpedientes) {
+        await cargarExpedientes();
+      }
+      
+      // Ejecutar callback adicional (para recargar vista de detalles si es necesario)
+      if (onPagoAplicado) {
+        await onPagoAplicado(expedienteParaPago);
+      }
 
     } catch (error) {
       console.error('❌ Error al procesar pago:', error);

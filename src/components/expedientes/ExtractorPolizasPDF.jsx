@@ -1414,30 +1414,51 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         datosConCliente.tipo_cobertura = datosConCliente.tipo_cobertura.charAt(0).toUpperCase() + datosConCliente.tipo_cobertura.slice(1).toLowerCase();
       }
       
-      // ================== FECHA LÍMITE DE PAGO ==================
-      // Si el extractor trae fecha_limite_pago (como Chubb), usarla como fecha_vencimiento_pago
-      if (datosConCliente.fecha_limite_pago) {
+      // ================== FECHA LÍMITE DE PAGO (PRIMER RECIBO) ==================
+      // Calcular: inicio_vigencia + periodo_gracia
+      if (datosConCliente.inicio_vigencia && datosConCliente.periodo_gracia) {
+        const [year, month, day] = datosConCliente.inicio_vigencia.split('-');
+        const fechaInicio = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        fechaInicio.setDate(fechaInicio.getDate() + parseInt(datosConCliente.periodo_gracia));
+        datosConCliente.fecha_vencimiento_pago = fechaInicio.toISOString().split('T')[0];
+        datosConCliente.fecha_pago = fechaInicio.toISOString().split('T')[0];
+        console.log('✅ Fecha límite de pago calculada:', datosConCliente.fecha_vencimiento_pago, `(${datosConCliente.inicio_vigencia} + ${datosConCliente.periodo_gracia} días)`);
+      } else if (datosConCliente.fecha_limite_pago) {
+        // Fallback: si el PDF trae fecha_limite_pago directamente, usarla
         datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
         datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
-        console.log('📅 Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
+        console.log('ℹ️ Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
+      }
+      
+      // ================== FECHA AVISO DE RENOVACIÓN ==================
+      // Calcular: termino_vigencia - 30 días
+      if (datosConCliente.termino_vigencia) {
+        const [yearTerm, monthTerm, dayTerm] = datosConCliente.termino_vigencia.split('-');
+        const fechaTermino = new Date(parseInt(yearTerm), parseInt(monthTerm) - 1, parseInt(dayTerm));
+        fechaTermino.setDate(fechaTermino.getDate() - 30);
+        datosConCliente.fecha_aviso_renovacion = fechaTermino.toISOString().split('T')[0];
+        console.log('✅ Fecha aviso renovación calculada:', datosConCliente.fecha_aviso_renovacion, `(${datosConCliente.termino_vigencia} - 30 días)`);
       }
       
       // ================== PERÍODO DE GRACIA ==================
-      // Si no viene del PDF, usar valores sugeridos por aseguradora
+      // Si NO viene del PDF (no se pudo extraer), usar valores sugeridos por aseguradora
       if (!datosConCliente.periodo_gracia) {
         const aseguradora = (datosConCliente.compania || '').toLowerCase();
         if (aseguradora.includes('qualitas')) {
-          datosConCliente.periodo_gracia = 14; // Qualitas: 14 días
+          datosConCliente.periodo_gracia = 14; // Qualitas: 14 días por defecto cuando NO se extrae del PDF
         } else if (aseguradora) {
           datosConCliente.periodo_gracia = 30; // Otras: 30 días
         }
-        console.log('📆 Período de gracia sugerido:', datosConCliente.periodo_gracia, 'días');
+        console.log('📆 Período de gracia sugerido (no extraído del PDF):', datosConCliente.periodo_gracia, 'días');
+      } else {
+        console.log('✅ Período de gracia extraído del PDF:', datosConCliente.periodo_gracia, 'días');
       }
       
       // ================== ESTATUS DE PAGO INICIAL ==================
-      // Calcular el estatus de pago basado en la fecha de vencimiento
+      // Calcular el estatus de pago basado en la fecha_vencimiento_pago (ya calculada arriba)
       if (datosConCliente.fecha_vencimiento_pago) {
-        const fechaVencimiento = new Date(datosConCliente.fecha_vencimiento_pago);
+        const [yearVenc, monthVenc, dayVenc] = datosConCliente.fecha_vencimiento_pago.split('-');
+        const fechaVencimiento = new Date(parseInt(yearVenc), parseInt(monthVenc) - 1, parseInt(dayVenc));
         const hoy = new Date();
         hoy.setHours(0, 0, 0, 0);
         fechaVencimiento.setHours(0, 0, 0, 0);
@@ -1446,15 +1467,19 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         
         if (diasRestantes < 0) {
           datosConCliente.estatusPago = 'Vencido';
+          datosConCliente.estatus_pago = 'Vencido';
         } else if (diasRestantes <= 15) {
           datosConCliente.estatusPago = 'Por Vencer';
+          datosConCliente.estatus_pago = 'Por Vencer';
         } else {
           datosConCliente.estatusPago = 'Pendiente';
+          datosConCliente.estatus_pago = 'Pendiente';
         }
         console.log('💳 Estatus de pago calculado:', datosConCliente.estatusPago, '(días restantes:', diasRestantes, ')');
       } else {
         // Si no hay fecha de vencimiento, el pago está pendiente
         datosConCliente.estatusPago = 'Pendiente';
+        datosConCliente.estatus_pago = 'Pendiente';
         console.log('💳 Estatus de pago por defecto: Pendiente (sin fecha de vencimiento)');
       }
       
