@@ -16,7 +16,7 @@ import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-export function usePagos({ expedientes, setExpedientes, cargarExpedientes, onPagoAplicado }) {
+export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado }) {
   // Estados del modal de pagos
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
@@ -63,6 +63,8 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, onPag
     if (!expedienteParaPago) return;
 
     setProcesandoPago(true);
+    // 🚫 Activar bandera para evitar recálculo de recibos durante el pago
+    if (set_aplicando_pago) set_aplicando_pago(true);
 
     try {
       // 1. Subir comprobante a S3 (solo si existe)
@@ -164,8 +166,10 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, onPag
       toast.error('Error al aplicar el pago: ' + error.message);
     } finally {
       setProcesandoPago(false);
+      // 🟢 Desactivar bandera para permitir recálculo normal
+      if (set_aplicando_pago) set_aplicando_pago(false);
     }
-  }, [expedienteParaPago, comprobantePago, fechaUltimoPago, numeroReciboPago, setExpedientes, cargarExpedientes]);
+  }, [expedienteParaPago, comprobantePago, fechaUltimoPago, numeroReciboPago, setExpedientes, cargarExpedientes, onPagoAplicado, set_aplicando_pago]);
 
   return {
     // Estados

@@ -502,13 +502,32 @@ const ModuloNvoExpedientes = () => {
     try {
       const datos = { ...formulario };
       
-      // Capturar si cambió inicio_vigencia ANTES de limpiar la bandera
+      // Capturar si cambió algún campo que afecta los recibos ANTES de limpiar las banderas
       const cambioInicioVigencia = datos._inicio_vigencia_changed === true;
+      const cambioPeriodoGracia = datos._periodo_gracia_changed === true;
+      const cambioTipoPago = datos._tipo_pago_changed === true;
+      const cambioFrecuenciaPago = datos._frecuencia_pago_changed === true;
+      const cambioTotal = datos._total_changed === true;
+      const cambioPrimerPago = datos._primer_pago_changed === true;
+      const cambioPagosSubsecuentes = datos._pagos_subsecuentes_changed === true;
       
-      // Limpiar campos temporales y bandera
+      const debeRegenerarRecibos = (
+        cambioInicioVigencia || cambioPeriodoGracia || cambioTipoPago || 
+        cambioFrecuenciaPago || cambioTotal || cambioPrimerPago || cambioPagosSubsecuentes
+      );
+      
+      // Limpiar campos temporales y banderas
       delete datos._fechaManual;
       delete datos._datos_desde_pdf;
       delete datos._inicio_vigencia_changed;
+      delete datos._periodo_gracia_changed;
+      delete datos._tipo_pago_changed;
+      delete datos._frecuencia_pago_changed;
+      delete datos._total_changed;
+      delete datos._primer_pago_changed;
+      delete datos._pagos_subsecuentes_changed;
+      delete datos.cliente;
+      delete datos.historial;
       delete datos.cliente;
       delete datos.historial;
 
@@ -554,10 +573,20 @@ const ModuloNvoExpedientes = () => {
       }
 
       // 5. Para pagos fraccionados: gestión de recibos
-      // Si cambió inicio_vigencia, ELIMINAR recibos para que el backend los regenere
-      if (cambioInicioVigencia && modoEdicion) {
-        console.log('🔄 Inicio de vigencia cambió - eliminando recibos para que el backend los regenere');
+      // Si cambió cualquier campo que afecte los recibos, ELIMINAR recibos para que el backend los regenere
+      if (debeRegenerarRecibos && modoEdicion) {
+        console.log('🔄 Cambios detectados que requieren regenerar recibos - eliminando recibos para que el backend los regenere');
+        console.log('🔄 Cambios:', {
+          inicio_vigencia: cambioInicioVigencia,
+          periodo_gracia: cambioPeriodoGracia,
+          tipo_pago: cambioTipoPago,
+          frecuencia_pago: cambioFrecuenciaPago,
+          total: cambioTotal,
+          primer_pago: cambioPrimerPago,
+          pagos_subsecuentes: cambioPagosSubsecuentes
+        });
         delete datos.recibos;
+        datos._force_recibo_regeneration = true; // Bandera explícita para backend
       } else {
         // Serializar recibos si existen
         if (datos.recibos && Array.isArray(datos.recibos) && datos.recibos.length > 0) {
@@ -978,10 +1007,23 @@ const ModuloNvoExpedientes = () => {
       }
     }
     
-    // 5. Si cambió inicio_vigencia, limpiar recibos para forzar recálculo
+    // 5. Si cambió cualquier campo que afecte los recibos, limpiar para forzar recálculo
     let recibosActualizados = formularioActual.recibos;
-    if (formularioActual._inicio_vigencia_changed) {
+    const debeRecalcularRecibos = (
+      formularioActual._inicio_vigencia_changed ||
+      formularioActual._periodo_gracia_changed ||
+      formularioActual._frecuencia_pago_changed ||
+      formularioActual._tipo_pago_changed ||
+      formularioActual._total_changed ||
+      formularioActual._primer_pago_changed ||
+      formularioActual._pagos_subsecuentes_changed
+    );
+    
+    if (debeRecalcularRecibos) {
       recibosActualizados = undefined; // Forzar recálculo en CalendarioPagos
+      console.log('🔄 Forzando recálculo de recibos por cambios detectados');
+      console.log('💾 Recibos antes del recálculo:', formularioActual.recibos?.length || 0);
+      console.log('💾 Recibos después del recálculo:', recibosActualizados);
     }
     
     // Retornar formulario actualizado
@@ -995,8 +1037,14 @@ const ModuloNvoExpedientes = () => {
       recibos: recibosActualizados
     };
     
-    // Limpiar bandera temporal
+    // Limpiar banderas temporales
     delete resultado._inicio_vigencia_changed;
+    delete resultado._periodo_gracia_changed;
+    delete resultado._frecuencia_pago_changed;
+    delete resultado._tipo_pago_changed;
+    delete resultado._total_changed;
+    delete resultado._primer_pago_changed;
+    delete resultado._pagos_subsecuentes_changed;
     
     return resultado;
   }, [calculartermino_vigencia]);

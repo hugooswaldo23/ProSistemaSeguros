@@ -930,7 +930,11 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control fw-bold"
                     value={formulario.total ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, total: e.target.value }))}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      total: e.target.value,
+                      _total_changed: true // Marcar cambio para forzar recálculo de recibos
+                    }))}
                     placeholder="0.00"
                   />
                 </div>
@@ -1029,7 +1033,8 @@ const FormularioExpedienteBase = React.memo(({
                     const nuevoFormulario = {
                       ...formulario,
                       tipo_pago: tipo,
-                      frecuenciaPago: esAnual ? 'Anual' : formulario.frecuenciaPago
+                      frecuenciaPago: esAnual ? 'Anual' : formulario.frecuenciaPago,
+                      _tipo_pago_changed: true // Marcar cambio para forzar recálculo de recibos
                     };
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                     setFormulario(formularioActualizado);
@@ -1048,7 +1053,11 @@ const FormularioExpedienteBase = React.memo(({
                     className="form-select"
                     value={formulario.frecuenciaPago}
                     onChange={(e) => {
-                      const nuevoFormulario = { ...formulario, frecuenciaPago: e.target.value };
+                      const nuevoFormulario = { 
+                        ...formulario, 
+                        frecuenciaPago: e.target.value,
+                        _frecuencia_pago_changed: true // Marcar cambio para forzar recálculo de recibos
+                      };
                       const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                       setFormulario(formularioActualizado);
                     }}
@@ -1085,10 +1094,11 @@ const FormularioExpedienteBase = React.memo(({
                       const valor = e.target.value;
                       const diasGracia = valor === '' ? 0 : Math.max(0, parseInt(valor, 10) || 0);
                       
-                      // Actualizar periodo_gracia y recalcular todo con actualizarCalculosAutomaticos
+                      // Actualizar periodo_gracia y marcar cambio para forzar recálculo de recibos
                       const formularioConNuevoPeriodo = {
                         ...formulario,
-                        periodo_gracia: diasGracia
+                        periodo_gracia: diasGracia,
+                        _periodo_gracia_changed: true // Marcar cambio para forzar recálculo
                       };
                       
                       // Usar la función de actualización automática que tiene toda la lógica
@@ -1163,7 +1173,8 @@ const FormularioExpedienteBase = React.memo(({
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
                         periodo_gracia: nuevoPeriodoGracia,
-                        _fechaManual: true
+                        _fechaManual: true,
+                        _periodo_gracia_changed: true // Marcar cambio para forzar recálculo de recibos
                       };
                     });
                   }}

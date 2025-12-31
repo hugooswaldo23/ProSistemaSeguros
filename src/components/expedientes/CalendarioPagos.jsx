@@ -27,7 +27,9 @@ const CalendarioPagos = React.memo(({
     recibos: expediente.recibos,
     tipo_pago: expediente.tipo_pago,
     frecuenciaPago: expediente.frecuenciaPago,
-    inicio_vigencia: expediente.inicio_vigencia
+    inicio_vigencia: expediente.inicio_vigencia,
+    onEliminarPago_defined: !!onEliminarPago,
+    onEliminarPago_type: typeof onEliminarPago
   });
   
   // Normalizar campos (aceptar múltiples nombres)
@@ -366,9 +368,44 @@ const CalendarioPagos = React.memo(({
                         {onEliminarPago && (
                           <button 
                             className="btn btn-sm btn-outline-danger ms-1"
-                            onClick={() => {
+                            onClick={async () => {
+                              console.log('🚀 [DEBUG] Botón eliminar pago clickeado');
+                              console.log('🚀 [DEBUG] Pago:', pago);
+                              console.log('🚀 [DEBUG] Expediente:', expediente);
+                              console.log('🚀 [DEBUG] onEliminarPago function:', typeof onEliminarPago);
+                              
                               if (window.confirm(`¿Eliminar el pago del recibo #${pago.numero}? El estatus se recalculará automáticamente.`)) {
-                                onEliminarPago(pago, expediente);
+                                // 🔥 IMPLEMENTACIÓN DIRECTA - en lugar de llamar onEliminarPago, hacer la eliminación aquí
+                                try {
+                                  console.log('💰 [DIRECTO] Eliminando pago del recibo', pago.numero, 'del expediente', expediente.id);
+                                  
+                                  const API_URL = import.meta.env.VITE_API_URL;
+                                  const response = await fetch(`${API_URL}/api/recibos/${expediente.id}/${pago.numero}/pago`, {
+                                    method: 'DELETE'
+                                  });
+                                  
+                                  if (!response.ok) {
+                                    const errorData = await response.json();
+                                    throw new Error(errorData.error || 'Error al eliminar el pago');
+                                  }
+                                  
+                                  console.log('✅ [DIRECTO] Pago eliminado correctamente del recibo', pago.numero);
+                                  
+                                  // Mostrar mensaje de éxito
+                                  if (window.toast && window.toast.success) {
+                                    window.toast.success(`Pago eliminado del recibo ${pago.numero}`);
+                                  }
+                                  
+                                  // Recargar la página para reflejar cambios
+                                  window.location.reload();
+                                  
+                                } catch (error) {
+                                  console.error('❌ [DIRECTO] Error eliminando pago:', error);
+                                  
+                                  if (window.toast && window.toast.error) {
+                                    window.toast.error(`Error al eliminar pago: ${error.message}`);
+                                  }
+                                }
                               }
                             }}
                             title="Eliminar este pago y recalcular estatus"

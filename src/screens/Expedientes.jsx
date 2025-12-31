@@ -554,6 +554,7 @@ const ModuloExpedientes = () => {
     expedientes, 
     setExpedientes, 
     cargarExpedientes,
+    set_aplicando_pago,
     onPagoAplicado: useCallback(async (expediente) => {
       // Si estamos en vista de detalles, solo recargar los recibos
       if (vistaActual === 'detalles' && expedienteSeleccionado) {
@@ -692,6 +693,7 @@ const ModuloExpedientes = () => {
 
   const [formulario, setFormulario] = useState(estadoInicialFormulario);
   const [formularioOriginal, setFormularioOriginal] = useState(null); // Snapshot al abrir edición
+  const [_aplicando_pago, set_aplicando_pago] = useState(false); // Control para evitar recálculo durante pagos
   const [clienteSeleccionado, setClienteSeleccionado] = useState(null);
   const debugLogOnceRef = useRef(false);
 
@@ -704,67 +706,95 @@ const ModuloExpedientes = () => {
    * Eliminar un pago del recibo y recalcular estatus
    * Se actualiza solo localmente, los cambios se guardan al hacer clic en "Guardar"
    */
-  const handleEliminarPago = useCallback((pago, expediente) => {
-    // Solo actualizar el estado local del calendario
-    setFormulario(prev => {
-      if (!prev.recibos || !Array.isArray(prev.recibos)) {
-        return prev;
-      }
+  const handleEliminarPago = useCallback(async (pago, expediente) => {
+    console.log('🔥 MI FUNCION handleEliminarPago SE EJECUTÓ!!! 🔥');
+    try {
+      console.log('🚀 [DEBUG] handleEliminarPago llamada con:', { pago, expediente: expediente?.id });
+      console.log(`💰 [Frontend] Eliminando pago del recibo ${pago.numero} del expediente ${expediente.id}`);
       
-      const recibosActualizados = prev.recibos.map(recibo => {
-        if (recibo.numero_recibo === pago.numero) {
-          const nuevoEstatus = estatusPagosUtils.calcularEstatusRecibo(
-            recibo.fecha_vencimiento, 
-            null
-          );
-          
-          return {
-            ...recibo,
-            fecha_pago_real: null,
-            fecha_captura_pago: null,
-            comprobante_url: null,
-            comprobante_nombre: null,
-            estatus: nuevoEstatus
-          };
-        }
-        return recibo;
+      // Llamar al endpoint específico para eliminar el pago
+      const response = await fetch(`${API_URL}/api/recibos/${expediente.id}/${pago.numero}/pago`, {
+        method: 'DELETE'
       });
       
-      const recibosPagados = recibosActualizados.filter(r => r.fecha_pago_real).length;
-      const totalRecibos = recibosActualizados.length;
-      
-      // 🔧 Calcular estatus del expediente basándose en el estado de los recibos
-      let nuevoEstatusPago = 'Pendiente';
-      
-      if (recibosPagados === totalRecibos) {
-        // Todos los recibos pagados
-        nuevoEstatusPago = 'Pagado';
-      } else if (recibosPagados > 0) {
-        // Algunos recibos pagados, otros pendientes
-        nuevoEstatusPago = 'Pago por vencer';
-      } else {
-        // Ningún recibo pagado: determinar estatus por el recibo más crítico
-        const tieneVencidos = recibosActualizados.some(r => r.estatus === 'Vencido');
-        const tienePorVencer = recibosActualizados.some(r => r.estatus === 'Por Vencer');
-        
-        if (tieneVencidos) {
-          nuevoEstatusPago = 'Vencido';
-        } else if (tienePorVencer) {
-          nuevoEstatusPago = 'Pago por vencer';
-        } else {
-          nuevoEstatusPago = 'Pendiente';
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al eliminar el pago');
       }
       
-      return {
-        ...prev,
-        recibos: recibosActualizados,
-        ultimo_recibo_pagado: recibosPagados,
-        estatus_pago: nuevoEstatusPago,
-        estatusPago: nuevoEstatusPago
-      };
-    });
-  }, [setFormulario]);
+      console.log(`✅ [Frontend] Pago eliminado correctamente del recibo ${pago.numero}`);
+      toast.success(`Pago eliminado del recibo ${pago.numero}`);
+      
+      // Recargar los recibos para reflejar el cambio
+      if (cargarExpedientes) {
+        await cargarExpedientes();
+      }
+      
+      // Actualizar el estado local del formulario también para consistencia
+      setFormulario(prev => {
+        if (!prev.recibos || !Array.isArray(prev.recibos)) {
+          return prev;
+        }
+        
+        const recibosActualizados = prev.recibos.map(recibo => {
+          if (recibo.numero_recibo === pago.numero) {
+            const nuevoEstatus = estatusPagosUtils.calcularEstatusRecibo(
+              recibo.fecha_vencimiento, 
+              null
+            );
+            
+            return {
+              ...recibo,
+              fecha_pago_real: null,
+              fecha_captura_pago: null,
+              comprobante_url: null,
+              comprobante_nombre: null,
+              estatus: nuevoEstatus
+            };
+          }
+          return recibo;
+        });
+        
+        const recibosPagados = recibosActualizados.filter(r => r.fecha_pago_real).length;
+        const totalRecibos = recibosActualizados.length;
+        
+        // 🔧 Calcular estatus del expediente basándose en el estado de los recibos
+        let nuevoEstatusPago = 'Pendiente';
+        
+        if (recibosPagados === totalRecibos) {
+          // Todos los recibos pagados
+          nuevoEstatusPago = 'Pagado';
+        } else if (recibosPagados > 0) {
+          // Algunos recibos pagados, otros pendientes
+          nuevoEstatusPago = 'Pago por vencer';
+        } else {
+          // Ningún recibo pagado: determinar estatus por el recibo más crítico
+          const tieneVencidos = recibosActualizados.some(r => r.estatus === 'Vencido');
+          const tienePorVencer = recibosActualizados.some(r => r.estatus === 'Por Vencer');
+          
+          if (tieneVencidos) {
+            nuevoEstatusPago = 'Vencido';
+          } else if (tienePorVencer) {
+            nuevoEstatusPago = 'Pago por vencer';
+          } else {
+            nuevoEstatusPago = 'Pendiente';
+          }
+        }
+        
+        return {
+          ...prev,
+          recibos: recibosActualizados,
+          ultimo_recibo_pagado: recibosPagados,
+          estatus_pago: nuevoEstatusPago,
+          estatusPago: nuevoEstatusPago
+        };
+      });
+      
+    } catch (error) {
+      console.error('❌ [Frontend] Error eliminando pago:', error);
+      toast.error(`Error al eliminar pago: ${error.message}`);
+    }
+  }, [cargarExpedientes, setFormulario]);
 
   // 📸 Capturar snapshot cuando el formulario esté completamente cargado en modo edición
   // 📸 CAPTURAR SNAPSHOT cuando el formulario termine de cargarse (PDF + BD + Cálculos)
@@ -910,6 +940,12 @@ const ModuloExpedientes = () => {
       return;
     }
     
+    // 🔧 FIX: NO recalcular si estamos aplicando pagos (para evitar sobrescribir pagos recién aplicados)
+    if (formulario._aplicando_pago || _aplicando_pago) {
+      console.log('⏸️ [RECALCULO] Saltando recálculo - Aplicando pago, no recalcular recibos...');
+      return;
+    }
+    
     const recalcularCamposDependientes = () => {
       console.log('🔄 [RECALCULO] Iniciando recálculo automático...');
       
@@ -980,51 +1016,99 @@ const ModuloExpedientes = () => {
             ? parseInt(formulario.periodo_gracia, 10)
             : 0; // Sin fallback cuando hay datos extraídos
           
-          nuevosRecibos = formulario.recibos.map((reciboOriginal, index) => {
-            // Calcular nueva fecha para este recibo
-            let nuevaFechaVencimiento;
-            
-            if (index === 0) {
-              // ✅ Primer recibo: fecha inicio + período de gracia EXTRAÍDO del PDF
-              const fechaPrimerRecibo = new Date(fechaInicio);
-              fechaPrimerRecibo.setDate(fechaPrimerRecibo.getDate() + periodoGraciaExtraido);
-              nuevaFechaVencimiento = fechaPrimerRecibo.toISOString().split('T')[0];
-            } else {
-              // ✅ Recibos subsecuentes: fecha inicio + meses (SIN período de gracia)
-              // La extracción indica 0 días para subsecuentes
-              const mesesIntervalo = frecuenciaPago === 'Mensual' ? 1 :
-                                   frecuenciaPago === 'Trimestral' ? 3 :
-                                   frecuenciaPago === 'Semestral' ? 6 : 12;
+          // 🔧 FIX CRÍTICO: Obtener recibos actuales de BD para preservar pagos recientes
+          // Si hay un expediente ID (modo edición), consultar BD para obtener estado actual de pagos
+          if (formulario.id && expedienteCargado && expedienteCargado.recibos) {
+            // Usar recibos de BD como base (más actualizados que el estado local)
+            nuevosRecibos = expedienteCargado.recibos.map((reciboOriginal, index) => {
+              // Calcular nueva fecha para este recibo (misma lógica)
+              let nuevaFechaVencimiento;
               
-              const fechaRecibo = new Date(fechaInicio.getTime()); // Crear copia explícita
-              // ✅ CORRECCIÓN: Aplicar la suma de meses que faltaba
-              fechaRecibo.setMonth(fechaRecibo.getMonth() + (mesesIntervalo * index));
-              nuevaFechaVencimiento = fechaRecibo.toISOString().split('T')[0];
-            }
-            
-            // Recalcular estatus solo si no está pagado
-            let nuevoEstatusRecibo = reciboOriginal.estatus;
-            if (!reciboOriginal.fecha_pago_real) {
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              const fechaVenc = new Date(nuevaFechaVencimiento);
-              fechaVenc.setHours(0, 0, 0, 0);
-              
-              if (fechaVenc < hoy) {
-                nuevoEstatusRecibo = 'Vencido';
-              } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
-                nuevoEstatusRecibo = 'Por Vencer';
+              if (index === 0) {
+                const fechaPrimerRecibo = new Date(fechaInicio);
+                fechaPrimerRecibo.setDate(fechaPrimerRecibo.getDate() + periodoGraciaExtraido);
+                nuevaFechaVencimiento = fechaPrimerRecibo.toISOString().split('T')[0];
               } else {
-                nuevoEstatusRecibo = 'Pendiente';
+                const mesesIntervalo = frecuenciaPago === 'Mensual' ? 1 :
+                                     frecuenciaPago === 'Trimestral' ? 3 :
+                                     frecuenciaPago === 'Semestral' ? 6 : 12;
+                
+                const fechaRecibo = new Date(fechaInicio.getTime());
+                fechaRecibo.setMonth(fechaRecibo.getMonth() + (mesesIntervalo * index));
+                nuevaFechaVencimiento = fechaRecibo.toISOString().split('T')[0];
               }
-            }
-            
-            return {
-              ...reciboOriginal,
-              fecha_vencimiento: nuevaFechaVencimiento,
-              estatus: nuevoEstatusRecibo
-            };
-          });
+              
+              // Recalcular estatus solo si no está pagado
+              let nuevoEstatusRecibo = reciboOriginal.estatus;
+              if (!reciboOriginal.fecha_pago_real) {
+                const hoy = new Date();
+                hoy.setHours(0, 0, 0, 0);
+                const fechaVenc = new Date(nuevaFechaVencimiento);
+                fechaVenc.setHours(0, 0, 0, 0);
+                
+                if (fechaVenc < hoy) {
+                  nuevoEstatusRecibo = 'Vencido';
+                } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
+                  nuevoEstatusRecibo = 'Por Vencer';
+                } else {
+                  nuevoEstatusRecibo = 'Pendiente';
+                }
+              }
+              
+              return {
+                ...reciboOriginal, // ✅ PRESERVA fecha_pago_real y comprobantes de BD
+                fecha_vencimiento: nuevaFechaVencimiento,
+                estatus: nuevoEstatusRecibo
+              };
+            });
+          } else {
+            // Fallback para expedientes nuevos: usar formulario.recibos
+            nuevosRecibos = formulario.recibos.map((reciboOriginal, index) => {
+              // Calcular nueva fecha para este recibo
+              let nuevaFechaVencimiento;
+              
+              if (index === 0) {
+                // ✅ Primer recibo: fecha inicio + período de gracia EXTRAÍDO del PDF
+                const fechaPrimerRecibo = new Date(fechaInicio);
+                fechaPrimerRecibo.setDate(fechaPrimerRecibo.getDate() + periodoGraciaExtraido);
+                nuevaFechaVencimiento = fechaPrimerRecibo.toISOString().split('T')[0];
+              } else {
+                // ✅ Recibos subsecuentes: fecha inicio + meses (SIN período de gracia)
+                // La extracción indica 0 días para subsecuentes
+                const mesesIntervalo = frecuenciaPago === 'Mensual' ? 1 :
+                                     frecuenciaPago === 'Trimestral' ? 3 :
+                                     frecuenciaPago === 'Semestral' ? 6 : 12;
+                
+                const fechaRecibo = new Date(fechaInicio.getTime()); // Crear copia explícita
+                // ✅ CORRECCIÓN: Aplicar la suma de meses que faltaba
+                fechaRecibo.setMonth(fechaRecibo.getMonth() + (mesesIntervalo * index));
+                nuevaFechaVencimiento = fechaRecibo.toISOString().split('T')[0];
+              }
+              
+              // Recalcular estatus solo si no está pagado
+              let nuevoEstatusRecibo = reciboOriginal.estatus;
+              if (!reciboOriginal.fecha_pago_real) {
+                const hoy = new Date();
+                hoy.setHours(0, 0, 0, 0);
+                const fechaVenc = new Date(nuevaFechaVencimiento);
+                fechaVenc.setHours(0, 0, 0, 0);
+                
+                if (fechaVenc < hoy) {
+                  nuevoEstatusRecibo = 'Vencido';
+                } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
+                  nuevoEstatusRecibo = 'Por Vencer';
+                } else {
+                  nuevoEstatusRecibo = 'Pendiente';
+                }
+              }
+              
+              return {
+                ...reciboOriginal,
+                fecha_vencimiento: nuevaFechaVencimiento,
+                estatus: nuevoEstatusRecibo
+              };
+            });
+          }
         }
         
         // Verificar si hay cambios en el calendario
@@ -3139,7 +3223,10 @@ const eliminarExpediente = useCallback((id) => {
             subirPDFPoliza={subirPDFPoliza}
             mostrarExtractorPDF={mostrarExtractorPDF}
             setMostrarExtractorPDF={setMostrarExtractorPDF}
-            onEliminarPago={handleEliminarPago}
+            onEliminarPago={(() => {
+              console.log('🔥 PASANDO handleEliminarPago:', typeof handleEliminarPago);
+              return handleEliminarPago;
+            })()}
           />
         )}
         
