@@ -579,6 +579,22 @@ const ListaExpedientes = React.memo(({
                               const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
                               nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
                               apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            } else if (expediente.sub_agente) {
+                              // Fallback: usar sub_agente como texto
+                              const textoVendedor = (expediente.sub_agente || '').trim();
+                              const palabras = textoVendedor.split(/\s+/);
+                              // Si tiene 3+ palabras: primeras 2 como nombre, última como apellido
+                              // Ejemplo: "mariana sanchez torres" → nombre: "mariana sanchez", apellido: "torres"
+                              if (palabras.length >= 3) {
+                                nombreVendedor = palabras.slice(0, 2).join(' ');
+                                apellidoVendedor = palabras[palabras.length - 1];
+                              } else if (palabras.length === 2) {
+                                nombreVendedor = palabras[0];
+                                apellidoVendedor = palabras[1];
+                              } else {
+                                nombreVendedor = palabras[0] || '';
+                                apellidoVendedor = '';
+                              }
                             }
                             
                             return (
@@ -945,6 +961,21 @@ const ListaExpedientes = React.memo(({
                               const nombreCompletoVendedor = (vendedorInfo.nombre || '').trim();
                               nombreVendedor = nombreCompletoVendedor.split(/\s+/)[0] || '';
                               apellidoVendedor = vendedorInfo.apellidoPaterno || '';
+                            } else if (expediente.sub_agente) {
+                              // Fallback: usar sub_agente como texto
+                              const textoVendedor = (expediente.sub_agente || '').trim();
+                              const palabras = textoVendedor.split(/\s+/);
+                              // Si tiene 3+ palabras: primeras 2 como nombre, última como apellido
+                              if (palabras.length >= 3) {
+                                nombreVendedor = palabras.slice(0, 2).join(' ');
+                                apellidoVendedor = palabras[palabras.length - 1];
+                              } else if (palabras.length === 2) {
+                                nombreVendedor = palabras[0];
+                                apellidoVendedor = palabras[1];
+                              } else {
+                                nombreVendedor = palabras[0] || '';
+                                apellidoVendedor = '';
+                              }
                             }
                             
                             return (

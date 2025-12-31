@@ -1,5 +1,30 @@
 /**
  * ====================================================================
+ * ⚠️ ⚠️ ⚠️ ARCHIVO DE RESPALDO - NO USAR EN DESARROLLO ⚠️ ⚠️ ⚠️
+ * ====================================================================
+ * 
+ * Este archivo es la versión ANTERIOR del módulo de Expedientes.
+ * 
+ * 🆕 NUEVO MÓDULO: src/screens/NvoExpedientes.jsx
+ * 
+ * El nuevo módulo tiene:
+ * - Formularios separados (Agregar vs Editar)
+ * - Lógica simplificada y limpia
+ * - Componentes modulares
+ * - Mejor mantenibilidad
+ * 
+ * Este archivo (Expedientes.jsx) se mantiene como RESPALDO mientras
+ * se valida completamente la nueva versión.
+ * 
+ * ⛔ NO REALIZAR CAMBIOS EN ESTE ARCHIVO
+ * ✅ Todos los cambios deben hacerse en: NvoExpedientes.jsx
+ * 
+ * Pendiente: Eliminar este archivo cuando NvoExpedientes.jsx esté 100% validado
+ * ====================================================================
+ * 
+ * 
+ * 
+ * ====================================================================
  * COMPONENTE: Gestión de Expedientes (Pólizas)
  * TRAZABILIDAD COMPLETA DEL CICLO DE VIDA
  * ====================================================================
@@ -859,18 +884,35 @@ const ModuloExpedientes = () => {
     }
   }, [vistaActual, modoEdicion]);
 
+  // 🚨 Estado para prevenir recálculos durante guardado
+  const [guardando, setGuardando] = useState(false);
+
   // 🎯 RECALCULAR automáticamente campos derivados cuando cambian las fechas de vigencia
   useEffect(() => {
     // Solo recalcular si estamos en el formulario y hay fechas válidas
     if (vistaActual !== 'formulario' || !formulario.inicio_vigencia) return;
     
-    // 🔥 NO recalcular si la fecha viene de recibo real
-    if (formulario._no_recalcular_fecha_vencimiento) {
-      console.log('🔒 [USEEFFECT] Saltando recálculo - fecha viene de recibo real');
+    // 🚨 CRÍTICO: NO recalcular mientras se está guardando
+    if (guardando) {
+      console.log('⏸️ [RECALCULO] Saltando recálculo - Expediente guardando...');
+      return;
+    }
+    
+    // 🚨 CRÍTICO: NO recalcular si los datos vinieron del PDF
+    if (formulario._datos_desde_pdf || formulario._no_recalcular_automaticamente) {
+      console.log('⏸️ [RECALCULO] Saltando recálculo - Datos del PDF, no requieren recálculo...');
+      return;
+    }
+    
+    // 🚨 CRÍTICO: NO recalcular si la fecha fue editada manualmente
+    if (formulario._fechaManual || formulario._no_recalcular_fecha_vencimiento) {
+      console.log('⏸️ [RECALCULO] Saltando recálculo - Fecha editada manualmente...');
       return;
     }
     
     const recalcularCamposDependientes = () => {
+      console.log('🔄 [RECALCULO] Iniciando recálculo automático...');
+      
       // 1. Calcular término de vigencia (inicio + 1 año)
       const fechaInicio = new Date(formulario.inicio_vigencia);
       const fechaTermino = new Date(fechaInicio);
@@ -882,55 +924,180 @@ const ModuloExpedientes = () => {
       fechaAviso.setDate(fechaAviso.getDate() - 30);
       const nuevoAviso = fechaAviso.toISOString().split('T')[0];
       
-      // 3. Calcular próximo pago (inicio + periodo de gracia)
-      const periodoGracia = formulario.periodo_gracia 
+      // 3. Calcular próximo pago (primer recibo: inicio + periodo de gracia extraído)
+      // ✅ CORREGIDO: Respetar SOLO el período extraído del PDF, sin fallbacks
+      const periodoGraciaExtraido = formulario.periodo_gracia 
         ? parseInt(formulario.periodo_gracia, 10)
-        : (formulario.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+        : 0; // Sin fallback cuando hay extracción PDF
       
       const fechaPago = new Date(fechaInicio);
-      fechaPago.setDate(fechaPago.getDate() + periodoGracia);
+      fechaPago.setDate(fechaPago.getDate() + periodoGraciaExtraido);
       const nuevoProximoPago = fechaPago.toISOString().split('T')[0];
       
-      // 4. Calcular estatus de pago
+      // 4. Calcular estatus de pago SOLO si no está marcado como Pagado
       const hoy = new Date();
       hoy.setHours(0, 0, 0, 0);
       const fechaVenc = new Date(nuevoProximoPago);
       fechaVenc.setHours(0, 0, 0, 0);
       
-      let nuevoEstatus = 'Pendiente';
-      if (formulario.estatusPago === 'Pagado') {
-        nuevoEstatus = 'Pagado';
-      } else if (fechaVenc < hoy) {
-        nuevoEstatus = 'Vencido';
-      } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
-        nuevoEstatus = 'Por Vencer';
+      let nuevoEstatus = formulario.estatusPago;
+      if (formulario.estatusPago !== 'Pagado') {
+        if (fechaVenc < hoy) {
+          nuevoEstatus = 'Vencido';
+        } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
+          nuevoEstatus = 'Por Vencer';
+        } else {
+          nuevoEstatus = 'Pendiente';
+        }
       }
       
-      // Solo actualizar si cambió algo
-      if (formulario.termino_vigencia !== nuevoTermino ||
-          formulario.fecha_aviso_renovacion !== nuevoAviso ||
-          formulario.proximoPago !== nuevoProximoPago ||
-          formulario.fecha_pago !== nuevoProximoPago ||
-          formulario.fecha_vencimiento_pago !== nuevoProximoPago ||
-          formulario.estatusPago !== nuevoEstatus) {
+      // 5. 🗓️ RECALCULAR calendario completo de pagos si existe
+      let recibosActualizados = formulario.recibos;
+      if (formulario.recibos && formulario.recibos.length > 0) {
+        console.log('🗓️ [RECALCULO] Recalculando calendario de pagos...');
+        
+        // Obtener configuración de pago
+        const tipoPago = formulario.tipo_pago || 'Anual';
+        const frecuenciaPago = formulario.frecuenciaPago || formulario.frecuencia_pago || 'Anual';
+        
+        let nuevosRecibos;
+        if (tipoPago === 'Anual' || frecuenciaPago === 'Anual') {
+          // Pago anual: 1 solo recibo
+          nuevosRecibos = [{
+            numero_recibo: 1,
+            fecha_vencimiento: nuevoProximoPago,
+            monto: parseFloat(formulario.total || 0),
+            estatus: nuevoEstatus,
+            fecha_pago_real: formulario.recibos[0]?.fecha_pago_real || null, // Preservar pago existente
+            comprobante_nombre: formulario.recibos[0]?.comprobante_nombre || null,
+            comprobante_url: formulario.recibos[0]?.comprobante_url || null
+          }];
+        } else {
+          // Pagos fraccionados: mantener estructura original pero actualizar fechas
+          const fechaInicio = new Date(formulario.inicio_vigencia);
+          // ✅ CORREGIDO: Respetar SOLO período de gracia del PDF, sin fallbacks de compañía
+          const periodoGraciaExtraido = formulario.periodo_gracia 
+            ? parseInt(formulario.periodo_gracia, 10)
+            : 0; // Sin fallback cuando hay datos extraídos
+          
+          nuevosRecibos = formulario.recibos.map((reciboOriginal, index) => {
+            // Calcular nueva fecha para este recibo
+            let nuevaFechaVencimiento;
+            
+            if (index === 0) {
+              // ✅ Primer recibo: fecha inicio + período de gracia EXTRAÍDO del PDF
+              const fechaPrimerRecibo = new Date(fechaInicio);
+              fechaPrimerRecibo.setDate(fechaPrimerRecibo.getDate() + periodoGraciaExtraido);
+              nuevaFechaVencimiento = fechaPrimerRecibo.toISOString().split('T')[0];
+            } else {
+              // ✅ Recibos subsecuentes: fecha inicio + meses (SIN período de gracia)
+              // La extracción indica 0 días para subsecuentes
+              const mesesIntervalo = frecuenciaPago === 'Mensual' ? 1 :
+                                   frecuenciaPago === 'Trimestral' ? 3 :
+                                   frecuenciaPago === 'Semestral' ? 6 : 12;
+              
+              const fechaRecibo = new Date(fechaInicio.getTime()); // Crear copia explícita
+              // ✅ CORRECCIÓN: Aplicar la suma de meses que faltaba
+              fechaRecibo.setMonth(fechaRecibo.getMonth() + (mesesIntervalo * index));
+              nuevaFechaVencimiento = fechaRecibo.toISOString().split('T')[0];
+            }
+            
+            // Recalcular estatus solo si no está pagado
+            let nuevoEstatusRecibo = reciboOriginal.estatus;
+            if (!reciboOriginal.fecha_pago_real) {
+              const hoy = new Date();
+              hoy.setHours(0, 0, 0, 0);
+              const fechaVenc = new Date(nuevaFechaVencimiento);
+              fechaVenc.setHours(0, 0, 0, 0);
+              
+              if (fechaVenc < hoy) {
+                nuevoEstatusRecibo = 'Vencido';
+              } else if (Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24)) <= 15) {
+                nuevoEstatusRecibo = 'Por Vencer';
+              } else {
+                nuevoEstatusRecibo = 'Pendiente';
+              }
+            }
+            
+            return {
+              ...reciboOriginal,
+              fecha_vencimiento: nuevaFechaVencimiento,
+              estatus: nuevoEstatusRecibo
+            };
+          });
+        }
+        
+        // Verificar si hay cambios en el calendario
+        const calendarioCambio = !formulario.recibos || 
+          nuevosRecibos.length !== formulario.recibos.length ||
+          nuevosRecibos.some((r, i) => 
+            !formulario.recibos[i] || 
+            r.fecha_vencimiento !== formulario.recibos[i].fecha_vencimiento ||
+            r.estatus !== formulario.recibos[i].estatus ||
+            r.monto !== formulario.recibos[i].monto
+          );
+        
+        if (calendarioCambio) {
+          recibosActualizados = nuevosRecibos;
+          console.log('✅ [RECALCULO] Calendario de pagos actualizado:', nuevosRecibos.length, 'recibos');
+        }
+      }
+      
+      // Verificar qué campos necesitan actualización
+      const cambios = {};
+      let hayCambios = false;
+      
+      if (formulario.termino_vigencia !== nuevoTermino) {
+        cambios.termino_vigencia = nuevoTermino;
+        hayCambios = true;
+      }
+      if (formulario.fecha_aviso_renovacion !== nuevoAviso) {
+        cambios.fecha_aviso_renovacion = nuevoAviso;
+        hayCambios = true;
+      }
+      if (formulario.proximoPago !== nuevoProximoPago) {
+        cambios.proximoPago = nuevoProximoPago;
+        hayCambios = true;
+      }
+      if (formulario.fecha_pago !== nuevoProximoPago) {
+        cambios.fecha_pago = nuevoProximoPago;
+        hayCambios = true;
+      }
+      if (formulario.fecha_vencimiento_pago !== nuevoProximoPago) {
+        cambios.fecha_vencimiento_pago = nuevoProximoPago;
+        hayCambios = true;
+      }
+      if (formulario.estatusPago !== nuevoEstatus) {
+        cambios.estatusPago = nuevoEstatus;
+        hayCambios = true;
+      }
+      if (recibosActualizados !== formulario.recibos) {
+        cambios.recibos = recibosActualizados;
+        hayCambios = true;
+        console.log('📅 [RECALCULO] Calendario de pagos será actualizado');
+      }
+      
+      // Solo actualizar si hay cambios reales
+      if (hayCambios) {
+        console.log('🔄 [RECALCULO] Aplicando cambios:', Object.keys(cambios));
+        console.log('   - Término vigencia:', nuevoTermino);
+        console.log('   - Aviso renovación:', nuevoAviso);
+        console.log('   - Fecha límite pago:', nuevoProximoPago);
+        console.log('   - Estatus:', nuevoEstatus);
         
         setFormulario(prev => ({
           ...prev,
-          termino_vigencia: nuevoTermino,
-          fecha_aviso_renovacion: nuevoAviso,
-          proximoPago: nuevoProximoPago,
-          fecha_pago: nuevoProximoPago,
-          // 🔥 PROTEGER fecha_vencimiento_pago si viene de recibo real
-          fecha_vencimiento_pago: prev._no_recalcular_fecha_vencimiento 
-            ? prev.fecha_vencimiento_pago 
-            : nuevoProximoPago,
-          estatusPago: nuevoEstatus
+          ...cambios
         }));
+      } else {
+        console.log('ℹ️ [RECALCULO] No hay cambios necesarios');
       }
     };
     
-    recalcularCamposDependientes();
-  }, [formulario.inicio_vigencia, formulario.compania, formulario.periodo_gracia, vistaActual]);
+    // Usar timeout para evitar múltiples recálculos
+    const timeoutId = setTimeout(recalcularCamposDependientes, 100);
+    return () => clearTimeout(timeoutId);
+  }, [formulario.inicio_vigencia, formulario.periodo_gracia, formulario.compania, vistaActual]); // ✅ REMOVIDO 'guardando' para evitar recálculos al guardar
 
   const calculartermino_vigencia = useCallback((inicio_vigencia) => {
     if (!inicio_vigencia) return '';
@@ -942,13 +1109,25 @@ const ModuloExpedientes = () => {
     return fechaTermino.toISOString().split('T')[0];
   }, []);
 
-  const calcularProximoPago = useCallback((inicio_vigencia, tipo_pago, frecuenciaPago, compania, numeroPago = 1, periodoGraciaCustom = null) => {
+  const calcularProximoPago = useCallback((inicio_vigencia, tipo_pago, frecuenciaPago, compania, numeroPago = 1, periodoGraciaCustom = null, formularioCompleto = null) => {
     if (!inicio_vigencia) return '';
     
-    // 🔧 Usar periodo de gracia personalizado (del PDF) o calcular según la compañía
-    const periodoGracia = periodoGraciaCustom !== null 
-      ? periodoGraciaCustom 
-      : (compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+    // 🔧 JERARQUÍA DE PRIORIDAD para período de gracia:
+    // 1. Valor pasado como parámetro (periodoGraciaCustom) - tiene preferencia absoluta
+    // 2. Valor extraído del PDF (formularioCompleto.periodo_gracia) - usar tal cual, sin fallback
+    // 3. Fallback por compañía - SOLO para captura manual (cuando no hay extracción)
+    let periodoGracia;
+    
+    if (periodoGraciaCustom !== null) {
+      // Prioridad 1: Valor explícito pasado como parámetro
+      periodoGracia = periodoGraciaCustom;
+    } else if (formularioCompleto?.periodo_gracia) {
+      // Prioridad 2: Valor extraído del PDF - usar tal cual
+      periodoGracia = parseInt(formularioCompleto.periodo_gracia, 10);
+    } else {
+      // Prioridad 3: Fallback SOLO para captura manual
+      periodoGracia = compania?.toLowerCase().includes('qualitas') ? 14 : 30;
+    }
     
     // 🔥 Crear fecha en hora local para evitar problemas de timezone
     const [year, month, day] = inicio_vigencia.split('-');
@@ -1025,13 +1204,13 @@ const ModuloExpedientes = () => {
     const termino_vigencia = calculartermino_vigencia(formularioActual.inicio_vigencia);
     
     
-    // Calcular periodo de gracia: usar valor extraído del PDF si existe (convertir a número), sino aplicar regla de negocio
+    // ✅ CORREGIDO: Respetar SOLO período extraído del PDF, sin fallback de compañía
     const periodoGracia = formularioActual.periodo_gracia 
       ? parseInt(formularioActual.periodo_gracia, 10)
-      : (formularioActual.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+      : 0; // Sin fallback - solo PDF extraction
     
-    // ⚠️ Si la fecha fue editada manualmente, NO recalcular
-    if (formularioActual._fechaManual) {
+    // ⚠️ Si la fecha fue editada manualmente, NO recalcular proximoPago
+    if (formularioActual._fechaManual || formularioActual._no_recalcular_fecha_vencimiento) {
       console.log('⏭️ Saltando recálculo automático - Fecha editada manualmente');
       const resultado = {
         ...formularioActual,
@@ -1039,18 +1218,7 @@ const ModuloExpedientes = () => {
         periodo_gracia: periodoGracia
       };
       delete resultado._fechaManual; // Limpiar bandera temporal
-      return resultado;
-    }
-    
-    // 🔥 Si la fecha viene de recibo real, NO recalcular
-    if (formularioActual._no_recalcular_fecha_vencimiento) {
-      console.log('🔒 [CÁLCULOS] Protegiendo fecha_vencimiento_pago que viene de recibo real:', formularioActual.fecha_vencimiento_pago);
-      const resultado = {
-        ...formularioActual,
-        termino_vigencia,
-        periodo_gracia: periodoGracia
-      };
-      // Mantener las fechas tal como están
+      delete resultado._no_recalcular_fecha_vencimiento;
       return resultado;
     }
     
@@ -1065,18 +1233,26 @@ const ModuloExpedientes = () => {
         formularioActual.frecuenciaPago,
         formularioActual.compania,
         1,
-        periodoGracia
+        periodoGracia,
+        formularioActual
       );
     } else if (formularioActual.tipo_pago === 'Anual') {
-      // ✅ Anual: aplicar periodo de gracia para el primer pago siempre que cambie inicio
-      proximoPago = calcularProximoPago(
-        formularioActual.inicio_vigencia,
-        'Anual',
-        null,
-        formularioActual.compania,
-        1,
-        periodoGracia
-      );
+      // ✅ Anual: mantener fecha existente si ya está configurada y es válida
+      // Solo recalcular si no hay fecha_vencimiento_pago o si cambió inicio_vigencia
+      if (!formularioActual.fecha_vencimiento_pago) {
+        proximoPago = calcularProximoPago(
+          formularioActual.inicio_vigencia,
+          'Anual',
+          null,
+          formularioActual.compania,
+          1,
+          periodoGracia,
+          formularioActual
+        );
+      } else {
+        // Preservar la fecha existente para pagos anuales
+        proximoPago = formularioActual.fecha_vencimiento_pago;
+      }
     }
     
     // Calcular estatusPago basado en la fecha de vencimiento
@@ -1091,22 +1267,28 @@ const ModuloExpedientes = () => {
       fechaAvisoRenovacion = fechaTermino.toISOString().split('T')[0];
     }
     
+    // 🔥 Si cambió inicio_vigencia, limpiar recibos para forzar recálculo en CalendarioPagos
+    let recibosActualizados = formularioActual.recibos;
+    if (formularioActual._inicio_vigencia_changed) {
+      console.log('🔄 Inicio de vigencia cambió - limpiando recibos para recálculo');
+      recibosActualizados = undefined; // Forzar recálculo en frontend
+    }
+    
     // Retornar con todos los campos sincronizados
     const resultado = { 
       ...formularioActual, 
       termino_vigencia, 
       proximoPago, 
       fecha_pago: proximoPago, // Sincronizar fecha_pago con proximoPago
-      // 🔥 PROTEGER fecha_vencimiento_pago si viene de recibo real
-      fecha_vencimiento_pago: formularioActual._no_recalcular_fecha_vencimiento 
-        ? formularioActual.fecha_vencimiento_pago 
-        : proximoPago,
+      fecha_vencimiento_pago: proximoPago, // Siempre recalcular cuando se llama esta función
       estatusPago, 
       periodo_gracia: periodoGracia,
-      fecha_aviso_renovacion: fechaAvisoRenovacion // Precalcular fecha de aviso
+      fecha_aviso_renovacion: fechaAvisoRenovacion, // Precalcular fecha de aviso
+      recibos: recibosActualizados // Usar recibos actualizados o undefined
     };
     
-
+    // Limpiar bandera temporal
+    delete resultado._inicio_vigencia_changed;
     
     return resultado;
   }, [calculartermino_vigencia, calcularProximoPago, calcularEstatusPago]);
@@ -1721,10 +1903,10 @@ const ModuloExpedientes = () => {
     }
     
     if (expediente.tipo_pago === 'Fraccionado' && expediente.frecuenciaPago) {
-      // 🔧 Usar periodo de gracia del expediente (convertir a número) o calcular según compañía
+      // 🔧 CORREGIDO: Respetar periodo de gracia del expediente sin fallback cuando hay PDF
       const periodoGracia = expediente.periodo_gracia 
         ? parseInt(expediente.periodo_gracia, 10)
-        : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+        : 0; // Sin fallback para expedientes con extracción PDF
       
       // 🔥 Usar el número de recibo pagado directamente
       const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
@@ -1737,7 +1919,8 @@ const ModuloExpedientes = () => {
           expediente.frecuenciaPago, 
           expediente.compania, 
           1,
-          periodoGracia  // 🔥 Pasar periodo de gracia
+          periodoGracia,  // 🔥 Pasar periodo de gracia
+          expediente
         );
       }
       
@@ -1756,7 +1939,8 @@ const ModuloExpedientes = () => {
         expediente.frecuenciaPago,
         expediente.compania,
         siguienteNumeroRecibo,
-        periodoGracia  // 🔥 Pasar periodo de gracia
+        periodoGracia,  // 🔥 Pasar periodo de gracia
+        expediente
       );
       
       console.log('🔥 DEBUG calcularSiguientePago - Resultado final:', resultado);
@@ -1830,14 +2014,6 @@ const ModuloExpedientes = () => {
       }));
     }
   }, []);
-
-  const limpiarFormulario = useCallback(() => {
-    setFormulario(estadoInicialFormulario);
-    setFormularioOriginal(null); // Limpiar snapshot
-    setClienteSeleccionado(null);
-    setModoEdicion(false);
-    setExpedienteSeleccionado(null);
-  }, [estadoInicialFormulario]);
 
   const validarFormulario = useCallback(() => {
     // Validar que haya cliente seleccionado
@@ -2126,1492 +2302,150 @@ const ModuloExpedientes = () => {
     }
   }, []);
 
-  const guardarExpediente = useCallback(async () => {
-    // 🚨 DEBUG: Estado del formulario al hacer click en guardar
-    console.log('🚀 [GUARDAR EXPEDIENTE] Iniciando proceso de guardado');
-    console.log('🚀 [GUARDAR EXPEDIENTE] Estado actual del formulario:', formulario);
-    console.log('🚀 [GUARDAR EXPEDIENTE] cargo_pago_fraccionado:', formulario.cargo_pago_fraccionado);
-    console.log('🚀 [GUARDAR EXPEDIENTE] gastos_expedicion:', formulario.gastos_expedicion);
-    
-    if (!validarFormulario()) return;
+  const limpiarFormulario = useCallback(() => {
+    setFormulario(estadoInicialFormulario);
+    setFormularioOriginal(null);
+    setClienteSeleccionado(null);
+    setModoEdicion(false);
+    setExpedienteSeleccionado(null);
+  }, [estadoInicialFormulario]);
 
-    // ✅ VALIDAR FECHA DE EMISIÓN - Preguntar al usuario si desea usar fecha actual
-    if (!modoEdicion && (!formulario.fecha_emision || formulario.fecha_emision === new Date().toISOString().split('T')[0])) {
-      const usarFechaActual = window.confirm(
-        '¿Desea utilizar la fecha actual como fecha de emisión?\n\n' +
-        `Fecha actual: ${new Date().toLocaleDateString('es-MX', { day: '2-digit', month: 'long', year: 'numeric' })}\n\n` +
-        'Presione "Aceptar" para continuar con esta fecha\n' +
-        'Presione "Cancelar" para poder editarla'
-      );
-      
-      if (!usarFechaActual) {
-        toast.info('📅 Por favor, edite la Fecha de Emisión en el formulario antes de guardar');
-        // Hacer scroll hacia el campo de fecha_emision
-        const campoFechaEmision = document.querySelector('input[type="date"][value*="' + formulario.fecha_emision + '"]');
-        if (campoFechaEmision) {
-          campoFechaEmision.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          campoFechaEmision.focus();
-        }
-        return; // Detener el guardado
-      }
+  const guardarExpediente = useCallback(async () => {
+    console.log('🚀 [GUARDAR] Estado del formulario:', formulario);
+    
+    setGuardando(true);
+    
+    if (!validarFormulario()) {
+      setGuardando(false);
+      return;
     }
 
-    // Si hay un cliente seleccionado, actualizar sus datos de contacto según su tipo
-    if (clienteSeleccionado && formulario.cliente_id) {
-      try {
-        console.log('💼 Actualizando datos de contacto del cliente...', {
-          cliente_id: clienteSeleccionado.id,
-          tipoPersona: clienteSeleccionado.tipoPersona
-        });
-        
-        // LÓGICA CORRECTA:
-        // - Persona Moral: usa contacto_* para el contacto principal
-        // - Persona Física: usa email/telefono_* para el cliente + contacto_* para el gestor (opcional)
-        
-        let datosActualizados = {};
-        
-        if (clienteSeleccionado.tipoPersona === 'Persona Moral') {
-          // Persona Moral: solo actualizar contacto_* (contacto principal)
-          datosActualizados = {
-            contacto_nombre: formulario.contacto_nombre || null,
-            contacto_apellido_paterno: formulario.contacto_apellido_paterno || null,
-            contacto_apellido_materno: formulario.contacto_apellido_materno || null,
-            contacto_email: formulario.contacto_email || null,
-            contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
-            contacto_telefono_movil: formulario.contacto_telefono_movil || null
-          };
-        } else {
-          // Persona Física: actualizar campos principales DEL CLIENTE + contacto_* del gestor
-          datosActualizados = {
-            // Datos principales del cliente (editables desde póliza)
-            email: formulario.email || null,
-            telefonoMovil: formulario.telefono_movil || null,
-            telefonoFijo: formulario.telefono_fijo || null,
-            // Datos del gestor/contacto adicional (opcional)
-            contacto_nombre: formulario.contacto_nombre || null,
-            contacto_apellido_paterno: formulario.contacto_apellido_paterno || null,
-            contacto_apellido_materno: formulario.contacto_apellido_materno || null,
-            contacto_email: formulario.contacto_email || null,
-            contacto_telefono_fijo: formulario.contacto_telefono_fijo || null,
-            contacto_telefono_movil: formulario.contacto_telefono_movil || null
-          };
-        }
-        
-        const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
+    // 🎯 SIMPLE: Solo tomar el formulario y enviarlo
+    const datos = { ...formulario };
+    
+    // 🔍 DEBUG: Ver fechas ANTES de limpiar
+    console.log('📅 [PRE-GUARDAR] Fechas en formulario:', {
+      inicio_vigencia: datos.inicio_vigencia,
+      termino_vigencia: datos.termino_vigencia,
+      fecha_limite_pago: datos.fecha_limite_pago,
+      fecha_vencimiento_pago: datos.fecha_vencimiento_pago
+    });
+    
+    // Limpiar banderas temporales y objetos complejos
+    delete datos._fechaManual;
+    delete datos._no_recalcular_fecha_vencimiento;
+    delete datos._datos_desde_pdf;
+    delete datos._no_recalcular_automaticamente;
+    delete datos.__pdf_file;
+    delete datos.__pdf_nombre;
+    delete datos.__pdf_size;
+    delete datos.recibos; // Los recibos se crean automáticamente en el backend
+    delete datos.cliente; // No enviar el objeto cliente completo
+    delete datos.historial; // No enviar historial
+    
+    // 🔍 LOG DETALLADO: Ver qué tipo de datos tiene cada campo
+    console.log('🔍 [DEBUG] Revisando tipos de datos:');
+    Object.keys(datos).forEach(key => {
+      const value = datos[key];
+      const type = typeof value;
+      if (type === 'object' && value !== null) {
+        console.log(`⚠️ ${key}: [OBJETO] ${Array.isArray(value) ? '[Array]' : '[Object]'}`, value);
+      }
+    });
+    
+    // Convertir valores que puedan ser objetos a strings/null
+    Object.keys(datos).forEach(key => {
+      if (datos[key] && typeof datos[key] === 'object' && !Array.isArray(datos[key])) {
+        console.warn(`❌ Eliminando campo ${key} porque es un objeto:`, datos[key]);
+        delete datos[key];
+      }
+      // También eliminar arrays (excepto coberturas que puede ser array de strings)
+      if (Array.isArray(datos[key]) && key !== 'coberturas') {
+        console.warn(`❌ Eliminando campo ${key} porque es un array:`, datos[key]);
+        delete datos[key];
+      }
+    });
+
+    // 📊 RECALCULAR ESTATUS DEL PAGO basado en fecha_vencimiento_pago
+    const fechaVencimiento = datos.fecha_vencimiento_pago || datos.fecha_limite_pago || datos.fechaVencimientoPago;
+    if (fechaVencimiento) {
+      const hoy = new Date();
+      hoy.setHours(0, 0, 0, 0);
+      const fechaLimite = new Date(fechaVencimiento + 'T00:00:00');
+      
+      let nuevoEstatus;
+      if (fechaLimite < hoy) {
+        nuevoEstatus = 'Vencido';
+        console.log('🔴 Estatus calculado: Vencido (fecha:', fechaVencimiento, ')');
+      } else {
+        nuevoEstatus = 'Por Vencer';
+        console.log('🟡 Estatus calculado: Por Vencer (fecha:', fechaVencimiento, ')');
+      }
+      
+      // Actualizar AMBOS campos (camelCase y snake_case)
+      datos.estatus_pago = nuevoEstatus;
+      datos.estatusPago = nuevoEstatus;
+    }
+
+    // Serializar coberturas como JSON string si existe
+    if (datos.coberturas && Array.isArray(datos.coberturas)) {
+      console.log('📦 Serializando coberturas a JSON string');
+      datos.coberturas = JSON.stringify(datos.coberturas);
+    }
+
+    // Log para debug - mostrar el payload final COMPLETO
+    console.log('📤 [ENVIAR] Datos finales a enviar:');
+    console.log(JSON.stringify(datos, null, 2));
+
+    try {
+      let response;
+      
+      if (modoEdicion) {
+        // PUT para editar
+        response = await fetch(`${API_URL}/api/expedientes/${datos.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(datosActualizados)
+          body: JSON.stringify(datos)
         });
-
-        if (response.ok) {
-          const resultado = await response.json();
-          
-          // ⚠️ IMPORTANTE: Actualizar clientesMap inmediatamente para que InfoCliente vea los cambios
-          const clienteActualizado = resultado.data || resultado;
-          setClientesMap(prevMap => ({
-            ...prevMap,
-            [clienteSeleccionado.id]: {
-              ...prevMap[clienteSeleccionado.id],
-              ...clienteActualizado,
-              // Normalizar campos en camelCase para compatibilidad
-              contacto_nombre: clienteActualizado.contacto_nombre || clienteActualizado.contactoNombre,
-              contacto_apellido_paterno: clienteActualizado.contacto_apellido_paterno || clienteActualizado.contactoApellidoPaterno,
-              contacto_apellido_materno: clienteActualizado.contacto_apellido_materno || clienteActualizado.contactoApellidoMaterno,
-              contacto_email: clienteActualizado.contacto_email || clienteActualizado.contactoEmail,
-              contacto_telefono_fijo: clienteActualizado.contacto_telefono_fijo || clienteActualizado.contactoTelefonoFijo,
-              contacto_telefono_movil: clienteActualizado.contacto_telefono_movil || clienteActualizado.contactoTelefonoMovil,
-              email: clienteActualizado.email,
-              telefono_movil: clienteActualizado.telefono_movil || clienteActualizado.telefonoMovil,
-              telefono_fijo: clienteActualizado.telefono_fijo || clienteActualizado.telefonoFijo
-            }
-          }));
-          console.log('✅ ClientesMap actualizado con nuevos datos de contacto');
-          // Notificar globalmente para que otros módulos (Clientes) recarguen su lista
-          try {
-            window.dispatchEvent(new CustomEvent('clientes-actualizados', { detail: { origen: 'Expedientes.jsx', tipo: 'update', id: clienteSeleccionado.id, ts: Date.now() } }));
-          } catch (_) { /* noop */ }
-        } else {
-          const errorText = await response.text();
-          console.warn('⚠️ No se pudo actualizar el cliente:', errorText);
-        }
-      } catch (error) {
-        console.error('❌ Error al actualizar cliente:', error);
-        // Continuar con el guardado del expediente aunque falle la actualización del cliente
-      }
-    }
-
-    // 🎯 CRÍTICO: NO recalcular antes de guardar
-    // Guardar EXACTAMENTE lo que el usuario tiene en el formulario
-    const formularioParaGuardar = { ...formulario };
-    
-    // ✅ FUNCIÓN para convertir camelCase a snake_case
-    const camelToSnake = (str) => {
-      return str.replace(/([A-Z])/g, '_$1').toLowerCase();
-    };
-
-    // ✅ CONVERSIÓN COMPLETA a snake_case para el backend
-    const convertirASnakeCase = (obj) => {
-      const resultado = {};
-      
-        // Mapeo específico de campos conocidos
-        const mapeoEspecifico = {
-          // Identificación
-          numeroPoliza: 'numero_poliza',
-          clienteId: 'cliente_id',
-          agenteId: 'agente_id',
-          vendedorId: 'vendedor_id',
-          claveAseguradora: 'clave_aseguradora',
-          
-          // Datos Cliente
-          apellidoPaterno: 'apellido_paterno',
-          apellidoMaterno: 'apellido_materno',
-          razonSocial: 'razon_social',
-          nombreComercial: 'nombre_comercial',
-          numeroIdentificacion: 'numero_identificacion',
-          telefonoFijo: 'telefono_fijo',
-          telefonoMovil: 'telefono_movil',
-          
-          // Póliza
-          cargoPagoFraccionado: 'cargo_pago_fraccionado',
-          motivoCancelacion: 'motivo_cancelacion',
-          frecuenciaPago: 'frecuencia_pago',
-          proximoPago: 'proximo_pago',
-          estatusPago: 'estatus_pago',
-          gastosExpedicion: 'gastos_expedicion',
-          subAgente: 'sub_agente',
-          
-          // Vehículo
-          numeroSerie: 'numero_serie',
-          tipoVehiculo: 'tipo_vehiculo',
-          tipoCobertura: 'tipo_cobertura',
-          sumaAsegurada: 'suma_asegurada',
-          conductorHabitual: 'conductor_habitual',
-          edadConductor: 'edad_conductor',
-          licenciaConducir: 'licencia_conducir',
-          
-          // Financiero
-          primaPagada: 'prima_pagada',
-          periodoGracia: 'periodo_gracia',
-          fechaUltimoPago: 'fecha_ultimo_pago',
-          fechaVencimientoPago: 'fecha_vencimiento_pago',
-          
-          // Vigencia
-          inicioVigencia: 'inicio_vigencia',
-          terminoVigencia: 'termino_vigencia',
-          
-          // Estado
-          etapaActiva: 'etapa_activa',
-          tipoPago: 'tipo_pago',
-          fechaCreacion: 'fecha_creacion'
-        };
-
-        Object.keys(obj).forEach(key => {
-          // Usar mapeo específico si existe, sino conversión automática
-          const snakeKey = mapeoEspecifico[key] || camelToSnake(key);
-          
-          // ✅ CORRECCIÓN CRÍTICA: Solo aplicar si el campo snake_case no existe ya o está vacío
-          // Esto evita que campos camelCase vacíos sobrescriban campos snake_case con valores
-          const existeEnSnake = resultado.hasOwnProperty(snakeKey);
-          const valorActualSnake = resultado[snakeKey];
-          const valorNuevo = obj[key];
-          
-          if (!existeEnSnake || 
-              (valorActualSnake === '' || valorActualSnake === null || valorActualSnake === undefined) ||
-              (valorNuevo !== '' && valorNuevo !== null && valorNuevo !== undefined)) {
-            resultado[snakeKey] = valorNuevo;
-          }
-          
-          // Debug específico para campos problemáticos
-          if (key.includes('cargo_pago_fraccionado') || key.includes('gastos_expedicion') || snakeKey.includes('cargo_pago_fraccionado') || snakeKey.includes('gastos_expedicion')) {
-            console.log(`🔍 DEBUG convertirASnakeCase: ${key} = "${obj[key]}" → ${snakeKey} = "${resultado[snakeKey]}" (existía: ${existeEnSnake})`);
-          }
-        });      return resultado;
-    };
-
-    // 🚨 DEBUG: Verificar formulario ANTES de conversión
-    console.log('🚨 [FORMULARIO ANTES] cargo_pago_fraccionado:', formularioParaGuardar.cargo_pago_fraccionado);
-    console.log('🚨 [FORMULARIO ANTES] gastos_expedicion:', formularioParaGuardar.gastos_expedicion);
-    console.log('🚨 [FORMULARIO ANTES] tipo valor cargo_pago_fraccionado:', typeof formularioParaGuardar.cargo_pago_fraccionado);
-    console.log('🚨 [FORMULARIO ANTES] tipo valor gastos_expedicion:', typeof formularioParaGuardar.gastos_expedicion);
-    
-    // 🚨 DEBUG CRÍTICO: Verificar fechas en el formulario
-    console.log('📅 [FORMULARIO] fecha_emision:', formularioParaGuardar.fecha_emision);
-    console.log('📅 [FORMULARIO] inicio_vigencia:', formularioParaGuardar.inicio_vigencia);
-    console.log('📅 [FORMULARIO] termino_vigencia:', formularioParaGuardar.termino_vigencia);
-    
-    // ✅ SOLUCIÓN DIRECTA: Crear payload básico y forzar los campos problemáticos
-    let expedientePayload = {
-      ...formularioParaGuardar,
-      // Forzar estos campos específicos sin conversión compleja
-      cargo_pago_fraccionado: formularioParaGuardar.cargo_pago_fraccionado || '',
-      gastos_expedicion: formularioParaGuardar.gastos_expedicion || '',
-      estatus_pago: formularioParaGuardar.estatusPago || 'Pendiente', // ✅ FORZAR estatus_pago
-      frecuencia_pago: formularioParaGuardar.frecuenciaPago || formularioParaGuardar.frecuencia_pago || null, // ✅ FORZAR frecuencia_pago
-      // 💰 FORZAR montos de pagos fraccionados
-      primer_pago: formularioParaGuardar.primer_pago || formularioParaGuardar.primerPago || null,
-      pagos_subsecuentes: formularioParaGuardar.pagos_subsecuentes || formularioParaGuardar.pagosSubsecuentes || null,
-      // 🎯 CRÍTICO: Forzar fechas en snake_case
-      fecha_emision: formularioParaGuardar.fecha_emision,
-      inicio_vigencia: formularioParaGuardar.inicio_vigencia,
-      termino_vigencia: formularioParaGuardar.termino_vigencia,
-      fecha_vencimiento_pago: formularioParaGuardar.fecha_vencimiento_pago,
-      fecha_aviso_renovacion: formularioParaGuardar.fecha_aviso_renovacion
-    };
-    
-    // Solo hacer conversión básica de campos que no sean problemáticos
-    const convertirSoloNecesario = (obj) => {
-      const resultado = { ...obj };
-      
-      // Solo campos esenciales que necesitan conversión
-      if (resultado.clienteId) {
-        resultado.cliente_id = resultado.clienteId;
-        delete resultado.clienteId;
-      }
-      if (resultado.numeroPoliza) {
-        resultado.numero_poliza = resultado.numeroPoliza;
-        delete resultado.numeroPoliza;
-      }
-      if (resultado.inicioVigencia) {
-        resultado.inicio_vigencia = resultado.inicioVigencia;
-        delete resultado.inicioVigencia;
-      }
-      if (resultado.terminoVigencia) {
-        resultado.termino_vigencia = resultado.terminoVigencia;
-        delete resultado.terminoVigencia;
-      }
-      if (resultado.estatusPago) {
-        resultado.estatus_pago = resultado.estatusPago;
-        delete resultado.estatusPago;
-      }
-      
-      return resultado;
-    };
-    
-    expedientePayload = convertirSoloNecesario(expedientePayload);
-    
-    // ✅ GARANTIZAR que estos campos problemáticos estén presentes
-    expedientePayload.cargo_pago_fraccionado = formularioParaGuardar.cargo_pago_fraccionado || '';
-    expedientePayload.gastos_expedicion = formularioParaGuardar.gastos_expedicion || '';
-    // ✅ CRÍTICO: Usar 'formulario' (estado actual) para estatus_pago, no 'formularioParaGuardar'
-    expedientePayload.estatus_pago = formulario.estatusPago || formulario.estatus_pago || 'Pendiente';
-    expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion || null; // ✅ GARANTIZAR fecha_aviso_renovacion
-    // ✅ GARANTIZAR que se guarde el vendedor/sub agente
-    expedientePayload.sub_agente = formularioParaGuardar.sub_agente || null;
-    
-    // ✅ EXTRAER vendedor_id del campo sub_agente (formato: "123 - Nombre Apellido")
-    console.log('🔍 [VENDEDOR] sub_agente en formulario:', formularioParaGuardar.sub_agente);
-    if (formularioParaGuardar.sub_agente) {
-      const vendedorIdMatch = formularioParaGuardar.sub_agente.split('-')[0].trim();
-      console.log('🔍 [VENDEDOR] vendedorIdMatch extraído:', vendedorIdMatch);
-      if (vendedorIdMatch && !isNaN(vendedorIdMatch)) {
-        expedientePayload.vendedor_id = parseInt(vendedorIdMatch);
-        console.log('✅ [VENDEDOR] vendedor_id final:', expedientePayload.vendedor_id);
       } else {
-        console.log('⚠️ [VENDEDOR] No se pudo extraer ID numérico');
-        expedientePayload.vendedor_id = null;
+        // POST para crear
+        datos.fecha_creacion = new Date().toISOString().split('T')[0];
+        response = await fetch(`${API_URL}/api/expedientes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(datos)
+        });
       }
-    } else {
-      console.log('⚠️ [VENDEDOR] No hay sub_agente en formulario');
-      expedientePayload.vendedor_id = null;
-    }
-    
-    // 💰 FECHA DE PAGO: Si está marcado como "Pagado", usar fecha_ultimo_pago o fecha actual
-    if (expedientePayload.estatus_pago === 'Pagado') {
-      expedientePayload.fecha_ultimo_pago = formularioParaGuardar.fecha_ultimo_pago || new Date().toISOString().split('T')[0];
-      console.log('💰 Póliza marcada como Pagado. Fecha de pago:', expedientePayload.fecha_ultimo_pago);
-    }
-    
-    // 🎯 CRÍTICO: GARANTIZAR que las fechas estén en el payload (segunda vez por seguridad)
-    expedientePayload.fecha_emision = formularioParaGuardar.fecha_emision;
-    expedientePayload.inicio_vigencia = formularioParaGuardar.inicio_vigencia;
-    expedientePayload.termino_vigencia = formularioParaGuardar.termino_vigencia;
-    expedientePayload.fecha_vencimiento_pago = formularioParaGuardar.fecha_vencimiento_pago;
-    expedientePayload.fecha_aviso_renovacion = formularioParaGuardar.fecha_aviso_renovacion;
-    
-    console.log('🚨 [PAYLOAD SIMPLE] cargo_pago_fraccionado FORZADO:', expedientePayload.cargo_pago_fraccionado);
-    console.log('🚨 [PAYLOAD SIMPLE] gastos_expedicion FORZADO:', expedientePayload.gastos_expedicion);
-    console.log('🚨 [PAYLOAD SIMPLE] estatus_pago FORZADO:', expedientePayload.estatus_pago);
-    console.log('📅 [PAYLOAD SIMPLE] fecha_aviso_renovacion:', expedientePayload.fecha_aviso_renovacion);
-    console.log('👤 [PAYLOAD SIMPLE] sub_agente ENVIANDO:', expedientePayload.sub_agente);
-    console.log('📅 [PAYLOAD FINAL] fecha_emision:', expedientePayload.fecha_emision);
-    console.log('📅 [PAYLOAD FINAL] inicio_vigencia:', expedientePayload.inicio_vigencia);
-    console.log('📅 [PAYLOAD FINAL] termino_vigencia:', expedientePayload.termino_vigencia);
-    console.log('📅 [PAYLOAD FINAL] fecha_aviso_renovacion:', expedientePayload.fecha_aviso_renovacion);
-    
-    // Limpiar campos innecesarios
-    delete expedientePayload.__pdf_file;
-    delete expedientePayload.__pdf_nombre;
-    delete expedientePayload.__pdf_size;
-    delete expedientePayload.contacto_nombre;
-    delete expedientePayload.contacto_apellido_paterno;
-    delete expedientePayload.contacto_apellido_materno;
-    delete expedientePayload.contacto_email;
-    delete expedientePayload.contacto_telefono_fijo;
-    delete expedientePayload.contacto_telefono_movil;
-    
-    // Limpiar duplicados camelCase
-    delete expedientePayload.cargoPagoFraccionado;
-    delete expedientePayload.gastosExpedicion;
-    delete expedientePayload.proximoPago;
-    delete expedientePayload.estatusPago;
-    delete expedientePayload.motivoCancelacion;
-    delete expedientePayload.razonSocial;
-    delete expedientePayload.tasaFinanciamiento;
-    delete expedientePayload.subTotal;
-    delete expedientePayload.frecuenciaPago; // ✅ Eliminar camelCase, ya está como frecuencia_pago
-    delete expedientePayload.primerPago; // ✅ Eliminar camelCase, ya está como primer_pago
-    delete expedientePayload.pagosSubsecuentes; // ✅ Eliminar camelCase, ya está como pagos_subsecuentes
 
-    
-    // ✅ CAMBIO IMPORTANTE: Sí enviamos campos del cliente (nombre, apellidos, rfc, email, etc.)
-    // El backend los necesita para enriquecer el expediente
-    // Solo enviamos lo que el usuario puede editar
-    
-    // Convertir coberturas a JSON string si existen (para compatibilidad con SQL)
-    if (expedientePayload.coberturas && Array.isArray(expedientePayload.coberturas)) {
-      expedientePayload.coberturas = JSON.stringify(expedientePayload.coberturas);
-    }
-
-    // Debug: Verificar campos clave antes de guardar
-    console.log(`💾 Guardando expediente | Cliente: ${formularioParaGuardar.cliente_id} | Póliza: ${formularioParaGuardar.numero_poliza}`);
-    console.log('🔍 PAYLOAD FINAL - sub_agente:', expedientePayload.sub_agente);
-    console.log('🔍 FORMULARIO ORIGINAL - sub_agente:', formularioParaGuardar.sub_agente);
-
-    if (modoEdicion) {
-      // ✅ VERIFICACIÓN FINAL OBLIGATORIA - Asegurar que los campos estén ahí
-      if (!expedientePayload.hasOwnProperty('cargo_pago_fraccionado')) {
-        console.error('❌ FALTA cargo_pago_fraccionado en payload!');
-        expedientePayload.cargo_pago_fraccionado = formularioParaGuardar.cargo_pago_fraccionado || '';
-      }
-      if (!expedientePayload.hasOwnProperty('gastos_expedicion')) {
-        console.error('❌ FALTA gastos_expedicion en payload!');
-        expedientePayload.gastos_expedicion = formularioParaGuardar.gastos_expedicion || '';
-      }
-      
-      // 💰 VALIDAR cambios en fechas de pago - Preguntar si mantener estatus actual
-      let estatusRecalculado = null; // Para detectar cambios automáticos de estatus
-      
-      if (formularioOriginal) {
-        const fechasOriginal = {
-          inicio_vigencia: formularioOriginal.inicio_vigencia,
-          termino_vigencia: formularioOriginal.termino_vigencia,
-          fecha_vencimiento_pago: formularioOriginal.fecha_vencimiento_pago
-        };
-        
-        const fechasNuevas = {
-          inicio_vigencia: formularioParaGuardar.inicio_vigencia,
-          termino_vigencia: formularioParaGuardar.termino_vigencia,
-          fecha_vencimiento_pago: formularioParaGuardar.fecha_vencimiento_pago
-        };
-        
-        const cambiaronFechasPago = 
-          fechasOriginal.inicio_vigencia !== fechasNuevas.inicio_vigencia ||
-          fechasOriginal.termino_vigencia !== fechasNuevas.termino_vigencia ||
-          fechasOriginal.fecha_vencimiento_pago !== fechasNuevas.fecha_vencimiento_pago;
-        
-        const estatusOriginal = formularioOriginal.estatusPago || formularioOriginal.estatus_pago || 'Pendiente';
-        const estatusActual = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Pendiente';
-        
-        // Si cambiaron fechas Y el usuario NO cambió manualmente el estatus
-        if (cambiaronFechasPago && estatusOriginal === estatusActual) {
-          const mantenerEstatus = window.confirm(
-            `🔄 Has modificado fechas de vigencia o pago.\n\n` +
-            `Estatus de pago actual: "${estatusActual}"\n\n` +
-            `¿Deseas MANTENER el estatus de pago actual?\n\n` +
-            `• Presiona "Aceptar" para mantener: "${estatusActual}"\n` +
-            `• Presiona "Cancelar" para recalcular automáticamente según la fecha de vencimiento`
-          );
-          
-          if (!mantenerEstatus) {
-            // Recalcular estatus basado en fecha_vencimiento_pago usando la misma lógica
-            if (fechasNuevas.fecha_vencimiento_pago) {
-              const hoy = new Date();
-              hoy.setHours(0, 0, 0, 0);
-              const fechaVenc = new Date(fechasNuevas.fecha_vencimiento_pago);
-              fechaVenc.setHours(0, 0, 0, 0);
-              
-              const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-              
-              // Usar la misma lógica que calcularEstatusPago
-              let nuevoEstatus;
-              if (diasRestantes < 0) {
-                nuevoEstatus = 'Vencido';
-              } else if (diasRestantes <= 15) {
-                nuevoEstatus = 'Por Vencer';
-              } else {
-                nuevoEstatus = 'Pendiente';
-              }
-              
-              expedientePayload.estatus_pago = nuevoEstatus;
-              expedientePayload.estatusPago = nuevoEstatus;
-              
-              // ✅ Guardar para detectar cambio más adelante
-              estatusRecalculado = { anterior: estatusOriginal, nuevo: nuevoEstatus };
-              
-              // ✅ CRÍTICO: Actualizar también el estado 'formulario' para que se detecte el cambio
-              setFormulario(prev => ({
-                ...prev,
-                estatus_pago: nuevoEstatus,
-                estatusPago: nuevoEstatus
-              }));
-              
-              console.log(`📊 Estatus de pago recalculado: ${estatusOriginal} → ${nuevoEstatus} (${diasRestantes} días restantes)`);
-            }
-          } else {
-            console.log(`📊 Manteniendo estatus de pago: ${estatusActual}`);
-          }
+      if (!response.ok) {
+        // Intentar obtener el mensaje de error del backend
+        let errorMsg = 'Error desconocido';
+        try {
+          const errorData = await response.json();
+          errorMsg = errorData.message || errorData.error || JSON.stringify(errorData);
+          console.error('❌ Error del backend:', errorData);
+        } catch (e) {
+          const errorText = await response.text();
+          errorMsg = errorText || `Error ${response.status}`;
+          console.error('❌ Error del servidor:', errorText);
         }
+        throw new Error(errorMsg);
       }
-      
-      console.log(`✅ PUT Expediente ${formularioParaGuardar.id} | Estatus: ${expedientePayload.estatus_pago || 'N/A'}`);
-      
-      // ✅ Si el estatus cambió a "Pagado", actualizar etapa a "En Vigencia"
-      const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
-      const estatusBD = expedienteEnBD?.estatus_pago || expedienteEnBD?.estatusPago;
-      const estatusNuevo = expedientePayload.estatus_pago;
-      
-      if (estatusBD && estatusNuevo && 
-          estatusBD.toLowerCase() !== 'pagado' && 
-          estatusNuevo.toLowerCase() === 'pagado' &&
-          expedientePayload.etapa_activa !== 'En Vigencia') {
-        expedientePayload.etapa_activa = 'En Vigencia';
-        console.log('✅ Cambiando etapa a "En Vigencia" porque estatus cambió a Pagado');
-      }
-      
-      fetch(`${API_URL}/api/expedientes/${formularioParaGuardar.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(expedientePayload)
-      })
-        .then(response => response.json())
-        .then(async (data) => {
-          // Debug: Verificar respuesta tras UPDATE
-          if (data?.data || data) {
-            console.log('✅ PUT completado | ID:', formularioParaGuardar.id);
-          }
-          
-          // 💰 Guardar TODOS los recibos que tienen cambios (con o sin pago)
-          // Esto incluye tanto aplicar pagos como eliminar pagos existentes
-          if (formularioParaGuardar.recibos && Array.isArray(formularioParaGuardar.recibos)) {
-            console.log('💾 Procesando recibos para guardar...');
-            
-            for (const recibo of formularioParaGuardar.recibos) {
-              // Verificar si el recibo original tenía pago
-              const reciboOriginal = formularioOriginal?.recibos?.find(r => r.numero_recibo === recibo.numero_recibo);
-              const teniaPago = reciboOriginal?.fecha_pago_real;
-              const tienePago = recibo.fecha_pago_real;
-              
-              // Enviar POST si:
-              // 1. El recibo tiene pago ahora (aplicar pago), O
-              // 2. El recibo tenía pago antes pero ahora no (eliminar pago)
-              if (tienePago || (teniaPago && !tienePago)) {
-                const accion = tienePago ? 'aplicar pago' : 'eliminar pago';
-                console.log(`📤 Recibo #${recibo.numero_recibo}: ${accion} (${teniaPago ? 'tenía' : 'no tenía'} → ${tienePago ? 'tiene' : 'no tiene'})`);
-                
-                try {
-                  const response = await fetch(
-                    `${API_URL}/api/recibos/${formularioParaGuardar.id}/${recibo.numero_recibo}/pago`,
-                    {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        estatus: recibo.estatus,
-                        fecha_pago_real: recibo.fecha_pago_real, // Puede ser null para eliminar
-                        comprobante_nombre: recibo.comprobante_nombre || null,
-                        comprobante_url: recibo.comprobante_url || null
-                      })
-                    }
-                  );
-                  
-                  if (response.ok) {
-                    console.log(`✅ Recibo ${recibo.numero_recibo} ${tienePago ? 'aplicado' : 'eliminado'} correctamente`);
-                  } else {
-                    console.error(`❌ Error al ${tienePago ? 'aplicar' : 'eliminar'} pago del recibo ${recibo.numero_recibo}:`, await response.text());
-                  }
-                } catch (error) {
-                  console.error(`❌ Error al procesar recibo ${recibo.numero_recibo}:`, error);
-                }
-              } else {
-                console.log(`⏭️ Recibo #${recibo.numero_recibo}: sin cambios (${teniaPago ? 'tenía' : 'no tenía'} → ${tienePago ? 'tiene' : 'no tiene'})`);
-              }
-            }
-            
-            console.log('💾 Procesamiento de recibos completado');
-            
-            // 📅 Actualizar fecha_vencimiento_pago del expediente con la fecha del próximo recibo pendiente
-            if (formularioParaGuardar.recibos && formularioParaGuardar.recibos.length > 0) {
-              const recibosPendientes = formularioParaGuardar.recibos
-                .filter(r => !r.fecha_pago_real)
-                .sort((a, b) => a.numero_recibo - b.numero_recibo);
-              
-              if (recibosPendientes.length > 0) {
-                const proximoRecibo = recibosPendientes[0];
-                const nuevaFechaVencimiento = proximoRecibo.fecha_vencimiento;
-                
-                // Solo actualizar si cambió la fecha
-                if (nuevaFechaVencimiento && nuevaFechaVencimiento !== formularioParaGuardar.fecha_vencimiento_pago) {
-                  console.log(`📅 Actualizando fecha_vencimiento_pago: ${formularioParaGuardar.fecha_vencimiento_pago} → ${nuevaFechaVencimiento}`);
-                  
-                  try {
-                    await fetch(`${API_URL}/api/expedientes/${formularioParaGuardar.id}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ 
-                        fecha_vencimiento_pago: nuevaFechaVencimiento,
-                        fecha_pago: nuevaFechaVencimiento // Sincronizar fecha_pago también
-                      })
-                    });
-                    console.log('✅ Fecha de vencimiento actualizada correctamente');
-                  } catch (error) {
-                    console.error('❌ Error al actualizar fecha de vencimiento:', error);
-                  }
-                }
-              } else {
-                // Si no hay recibos pendientes, todos están pagados
-                console.log('✅ Todos los recibos están pagados');
-              }
-            }
-          }
-          
-          // ✨ Registrar actualización de datos en historial (trazabilidad)
-          try {
-            const expedienteId = formularioParaGuardar.id;
-            
-            // 🔧 Helper para comparar valores, manejando null/undefined/empty
-            // ⚠️ IMPORTANTE: Definir ANTES de usar para que esté disponible en todo el scope
-            const normalizar = (valor, esFecha = false) => {
-              if (valor === null || valor === undefined || valor === '') return '';
-              if (typeof valor === 'object') return JSON.stringify(valor);
-              
-              // Normalizar fechas eliminando la parte de hora para comparación
-              if (esFecha && valor) {
-                try {
-                  // Si es una fecha ISO con hora, extraer solo la fecha
-                  if (valor.includes('T') || valor.includes(':')) {
-                    return new Date(valor).toISOString().split('T')[0];
-                  }
-                  return String(valor).trim();
-                } catch (e) {
-                  return String(valor).trim();
-                }
-              }
-              
-              return String(valor).trim();
-            };
-            
-            // ✅ SOLUCIÓN DEFINITIVA: Comparar BD actual vs lo que se va a guardar
-            // Ignorar todo lo que pasó en el formulario (auto-fills, cálculos, etc.)
-            const expedienteEnBD = expedientes.find(exp => exp.id === formularioParaGuardar.id);
-            
-            // 🔍 Obtener datos actuales del cliente desde la tabla de clientes
-            let clienteActual = null;
-            if (formularioParaGuardar.cliente_id && clientesMap[formularioParaGuardar.cliente_id]) {
-              clienteActual = clientesMap[formularioParaGuardar.cliente_id];
-              console.log('🔍 [COMPARACIÓN] Cliente actual desde BD:', clienteActual);
-            }
-            
-            // Detectar cambios REALES comparando BD vs payload que se guardará
-            const camposModificados = [];
-            
-            if (expedienteEnBD) {
-              const camposAComparar = [
-                // Datos básicos de póliza
-                { key: 'numero_poliza', label: 'Número de póliza' },
-                { key: 'compania', label: 'Aseguradora' },
-                { key: 'producto', label: 'Producto' },
-                { key: 'tipo_seguro', label: 'Tipo de seguro' },
-                { key: 'etapa_activa', label: 'Etapa' },
-                
-                // Fechas (marcar como esFecha para normalización correcta)
-                { key: 'fecha_emision', label: 'Fecha de emisión', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
-                { key: 'fecha_captura', label: 'Fecha de captura', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
-                { key: 'inicio_vigencia', label: 'Inicio de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
-                { key: 'termino_vigencia', label: 'Término de vigencia', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
-                { key: 'fecha_vencimiento_pago', label: 'Vencimiento de pago', formatter: (v) => v ? new Date(v).toISOString().split('T')[0] : '', esFecha: true },
-                
-                // Montos
-                { key: 'prima_pagada', label: 'Prima', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'total', label: 'Total', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'subtotal', label: 'Subtotal', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'derecho_poliza', label: 'Derecho de póliza', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'iva', label: 'IVA', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'recargo', label: 'Recargo', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'cargo_pago_fraccionado', label: 'Cargo por pago fraccionado', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                { key: 'gastos_expedicion', label: 'Gastos de expedición', formatter: (v) => `$${parseFloat(v || 0).toFixed(2)}` },
-                
-                // Pago
-                { key: 'tipo_pago', label: 'Tipo de pago' },
-                { key: 'forma_pago', label: 'Forma de pago' },
-                { key: 'estatusPago', label: 'Estatus de pago' },
-                { key: 'periodo_gracia', label: 'Periodo de gracia', formatter: (v) => `${v || 0} días` },
-                
-                // Agente y comisiones
-                { key: 'agente', label: 'Agente' },
-                { key: 'comision_agente', label: 'Comisión agente', formatter: (v) => `${parseFloat(v || 0).toFixed(2)}%` },
-                { key: 'porcentaje_comision_plataforma', label: 'Comisión plataforma', formatter: (v) => `${parseFloat(v || 0).toFixed(2)}%` },
-                
-                // Vehículo (para autos)
-                { key: 'marca', label: 'Marca' },
-                { key: 'modelo', label: 'Modelo' },
-                { key: 'anio', label: 'Año' },
-                { key: 'tipo', label: 'Tipo de vehículo' },
-                { key: 'numero_serie', label: 'Número de serie' },
-                { key: 'placas', label: 'Placas' },
-                { key: 'uso', label: 'Uso' },
-                { key: 'servicio', label: 'Servicio' },
-                { key: 'movimiento', label: 'Movimiento' },
-                
-                // Conductor
-                { key: 'conductor_habitual', label: 'Conductor habitual' },
-                { key: 'edad_conductor', label: 'Edad del conductor' },
-                
-                // Datos del cliente
-                { key: 'nombre', label: 'Nombre' },
-                { key: 'apellido_paterno', label: 'Apellido paterno' },
-                { key: 'apellido_materno', label: 'Apellido materno' },
-                { key: 'email', label: 'Email' },
-                { key: 'telefono_fijo', label: 'Teléfono fijo' },
-                { key: 'telefono_movil', label: 'Teléfono móvil' },
-                { key: 'rfc', label: 'RFC' },
-                
-                // Contactos principales (campos planos)
-                { key: 'contacto_nombre', label: 'Nombre del contacto' },
-                { key: 'contacto_apellido_paterno', label: 'Apellido paterno del contacto' },
-                { key: 'contacto_apellido_materno', label: 'Apellido materno del contacto' },
-                { key: 'contacto_email', label: 'Email del contacto' },
-                { key: 'contacto_telefono_fijo', label: 'Teléfono fijo del contacto' },
-                { key: 'contacto_telefono_movil', label: 'Teléfono móvil del contacto' },
-                
-                // Otros
-                { key: 'observaciones', label: 'Observaciones' }
-              ];
-              
-              // Comparar campos simples
-              camposAComparar.forEach(({ key, label, formatter, esFecha }) => {
-                // ⚠️ EXCLUIR campos que se calculan automáticamente O están en solo lectura
-                const camposExcluidos = [
-                  'agente', 
-                  'tipo_pago', 
-                  'fecha_vencimiento_pago', 
-                  'proximoPago',
-                  'estatusPago', // Se maneja por separado
-                  'estatus_pago', // Se maneja por separado
-                  // 🔒 EXCLUIR campos del cliente en SOLO LECTURA (nunca se pueden editar desde el formulario)
-                  'nombre',
-                  'apellido_paterno',
-                  'apellido_materno',
-                  'rfc'
-                ];
-                if (camposExcluidos.includes(key)) return;
-                
-                // 🔍 CAMPOS EDITABLES DEL CLIENTE: email, teléfonos
-                // Comparar contra tabla de clientes para detectar cambios reales
-                const camposClienteEditables = ['email', 'telefono_fijo', 'telefono_movil'];
-                
-                // Campos del contacto adicional/gestor (siempre editables)
-                const camposContacto = [
-                  'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
-                  'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
-                ];
-                
-                let valorAnterior, valorNuevo;
-                
-                if (camposClienteEditables.includes(key) || camposContacto.includes(key)) {
-                  // Comparar contra datos actuales del cliente en la BD
-                  if (!clienteActual) return; // No podemos comparar sin datos del cliente
-                  
-                  // Mapear nombres de campos del expediente a nombres en tabla clientes
-                  const mapeoCliente = {
-                    'telefono_fijo': 'telefonoFijo',
-                    'telefono_movil': 'telefonoMovil'
-                  };
-                  const keyCliente = mapeoCliente[key] || key;
-                  
-                  valorAnterior = normalizar(clienteActual[keyCliente], esFecha);
-                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
-                } else {
-                  // Comparar campos de póliza normalmente (contra expediente anterior)
-                  valorAnterior = normalizar(expedienteEnBD[key], esFecha);
-                  valorNuevo = normalizar(formularioParaGuardar[key], esFecha);
-                }
-                
-                // Solo registrar cambios REALES (ignorar cambios entre valores vacíos: null, undefined, '')
-                if (valorAnterior !== valorNuevo) {
-                  // Ambos valores están vacíos -> NO es un cambio real
-                  if ((valorAnterior === '' || !valorAnterior) && (valorNuevo === '' || !valorNuevo)) {
-                    return; // Skip - no es cambio real
-                  }
-                  
-                  const valorAnteriorFormateado = formatter && expedienteEnBD[key] 
-                    ? formatter(expedienteEnBD[key]) 
-                    : (valorAnterior || 'vacío');
-                  const valorNuevoFormateado = formatter && formularioParaGuardar[key]
-                    ? formatter(formularioParaGuardar[key]) 
-                    : (valorNuevo || 'vacío');
-                  
-                  camposModificados.push(`• ${label}: "${valorAnteriorFormateado}" → "${valorNuevoFormateado}"`);
-                }
-              });
-              
-              // ✅ Agregar estatus_pago si fue recalculado automáticamente
-              if (estatusRecalculado && estatusRecalculado.anterior !== estatusRecalculado.nuevo) {
-                camposModificados.push(`• Estatus de pago: "${estatusRecalculado.anterior}" → "${estatusRecalculado.nuevo}" (recalculado automáticamente)`);
-              }
-            }
-            
-            // 💰 DETECTAR cambio manual en estatus de pago Y cambios en recibos (aplicar/remover pagos)
-            let cambioEstatusPago = null;
-            let etapaAfectadaPorPago = null;
-            
-            // 🔍 DETECTAR pagos aplicados o removidos comparando recibos directamente
-            let reciboAfectado = null;
-            let pagoAplicado = false;
-            let pagoRemovido = false;
-            
-            if (formularioOriginal?.recibos && formularioParaGuardar.recibos) {
-              console.log('🔍 [PAGO LOG] Comparando recibos...');
-              
-              // Buscar recibos con cambios en fecha_pago_real
-              for (const reciboOriginal of formularioOriginal.recibos) {
-                const reciboNuevo = formularioParaGuardar.recibos.find(r => r.numero_recibo === reciboOriginal.numero_recibo);
-                if (!reciboNuevo) continue;
-                
-                const teniaPago = !!reciboOriginal.fecha_pago_real;
-                const tienePago = !!reciboNuevo.fecha_pago_real;
-                
-                // Detectar si se removió un pago
-                if (teniaPago && !tienePago) {
-                  pagoRemovido = true;
-                  reciboAfectado = {
-                    numero: reciboOriginal.numero_recibo,
-                    monto: reciboOriginal.monto || reciboOriginal.monto_recibo,
-                    fecha_vencimiento: reciboOriginal.fecha_vencimiento,
-                    comprobante_nombre: reciboOriginal.comprobante_nombre,
-                    comprobante_url: reciboOriginal.comprobante_url,
-                    fecha_pago_real: reciboOriginal.fecha_pago_real
-                  };
-                  console.log('🔍 [PAGO LOG] Pago removido detectado:', reciboAfectado);
-                  break;
-                }
-                
-                // Detectar si se aplicó un pago
-                if (!teniaPago && tienePago) {
-                  pagoAplicado = true;
-                  reciboAfectado = {
-                    numero: reciboNuevo.numero_recibo,
-                    monto: reciboNuevo.monto || reciboNuevo.monto_recibo,
-                    fecha_vencimiento: reciboNuevo.fecha_vencimiento,
-                    comprobante_nombre: reciboNuevo.comprobante_nombre,
-                    comprobante_url: reciboNuevo.comprobante_url,
-                    fecha_pago_real: reciboNuevo.fecha_pago_real
-                  };
-                  console.log('🔍 [PAGO LOG] Pago aplicado detectado:', reciboAfectado);
-                  break;
-                }
-              }
-            }
-            
-            // 🔍 Buscar próximo recibo pendiente (para pago removido o aplicado)
-            let proximoReciboPendiente = null;
-            if ((pagoRemovido || pagoAplicado) && formularioParaGuardar.recibos) {
-              const recibosPendientes = formularioParaGuardar.recibos
-                .filter(r => !r.fecha_pago_real)
-                .sort((a, b) => a.numero_recibo - b.numero_recibo);
-              
-              if (recibosPendientes.length > 0) {
-                const proximo = recibosPendientes[0];
-                proximoReciboPendiente = {
-                  numero: proximo.numero_recibo,
-                  monto: proximo.monto || proximo.monto_recibo,
-                  fecha_vencimiento: proximo.fecha_vencimiento,
-                  estatus: proximo.estatus
-                };
-              }
-            }
-            
-            if (expedienteEnBD) {
-              console.log('🔍 [PAGO LOG] Verificando cambio en estatus de pago...');
-              
-              // Comparar BD actual vs lo que se va a guardar
-              const estatusPagoAnterior = estatusRecalculado 
-                ? normalizar(estatusRecalculado.anterior)
-                : normalizar(expedienteEnBD.estatusPago || expedienteEnBD.estatus_pago);
-              const estatusPagoNuevo = estatusRecalculado
-                ? normalizar(estatusRecalculado.nuevo)
-                : normalizar(formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago);
-              
-              console.log('🔍 [PAGO LOG] estatusPagoAnterior:', estatusPagoAnterior);
-              console.log('🔍 [PAGO LOG] estatusPagoNuevo:', estatusPagoNuevo);
-              
-              // Si hubo cambio en recibos (pago aplicado/removido), crear cambioEstatusPago
-              if (pagoAplicado || pagoRemovido) {
-                console.log('🔍 [PAGO LOG] Cambio detectado en recibos');
-                cambioEstatusPago = {
-                  anterior: estatusPagoAnterior,
-                  nuevo: estatusPagoNuevo,
-                  pagoAplicado,
-                  pagoRemovido,
-                  reciboAfectado,
-                  proximoReciboPendiente
-                };
-                
-                // Si se removió el pago y estaba "En Vigencia", revertir a "Emitida"
-                if (pagoRemovido && expedienteEnBD.etapa_activa === 'En Vigencia') {
-                  try {
-                    await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ etapa_activa: 'Emitida' })
-                    });
-                    etapaAfectadaPorPago = 'Emitida';
-                    console.log('✅ Etapa revertida de "En Vigencia" → "Emitida"');
-                  } catch (e) {
-                    console.warn('⚠️ No se pudo revertir etapa:', e);
-                  }
-                }
-                
-                // ⚠️ NO agregar a camposModificados aquí - se mostrará en el badge destacado
-                // Solo agregamos si es un cambio entre estados no-pagado (ej: Pendiente → Vencido)
-                if (!pagoAplicado && !pagoRemovido) {
-                  camposModificados.push(`• Estatus de pago: "${estatusPagoAnterior}" → "${estatusPagoNuevo}"`);
-                }
-              }
-            }
-            
-            // Registrar evento consolidado si hubo cambios O si hubo cambio de pago manual
-            if (camposModificados.length > 0 || cambioEstatusPago) {
-              // 🔍 PRIMERO: Ejecutar verificación de vigencia para obtener la etapa FINAL
-              let etapaFinalReal = formularioParaGuardar.etapa_activa;
-              
-              if (!cambioEstatusPago || (!cambioEstatusPago.pagoAplicado && !cambioEstatusPago.pagoRemovido)) {
-                try {
-                  const expedienteActualizado = {
-                    ...formularioParaGuardar,
-                    estatus_pago: formulario.estatusPago || formulario.estatus_pago,
-                    estatusPago: formulario.estatusPago || formulario.estatus_pago
-                  };
-                  await verificarYRegistrarEstadoVigencia(expedienteActualizado, data?.historial);
-                  
-                  // Recargar el expediente para obtener la etapa_activa REAL después de la verificación
-                  const respuestaFresh = await fetch(`${API_URL}/api/expedientes/${expedienteId}`);
-                  if (respuestaFresh.ok) {
-                    const datosFresh = await respuestaFresh.json();
-                    const expFresh = datosFresh.data || datosFresh;
-                    etapaFinalReal = expFresh.etapa_activa;
-                    console.log('✅ Etapa final obtenida después de verificación:', etapaFinalReal);
-                  }
-                } catch (errorVigencia) {
-                  console.warn('⚠️ No se pudo verificar estado de vigencia:', errorVigencia);
-                }
-              }
-              
-              // Verificar si cambió la etapa (comparar BD vs etapa FINAL REAL)
-              const cambioEtapa = expedienteEnBD && expedienteEnBD.etapa_activa !== etapaFinalReal;
-              const etapaFinal = etapaAfectadaPorPago || etapaFinalReal;
-              
-              // 🔍 Detectar si el cambio de etapa fue automático por vigencia
-              const cambioAutomaticoPorVigencia = cambioEtapa && !etapaAfectadaPorPago && 
-                (etapaFinalReal === 'Por Renovar' || etapaFinalReal === 'Vencida');
-              
-              // Construir descripción consolidada con destacado de pago/vigencia si aplica
-              let descripcion = '';
-              
-              // 🎯 DESTACAR cambios automáticos importantes al inicio
-              if (cambioEstatusPago) {
-                if (cambioEstatusPago.pagoAplicado) {
-                  descripcion = '🟢 PAGO APLICADO MANUALMENTE';
-                } else if (cambioEstatusPago.pagoRemovido) {
-                  descripcion = '⚠️ PAGO REMOVIDO MANUALMENTE';
-                  
-                  // Agregar detalles del recibo removido
-                  if (cambioEstatusPago.reciboAfectado) {
-                    const recibo = cambioEstatusPago.reciboAfectado;
-                    descripcion += `\n\n📋 Recibo removido: #${recibo.numero}`;
-                    if (recibo.monto) {
-                      descripcion += `\n💵 Monto: $${Number(recibo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                    }
-                    if (recibo.fecha_pago_real) {
-                      // 🔧 Formatear fecha sin problemas de zona horaria
-                      const fechaStr = recibo.fecha_pago_real.split('T')[0]; // Obtener solo YYYY-MM-DD
-                      const [year, month, day] = fechaStr.split('-');
-                      descripcion += `\n📅 Fecha de pago original: ${day}/${month}/${year}`;
-                    }
-                    if (recibo.comprobante_nombre) {
-                      descripcion += `\n🧾 Comprobante guardado: ${recibo.comprobante_nombre}`;
-                    }
-                  }
-                  
-                  // Agregar información del próximo recibo pendiente
-                  if (cambioEstatusPago.proximoReciboPendiente) {
-                    const proximo = cambioEstatusPago.proximoReciboPendiente;
-                    descripcion += `\n\n📊 Próximo recibo pendiente: #${proximo.numero}`;
-                    if (proximo.monto) {
-                      descripcion += `\n💵 Monto: $${Number(proximo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-                    }
-                    if (proximo.fecha_vencimiento) {
-                      // 🔧 Formatear fecha sin problemas de zona horaria
-                      const fechaStr = proximo.fecha_vencimiento.split('T')[0]; // Obtener solo YYYY-MM-DD
-                      const [year, month, day] = fechaStr.split('-');
-                      descripcion += `\n📅 Vencimiento: ${day}/${month}/${year}`;
-                    }
-                    if (proximo.estatus) {
-                      descripcion += `\n⚡ Estatus: ${proximo.estatus}`;
-                    }
-                  }
-                  
-                  // Si además cambió a vencida automáticamente, agregar ese badge también
-                  if (cambioAutomaticoPorVigencia && etapaFinalReal === 'Vencida') {
-                    descripcion += '\n\n🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
-                  }
-                }
-              } else if (cambioAutomaticoPorVigencia) {
-                if (etapaFinalReal === 'Por Renovar') {
-                  descripcion = '⏰ PÓLIZA PRÓXIMA A VENCER\n(Automático: 30 días antes del vencimiento)';
-                } else if (etapaFinalReal === 'Vencida') {
-                  descripcion = '🚨 PÓLIZA VENCIDA\n(Automático: Término de vigencia alcanzado)';
-                }
-              }
-              
-              // Solo mostrar resumen de campos si hay cambios adicionales
-              if (camposModificados.length > 0) {
-                if (descripcion) descripcion += '\n\n'; // Separador solo si hay badge
-                descripcion += `Póliza editada - ${camposModificados.length} campo(s) modificado(s)\n\nCampos modificados:\n${camposModificados.join('\n')}`;
-              }
-              
-              // 📂 SIEMPRE agregar información de carpeta y estatus de pago
-              if (descripcion) descripcion += '\n\n';
-              
-              // Mostrar movimiento de carpeta o carpeta actual
-              if (cambioEtapa || etapaAfectadaPorPago) {
-                // Hubo movimiento de carpeta
-                descripcion += `📂 Póliza movida a: ${etapaFinal}`;
-              } else {
-                // No hubo movimiento - mostrar carpeta actual
-                descripcion += `📂 Carpeta actual: ${formularioParaGuardar.etapa_activa}`;
-              }
-              
-              // 💳 SIEMPRE agregar estatus de pago FINAL (después de todos los cambios)
-              // Usar el estatus que se guardó en la BD, no el del formulario original
-              let estatusPagoFinal;
-              if (cambioEstatusPago) {
-                estatusPagoFinal = cambioEstatusPago.nuevo; // Usar el nuevo estatus después del cambio
-              } else {
-                estatusPagoFinal = formularioParaGuardar.estatusPago || formularioParaGuardar.estatus_pago || 'Sin estatus';
-              }
-              descripcion += `\n💳 Estatus de pago: ${estatusPagoFinal}`;
-              
-              // Registrar los cambios de datos (consolidado)
-              await historialService.registrarEvento({
-                expediente_id: expedienteId,
-                cliente_id: formularioParaGuardar.cliente_id,
-                tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
-                usuario_nombre: 'Sistema', // TODO: usuario actual
-                descripcion,
-                datos_adicionales: {
-                  numero_poliza: formularioParaGuardar.numero_poliza,
-                  compania: formularioParaGuardar.compania,
-                  producto: formularioParaGuardar.producto,
-                  campos_modificados: camposModificados,
-                  cantidad_cambios: camposModificados.length,
-                  modificaciones_manuales: camposModificados.length > 0, // ✅ Marcar como modificación manual
-                  ...(cambioEtapa && {
-                    etapa_anterior: expedienteEnBD.etapa_activa,
-                    etapa_nueva: formularioParaGuardar.etapa_activa
-                  }),
-                  ...(cambioEstatusPago && {
-                    cambio_pago: {
-                      anterior: cambioEstatusPago.anterior,
-                      nuevo: cambioEstatusPago.nuevo,
-                      tipo: cambioEstatusPago.pagoAplicado ? 'aplicado_manual' : cambioEstatusPago.pagoRemovido ? 'removido_manual' : 'cambio_estatus',
-                      // 📋 Información detallada del recibo afectado (para pago removido)
-                      ...(cambioEstatusPago.pagoRemovido && cambioEstatusPago.reciboAfectado && {
-                        recibo_removido: {
-                          numero: cambioEstatusPago.reciboAfectado.numero,
-                          monto: cambioEstatusPago.reciboAfectado.monto,
-                          fecha_vencimiento: cambioEstatusPago.reciboAfectado.fecha_vencimiento,
-                          fecha_pago_real: cambioEstatusPago.reciboAfectado.fecha_pago_real,
-                          // 🧾 Mantener referencia del comprobante para aclaraciones
-                          comprobante_nombre: cambioEstatusPago.reciboAfectado.comprobante_nombre,
-                          comprobante_url: cambioEstatusPago.reciboAfectado.comprobante_url
-                        }
-                      }),
-                      // 📊 Información del próximo recibo pendiente (para pago removido)
-                      ...(cambioEstatusPago.pagoRemovido && cambioEstatusPago.proximoReciboPendiente && {
-                        proximo_recibo_pendiente: {
-                          numero: cambioEstatusPago.proximoReciboPendiente.numero,
-                          monto: cambioEstatusPago.proximoReciboPendiente.monto,
-                          fecha_vencimiento: cambioEstatusPago.proximoReciboPendiente.fecha_vencimiento,
-                          estatus: cambioEstatusPago.proximoReciboPendiente.estatus
-                        }
-                      })
-                    }
-                  })
-                }
-              });
-              console.log(`✅ Evento consolidado "Edición" registrado con ${camposModificados.length} cambios${cambioEtapa ? ' (incluye cambio de etapa)' : ''}${cambioEstatusPago ? ' (incluye cambio de pago)' : ''}`);
-              
-              // 🎯 Detectar cambios automáticos de vigencia/renovación por edición de fechas
-              if (expedienteAnterior) {
-                const hoy = new Date();
-                hoy.setHours(0, 0, 0, 0);
-                
-                // ⚠️ PENDIENTE: Flujo completo de renovación con módulo de cotizaciones
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // CONTEXTO: Cuando se habilite el módulo de cotizaciones, completar el
-                // flujo de renovación con los siguientes estados y eventos:
-                //
-                // CARPETAS Y FLUJO:
-                // ─────────────────────────────────────────────────────────────────
-                // 📂 "Por Renovar" o "Vencidas" → Usuario hace clic en botón "Cotizar"
-                //    ↓
-                // 📂 "En Proceso" (desde que inicia cotización hasta que se paga)
-                //    ↓
-                // 📂 "Renovadas" (cuando se aplica el pago)
-                //
-                // EVENTOS Y ESTADOS:
-                // ─────────────────────────────────────────────────────────────────
-                // 1. ⏰ POLIZA_PROXIMA_VENCER - Ya implementado ✅
-                //    └─> Automático: fecha_aviso_renovacion <= hoy
-                //    └─> Carpeta: "Por Renovar"
-                //    └─> Estado: etapa_activa sin cambios
-                //
-                // 2. ❌ POLIZA_VENCIDA - Ya implementado ✅
-                //    └─> Automático: termino_vigencia < hoy
-                //    └─> Carpeta: "Vencidas"
-                //    └─> Estado: etapa_activa = "Vencida" (opcional)
-                //
-                // 3. 📝 COTIZACION_RENOVACION_INICIADA - Pendiente
-                //    └─> Trigger: Botón "Cotizar" en listado (carpetas Por Renovar/Vencidas)
-                //    └─> Acción: Abrir modal/formulario de cotización
-                //    └─> Cambio: etapa_activa = "En Cotización - Renovación"
-                //    └─> Carpeta: "En Proceso"
-                //
-                // 4. 📧 COTIZACION_RENOVACION_ENVIADA - Pendiente
-                //    └─> Trigger: Se envía cotización de renovación al cliente
-                //    └─> Cambio: etapa_activa = "Renovación Enviada"
-                //    └─> Carpeta: "En Proceso"
-                //    └─> Registrar: destinatario, monto, PDF, fecha de envío
-                //
-                // 5. ⏳ RENOVACION_PENDIENTE_EMISION - Pendiente
-                //    └─> Trigger: Cliente autoriza cotización
-                //    └─> Cambio: etapa_activa = "Pendiente de Emisión - Renovación"
-                //    └─> Carpeta: "En Proceso"
-                //
-                // 6. 📄 RENOVACION_EMITIDA - Pendiente
-                //    └─> Trigger: Aseguradora emite la póliza renovada
-                //    └─> Cambio: etapa_activa = "Renovación Emitida"
-                //    └─> Carpeta: "En Proceso"
-                //    └─> Actualizar: nuevo numero_poliza (si aplica), nuevas vigencias
-                //
-                // 7. 💰 PAGO_RENOVACION_REGISTRADO - Pendiente
-                //    └─> Trigger: Se registra pago de la renovación
-                //    └─> Cambio: estatus_pago = "Pagado"
-                //    └─> Registrar: monto, método, comprobante
-                //
-                // 8. 🔁 RENOVACION_VIGENTE - Pendiente
-                //    └─> Trigger: Pago completado (automático tras registrar pago)
-                //    └─> Cambio: etapa_activa = "Renovada"
-                //    └─> Carpeta: "Renovadas" (NO va a "Vigentes", va a carpeta especial)
-                //    └─> Actualizar: inicio_vigencia (nuevo inicio)
-                //    └─> Actualizar: termino_vigencia (nuevo inicio + 1 año)
-                //    └─> Actualizar: fecha_aviso_renovacion (nuevo término - 30 días)
-                //    └─> Nota: tipo_movimiento = "renovacion" (para distinguir de nuevas)
-                //
-                // CONSIDERACIONES TÉCNICAS:
-                // ─────────────────────────────────────────────────────────────────
-                // - Crear eventos específicos para renovación (COTIZACION_RENOVACION_*, etc.)
-                //   para mantener claridad en el historial y poder filtrar/analizar renovaciones
-                // - El campo tipo_movimiento = "renovacion" permite diferenciar en reportes
-                // - La carpeta "Renovadas" mantiene pólizas renovadas separadas de nuevas
-                // - Considerar si crear nueva fila en BD o actualizar la existente
-                //   (Recomendado: actualizar existente y mantener historial en tabla de eventos)
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                
-                // ✅ La verificación de vigencia ya se ejecutó ANTES de registrar el log
-                // (Ver líneas arriba, se ejecuta antes de generar el log para obtener etapa_activa FINAL)
-              }
-            } else {
-              console.log('ℹ️ No se detectaron cambios reales, no se registra evento de edición');
-            }
-          } catch (e) {
-            console.warn('⚠️ No se pudo registrar evento de actualización:', e);
-          }
 
-          limpiarFormulario();
-          await recargarExpedientes(); // Esperar a que se recarguen los datos
-          setVistaActual('lista');
-        })
-        .catch(err => {
-          console.error('❌ Error al actualizar expediente:', err);
-          toast.error('Error al actualizar expediente: ' + err.message);
-        });
-    } else {
-      // 🚨 DEBUG CRÍTICO: Verificar el payload final del POST
-      const payloadFinal = {
-        ...expedientePayload,
-        fecha_creacion: new Date().toISOString().split('T')[0]
-      };
+      const resultado = await response.json();
       
-      console.log(`✅ POST Expediente | Póliza: ${payloadFinal.numero_poliza || 'N/A'} | Cliente: ${payloadFinal.cliente_id || 'N/A'}`);
+      toast.success(`✅ Expediente ${modoEdicion ? 'actualizado' : 'creado'} correctamente`);
+      limpiarFormulario();
+      await cargarExpedientes(); // Recargar la lista completa
+      setVistaActual('lista');
+      setGuardando(false);
       
-  fetch(`${API_URL}/api/expedientes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payloadFinal)
-      })
-        .then(response => response.json())
-        .then(async (data) => {
-          // Debug: Verificar respuesta tras CREATE
-          if (data?.id || data?.data?.id) {
-            console.log('✅ POST completado | ID:', data?.id || data?.data?.id);
-          }
-          
-          // 💰 CARGAR RECIBOS DEL EXPEDIENTE RECIÉN CREADO
-          const nuevoId = data?.id || data?.data?.id;
-          if (nuevoId) {
-            try {
-              console.log('📋 Cargando recibos del expediente recién creado:', nuevoId);
-              const recibosResponse = await fetch(`${API_URL}/api/recibos/${nuevoId}`);
-              if (recibosResponse.ok) {
-                const recibosData = await recibosResponse.json();
-                if (recibosData.success && recibosData.data && Array.isArray(recibosData.data)) {
-                  console.log(`✅ ${recibosData.data.length} recibos cargados para la nueva póliza`);
-                  
-                  // Actualizar el formulario con los recibos antes de limpiar
-                  setFormulario(prev => ({
-                    ...prev,
-                    id: nuevoId,
-                    recibos: recibosData.data
-                  }));
-                  
-                  console.log('📋 Recibos cargados:', recibosData.data);
-                } else {
-                  console.warn('⚠️ Backend no devolvió recibos para el nuevo expediente');
-                }
-              }
-            } catch (errorRecibos) {
-              console.error('❌ Error al cargar recibos:', errorRecibos);
-            }
-          }
-          
-          // ✨ Registrar creación en historial de trazabilidad
-          try {
-            const nuevoId = data?.id || data?.data?.id;
-            if (nuevoId) {
-              const etapaActual = expedientePayload.etapa_activa || 'En cotización';
-              const capturadoConExtractorPDF = formularioParaGuardar._capturado_con_extractor_pdf === true;
-              const nombreArchivoPDF = formularioParaGuardar._nombre_archivo_pdf || 'PDF importado';
-              
-              console.log('🔍 DEBUG captura evento:', {
-                capturadoConExtractorPDF,
-                nombreArchivoPDF,
-                tiene_datos_originales: !!formularioParaGuardar._datos_originales_pdf
-              });
-              
-              // 🔍 DETECTAR CAMPOS MODIFICADOS MANUALMENTE
-              // ✅ LÓGICA SIMPLE: Si existe snapshot (formularioOriginal), comparar todo el formulario
-              const camposModificados = [];
-              let huboModificacionesManuales = false;
-              
-              if (formularioOriginal) {
-                console.log('✅ Snapshot disponible - detectando cambios desde el estado inicial completo');
-                console.log('📸 Campos en snapshot:', Object.keys(formularioOriginal).filter(k => !k.startsWith('_')).length);
-                console.log('🔍 DEBUG - Valores clave en snapshot:', {
-                  contacto_nombre: formularioOriginal.contacto_nombre,
-                  contacto_telefono_fijo: formularioOriginal.contacto_telefono_fijo,
-                  conductor_habitual: formularioOriginal.conductor_habitual,
-                  fecha_emision: formularioOriginal.fecha_emision,
-                  fecha_captura: formularioOriginal.fecha_captura
-                });
-                console.log('🔍 DEBUG - Valores clave en formulario actual:', {
-                  contacto_nombre: formularioParaGuardar.contacto_nombre,
-                  contacto_telefono_fijo: formularioParaGuardar.contacto_telefono_fijo,
-                  conductor_habitual: formularioParaGuardar.conductor_habitual,
-                  fecha_emision: formularioParaGuardar.fecha_emision,
-                  fecha_captura: formularioParaGuardar.fecha_captura
-                });
-                
-                // Normalizar valores para comparación
-                const normalizar = (valor) => {
-                  if (valor === null || valor === undefined) return '';
-                  if (typeof valor === 'object') return JSON.stringify(valor);
-                  return String(valor).trim();
-                };
-                
-                // Lista de campos editables a comparar
-                const camposEditables = [
-                  // === DATOS DEL CLIENTE ===
-                  { key: 'nombre', label: 'Nombre del cliente' },
-                  { key: 'apellido_paterno', label: 'Apellido paterno del cliente' },
-                  { key: 'apellido_materno', label: 'Apellido materno del cliente' },
-                  { key: 'razon_social', label: 'Razón social' },
-                  { key: 'nombre_comercial', label: 'Nombre comercial' },
-                  { key: 'rfc', label: 'RFC' },
-                  { key: 'curp', label: 'CURP' },
-                  { key: 'email', label: 'Email del cliente' },
-                  { key: 'telefono_fijo', label: 'Teléfono fijo del cliente' },
-                  { key: 'telefono_movil', label: 'Teléfono móvil del cliente' },
-                  { key: 'domicilio', label: 'Domicilio' },
-                  
-                  // === CONTACTO ADICIONAL ===
-                  { key: 'contacto_nombre', label: 'Nombre del contacto' },
-                  { key: 'contacto_apellido_paterno', label: 'Apellido paterno del contacto' },
-                  { key: 'contacto_apellido_materno', label: 'Apellido materno del contacto' },
-                  { key: 'contacto_email', label: 'Email del contacto' },
-                  { key: 'contacto_telefono_fijo', label: 'Teléfono fijo del contacto' },
-                  { key: 'contacto_telefono_movil', label: 'Teléfono móvil del contacto' },
-                  
-                  // === DATOS BÁSICOS DE PÓLIZA ===
-                  { key: 'numero_poliza', label: 'Número de póliza' },
-                  { key: 'compania', label: 'Aseguradora' },
-                  { key: 'producto', label: 'Producto' },
-                  { key: 'tipo_seguro', label: 'Tipo de seguro' },
-                  { key: 'endoso', label: 'Endoso' },
-                  { key: 'inciso', label: 'Inciso' },
-                  
-                  // === FECHAS ===
-                  { key: 'fecha_emision', label: 'Fecha de emisión' },
-                  { key: 'fecha_captura', label: 'Fecha de captura' },
-                  { key: 'inicio_vigencia', label: 'Inicio de vigencia' },
-                  { key: 'termino_vigencia', label: 'Término de vigencia' },
-                  
-                  // === MONTOS ===
-                  { key: 'prima_pagada', label: 'Prima' },
-                  { key: 'cargo_pago_fraccionado', label: 'Cargo pago fraccionado' },
-                  { key: 'gastos_expedicion', label: 'Gastos de expedición' },
-                  { key: 'iva', label: 'IVA' },
-                  { key: 'recargo', label: 'Recargo' },
-                  { key: 'total', label: 'Total' },
-                  { key: 'subtotal', label: 'Subtotal' },
-                  { key: 'suma_asegurada', label: 'Suma asegurada' },
-                  { key: 'deducible', label: 'Deducible' },
-                  
-                  // === PAGO ===
-                  { key: 'forma_pago', label: 'Forma de pago' },
-                  { key: 'tipo_pago', label: 'Tipo de pago' },
-                  { key: 'frecuenciaPago', label: 'Frecuencia de pago' },
-                  { key: 'primer_pago', label: 'Primer pago' },
-                  { key: 'pagos_subsecuentes', label: 'Pagos subsecuentes' },
-                  { key: 'periodo_gracia', label: 'Período de gracia' },
-                  
-                  // === VEHÍCULO (PARA AUTOS) ===
-                  { key: 'marca', label: 'Marca' },
-                  { key: 'modelo', label: 'Modelo' },
-                  { key: 'anio', label: 'Año' },
-                  { key: 'tipo_vehiculo', label: 'Tipo de vehículo' },
-                  { key: 'numero_serie', label: 'Número de serie' },
-                  { key: 'motor', label: 'Motor' },
-                  { key: 'placas', label: 'Placas' },
-                  { key: 'color', label: 'Color' },
-                  { key: 'codigo_vehiculo', label: 'Código de vehículo' },
-                  { key: 'tipo_cobertura', label: 'Tipo de cobertura' },
-                  { key: 'plan', label: 'Plan' },
-                  
-                  // === USO Y SERVICIO ===
-                  { key: 'uso', label: 'Uso' },
-                  { key: 'servicio', label: 'Servicio' },
-                  { key: 'movimiento', label: 'Movimiento' },
-                  
-                  // === CONDUCTOR ===
-                  { key: 'conductor_habitual', label: 'Conductor habitual' },
-                  { key: 'edad_conductor', label: 'Edad del conductor' },
-                  { key: 'licencia_conducir', label: 'Licencia de conducir' },
-                  
-                  // === OTROS ===
-                  { key: 'observaciones', label: 'Observaciones' }
-                ];
-                
-                // Comparar cada campo
-                camposEditables.forEach(({ key, label }) => {
-                  const valorOriginal = normalizar(formularioOriginal[key]);
-                  const valorActual = normalizar(formularioParaGuardar[key]);
-                  
-                  if (valorOriginal !== valorActual) {
-                    // Ignorar cambios de vacío a vacío
-                    if (!valorOriginal && !valorActual) return;
-                    
-                    camposModificados.push(
-                      `• ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`
-                    );
-                    console.log(`  ✏️ ${label}: "${valorOriginal || 'vacío'}" → "${valorActual || 'vacío'}"`);
-                  }
-                });
-                
-                huboModificacionesManuales = camposModificados.length > 0;
-                console.log(`✅ ${camposModificados.length} campo(s) modificado(s) manualmente`);
-              } else {
-                console.log('⚠️ No hay snapshot - no se pueden detectar cambios manuales');
-              }
-              
-              // 🎯 EVENTO CAPTURA: Registrar en el nuevo sistema de historial
-              const metodCaptura = capturadoConExtractorPDF ? 'Extractor PDF' : 'Captura Manual';
-              const aseguradoraNombre = expedientePayload.compania || 'Aseguradora';
-              const fechaCaptura = new Date().toISOString().split('T')[0];
-              
-              // Registrar en el sistema de historial (nueva tabla)
-              const fechaEmision = expedientePayload.fecha_emision || 'No especificada';
-              const inicioVigencia = expedientePayload.inicio_vigencia || 'No especificada';
-              
-              // Construir descripción con información relevante
-              let descripcionEvento = '';
-              if (capturadoConExtractorPDF) {
-                // Incluir nombre de la aseguradora para identificar qué extractor se usó
-                descripcionEvento = `Póliza extraída con Extractor PDF ${aseguradoraNombre} • Archivo: ${nombreArchivoPDF}`;
-                if (huboModificacionesManuales && camposModificados.length > 0) {
-                  descripcionEvento += `\n\n${camposModificados.length} campo(s) modificado(s) manualmente:\n${camposModificados.join('\n')}`;
-                }
-              } else {
-                descripcionEvento = `Póliza capturada manualmente`;
-                if (huboModificacionesManuales && camposModificados.length > 0) {
-                  descripcionEvento += `\n\nCampos capturados:\n${camposModificados.join('\n')}`;
-                }
-              }
-              
-              // Agregar información de fechas si están disponibles
-              const infoFechas = [];
-              if (fechaEmision && fechaEmision !== 'No especificada') {
-                infoFechas.push(`Emisión: ${fechaEmision}`);
-              }
-              if (inicioVigencia && inicioVigencia !== 'No especificada') {
-                infoFechas.push(`Vigencia: ${inicioVigencia}`);
-              }
-              if (infoFechas.length > 0) {
-                descripcionEvento += ` • ${infoFechas.join(' • ')}`;
-              }
-              
-              const eventoData = {
-                expediente_id: String(nuevoId), // Convertir a string para coincidir con VARCHAR(50)
-                cliente_id: String(expedientePayload.cliente_id),
-                tipo_evento: capturadoConExtractorPDF 
-                  ? historialService.TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF 
-                  : historialService.TIPOS_EVENTO.CAPTURA_MANUAL,
-                usuario_nombre: 'Sistema',
-                descripcion: descripcionEvento,
-                datos_adicionales: {
-                  metodo: metodCaptura,
-                  numero_poliza: expedientePayload.numero_poliza,
-                  compania: aseguradoraNombre,
-                  producto: expedientePayload.producto || '',
-                  etapa_inicial: etapaActual,
-                  fecha_emision: fechaEmision,
-                  inicio_vigencia: inicioVigencia,
-                  ...(capturadoConExtractorPDF && {
-                    nombre_archivo_pdf: nombreArchivoPDF,
-                    modificaciones_manuales: huboModificacionesManuales,
-                    ...(huboModificacionesManuales && camposModificados.length > 0 && {
-                      campos_modificados: camposModificados
-                    })
-                  })
-                }
-              };
-              
-              console.log('🔍 DEBUG: Registrando evento en historial con datos:', eventoData);
-              await historialService.registrarEvento(eventoData);
-              
-              console.log(`✅ Captura registrada en historial: ${metodCaptura} - ${aseguradoraNombre}`);
-              
-              // 💰 REGISTRAR PAGO INICIAL si la póliza fue marcada como "Pagado" al momento de captura
-              const estatusPago = expedientePayload.estatus_pago || expedientePayload.estatusPago;
-              if (estatusPago === 'Pagado') {
-                console.log('💰 Detectado pago aplicado en captura inicial, registrando evento...');
-                try {
-                  const fechaPago = expedientePayload.fecha_ultimo_pago || expedientePayload.fecha_vencimiento_pago || new Date().toISOString().split('T')[0];
-                  const fechaPagoFormateada = new Date(fechaPago).toLocaleDateString('es-MX', { 
-                    day: 'numeric', 
-                    month: 'long', 
-                    year: 'numeric' 
-                  });
-                  
-                  const comentarioPago = `💰 Pago Registrado en Captura Inicial\n` +
-                    `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
-                    `💵 Monto: $${parseFloat(expedientePayload.total || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
-                    `✅ Póliza marcada como pagada desde la captura`;
-                  
-                  await historialService.registrarEvento({
-                    expediente_id: String(nuevoId),
-                    cliente_id: String(expedientePayload.cliente_id),
-                    tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
-                    usuario_nombre: 'Sistema',
-                    descripcion: comentarioPago,
-                    datos_adicionales: {
-                      numero_poliza: expedientePayload.numero_poliza,
-                      compania: aseguradoraNombre,
-                      producto: expedientePayload.producto || '',
-                      monto_total: expedientePayload.total || null,
-                      monto_pagado: expedientePayload.total || null,
-                      fecha_pago: fechaPago,
-                      tipo_pago: expedientePayload.tipo_pago,
-                      frecuencia_pago: expedientePayload.frecuenciaPago,
-                      aplicado_en_captura: true
-                    }
-                  });
-                  console.log('✅ Evento de pago inicial registrado en historial');
-                } catch (errorPagoInicial) {
-                  console.warn('⚠️ No se pudo registrar evento de pago inicial:', errorPagoInicial);
-                }
-              }
-            }
-          } catch (error) {
-            console.warn('⚠️ Error al registrar captura:', error.message);
-          }
-
-          try {
-            // Obtener ID del expediente creado (compatibilidad con posibles estructuras)
-            const nuevoId = data?.id || data?.data?.id;
-            if (nuevoId && formulario.__pdfFile) {
-              console.log('📤 Subiendo PDF automáticamente para expediente recién creado:', nuevoId);
-              setSubiendoPDF(true);
-              try {
-                const pdfData = await pdfService.subirPDFPoliza(nuevoId, formulario.__pdfFile);
-                // Refrescar listado para reflejar metadatos del PDF
-                await recargarExpedientes();
-                console.log('✅ PDF subido automáticamente:', pdfData?.pdf_nombre || formulario.__pdfNombre || 'PDF');
-              } catch (error) {
-                console.error('⚠️ Error al subir automáticamente el PDF:', error);
-                toast('⚠️ Expediente creado, pero no se pudo subir el PDF automáticamente: ' + error.message);
-              } finally {
-                setSubiendoPDF(false);
-              }
-            }
-          } catch (e) {
-            console.warn('No fue posible realizar la subida automática del PDF:', e);
-          }
-          limpiarFormulario();
-          recargarExpedientes();
-          setVistaActual('lista');
-        })
-        .catch(err => {
-          console.error('❌ Error al crear expediente:', err);
-          toast.error('Error al crear expediente: ' + err.message);
-        });
+    } catch (error) {
+      console.error('❌ Error completo:', error);
+      toast.error('Error al guardar: ' + error.message);
+      setGuardando(false);
     }
-  }, [formulario, modoEdicion, actualizarCalculosAutomaticos, limpiarFormulario, validarFormulario, clienteSeleccionado]);
-  const recargarExpedientes = useCallback(async () => {
-    try {
-      // Obtener expedientes frescos SIN cache
-      const resExpedientes = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
-      const expedientes = await resExpedientes.json();
-      
-      // 2. Obtener todos los clientes
-      const resClientes = await fetch(`${API_URL}/api/clientes`);
-      const clientesData = await resClientes.json();
-      
-      // 3. Crear un mapa de clientes por ID para búsqueda rápida
-      const mapa = {};
-      clientesData.forEach(cliente => {
-        mapa[cliente.id] = cliente;
-      });
-      
-      // 4. Actualizar estados de clientes
-      setClientes(clientesData);
-      setClientesMap(mapa);
-      
-      // 🔥 Ya no normalizamos estatusPago - se calcula dinámicamente con calcularEstatusPagoActual()
-      setExpedientes(expedientes);
-    } catch (err) {
-      console.error('Error al recargar expedientes:', err);
-    }
-  }, []);
+  }, [formulario, modoEdicion, validarFormulario, limpiarFormulario, setVistaActual, cargarExpedientes]);
   
   // ═══════════════════════════════════════════════════════════════
   // FUNCIONES PARA FLUJO DE RENOVACIÓN
@@ -3651,13 +2485,13 @@ const ModuloExpedientes = () => {
       toast.success('Cotización de renovación iniciada');
       setMostrarModalCotizarRenovacion(false);
       setExpedienteParaRenovacion(null);
-      await recargarExpedientes();
+      await cargarExpedientes();
       
     } catch (error) {
       console.error('Error al guardar cotización:', error);
       toast.error('Error al guardar cotización de renovación');
     }
-  }, [cambiarEstadoExpediente, recargarExpedientes]);
+  }, [cambiarEstadoExpediente, cargarExpedientes]);
 
   /**
    * 2. Marcar como Autorizado
@@ -3693,13 +2527,13 @@ const ModuloExpedientes = () => {
       toast.success('Renovación marcada como autorizada');
       setMostrarModalAutorizarRenovacion(false);
       setExpedienteParaRenovacion(null);
-      await recargarExpedientes();
+      await cargarExpedientes();
       
     } catch (error) {
       console.error('Error al marcar como autorizada:', error);
       toast.error('Error al marcar renovación como autorizada');
     }
-  }, [cambiarEstadoExpediente, recargarExpedientes]);
+  }, [cambiarEstadoExpediente, cargarExpedientes]);
 
   /**
    * 3. Agregar Póliza Renovada
@@ -3778,19 +2612,14 @@ const ModuloExpedientes = () => {
         terminoVigenciaNueva: '',
         observaciones: ''
       });
-      await recargarExpedientes();
+      await cargarExpedientes();
       
     } catch (error) {
       console.error('Error al guardar póliza renovada:', error);
       toast.error('Error al guardar póliza renovada');
     }
-  }, [recargarExpedientes]);
+  }, [cargarExpedientes]);
   
-  // ✅ FUNCIÓN para convertir snake_case a camelCase
-  const snakeToCamel = (str) => {
-    return str.replace(/_([a-z])/g, (match, letter) => letter.toUpperCase());
-  };
-
   // ✅ CONVERSIÓN de snake_case a camelCase para uso interno del frontend
   const convertirACamelCase = (obj) => {
     console.log('🔄 [convertirACamelCase] ENTRADA - obj:', obj);
@@ -4084,11 +2913,6 @@ const ModuloExpedientes = () => {
     const estatusPagoDesdeBD = formularioBase.estatus_pago || formularioBase.estatusPago || 'Pendiente';
     formularioConCalculos.estatusPago = estatusPagoDesdeBD;
     formularioConCalculos.estatus_pago = estatusPagoDesdeBD;
-    
-    // 🔥 PROTEGER LA FECHA DE VENCIMIENTO REAL DEL RECIBO
-    // Marcar que la fecha viene de un recibo real para evitar recálculos automáticos
-    formularioConCalculos._fecha_vencimiento_desde_recibo = true;
-    formularioConCalculos._no_recalcular_fecha_vencimiento = true;
     
     console.log('📊 [EDITAR] Estatus de pago cargado desde BD:', {
       estatus_pago_bd: formularioBase.estatus_pago,
