@@ -248,9 +248,85 @@ export async function extraer(ctx) {
   const desdeMatch = textoQualitas.match(/Desde\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
   const hastaMatch = textoQualitas.match(/Hasta\s+las.*?del[:\s]*(\d{2})\s*\/\s*([A-Z]{3})\s*\/\s*(\d{4})/i);
   
+  // ==================== FECHA DE EMISIÓN ====================
+  // Buscar la fecha de emisión que aparece como "A 14 DE AGOSTO DE 2025" o similar
+  // Suele estar después de los montos (IMPORTE TOTAL) y antes del lugar (SAN JERONIMO, etc.)
+  let fecha_emision = '';
+  
+  // Patrón 1: "A ## DE NOMBRE_MES DE ####"
+  const emisionMatch1 = textoCompleto.match(/A\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
+  
+  if (emisionMatch1) {
+    const dia = emisionMatch1[1].padStart(2, '0');
+    const mesTexto = emisionMatch1[2].toUpperCase();
+    const anio = emisionMatch1[3];
+    
+    // Mapear nombre de mes completo a número
+    const mesesCompletos = {
+      'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
+      'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
+      'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+    };
+    
+    const mesNumero = mesesCompletos[mesTexto] || '01';
+    fecha_emision = `${anio}-${mesNumero}-${dia}`;
+    console.log('📅 Fecha de emisión encontrada:', fecha_emision, `(Original: "A ${dia} DE ${mesTexto} DE ${anio}")`);
+  } else {
+    // Patrón 2: Fallback - buscar fecha después de "IMPORTE TOTAL"
+    const seccionDespuesTotal = textoCompleto.match(/IMPORTE\s+TOTAL[\s\S]{0,200}?(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
+    
+    if (seccionDespuesTotal) {
+      const dia = seccionDespuesTotal[1].padStart(2, '0');
+      const mesTexto = seccionDespuesTotal[2].toUpperCase();
+      const anio = seccionDespuesTotal[3];
+      
+      const mesesCompletos = {
+        'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
+        'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
+        'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+      };
+      
+      const mesNumero = mesesCompletos[mesTexto] || '01';
+      fecha_emision = `${anio}-${mesNumero}-${dia}`;
+      console.log('📅 Fecha de emisión encontrada (fallback):', fecha_emision);
+    } else {
+      console.warn('⚠️ Fecha de emisión no encontrada, usando fecha actual');
+      // Si no se encuentra, usar la fecha actual como fallback
+      const hoy = new Date();
+      fecha_emision = hoy.toISOString().split('T')[0];
+    }
+  }
+  
   // ==================== PERIODO DE GRACIA ====================
-  const plazoMatch = textoQualitas.match(/Plazo\s+de\s+pago:\s*(\d+)\s*d[ií]as/i);
+  // Buscar "Plazo de pago: X días" o variaciones
+  // Ejemplos: "Plazo de pago: 3 días", "Plazo de pago 3 días", "Plazo 3 días", "3 días naturales"
+  
+  // DEBUG: Mostrar fragmento del texto donde debería estar el plazo
+  const fragmentoPlazo = textoQualitas.match(/.{0,100}[Pp]lazo.{0,100}/)?.[0];
+  if (fragmentoPlazo) {
+    console.log('🔍 DEBUG - Fragmento con "Plazo":', fragmentoPlazo);
+  }
+  
+  let plazoMatch = textoQualitas.match(/Plazo\s+de\s+pago[:\s]+(\d+)\s*d[ií]as/i);
+  
+  // Si no se encuentra, buscar patrón más simple "Plazo: X días" o "Plazo X días"
+  if (!plazoMatch) {
+    plazoMatch = textoQualitas.match(/Plazo[:\s]+(\d+)\s*d[ií]as/i);
+  }
+  
+  // Buscar "X días naturales" o "X días" cerca de texto de período de gracia
+  if (!plazoMatch) {
+    plazoMatch = textoQualitas.match(/per[ií]odo\s+(?:de\s+)?gracia[:\s]*(\d+)\s*d[ií]as/i);
+  }
+  
+  // Buscar solo "X días naturales" cuando aparece después de "Pago:" o montos
+  if (!plazoMatch) {
+    plazoMatch = textoQualitas.match(/\$[\d,]+\.?\d*\s+(\d+)\s*d[ií]as\s+naturales/i);
+  }
+  
+  // Valor por defecto SOLO si no se encontró en el PDF: 14 días (captura manual)
   const periodoGraciaExtraido = plazoMatch ? plazoMatch[1] : '14';
+  console.log('📆 Período de gracia:', plazoMatch ? `✅ Extraído del PDF: ${periodoGraciaExtraido} días` : `⚠️ Valor por defecto (no encontrado en PDF): ${periodoGraciaExtraido} días`);
   
   // ==================== FORMA DE PAGO ====================
   const seccionGastosAPago = textoQualitas.match(/Gastos\s+por\s+Expedici[oó]n[.\s]+[\d,]+\.?\d*\s+([\s\S]{0,100}?)Pago:/i);
@@ -418,6 +494,8 @@ export async function extraer(ctx) {
     // Vigencia
     inicio_vigencia: desdeMatch ? `${desdeMatch[3]}-${meses[desdeMatch[2]]}-${desdeMatch[1]}` : '',
     termino_vigencia: hastaMatch ? `${hastaMatch[3]}-${meses[hastaMatch[2]]}-${hastaMatch[1]}` : '',
+    fecha_emision: fecha_emision,
+    fecha_captura: new Date().toISOString().split('T')[0],
     
     // Financiero
     prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',

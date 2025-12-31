@@ -204,15 +204,6 @@ const ListaExpedientes = React.memo(({
       {/* Header Compacto */}
       <div className="d-flex justify-content-between align-items-center mb-3">
         <h4 className="mb-0">Gestión de Pólizas</h4>
-        <button
-          onClick={() => {
-            setMostrarModalMetodoCaptura(true);
-          }}
-          className="btn btn-primary"
-        >
-          <Plus size={16} className="me-2" />
-          Nueva Póliza
-        </button>
       </div>
 
       {/* Carpetas en Grid Responsive */}

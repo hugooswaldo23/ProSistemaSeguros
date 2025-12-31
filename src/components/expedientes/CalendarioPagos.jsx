@@ -24,15 +24,26 @@ const CalendarioPagos = React.memo(({
   // Debug: verificar datos recibidos
   console.log('🔄 CalendarioPagos - Renderizando con:', {
     cantidad_recibos: expediente.recibos?.length || 0,
-    recibos: expediente.recibos
+    recibos: expediente.recibos,
+    tipo_pago: expediente.tipo_pago,
+    frecuenciaPago: expediente.frecuenciaPago,
+    inicio_vigencia: expediente.inicio_vigencia
   });
   
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
   const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
   
+  console.log('📊 CalendarioPagos - Valores normalizados:', {
+    tipoPago,
+    frecuencia,
+    esAnual: tipoPago?.toUpperCase() === 'ANUAL',
+    esFraccionado: tipoPago?.toUpperCase() === 'FRACCIONADO'
+  });
+  
   // Validar que tenga los datos mínimos necesarios
   if (!expediente.inicio_vigencia) {
+    console.log('❌ CalendarioPagos - No hay inicio_vigencia, no se renderiza');
     return null;
   }
   
@@ -42,11 +53,13 @@ const CalendarioPagos = React.memo(({
   
   // Si no es ninguno de los dos, no mostrar
   if (!esAnual && !esFraccionado) {
+    console.log('❌ CalendarioPagos - No es Anual ni Fraccionado, no se renderiza');
     return null;
   }
   
   // Para fraccionado, validar que tenga frecuencia
   if (esFraccionado && !frecuencia) {
+    console.log('❌ CalendarioPagos - Es Fraccionado pero NO hay frecuencia, no se renderiza');
     return null;
   }
 

@@ -971,7 +971,7 @@ const FormularioExpedienteBase = React.memo(({
                 <input
                   type="date"
                   className="form-control form-control-sm"
-                  value={formulario.inicio_vigencia || ''}
+                  value={formatearFechaParaInput(formulario.inicio_vigencia) || ''}
                   onChange={(e) => {
                     console.log('📅 Cambio en inicio_vigencia:', e.target.value);
                     const nuevoFormulario = { 
@@ -1085,40 +1085,15 @@ const FormularioExpedienteBase = React.memo(({
                       const valor = e.target.value;
                       const diasGracia = valor === '' ? 0 : Math.max(0, parseInt(valor, 10) || 0);
                       
-                      setFormulario(prev => {
-                        let nuevaFechaPago = prev.fecha_vencimiento_pago || prev.fecha_pago;
-                        
-                        if (prev.inicio_vigencia) {
-                          const fechaInicio = new Date(prev.inicio_vigencia);
-                          fechaInicio.setDate(fechaInicio.getDate() + diasGracia);
-                          nuevaFechaPago = fechaInicio.toISOString().split('T')[0];
-                        }
-                        
-                        let nuevoEstatus = prev.estatusPago;
-                        if (nuevoEstatus !== 'Pagado' && nuevaFechaPago) {
-                          const fechaPago = new Date(nuevaFechaPago);
-                          const hoy = new Date();
-                          hoy.setHours(0, 0, 0, 0);
-                          fechaPago.setHours(0, 0, 0, 0);
-                          const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
-                          
-                          if (diasRestantes < 0) {
-                            nuevoEstatus = 'Vencido';
-                          } else if (diasRestantes <= 15) {
-                            nuevoEstatus = 'Por Vencer';
-                          } else {
-                            nuevoEstatus = 'Pendiente';
-                          }
-                        }
-                        
-                        return {
-                          ...prev,
-                          periodo_gracia: diasGracia,
-                          fecha_vencimiento_pago: nuevaFechaPago,
-                          fecha_pago: nuevaFechaPago,
-                          estatusPago: nuevoEstatus
-                        };
-                      });
+                      // Actualizar periodo_gracia y recalcular todo con actualizarCalculosAutomaticos
+                      const formularioConNuevoPeriodo = {
+                        ...formulario,
+                        periodo_gracia: diasGracia
+                      };
+                      
+                      // Usar la función de actualización automática que tiene toda la lógica
+                      const formularioActualizado = actualizarCalculosAutomaticos(formularioConNuevoPeriodo);
+                      setFormulario(formularioActualizado);
                     }}
                     min={0}
                   />
@@ -1128,7 +1103,7 @@ const FormularioExpedienteBase = React.memo(({
                 </div>
                 <small className="text-muted">
                   {formulario.compania?.toLowerCase().includes('qualitas') 
-                    ? 'Sugerido Qualitas: 14 días' 
+                    ? 'Sugerido Qualitas: 14 días (captura manual) - El PDF puede tener otro valor' 
                     : formulario.compania 
                       ? 'Sugerido otras aseguradoras: 30 días'
                       : 'Editable para pruebas'}
