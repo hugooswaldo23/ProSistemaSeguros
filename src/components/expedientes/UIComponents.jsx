@@ -161,11 +161,71 @@ InfoCliente.displayName = 'InfoCliente';
 export const obtenerEstatusPagoDesdeBackend = (expediente) => {
   // Usar groupCollapsed para logs agrupados y silenciosos
   if (process.env.NODE_ENV === 'development') {
-    console.groupCollapsed(`📊 Estatus: ${expediente.numero_poliza}`);
+    console.groupCollapsed(`📊 Badge Estatus: ${expediente.numero_poliza}`);
   }
   
-  // 🔧 CORREGIDO: Respetar el estatus_pago del backend SIEMPRE
-  // Solo recalcular si no existe o está vacío
+  // NUEVA LÓGICA: Si tiene recibos, usar la misma lógica que en ListaExpedientes
+  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+    const recibosTotal = expediente.recibos.length;
+    const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🧮 Con recibos:', { total: recibosTotal, pagados: recibosPagados });
+    }
+    
+    // Si todos están pagados
+    if (recibosPagados >= recibosTotal) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Badge: Todos pagados');
+        console.groupEnd();
+      }
+      return 'Pagado';
+    }
+    
+    // Si no todos están pagados, buscar el primer recibo pendiente
+    const primerReciboPendiente = expediente.recibos
+      .filter(r => !r.fecha_pago_real)
+      .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
+    
+    if (primerReciboPendiente && primerReciboPendiente.fecha_vencimiento) {
+      const fechaVencimiento = new Date(primerReciboPendiente.fecha_vencimiento);
+      const hoy = new Date();
+      fechaVencimiento.setHours(0, 0, 0, 0);
+      hoy.setHours(0, 0, 0, 0);
+      const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🎯 Badge - Primer recibo pendiente:', {
+          numero: primerReciboPendiente.numero_recibo,
+          fecha_vencimiento: primerReciboPendiente.fecha_vencimiento,
+          diasRestantes
+        });
+      }
+      
+      let estatus;
+      if (diasRestantes < 0) {
+        estatus = 'Vencido';
+      } else if (diasRestantes <= 5) {
+        estatus = 'Por vencer';
+      } else {
+        estatus = 'Pendiente';
+      }
+      
+      if (process.env.NODE_ENV === 'development') {
+        console.log('✅ Badge estatus calculado:', estatus);
+        console.groupEnd();
+      }
+      return estatus;
+    }
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('⚠️ Badge: Sin fecha_vencimiento en primer recibo pendiente');
+      console.groupEnd();
+    }
+    return 'Pendiente';
+  }
+
+  // FALLBACK: Lógica original para expedientes sin recibos
   const estatusBackend = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase().trim();
   
   if (estatusBackend) {
@@ -186,7 +246,7 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
     }
     
     if (process.env.NODE_ENV === 'development') {
-      console.log('✅ Usando estatus del backend:', estatusNormalizado);
+      console.log('✅ Badge: Usando estatus del backend:', estatusNormalizado);
       console.groupEnd();
     }
     return estatusNormalizado;

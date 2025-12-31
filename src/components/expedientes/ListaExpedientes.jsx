@@ -611,31 +611,101 @@ const ListaExpedientes = React.memo(({
                              (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
                              expediente.inicio_vigencia && (
                               (() => {
-                                // 🎯 SOLO CONSULTAR CAMPOS DE BD - SIN CÁLCULOS
+                                // 🎯 PRIORIDAD: Consultar directamente los recibos si están disponibles
+                                if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+                                  const recibosTotal = expediente.recibos.length;
+                                  const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
+                                  
+                                  let estatusDisplay = 'Pagado';
+                                  let colorClass = 'text-success fw-bold';
+                                  
+                                  // Si no todos están pagados, encontrar el primer recibo pendiente
+                                  if (recibosPagados < recibosTotal) {
+                                    // Buscar el primer recibo sin pago (ordenados por número)
+                                    const primerReciboPendiente = expediente.recibos
+                                      .filter(r => !r.fecha_pago_real)
+                                      .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
+                                    
+                                    if (primerReciboPendiente) {
+                                      estatusDisplay = 'Pendiente';
+                                      colorClass = 'text-info';
+                                      
+                                      // Determinar estatus del primer recibo pendiente
+                                      if (primerReciboPendiente.fecha_vencimiento) {
+                                        const fechaVencimiento = new Date(primerReciboPendiente.fecha_vencimiento);
+                                        const hoy = new Date();
+                                        fechaVencimiento.setHours(0, 0, 0, 0);
+                                        hoy.setHours(0, 0, 0, 0);
+                                        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+                                        
+                                        if (diasRestantes < 0) {
+                                          estatusDisplay = 'Vencido';
+                                          colorClass = 'text-danger fw-bold';
+                                        } else if (diasRestantes <= 5) {
+                                          estatusDisplay = 'Por vencer';
+                                          colorClass = 'text-warning fw-bold';
+                                        }
+                                      }
+                                    }
+                                  }
+                                  
+                                  return (
+                                    <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
+                                      <span className={colorClass}>
+                                        {recibosPagados}/{recibosTotal} {estatusDisplay}
+                                      </span>
+                                    </div>
+                                  );
+                                }
+                                
+                                // FALLBACK: Usar campos del expediente si no hay recibos
                                 const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
                                 const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
                                 const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
                                 const estatusPago = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase();
                                 
-                                // Determinar color según estatus de BD
+                                // Determinar estatus basándose en fecha de vencimiento
                                 let colorClass = 'text-info';
+                                let estatusDisplay = 'Pendiente';
+                                
                                 if (estatusPago === 'pagado' || pagosRealizados >= numeroPagos) {
                                   colorClass = 'text-success fw-bold';
-                                } else if (estatusPago === 'vencido') {
-                                  colorClass = 'text-danger fw-bold';
-                                } else if (estatusPago.includes('vencer') || estatusPago === 'por vencer') {
-                                  colorClass = 'text-warning fw-bold';
+                                  estatusDisplay = 'Pagado';
+                                } else {
+                                  // Evaluar fecha de vencimiento para determinar si está vencido
+                                  const fechaVencimiento = expediente.fecha_vencimiento_pago || expediente.fecha_pago;
+                                  if (fechaVencimiento) {
+                                    const fechaVenc = new Date(fechaVencimiento);
+                                    const hoy = new Date();
+                                    fechaVenc.setHours(0, 0, 0, 0);
+                                    hoy.setHours(0, 0, 0, 0);
+                                    const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+                                    
+                                    if (diasRestantes < 0) {
+                                      colorClass = 'text-danger fw-bold';
+                                      estatusDisplay = 'Vencido';
+                                    } else if (diasRestantes <= 5) {
+                                      colorClass = 'text-warning fw-bold';
+                                      estatusDisplay = 'Por vencer';
+                                    } else {
+                                      estatusDisplay = 'Pendiente';
+                                    }
+                                  } else if (estatusPago === 'vencido') {
+                                    colorClass = 'text-danger fw-bold';
+                                    estatusDisplay = 'Vencido';
+                                  } else if (estatusPago.includes('vencer') || estatusPago === 'por vencer') {
+                                    colorClass = 'text-warning fw-bold';
+                                    estatusDisplay = 'Por vencer';
+                                  }
                                 }
                                 
                                 // Mostrar progreso y estatus
                                 const proximoRecibo = pagosRealizados + 1;
-                                const estatusDisplay = pagosRealizados >= numeroPagos ? 'Pagado' : 
-                                                      (expediente.estatus_pago || expediente.estatusPago || 'Pendiente');
                                 
                                 return (
                                   <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
                                     <span className={colorClass}>
-                                      {pagosRealizados >= numeroPagos ? numeroPagos : proximoRecibo}/{numeroPagos} {estatusDisplay}
+                                      {pagosRealizados >= numeroPagos ? numeroPagos : pagosRealizados}/{numeroPagos} {estatusDisplay}
                                     </span>
                                   </div>
                                 );
