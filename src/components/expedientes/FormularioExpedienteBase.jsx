@@ -1111,7 +1111,7 @@ const FormularioExpedienteBase = React.memo(({
               </div>
               
               <div className="col-md-3">
-                <label className="form-label">Fecha límite de pago (Último recibo)</label>
+                <label className="form-label">Fecha límite de pago (Primer recibo)</label>
                 <input
                   type="date"
                   className="form-control"
@@ -1127,18 +1127,11 @@ const FormularioExpedienteBase = React.memo(({
                           const recibosData = await recibosResponse.json();
                           
                           if (recibosData.success && recibosData.data) {
-                            const recibosPendientes = recibosData.data
-                              .filter(recibo => 
-                                recibo.estatus !== 'Pagado' && 
-                                recibo.estatus !== 'pagado' &&
-                                recibo.estatus !== 'PAGADO'
-                              )
-                              .sort((a, b) => parseInt(a.numero_recibo) - parseInt(b.numero_recibo));
+                            // 🔧 FIX: Buscar específicamente el recibo #1 (primer recibo)
+                            const primerRecibo = recibosData.data.find(recibo => recibo.numero_recibo === 1);
                             
-                            const reciboPendiente = recibosPendientes[0];
-                            
-                            if (reciboPendiente) {
-                              await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}/fecha-vencimiento`, {
+                            if (primerRecibo) {
+                              await fetch(`${API_URL}/api/recibos/${formulario.id}/${primerRecibo.numero_recibo}/fecha-vencimiento`, {
                                 method: 'PUT',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ fecha_vencimiento: nuevaFecha })
@@ -1152,6 +1145,7 @@ const FormularioExpedienteBase = React.memo(({
                     }
                     
                     setFormulario(prev => {
+                      // 🔧 FIX: Calcular período de gracia correctamente
                       let nuevoPeriodoGracia = prev.periodo_gracia || 0;
                       
                       if (prev.inicio_vigencia && nuevaFecha) {
@@ -1164,29 +1158,11 @@ const FormularioExpedienteBase = React.memo(({
                         nuevoPeriodoGracia = Math.max(0, diferenciaDias);
                       }
                       
-                      let nuevoEstatus = prev.estatusPago;
-                      if (nuevoEstatus !== 'Pagado' && nuevaFecha) {
-                        const fechaPago = new Date(nuevaFecha);
-                        const hoy = new Date();
-                        hoy.setHours(0, 0, 0, 0);
-                        fechaPago.setHours(0, 0, 0, 0);
-                        const diasRestantes = Math.ceil((fechaPago - hoy) / (1000 * 60 * 60 * 24));
-                        
-                        if (diasRestantes < 0) {
-                          nuevoEstatus = 'Vencido';
-                        } else if (diasRestantes <= 15) {
-                          nuevoEstatus = 'Por Vencer';
-                        } else {
-                          nuevoEstatus = 'Pendiente';
-                        }
-                      }
-                      
+                      // Actualizar solo la fecha de vencimiento del primer pago
                       return {
                         ...prev,
                         fecha_vencimiento_pago: nuevaFecha,
-                        fecha_pago: nuevaFecha,
                         periodo_gracia: nuevoPeriodoGracia,
-                        estatusPago: nuevoEstatus,
                         _fechaManual: true
                       };
                     });

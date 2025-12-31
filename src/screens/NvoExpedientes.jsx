@@ -708,6 +708,17 @@ const ModuloNvoExpedientes = () => {
                                         expedienteCompleto.frecuencia ||
                                         (tipoPagoNormalizado === 'Anual' ? 'Anual' : '');
 
+      // 🔧 FIX SIMPLE: Calcular fecha_vencimiento_pago = inicio + periodo_gracia
+      let fechaVencimientoPago = '';
+      if (expedienteCompleto.inicio_vigencia && expedienteCompleto.periodo_gracia) {
+        const fechaInicio = new Date(expedienteCompleto.inicio_vigencia);
+        fechaInicio.setDate(fechaInicio.getDate() + parseInt(expedienteCompleto.periodo_gracia));
+        fechaVencimientoPago = fechaInicio.toISOString().split('T')[0];
+        console.log('🔧 CALCULANDO: inicio:', expedienteCompleto.inicio_vigencia, '+ gracia:', expedienteCompleto.periodo_gracia, '= fecha límite:', fechaVencimientoPago);
+      } else {
+        fechaVencimientoPago = expedienteCompleto.fecha_vencimiento_pago || expedienteCompleto.proximoPago;
+      }
+
       const datosFormulario = {
         ...expedienteCompleto,
         // Formatear todas las fechas
@@ -716,8 +727,8 @@ const ModuloNvoExpedientes = () => {
         inicio_vigencia: formatearFecha(expedienteCompleto.inicio_vigencia),
         termino_vigencia: formatearFecha(expedienteCompleto.termino_vigencia),
         fecha_aviso_renovacion: formatearFecha(expedienteCompleto.fecha_aviso_renovacion),
-        fecha_vencimiento_pago: formatearFecha(expedienteCompleto.fecha_vencimiento_pago || expedienteCompleto.proximoPago || expedienteCompleto.fecha_pago),
-        proximoPago: formatearFecha(expedienteCompleto.proximoPago || expedienteCompleto.fecha_vencimiento_pago || expedienteCompleto.fecha_pago),
+        fecha_vencimiento_pago: formatearFecha(fechaVencimientoPago),
+        proximoPago: formatearFecha(expedienteCompleto.proximoPago || fechaVencimientoPago),
         fecha_pago: formatearFecha(expedienteCompleto.fecha_pago),
         fecha_ultimo_pago: formatearFecha(expedienteCompleto.fecha_ultimo_pago),
         // Normalizar estatus
@@ -755,6 +766,7 @@ const ModuloNvoExpedientes = () => {
       console.log('📅 Recibos parseados:', recibosParseados);
       console.log('💰 Tipo de pago:', datosFormulario.tipo_pago, '| Frecuencia:', datosFormulario.frecuenciaPago);
 
+      // 🔧 FIX: NO RECALCULAR - usar los datos tal como vienen calculados
       setFormulario(datosFormulario);
       setClienteSeleccionado(clienteEncontrado);
       setModoEdicion(true);
@@ -937,43 +949,22 @@ const ModuloNvoExpedientes = () => {
       fecha_aviso_renovacion = fechaTermino.toISOString().split('T')[0];
     }
     
-    // 3. Calcular fecha límite de pago (inicio + periodo de gracia)
-    // Usar periodo_gracia del formulario, o fallback según la compañía si está vacío
-    let periodoGracia = formularioActual.periodo_gracia;
-    if (!periodoGracia || periodoGracia === 0) {
-      // Fallback: usar valor por defecto según la compañía
-      const compania = formularioActual.compania || '';
-      periodoGracia = compania.toLowerCase().includes('qualitas') ? 14 : 30;
-    }
-    
-    let proximoPago = '';
-    
-    if (formularioActual.tipo_pago === 'Fraccionado') {
-      proximoPago = calcularProximoPago(
-        formularioActual.inicio_vigencia,
-        formularioActual.tipo_pago,
-        formularioActual.frecuenciaPago,
-        formularioActual.compania,
-        1,
-        periodoGracia
-      );
-    } else if (formularioActual.tipo_pago === 'Anual') {
-      proximoPago = calcularProximoPago(
-        formularioActual.inicio_vigencia,
-        'Anual',
-        null,
-        formularioActual.compania,
-        1,
-        periodoGracia
-      );
+    // 3. 🔧 FIX SIMPLE: Fecha límite = inicio_vigencia + periodo_gracia
+    let fechaLimitePago = '';
+    if (formularioActual.inicio_vigencia) {
+      const periodoGracia = parseInt(formularioActual.periodo_gracia) || 0;
+      const fechaInicio = new Date(formularioActual.inicio_vigencia);
+      fechaInicio.setDate(fechaInicio.getDate() + periodoGracia);
+      fechaLimitePago = fechaInicio.toISOString().split('T')[0];
+      console.log('🔧 actualizarCalculosAutomaticos: inicio:', formularioActual.inicio_vigencia, '+ gracia:', periodoGracia, '= límite:', fechaLimitePago);
     }
     
     // 4. Calcular estatus de pago basado en la fecha límite
-    let estatusPago = 'Pendiente';
-    if (proximoPago) {
+    let estatusPago = formularioActual.estatusPago || 'Pendiente';
+    if (fechaLimitePago && estatusPago !== 'Pagado') {
       const hoy = new Date();
       hoy.setHours(0, 0, 0, 0);
-      const fechaLimite = new Date(proximoPago);
+      const fechaLimite = new Date(fechaLimitePago);
       fechaLimite.setHours(0, 0, 0, 0);
       
       const diasRestantes = Math.ceil((fechaLimite - hoy) / (1000 * 60 * 60 * 24));
@@ -998,11 +989,8 @@ const ModuloNvoExpedientes = () => {
       ...formularioActual,
       termino_vigencia,
       fecha_aviso_renovacion,
-      proximoPago,
-      // ⚠️ fecha_pago es la fecha REAL del pago (solo si está pagado)
-      // NO confundir con fecha_vencimiento_pago que es la fecha límite
-      // fecha_pago: solo se asigna cuando el usuario marca como pagado
-      fecha_vencimiento_pago: proximoPago,
+      proximoPago: fechaLimitePago,
+      fecha_vencimiento_pago: fechaLimitePago,
       estatusPago,
       recibos: recibosActualizados
     };
@@ -1011,7 +999,7 @@ const ModuloNvoExpedientes = () => {
     delete resultado._inicio_vigencia_changed;
     
     return resultado;
-  }, [calculartermino_vigencia, calcularProximoPago]);
+  }, [calculartermino_vigencia]);
 
   return (
     <div className="container-fluid py-3">
