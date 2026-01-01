@@ -145,8 +145,30 @@ const ModuloNvoExpedientes = () => {
           mapa[cliente.id] = cliente;
         });
 
+        // 🔥 CARGAR RECIBOS PARA CADA EXPEDIENTE FRACCIONADO
+        const expedientesConRecibos = await Promise.all(
+          expedientesData.map(async (exp) => {
+            // Solo cargar recibos si es pago fraccionado
+            if ((exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') && 
+                (exp.frecuenciaPago || exp.frecuencia_pago)) {
+              try {
+                const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`);
+                if (recibosResponse.ok) {
+                  const recibosData = await recibosResponse.json();
+                  const recibosArray = recibosData?.data || recibosData || [];
+                  exp.recibos = Array.isArray(recibosArray) ? recibosArray : [];
+                }
+              } catch (error) {
+                console.warn(`⚠️ Error al cargar recibos para expediente ${exp.id}:`, error);
+                exp.recibos = [];
+              }
+            }
+            return exp;
+          })
+        );
+
         // Normalizar expedientes desde backend: sincronizar ambos formatos
-        const expedientesNormalizados = expedientesData.map(exp => ({
+        const expedientesNormalizados = expedientesConRecibos.map(exp => ({
           ...exp,
           estatusPago: exp.estatusPago || exp.estatus_pago || 'Pendiente',
           estatus_pago: exp.estatus_pago || exp.estatusPago || 'Pendiente',
@@ -162,7 +184,7 @@ const ModuloNvoExpedientes = () => {
         setAseguradoras(aseguradorasData);
         setTiposProductos(['Automóvil', 'Moto', 'Camión', 'Hogar', 'Empresa', 'GMM', 'Vida']);
 
-        console.log('✅ Datos iniciales cargados');
+        console.log('✅ Datos iniciales cargados con recibos');
       } catch (error) {
         console.error('❌ Error al cargar datos iniciales:', error);
         if (mounted) {
@@ -183,8 +205,39 @@ const ModuloNvoExpedientes = () => {
       const response = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
       const data = await response.json();
       
+      // 🔥 CARGAR SOLO EL PRIMER RECIBO PENDIENTE DE CADA EXPEDIENTE
+      const datosConPrimerRecibo = await Promise.all(
+        data.map(async (exp) => {
+          // Solo cargar recibos si es pago fraccionado
+          if ((exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') && 
+              (exp.frecuenciaPago || exp.frecuencia_pago)) {
+            try {
+              const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`);
+              if (recibosResponse.ok) {
+                const recibosData = await recibosResponse.json();
+                const recibosArray = recibosData?.data || recibosData || [];
+                
+                if (Array.isArray(recibosArray) && recibosArray.length > 0) {
+                  // Buscar el primer recibo sin fecha_pago_real (sin pagar)
+                  const primerReciboPendiente = recibosArray
+                    .filter(r => !r.fecha_pago_real)
+                    .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
+                  
+                  // Guardar solo el primer recibo pendiente (o array vacío si todos están pagados)
+                  exp.primer_recibo_pendiente = primerReciboPendiente || null;
+                }
+              }
+            } catch (error) {
+              console.warn(`⚠️ Error al cargar recibos para expediente ${exp.id}:`, error);
+              exp.primer_recibo_pendiente = null;
+            }
+          }
+          return exp;
+        })
+      );
+      
       // Normalizar datos del backend: sincronizar ambos formatos de campos
-      const datosNormalizados = data.map(exp => ({
+      const datosNormalizados = datosConPrimerRecibo.map(exp => ({
         ...exp,
         // Sincronizar estatus_pago ↔ estatusPago
         estatusPago: exp.estatusPago || exp.estatus_pago || 'Pendiente',
@@ -195,7 +248,7 @@ const ModuloNvoExpedientes = () => {
         fecha_pago: exp.fecha_pago || exp.fecha_vencimiento_pago || exp.proximoPago || ''
       }));
       
-      console.log('✅ Expedientes normalizados desde backend:', datosNormalizados.length);
+      console.log('✅ Expedientes normalizados con primer recibo pendiente:', datosNormalizados.length);
       setExpedientes(datosNormalizados);
     } catch (error) {
       console.error('Error al recargar expedientes:', error);
