@@ -382,25 +382,27 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                       {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf') ? (
                         <div className="mb-1">
                           {/* Línea principal: nombre del archivo o método */}
-                          {evento.datos_adicionales?.nombre_archivo_pdf ? (
+                          {evento.datos_adicionales?.nombre_archivo_pdf || evento.tipo_evento === 'captura_extractor_pdf' ? (
                             <div className="mb-2">
                               <span className="text-dark" style={{ fontSize: '0.85rem' }}>
-                                📄 {evento.datos_adicionales.nombre_archivo_pdf}
+                                📄 {evento.datos_adicionales?.nombre_archivo_pdf || 'Extracción desde PDF'}
                               </span>
-                              {evento.datos_adicionales?.modificaciones_manuales && (
+                              {(evento.datos_adicionales?.campos_modificados_manualmente || evento.datos_adicionales?.modificaciones_manuales) && (
                                 <span className="badge bg-warning bg-opacity-10 text-warning ms-2" style={{ fontSize: '0.75rem' }}>
-                                  ✏️ {evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) editado(s)
+                                  ✏️ {evento.datos_adicionales?.cantidad_campos_modificados || evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) modificado(s)
                                 </span>
                               )}
                               {/* Mostrar detalle de campos modificados si existen */}
                               {evento.datos_adicionales?.campos_modificados && evento.datos_adicionales.campos_modificados.length > 0 && (
                                 <div className="mt-2 p-2 bg-light rounded" style={{ fontSize: '0.75rem' }}>
-                                  <div className="text-muted mb-1">Campos modificados manualmente:</div>
-                                  {evento.datos_adicionales.campos_modificados.map((campo, idx) => (
-                                    <div key={idx} className="text-dark" style={{ lineHeight: '1.4' }}>
-                                      {campo}
-                                    </div>
-                                  ))}
+                                  <div className="text-muted mb-1"><strong>✏️ Campos editados manualmente post-extracción:</strong></div>
+                                  <div className="d-flex flex-wrap gap-1 mt-1">
+                                    {evento.datos_adicionales.campos_modificados.map((campo, idx) => (
+                                      <span key={idx} className="badge bg-secondary bg-opacity-10 text-secondary" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
+                                        {campo.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim()}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
                               )}
                             </div>

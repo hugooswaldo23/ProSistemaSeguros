@@ -48,6 +48,7 @@ const FormularioNuevoExpediente = ({
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
+  const [camposModificadosPostPDF, setCamposModificadosPostPDF] = useState([]);
 
   /**
    * Handler para seleccionar modo de captura
@@ -58,6 +59,12 @@ const FormularioNuevoExpediente = ({
     
     if (modo === 'pdf') {
       setMostrarExtractorPDF(true);
+    } else if (modo === 'manual') {
+      // Marcar que fue captura manual
+      setFormulario(prev => ({
+        ...prev,
+        _metodo_captura: 'manual'
+      }));
     }
   };
 
@@ -182,6 +189,12 @@ const FormularioNuevoExpediente = ({
 
         // 5. NO recalcular automáticamente - usar datos del PDF tal cual
         // Los cálculos solo se aplican cuando el usuario edita campos manualmente
+        
+        // 🔥 MARCAR que estos datos vienen del PDF extractor
+        nuevosDatos._datos_desde_pdf = true;
+        nuevosDatos._metodo_captura = 'pdf';
+        nuevosDatos._snapshot_pdf = JSON.stringify(nuevosDatos); // Snapshot para detectar cambios
+        
         return nuevosDatos;
       });
 
@@ -211,6 +224,56 @@ const FormularioNuevoExpediente = ({
       setMostrarExtractorPDF(false);
     }
   }, [setFormulario, actualizarCalculosAutomaticos, handleClienteSeleccionado]);
+
+  /**
+   * Wrapper para setFormulario que detecta cambios manuales post-PDF
+   */
+  const setFormularioConDeteccion = useCallback((updater) => {
+    setFormulario(prev => {
+      const updated = typeof updater === 'function' ? updater(prev) : updater;
+      
+      // Si fue captura desde PDF y ya se cargaron los datos
+      if (updated._metodo_captura === 'pdf' && updated._snapshot_pdf && datosImportadosDesdePDF) {
+        try {
+          const snapshot = JSON.parse(updated._snapshot_pdf);
+          const camposModificados = [];
+          
+          // Campos importantes a monitorear
+          const camposClave = [
+            'numero_poliza', 'compania', 'producto', 'numero_endoso',
+            'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
+            'prima_neta', 'total', 'tipo_pago', 'frecuenciaPago',
+            'marca', 'modelo', 'anio', 'placas', 'numero_serie',
+            'agente', 'estatusPago', 'fecha_vencimiento_pago'
+          ];
+          
+          camposClave.forEach(campo => {
+            const valorOriginal = snapshot[campo];
+            const valorActual = updated[campo];
+            
+            // Detectar cambio (ignorando campos temporales)
+            if (valorOriginal !== valorActual && 
+                !campo.startsWith('_') &&
+                valorOriginal !== undefined &&
+                valorActual !== undefined) {
+              camposModificados.push(campo);
+            }
+          });
+          
+          if (camposModificados.length > 0) {
+            setCamposModificadosPostPDF(prev => {
+              const nuevoSet = new Set([...prev, ...camposModificados]);
+              return Array.from(nuevoSet);
+            });
+          }
+        } catch (err) {
+          console.error('Error al comparar snapshot:', err);
+        }
+      }
+      
+      return updated;
+    });
+  }, [setFormulario, datosImportadosDesdePDF]);
 
   // Banner superior: Confirmación de importación desde PDF
   const bannerSuperior = datosImportadosDesdePDF && infoImportacion && (
@@ -381,9 +444,18 @@ const FormularioNuevoExpediente = ({
           textoBotónGuardar="Guardar Expediente"
           setVistaActual={setVistaActual}
           formulario={formulario}
-          setFormulario={setFormulario}
+          setFormulario={setFormularioConDeteccion}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
-          guardarExpediente={guardarExpediente}
+          guardarExpediente={() => {
+            // Agregar información de campos modificados antes de guardar
+            if (camposModificadosPostPDF.length > 0) {
+              setFormulario(prev => ({
+                ...prev,
+                _campos_modificados_post_pdf: camposModificadosPostPDF
+              }));
+            }
+            return guardarExpediente();
+          }}
           companias={companias}
           productos={productos}
           aseguradoras={aseguradoras}

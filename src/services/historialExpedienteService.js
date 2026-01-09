@@ -3,6 +3,19 @@
  * SERVICIO: Historial de Expedientes
  * PROPÓSITO: Gestionar la trazabilidad completa del ciclo de vida
  * FECHA: 2025-11-10
+ * ACTUALIZADO: 2026-01-09 - Sistema de etapas renovado
+ * ====================================================================
+ * 
+ * 🔄 NUEVO FLUJO DE ETAPAS:
+ * 1. Emitida → 2. Enviada al Cliente → 3. Pagada → 4. Por Renovar →
+ * 5. Renovación Emitida → 6. Renovación Enviada → 7. Renovación Pagada
+ * 
+ * ⚠️ IMPORTANTE - CAMBIO ETAPA AUTOMÁTICA "Por Renovar":
+ * El backend debe calcular dinámicamente cuando una póliza "Pagada" debe
+ * cambiar a "Por Renovar" basándose en fecha_aviso_renovacion.
+ * Ver documentación: docs/BACKEND-CALCULO-DINAMICO-ETAPA-POR-RENOVAR.md
+ * 
+ * El frontend ya está preparado para usar campo 'etapa_calculada' del backend.
  * ====================================================================
  */
 
@@ -36,17 +49,21 @@ export const TIPOS_EVENTO = {
   AVISO_PAGO_ENVIADO: 'aviso_pago_enviado',
   PAGO_APLICADO_MANUALMENTE: 'pago_aplicado_manualmente',
   PAGO_REMOVIDO: 'pago_removido',
+  POLIZA_PAGADA: 'poliza_pagada', // 🆕 Cambio de etapa a "Pagada"
   
   // Renovaciones
   RENOVACION_INICIADA: 'renovacion_iniciada',
   POLIZA_RENOVADA: 'poliza_renovada',
   RECORDATORIO_RENOVACION_ENVIADO: 'recordatorio_renovacion_enviado',
+  POLIZA_POR_RENOVAR: 'poliza_por_renovar', // 🆕 30 días antes del vencimiento
   
   // 🆕 NUEVOS EVENTOS DE RENOVACIÓN (Flujo completo)
   COTIZACION_RENOVACION_INICIADA: 'cotizacion_renovacion_iniciada',
   COTIZACION_RENOVACION_ENVIADA: 'cotizacion_renovacion_enviada',
   RENOVACION_PENDIENTE_EMISION: 'renovacion_pendiente_emision',
   RENOVACION_EMITIDA: 'renovacion_emitida',
+  RENOVACION_ENVIADA: 'renovacion_enviada', // 🆕 Renovación enviada al cliente
+  RENOVACION_PAGADA: 'renovacion_pagada', // 🆕 Renovación pagada
   PAGO_RENOVACION_REGISTRADO: 'pago_renovacion_registrado',
   RENOVACION_VIGENTE: 'renovacion_vigente',
   
@@ -98,16 +115,20 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.AVISO_PAGO_ENVIADO]: { icon: '📢', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE]: { icon: '✏️', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_REMOVIDO]: { icon: '🔙', color: '#fd7e14', bgColor: '#ffe5d0' },
+    [TIPOS_EVENTO.POLIZA_PAGADA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: { icon: '🔄', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.POLIZA_RENOVADA]: { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.POLIZA_POR_RENOVAR]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
     
     // 🆕 NUEVOS ESTILOS DE RENOVACIÓN
     [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: { icon: '📝', color: '#3b82f6', bgColor: '#dbeafe' },
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: { icon: '📧', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: { icon: '⏳', color: '#f59e0b', bgColor: '#fef3c7' },
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: { icon: '📄', color: '#8b5cf6', bgColor: '#ede9fe' },
+    [TIPOS_EVENTO.RENOVACION_ENVIADA]: { icon: '📨', color: '#10b981', bgColor: '#d1fae5' },
+    [TIPOS_EVENTO.RENOVACION_PAGADA]: { icon: '✅', color: '#059669', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: { icon: '💰', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: { icon: '🔁', color: '#059669', bgColor: '#d1fae5' },
     
@@ -154,16 +175,20 @@ export const obtenerTituloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.PAGO_REGISTRADO]: 'Pago Registrado',
     [TIPOS_EVENTO.PAGO_VENCIDO]: 'Pago Vencido',
     [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: 'Recordatorio de Pago Enviado',
+    [TIPOS_EVENTO.POLIZA_PAGADA]: 'Póliza Pagada',
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: 'Proceso de Renovación Iniciado',
     [TIPOS_EVENTO.POLIZA_RENOVADA]: 'Póliza Renovada',
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: 'Recordatorio de Renovación Enviado',
+    [TIPOS_EVENTO.POLIZA_POR_RENOVAR]: 'Póliza Por Renovar',
     
     // 🆕 NUEVOS TÍTULOS DE RENOVACIÓN
     [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: 'Cotización de Renovación Iniciada',
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: 'Cotización de Renovación Enviada',
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: 'Renovación Pendiente de Emisión',
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: 'Renovación Emitida',
+    [TIPOS_EVENTO.RENOVACION_ENVIADA]: 'Renovación Enviada al Cliente',
+    [TIPOS_EVENTO.RENOVACION_PAGADA]: 'Renovación Pagada',
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: 'Pago de Renovación Registrado',
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: 'Renovación Vigente',
     

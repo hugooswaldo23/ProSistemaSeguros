@@ -12,11 +12,12 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import * as pagosService from '../services/pagosService';
+import * as historialService from '../services/historialExpedienteService';
 import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado }) {
+export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado, cambiarEstadoExpediente }) {
   // Estados del modal de pagos
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
@@ -115,7 +116,50 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
 
       console.log('✅ Pago aplicado correctamente');
 
-      // 3. Actualizar estatus del recibo específico en la tabla recibos_pago
+      // 3. 📝 Registrar evento en historial de trazabilidad
+      try {
+        const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || 
+                              (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
+        
+        await historialService.registrarEvento({
+          expediente_id: expedienteParaPago.id,
+          cliente_id: expedienteParaPago.cliente_id,
+          tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
+          usuario_nombre: 'Sistema',
+          descripcion: esFraccionado 
+            ? `Pago registrado - Recibo #${numeroReciboPago}` 
+            : `Pago registrado - Pago completo`,
+          datos_adicionales: {
+            numero_poliza: expedienteParaPago.numero_poliza,
+            compania: expedienteParaPago.compania,
+            monto: esFraccionado 
+              ? (numeroReciboPago === 1 ? expedienteParaPago.primer_pago : expedienteParaPago.pagos_subsecuentes)
+              : expedienteParaPago.total,
+            fecha_pago_real: fechaUltimoPago,
+            numero_recibo: esFraccionado ? numeroReciboPago : null,
+            tipo_pago: expedienteParaPago.tipo_pago,
+            frecuencia_pago: expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago,
+            comprobante_nombre: comprobantePago?.name || null,
+            comprobante_url: comprobanteUrl || null,
+            nuevo_estatus: resultado.nuevoEstatusPago || 'Pagado'
+          }
+        });
+        console.log('✅ Evento de pago registrado en historial');
+      } catch (errorHistorial) {
+        console.error('⚠️ Error al registrar evento en historial (no crítico):', errorHistorial);
+      }
+
+      // 🔄 Cambiar etapa a "Pagada" si tenemos la función disponible
+      if (cambiarEstadoExpediente && typeof cambiarEstadoExpediente === 'function') {
+        try {
+          await cambiarEstadoExpediente(expedienteParaPago.id, 'Pagada');
+          console.log('✅ Etapa cambiada a "Pagada"');
+        } catch (errorEtapa) {
+          console.error('⚠️ Error al cambiar etapa (no crítico):', errorEtapa);
+        }
+      }
+
+      // 4. Actualizar estatus del recibo específico en la tabla recibos_pago
       try {
         console.log(`📝 Actualizando recibo ${numeroReciboPago} en base de datos...`);
         const reciboResponse = await fetch(
@@ -144,14 +188,14 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
         toast.error('Pago aplicado pero error al actualizar recibo en BD');
       }
 
-      // 4. Cerrar modal y mostrar éxito
+      // 5. Cerrar modal y mostrar éxito
       toast.success('✅ Pago aplicado correctamente');
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
       setNumeroReciboPago(1);
 
-      // 5. Recargar expedientes desde BD para obtener el estatus correcto calculado por el backend
+      // 6. Recargar expedientes desde BD para obtener el estatus correcto calculado por el backend
       if (cargarExpedientes) {
         await cargarExpedientes();
       }

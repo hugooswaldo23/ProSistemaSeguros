@@ -18,6 +18,7 @@ import ModalCapturarContacto from '../components/ModalCapturarContacto';
 import { usePagos } from '../hooks/usePagos';
 import { useCompartirExpediente } from '../hooks/useCompartirExpediente';
 import * as clientesService from '../services/clientesService';
+import * as historialService from '../services/historialExpedienteService';
 import utils from '../utils/expedientesUtils';
 import { CONSTANTS } from '../utils/expedientesConstants';
 
@@ -245,7 +246,15 @@ const ModuloNvoExpedientes = () => {
         // Sincronizar fecha_vencimiento_pago ↔ proximoPago ↔ fecha_pago
         fecha_vencimiento_pago: exp.fecha_vencimiento_pago || exp.proximoPago || exp.fecha_pago || '',
         proximoPago: exp.proximoPago || exp.fecha_vencimiento_pago || exp.fecha_pago || '',
-        fecha_pago: exp.fecha_pago || exp.fecha_vencimiento_pago || exp.proximoPago || ''
+        fecha_pago: exp.fecha_pago || exp.fecha_vencimiento_pago || exp.proximoPago || '',
+        
+        // 🔄 USAR ETAPA CALCULADA DEL BACKEND (si existe)
+        // ⚠️ NOTA PARA HUGO: El backend debe agregar campo 'etapa_calculada' que determine
+        //    dinámicamente si una póliza Pagada debe cambiar a "Por Renovar" basándose
+        //    en fecha_aviso_renovacion. Ver: docs/BACKEND-CALCULO-DINAMICO-ETAPA-POR-RENOVAR.md
+        etapa_activa: exp.etapa_calculada || exp.etapa_activa,
+        _etapa_original: exp.etapa_activa, // Guardar etapa original por si se necesita
+        _dias_para_vencimiento: exp.dias_para_vencimiento || null // Campo adicional del backend
       }));
       
       console.log('✅ Expedientes normalizados con primer recibo pendiente:', datosNormalizados.length);
@@ -288,6 +297,55 @@ const ModuloNvoExpedientes = () => {
       }
 
       console.log('✅ Etapa actualizada en BD');
+      
+      // 📝 Registrar evento en historial de trazabilidad
+      try {
+        let tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS; // Default
+        let descripcion = `Etapa cambiada de "${etapaAnterior}" a "${nuevoEstado}"`;
+        
+        // Asignar tipo de evento específico según el cambio de etapa
+        switch (nuevoEstado) {
+          case 'Emitida':
+            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
+            break;
+          case 'Enviada al Cliente':
+            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL; // Se registra por método de envío
+            break;
+          case 'Pagada':
+            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_PAGADA;
+            break;
+          case 'Por Renovar':
+            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_POR_RENOVAR;
+            break;
+          case 'Renovación Emitida':
+            tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_EMITIDA;
+            break;
+          case 'Renovación Enviada':
+            tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_ENVIADA;
+            break;
+          case 'Renovación Pagada':
+            tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_PAGADA;
+            break;
+          case 'Cancelada':
+            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
+            descripcion = motivo ? `Motivo: ${motivo}` : 'Póliza cancelada sin especificar motivo';
+            break;
+        }
+        
+        await historialService.registrarCambioEtapa(
+          expedienteId,
+          expedienteActual?.cliente_id,
+          etapaAnterior,
+          nuevoEstado,
+          'Sistema', // TODO: Obtener nombre del usuario actual
+          descripcion,
+          tipoEvento
+        );
+        console.log(`✅ Evento "${tipoEvento}" registrado en historial de trazabilidad`);
+      } catch (error) {
+        console.error('⚠️ Error al registrar cambio de etapa en historial:', error);
+      }
+      
       await recargarExpedientes();
       
     } catch (error) {
@@ -430,7 +488,8 @@ const ModuloNvoExpedientes = () => {
   } = usePagos({ 
     expedientes, 
     setExpedientes, 
-    cargarExpedientes: recargarExpedientes
+    cargarExpedientes: recargarExpedientes,
+    cambiarEstadoExpediente
   });
 
   // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
@@ -569,9 +628,17 @@ const ModuloNvoExpedientes = () => {
         cambioFrecuenciaPago || cambioTotal || cambioPrimerPago || cambioPagosSubsecuentes
       );
       
+      // 🔥 GUARDAR flag de PDF ANTES de eliminarlo (para el log de trazabilidad)
+      const fueExtractorPDF = datos._datos_desde_pdf === true;
+      const camposModificadosPostPDF = datos._campos_modificados_post_pdf || [];
+      const metodoCaptura = datos._metodo_captura || (fueExtractorPDF ? 'pdf' : 'manual');
+      
       // Limpiar campos temporales y banderas
       delete datos._fechaManual;
       delete datos._datos_desde_pdf;
+      delete datos._metodo_captura;
+      delete datos._snapshot_pdf;
+      delete datos._campos_modificados_post_pdf;
       delete datos._inicio_vigencia_changed;
       delete datos._periodo_gracia_changed;
       delete datos._tipo_pago_changed;
@@ -693,6 +760,148 @@ const ModuloNvoExpedientes = () => {
 
       const resultado = await response.json();
       console.log('✅ Respuesta del backend:', resultado);
+      
+      // 📝 Registrar evento en historial de trazabilidad
+      try {
+        if (modoEdicion) {
+          // Registro de EDICIÓN
+          await historialService.registrarEvento({
+            expediente_id: datos.id,
+            cliente_id: datos.cliente_id,
+            tipo_evento: historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
+            usuario_nombre: 'Sistema',
+            descripcion: `Expediente actualizado - Póliza: ${datos.numero_poliza || 'N/A'}`,
+            datos_adicionales: {
+              numero_poliza: datos.numero_poliza,
+              compania: datos.compania,
+              producto: datos.producto,
+              fecha_actualizacion: new Date().toISOString()
+            }
+          });
+          console.log('✅ Evento de edición registrado en historial');
+        } else {
+          // Registro de CREACIÓN
+          const expedienteId = resultado.data?.id || resultado.id;
+          
+          // Construir nombre completo del cliente
+          let nombreCliente = '';
+          if (datos.razon_social || datos.razonSocial) {
+            nombreCliente = datos.razon_social || datos.razonSocial;
+          } else {
+            const partes = [
+              datos.nombre,
+              datos.apellido_paterno || datos.apellidoPaterno,
+              datos.apellido_materno || datos.apellidoMaterno
+            ].filter(Boolean);
+            nombreCliente = partes.join(' ') || 'Sin nombre';
+          }
+          
+          await historialService.registrarEvento({
+            expediente_id: expedienteId,
+            cliente_id: datos.cliente_id,
+            tipo_evento: fueExtractorPDF 
+              ? historialService.TIPOS_EVENTO.CAPTURA_EXTRACTOR_PDF 
+              : historialService.TIPOS_EVENTO.CAPTURA_MANUAL,
+            usuario_nombre: 'Sistema',
+            descripcion: fueExtractorPDF 
+              ? `Expediente creado mediante extracción automática de PDF - ${datos.compania || ''} ${datos.numero_poliza || ''}${camposModificadosPostPDF.length > 0 ? ' (con modificaciones manuales)' : ''}`
+              : `Expediente creado mediante captura manual - ${datos.compania || ''} ${datos.numero_poliza || ''}`,
+            datos_adicionales: {
+              // Datos de la póliza
+              numero_poliza: datos.numero_poliza || 'Sin número',
+              compania: datos.compania || 'Sin compañía',
+              producto: datos.producto || 'Sin producto',
+              numero_endoso: datos.numero_endoso || null,
+              
+              // Datos del cliente
+              cliente_nombre: nombreCliente,
+              cliente_rfc: datos.rfc || null,
+              
+              // Vigencia
+              inicio_vigencia: datos.inicio_vigencia || null,
+              termino_vigencia: datos.termino_vigencia || null,
+              
+              // Montos
+              prima_neta: datos.prima_neta || null,
+              total: datos.total || null,
+              tipo_pago: datos.tipo_pago || null,
+              frecuencia_pago: datos.frecuenciaPago || datos.frecuencia_pago || null,
+              
+              // Vehículo (si aplica)
+              vehiculo_marca: datos.marca || null,
+              vehiculo_modelo: datos.modelo || null,
+              vehiculo_anio: datos.anio || null,
+              vehiculo_placas: datos.placas || null,
+              
+              // Agente
+              agente: datos.agente || null,
+              clave_agente: datos.clave_agente || null,
+              
+              // Metadata de captura
+              metodo_captura: metodoCaptura === 'pdf' ? 'Extractor PDF' : 'Captura Manual',
+              campos_extraidos_desde_pdf: fueExtractorPDF,
+              campos_modificados_manualmente: camposModificadosPostPDF.length > 0,
+              campos_modificados: camposModificadosPostPDF.length > 0 ? camposModificadosPostPDF : null,
+              cantidad_campos_modificados: camposModificadosPostPDF.length,
+              fecha_captura: new Date().toISOString(),
+              etapa_inicial: datos.etapa_activa || 'Captura'
+            }
+          });
+          console.log('✅ Evento de creación registrado en historial:', fueExtractorPDF ? 'PDF' : 'Manual');
+          
+          // 🔥 SEGUNDO EVENTO: Registrar evento según la etapa inicial del expediente
+          const etapaInicial = datos.etapa_activa || 'Captura';
+          let tipoEventoEtapa = null;
+          let descripcionEtapa = '';
+          
+          switch (etapaInicial) {
+            case 'En cotización':
+            case 'Captura':
+              tipoEventoEtapa = historialService.TIPOS_EVENTO.COTIZACION_CREADA;
+              descripcionEtapa = `Cotización creada - ${datos.compania || ''} ${datos.numero_poliza || ''}`;
+              break;
+            case 'Cotización enviada':
+              tipoEventoEtapa = historialService.TIPOS_EVENTO.COTIZACION_ENVIADA;
+              descripcionEtapa = `Cotización enviada al cliente - ${datos.compania || ''} ${datos.numero_poliza || ''}`;
+              break;
+            case 'Autorizado':
+              tipoEventoEtapa = historialService.TIPOS_EVENTO.COTIZACION_AUTORIZADA;
+              descripcionEtapa = `Cotización autorizada por el cliente - ${datos.compania || ''} ${datos.numero_poliza || ''}`;
+              break;
+            case 'En proceso emisión':
+              tipoEventoEtapa = historialService.TIPOS_EVENTO.EMISION_INICIADA;
+              descripcionEtapa = `Emisión de póliza iniciada - ${datos.compania || ''} ${datos.numero_poliza || ''}`;
+              break;
+            case 'Emitida':
+              tipoEventoEtapa = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
+              descripcionEtapa = `Póliza emitida - ${datos.compania || ''} ${datos.numero_poliza || ''}`;
+              break;
+          }
+          
+          // Registrar el evento de etapa si aplica
+          if (tipoEventoEtapa) {
+            await historialService.registrarEvento({
+              expediente_id: expedienteId,
+              cliente_id: datos.cliente_id,
+              tipo_evento: tipoEventoEtapa,
+              usuario_nombre: 'Sistema',
+              descripcion: descripcionEtapa,
+              datos_adicionales: {
+                numero_poliza: datos.numero_poliza || 'Sin número',
+                compania: datos.compania || 'Sin compañía',
+                producto: datos.producto || 'Sin producto',
+                etapa: etapaInicial,
+                inicio_vigencia: datos.inicio_vigencia || null,
+                termino_vigencia: datos.termino_vigencia || null,
+                total: datos.total || null
+              }
+            });
+            console.log('✅ Evento de etapa registrado:', tipoEventoEtapa);
+          }
+        }
+      } catch (errorHistorial) {
+        console.error('⚠️ Error al registrar en historial (no crítico):', errorHistorial);
+      }
       
       // Recargar lista de expedientes desde backend para asegurar sincronización
       await recargarExpedientes();
@@ -1148,7 +1357,7 @@ const ModuloNvoExpedientes = () => {
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
-          etapasActivas={['Captura', 'Cotización', 'Emitida', 'Vigente', 'Cancelada', 'Renovada']}
+          etapasActivas={['Emitida', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
           agentes={agentes}
           tiposPago={['Anual', 'Fraccionado', 'Pago Único']}
           frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Semestral', 'Anual']}
@@ -1177,7 +1386,7 @@ const ModuloNvoExpedientes = () => {
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
-          etapasActivas={['Captura', 'Cotización', 'Emitida', 'Vigente', 'Cancelada', 'Renovada']}
+          etapasActivas={['Emitida', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
           agentes={agentes}
           tiposPago={['Anual', 'Fraccionado', 'Pago Único']}
           frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Semestral', 'Anual']}
