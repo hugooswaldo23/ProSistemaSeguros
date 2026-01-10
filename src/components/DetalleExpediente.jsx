@@ -23,16 +23,6 @@ const DetalleExpediente = ({
   const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(false);
   const [openHistorial, setOpenHistorial] = useState(false);
 
-  // 🔍 DEBUG: Ver qué datos llegan
-  console.log('🔍 DetalleExpediente - datos recibidos:', {
-    numero_poliza: datos?.numero_poliza,
-    tiene_fecha_aviso: !!datos?.fecha_aviso_renovacion,
-    fecha_aviso_renovacion: datos?.fecha_aviso_renovacion,
-    fechaAvisoRenovacion: datos?.fechaAvisoRenovacion,
-    inicio_vigencia: datos?.inicio_vigencia,
-    termino_vigencia: datos?.termino_vigencia
-  });
-
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
   const tipoRiesgo = useMemo(() => {
     const texto = `${datos?.producto || ''} ${datos?.tipo_de_poliza || ''}`.toLowerCase();

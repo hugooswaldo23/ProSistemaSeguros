@@ -79,6 +79,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
+import { validarContactoCliente } from '../utils/validacionContacto';
 import Swal from 'sweetalert2';
 import { Plus, Edit, Trash2, Eye, FileText, ArrowRight, X, XCircle, DollarSign, AlertCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Search, Save, Upload, CheckCircle, Loader, Share2, Mail, Bell, Clock, RefreshCw, Calendar } from 'lucide-react';
 import DetalleExpediente from '../components/DetalleExpediente';
@@ -2212,38 +2213,9 @@ const ModuloExpedientes = () => {
       }
     }
 
-    // Regla de negocio: En Persona Moral debe existir Contacto Principal (nombre) y al menos Email o Teléfono Móvil
-    if (clienteSeleccionado?.tipoPersona === 'Persona Moral') {
-      const nombreContacto = (formulario.contacto_nombre || clienteSeleccionado.contacto_nombre || '').trim();
-      const tieneEmailOMovil = !!(
-        (formulario.contacto_email || clienteSeleccionado.contacto_email || '').trim() ||
-        (formulario.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_movil || '').trim()
-      );
-      if (!nombreContacto || !tieneEmailOMovil) {
-  toast('⚠️ Persona Moral: capture Contacto Principal con nombre y al menos Email o Teléfono Móvil');
-        return false;
-      }
-    }
-
-    // Regla de negocio: En Persona Física debe tener al menos Email o Teléfono Móvil (propio o del contacto principal)
-    if (clienteSeleccionado?.tipoPersona === 'Persona Física') {
-      // Verificar datos propios del cliente
-      const tieneEmailPropio = !!(formulario.email || clienteSeleccionado.email || '').trim();
-      const tieneMovilPropio = !!(formulario.telefono_movil || clienteSeleccionado.telefono_movil || clienteSeleccionado.telefonoMovil || '').trim();
-      
-      // Verificar datos del contacto principal (si existe)
-      const tieneContactoPrincipal = !!(formulario.contacto_nombre || clienteSeleccionado.contacto_nombre || '').trim();
-      const tieneEmailContacto = !!(formulario.contacto_email || clienteSeleccionado.contacto_email || '').trim();
-      const tieneMovilContacto = !!(formulario.contacto_telefono_movil || clienteSeleccionado.contacto_telefono_movil || '').trim();
-      
-      // Debe tener al menos un email o móvil (propio o del contacto)
-      const tieneContactoValido = tieneEmailPropio || tieneMovilPropio || 
-                                  (tieneContactoPrincipal && (tieneEmailContacto || tieneMovilContacto));
-      
-      if (!tieneContactoValido) {
-  toast('⚠️ Persona Física: se requiere Email o Teléfono Móvil (cliente o contacto)');
-        return false;
-      }
+    // Validación de contacto del cliente usando función utilitaria
+    if (!validarContactoCliente(formulario, clienteSeleccionado, toast)) {
+      return false;
     }
 
     return true;

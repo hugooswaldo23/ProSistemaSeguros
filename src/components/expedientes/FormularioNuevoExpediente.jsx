@@ -9,8 +9,10 @@
  * - Banner de confirmación de importación
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { CheckCircle, FileText, Upload } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { validarContactoCliente } from '../../utils/validacionContacto';
 import FormularioExpedienteBase from './FormularioExpedienteBase';
 import ExtractorPolizasPDF from './ExtractorPolizasPDF';
 
@@ -195,6 +197,10 @@ const FormularioNuevoExpediente = ({
         nuevosDatos._metodo_captura = 'pdf';
         nuevosDatos._snapshot_pdf = JSON.stringify(nuevosDatos); // Snapshot para detectar cambios
         
+        // 🔥 GUARDAR SNAPSHOT GLOBAL para detectar cambios en guardarExpediente
+        window.__datosOriginalesPDF = { ...nuevosDatos };
+        console.log('📸 Snapshot de datos originales del PDF guardado globalmente');
+        
         return nuevosDatos;
       });
 
@@ -226,54 +232,56 @@ const FormularioNuevoExpediente = ({
   }, [setFormulario, actualizarCalculosAutomaticos, handleClienteSeleccionado]);
 
   /**
-   * Wrapper para setFormulario que detecta cambios manuales post-PDF
+   * useEffect para detectar cambios manuales post-PDF
+   */
+  useEffect(() => {
+    if (formulario._metodo_captura === 'pdf' && formulario._snapshot_pdf && datosImportadosDesdePDF) {
+      try {
+        const snapshot = JSON.parse(formulario._snapshot_pdf);
+        const camposModificados = [];
+        
+        // Campos importantes a monitorear
+        const camposClave = [
+          'numero_poliza', 'compania', 'producto', 'numero_endoso',
+          'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
+          'prima_neta', 'total', 'tipo_pago', 'frecuenciaPago',
+          'marca', 'modelo', 'anio', 'placas', 'numero_serie',
+          'agente', 'estatusPago', 'fecha_vencimiento_pago'
+        ];
+        
+        camposClave.forEach(campo => {
+          const valorOriginal = snapshot[campo];
+          const valorActual = formulario[campo];
+          
+          // Detectar cambio (ignorando campos temporales)
+          if (valorOriginal !== valorActual && 
+              !campo.startsWith('_') &&
+              valorOriginal !== undefined &&
+              valorActual !== undefined) {
+            camposModificados.push(campo);
+          }
+        });
+        
+        if (camposModificados.length > 0) {
+          setCamposModificadosPostPDF(prev => {
+            const nuevoSet = new Set([...prev, ...camposModificados]);
+            return Array.from(nuevoSet);
+          });
+        }
+      } catch (err) {
+        console.error('Error al comparar snapshot:', err);
+      }
+    }
+  }, [formulario, datosImportadosDesdePDF]);
+
+  /**
+   * Wrapper para setFormulario simplificado (sin detección sincrónica)
    */
   const setFormularioConDeteccion = useCallback((updater) => {
     setFormulario(prev => {
-      const updated = typeof updater === 'function' ? updater(prev) : updater;
-      
-      // Si fue captura desde PDF y ya se cargaron los datos
-      if (updated._metodo_captura === 'pdf' && updated._snapshot_pdf && datosImportadosDesdePDF) {
-        try {
-          const snapshot = JSON.parse(updated._snapshot_pdf);
-          const camposModificados = [];
-          
-          // Campos importantes a monitorear
-          const camposClave = [
-            'numero_poliza', 'compania', 'producto', 'numero_endoso',
-            'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
-            'prima_neta', 'total', 'tipo_pago', 'frecuenciaPago',
-            'marca', 'modelo', 'anio', 'placas', 'numero_serie',
-            'agente', 'estatusPago', 'fecha_vencimiento_pago'
-          ];
-          
-          camposClave.forEach(campo => {
-            const valorOriginal = snapshot[campo];
-            const valorActual = updated[campo];
-            
-            // Detectar cambio (ignorando campos temporales)
-            if (valorOriginal !== valorActual && 
-                !campo.startsWith('_') &&
-                valorOriginal !== undefined &&
-                valorActual !== undefined) {
-              camposModificados.push(campo);
-            }
-          });
-          
-          if (camposModificados.length > 0) {
-            setCamposModificadosPostPDF(prev => {
-              const nuevoSet = new Set([...prev, ...camposModificados]);
-              return Array.from(nuevoSet);
-            });
-          }
-        } catch (err) {
-          console.error('Error al comparar snapshot:', err);
-        }
-      }
-      
-      return updated;
+      return typeof updater === 'function' ? updater(prev) : updater;
     });
-  }, [setFormulario, datosImportadosDesdePDF]);
+  }, [setFormulario]);
 
   // Banner superior: Confirmación de importación desde PDF
   const bannerSuperior = datosImportadosDesdePDF && infoImportacion && (
@@ -447,6 +455,11 @@ const FormularioNuevoExpediente = ({
           setFormulario={setFormularioConDeteccion}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
           guardarExpediente={() => {
+            // VALIDACIÓN DE CONTACTO usando función utilitaria
+            if (!validarContactoCliente(formulario, clienteSeleccionado, toast)) {
+              return Promise.resolve(); // No guardar si falla validación
+            }
+            
             // Agregar información de campos modificados antes de guardar
             if (camposModificadosPostPDF.length > 0) {
               setFormulario(prev => ({

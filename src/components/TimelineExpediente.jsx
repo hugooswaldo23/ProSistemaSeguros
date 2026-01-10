@@ -378,60 +378,161 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                         </strong>
                       </div>
                       
-                      {/* Vista mejorada para eventos de captura */}
-                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf') ? (
+                      {/* Vista mejorada para eventos de captura Y edición */}
+                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf' || evento.tipo_evento === 'edicion_manual_expediente') ? (
                         <div className="mb-1">
-                          {/* Línea principal: nombre del archivo o método */}
-                          {evento.datos_adicionales?.nombre_archivo_pdf || evento.tipo_evento === 'captura_extractor_pdf' ? (
-                            <div className="mb-2">
-                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
-                                📄 {evento.datos_adicionales?.nombre_archivo_pdf || 'Extracción desde PDF'}
-                              </span>
-                              {(evento.datos_adicionales?.campos_modificados_manualmente || evento.datos_adicionales?.modificaciones_manuales) && (
-                                <span className="badge bg-warning bg-opacity-10 text-warning ms-2" style={{ fontSize: '0.75rem' }}>
-                                  ✏️ {evento.datos_adicionales?.cantidad_campos_modificados || evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) modificado(s)
-                                </span>
-                              )}
-                              {/* Mostrar detalle de campos modificados si existen */}
-                              {evento.datos_adicionales?.campos_modificados && evento.datos_adicionales.campos_modificados.length > 0 && (
-                                <div className="mt-2 p-2 bg-light rounded" style={{ fontSize: '0.75rem' }}>
-                                  <div className="text-muted mb-1"><strong>✏️ Campos editados manualmente post-extracción:</strong></div>
-                                  <div className="d-flex flex-wrap gap-1 mt-1">
-                                    {evento.datos_adicionales.campos_modificados.map((campo, idx) => (
-                                      <span key={idx} className="badge bg-secondary bg-opacity-10 text-secondary" style={{ fontSize: '0.7rem', fontWeight: 'normal' }}>
-                                        {campo.replace(/_/g, ' ').replace(/([A-Z])/g, ' $1').trim()}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="mb-1">
-                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
-                                ✍️ Captura manual del sistema
-                              </span>
-                            </div>
-                          )}
-                          
-                          {/* Información de fechas en formato vertical compacto */}
+                          {/* Información completa en formato vertical: 10 datos esenciales */}
                           <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
-                            {evento.datos_adicionales?.fecha_emision && evento.datos_adicionales.fecha_emision !== 'No especificada' && (
+                            {/* 1. Método de captura (SOLO para captura, no para edición) */}
+                            {evento.datos_adicionales?.metodo_captura && evento.tipo_evento !== 'edicion_manual_expediente' && (
                               <div className="text-muted">
-                                📅 Fecha emisión: <strong className="text-dark">{evento.datos_adicionales.fecha_emision}</strong>
+                                📋 Método: <strong className="text-dark">{evento.datos_adicionales.metodo_captura}</strong>
                               </div>
                             )}
-                            {evento.datos_adicionales?.inicio_vigencia && evento.datos_adicionales.inicio_vigencia !== 'No especificada' && (
+                            
+                            {/* Fecha de edición (solo para edición) */}
+                            {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.fecha_edicion && (
                               <div className="text-muted">
-                                🔖 Inicio vigencia: <strong className="text-dark">{evento.datos_adicionales.inicio_vigencia}</strong>
+                                🕐 Fecha edición: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_edicion).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/')}</strong>
                               </div>
                             )}
-                            <div className="text-muted">
-                              🕐 Fecha captura: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
-                            </div>
-                            {evento.usuario_nombre && (
+                            
+                            {/* 2. Fecha de captura */}
+                            {evento.datos_adicionales?.fecha_captura && (
                               <div className="text-muted">
-                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                                🕐 Fecha captura: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '/')}</strong>
+                              </div>
+                            )}
+                            
+                            {/* 3. Aseguradora */}
+                            {evento.datos_adicionales?.aseguradora && (
+                              <div className="text-muted">
+                                🏢 Aseguradora: <strong className="text-dark">{evento.datos_adicionales.aseguradora}</strong>
+                              </div>
+                            )}
+                            
+                            {/* 4. Número de póliza */}
+                            {evento.datos_adicionales?.numero_poliza && (
+                              <div className="text-muted">
+                                📄 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                              </div>
+                            )}
+                            
+                            {/* 5. Fecha de emisión - SOLO PARA CAPTURA */}
+                            {evento.datos_adicionales?.fecha_emision && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                              <div className="text-muted">
+                                📅 Fecha emisión: <strong className="text-dark">{evento.datos_adicionales.fecha_emision.includes('T') ? new Date(evento.datos_adicionales.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.fecha_emision.split('-').reverse().join('/')}</strong>
+                              </div>
+                            )}
+                            
+                            {/* 6 y 7. Vigencia (del: al) - SOLO PARA CAPTURA */}
+                            {(evento.datos_adicionales?.inicio_vigencia || evento.datos_adicionales?.termino_vigencia) && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                              <div className="text-muted">
+                                🔖 Vigencia: <strong className="text-dark">
+                                  Del: {evento.datos_adicionales.inicio_vigencia ? (evento.datos_adicionales.inicio_vigencia.includes('T') ? new Date(evento.datos_adicionales.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.inicio_vigencia.split('-').reverse().join('/')) : 'N/A'} al {evento.datos_adicionales.termino_vigencia ? (evento.datos_adicionales.termino_vigencia.includes('T') ? new Date(evento.datos_adicionales.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.termino_vigencia.split('-').reverse().join('/')) : 'N/A'}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* 8. Monto total - SOLO PARA CAPTURA */}
+                            {evento.datos_adicionales?.monto_total && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                              <div className="text-muted">
+                                💰 Monto total: <strong className="text-dark">${Number(evento.datos_adicionales.monto_total).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Recibos generados como líneas individuales */}
+                            {evento.datos_adicionales?.recibos_generados?.detalles && evento.datos_adicionales.recibos_generados.detalles.length > 0 && (
+                              <>
+                                {evento.datos_adicionales.recibos_generados.detalles.map((recibo, idx) => (
+                                  <div key={idx} className="text-muted">
+                                    📋 Recibo #{recibo.numero}: <strong className="text-dark">${Number(recibo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - Vence: {recibo.fecha_vencimiento ? new Date(recibo.fecha_vencimiento).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 'N/A'}</strong>
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                            
+                            {/* 9. Usuario que capturó o editó */}
+                            {(evento.datos_adicionales?.usuario_capturo || evento.datos_adicionales?.usuario_edito) && (
+                              <div className="text-muted">
+                                👤 Usuario: <strong className="text-dark">{evento.datos_adicionales.usuario_capturo || evento.datos_adicionales.usuario_edito}</strong>
+                              </div>
+                            )}
+                            
+                            {/* 10. Etapa inicial o actual */}
+                            {(evento.datos_adicionales?.etapa_inicial || evento.datos_adicionales?.etapa_actual) && (
+                              <div className="text-muted">
+                                🎯 Etapa: <strong className="text-dark">{evento.datos_adicionales.etapa_inicial || evento.datos_adicionales.etapa_actual}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Subtítulo: Datos de contacto editados (solo si hay cambios de cliente en edición) */}
+                            {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.cliente_cambios?.cambios_detallados && (
+                              <div className="mt-2 mb-1">
+                                <strong style={{ color: '#fd7e14', fontSize: '0.9rem' }}>
+                                  ✏️ Datos de contacto editados:
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* Cambios del cliente editados manualmente */}
+                            {evento.datos_adicionales?.cliente_cambios?.cambios_detallados && Object.entries(evento.datos_adicionales.cliente_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                              // Función para limpiar fechas ISO
+                              const limpiarValor = (valor) => {
+                                if (!valor || valor === 'vacío') return valor;
+                                // Si es fecha ISO, quitar hora
+                                if (typeof valor === 'string' && valor.includes('T')) {
+                                  return valor.split('T')[0];
+                                }
+                                return valor;
+                              };
+                              
+                              return (
+                                <div key={`cliente-${idx}`} className="text-muted">
+                                  👤 Contacto {campo.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: <strong className="text-dark">"{limpiarValor(cambio.anterior)}" → "{limpiarValor(cambio.nuevo)}"</strong>
+                                </div>
+                              );
+                            })}
+                            
+                            {/* Subtítulo: Datos de póliza editados (solo si hay cambios de póliza) */}
+                            {evento.datos_adicionales?.poliza_cambios?.cambios_detallados && (
+                              <div className={evento.datos_adicionales?.cliente_cambios?.cambios_detallados ? 'mt-2 mb-1' : 'mt-2 mb-1'}>
+                                <strong style={{ color: '#fd7e14', fontSize: '0.9rem' }}>
+                                  {evento.tipo_evento === 'edicion_manual_expediente' 
+                                    ? '✏️ Datos de póliza editados:'
+                                    : '✏️ Datos editados manualmente post-extracción:'}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* Cambios de la póliza editados manualmente */}
+                            {evento.datos_adicionales?.poliza_cambios?.cambios_detallados && Object.entries(evento.datos_adicionales.poliza_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                              // Función para limpiar fechas ISO
+                              const limpiarValor = (valor) => {
+                                if (!valor || valor === 'vacío') return valor;
+                                // Si es fecha ISO, quitar hora
+                                if (typeof valor === 'string' && valor.includes('T')) {
+                                  return valor.split('T')[0];
+                                }
+                                return valor;
+                              };
+                              
+                              return (
+                                <div key={`poliza-${idx}`} className="text-muted">
+                                  📄 {campo.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: <strong className="text-dark">"{limpiarValor(cambio.anterior)}" → "{limpiarValor(cambio.nuevo)}"</strong>
+                                </div>
+                              );
+                            })}
+                            
+                            {/* Campos editados manualmente (si hubo extracción PDF) - LEGACY */}
+                            {evento.datos_adicionales?.campos_editados_manualmente && Object.keys(evento.datos_adicionales.campos_editados_manualmente).length > 0 && (
+                              <div className="mt-2 p-2 bg-warning bg-opacity-10 rounded" style={{ fontSize: '0.75rem' }}>
+                                <div className="text-warning mb-1"><strong>✏️ Campos editados manualmente post-extracción:</strong></div>
+                                {Object.entries(evento.datos_adicionales.campos_editados_manualmente).map(([campo, cambio], idx) => (
+                                  <div key={idx} className="text-muted mt-1" style={{ fontSize: '0.72rem' }}>
+                                    <strong>{campo.replace(/_/g, ' ')}:</strong> <span className="text-danger">{cambio.antes}</span> → <span className="text-success">{cambio.despues}</span>
+                                  </div>
+                                ))}
                               </div>
                             )}
                           </div>
@@ -548,6 +649,67 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             {/* Fecha y hora del envío */}
                             <div className="text-muted">
                               🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ) : evento.tipo_evento === 'datos-actualizados' ? (
+                        /* Vista vertical para eventos de edición de póliza */
+                        <div className="mb-1">
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Aseguradora */}
+                            {evento.datos_adicionales?.compania && (
+                              <div className="text-muted">
+                                🏢 Aseguradora: <strong className="text-dark">{evento.datos_adicionales.compania}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Número de póliza */}
+                            {evento.datos_adicionales?.numero_poliza && (
+                              <div className="text-muted">
+                                📋 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Cantidad de cambios */}
+                            {evento.datos_adicionales?.cantidad_cambios !== undefined && (
+                              <div className="text-muted">
+                                ✏️ Cambios: <strong className="text-dark">{evento.datos_adicionales.cantidad_cambios} campo(s) modificado(s)</strong>
+                              </div>
+                            )}
+                            
+                            {/* Campos editados - mostrar lista detallada */}
+                            {evento.datos_adicionales?.campos_editados && Object.keys(evento.datos_adicionales.campos_editados).length > 0 && (
+                              <div className="mt-2 p-2 bg-info bg-opacity-10 rounded" style={{ fontSize: '0.75rem' }}>
+                                <div className="text-info mb-1"><strong>📝 Campos modificados:</strong></div>
+                                {Object.entries(evento.datos_adicionales.campos_editados).map(([campo, cambio], idx) => {
+                                  // Formatear fechas si el campo contiene fecha
+                                  const esFecha = campo.toLowerCase().includes('fecha');
+                                  const valorAntes = esFecha && cambio.antes !== 'vacío' ? 
+                                    new Date(cambio.antes).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 
+                                    cambio.antes;
+                                  const valorDespues = esFecha && cambio.despues !== 'vacío' ? 
+                                    new Date(cambio.despues).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 
+                                    cambio.despues;
+                                  
+                                  return (
+                                    <div key={idx} className="text-muted mt-1" style={{ fontSize: '0.72rem' }}>
+                                      <strong>{campo}:</strong> <span className="text-danger">{valorAntes}</span> → <span className="text-success">{valorDespues}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            
+                            {/* Usuario */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted mt-1">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha del evento */}
+                            <div className="text-muted">
+                              🕐 Fecha edición: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
                             </div>
                           </div>
                         </div>

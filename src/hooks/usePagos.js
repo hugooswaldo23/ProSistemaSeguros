@@ -121,20 +121,22 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
         const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || 
                               (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
         
+        const montoAplicado = esFraccionado 
+          ? (numeroReciboPago === 1 ? expedienteParaPago.primer_pago : expedienteParaPago.pagos_subsecuentes)
+          : expedienteParaPago.total;
+        
         await historialService.registrarEvento({
           expediente_id: expedienteParaPago.id,
           cliente_id: expedienteParaPago.cliente_id,
           tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
           usuario_nombre: 'Sistema',
           descripcion: esFraccionado 
-            ? `Pago registrado - Recibo #${numeroReciboPago}` 
-            : `Pago registrado - Pago completo`,
+            ? `Aplicación de pago | ${expedienteParaPago.compania || 'Sin aseguradora'} | Póliza: ${expedienteParaPago.numero_poliza || 'Sin número'} | Recibo #${numeroReciboPago} de ${CONSTANTS.PAGOS_POR_FRECUENCIA[expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago] || 'N/A'} | Monto: $${montoAplicado || '0'} | Fecha: ${fechaUltimoPago}`
+            : `Aplicación de pago | ${expedienteParaPago.compania || 'Sin aseguradora'} | Póliza: ${expedienteParaPago.numero_poliza || 'Sin número'} | Pago completo | Monto: $${montoAplicado || '0'} | Fecha: ${fechaUltimoPago}`,
           datos_adicionales: {
             numero_poliza: expedienteParaPago.numero_poliza,
             compania: expedienteParaPago.compania,
-            monto: esFraccionado 
-              ? (numeroReciboPago === 1 ? expedienteParaPago.primer_pago : expedienteParaPago.pagos_subsecuentes)
-              : expedienteParaPago.total,
+            monto: montoAplicado,
             fecha_pago_real: fechaUltimoPago,
             numero_recibo: esFraccionado ? numeroReciboPago : null,
             tipo_pago: expedienteParaPago.tipo_pago,

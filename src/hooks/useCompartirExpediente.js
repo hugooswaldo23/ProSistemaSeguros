@@ -131,16 +131,27 @@ export const useCompartirExpediente = ({
           'WhatsApp',
           { nombre: nombreDestinatario, contacto: telefono },
           mensaje,
-          pdfUrl
+          pdfUrl,
+          { 
+            compania: expediente.compania,
+            numero_poliza: expediente.numero_poliza,
+            tipo_pago: expediente.tipo_pago
+          }
         );
         console.log('✅ Evento registrado en historial de trazabilidad');
       } catch (error) {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
       
-      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+      // Actualizar la etapa según el tipo de mensaje
       if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        toast.success(`✅ Póliza enviada por WhatsApp.\n📬 Etapa avanzada a "Enviada al Cliente"`);
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+        toast.success(`✅ Renovación enviada por WhatsApp.\n📬 Etapa avanzada a "Renovación Enviada"`);
+      } else {
+        toast.success('✅ Mensaje enviado por WhatsApp');
       }
       
     } catch (error) {
@@ -241,16 +252,27 @@ export const useCompartirExpediente = ({
           'Email',
           { nombre: nombreDestinatario, contacto: email },
           cuerpo,
-          pdfUrl
+          pdfUrl,
+          { 
+            compania: expediente.compania,
+            numero_poliza: expediente.numero_poliza,
+            tipo_pago: expediente.tipo_pago
+          }
         );
         console.log('✅ Evento registrado en historial de trazabilidad');
       } catch (error) {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
     
-      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+      // Actualizar la etapa según el tipo de mensaje
       if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        toast.success('✅ Póliza enviada por Email.\n📬 Etapa avanzada a "Enviada al Cliente"');
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+        toast.success('✅ Renovación enviada por Email.\n📬 Etapa avanzada a "Renovación Enviada"');
+      } else {
+        toast.success('✅ Mensaje enviado por Email');
       }
     
     } catch (error) {

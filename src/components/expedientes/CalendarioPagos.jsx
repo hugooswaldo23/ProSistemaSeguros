@@ -21,27 +21,9 @@ const CalendarioPagos = React.memo(({
   onEliminarPago, // Callback para eliminar un pago (solo en modo edición)
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
-  // Debug: verificar datos recibidos
-  console.log('🔄 CalendarioPagos - Renderizando con:', {
-    cantidad_recibos: expediente.recibos?.length || 0,
-    recibos: expediente.recibos,
-    tipo_pago: expediente.tipo_pago,
-    frecuenciaPago: expediente.frecuenciaPago,
-    inicio_vigencia: expediente.inicio_vigencia,
-    onEliminarPago_defined: !!onEliminarPago,
-    onEliminarPago_type: typeof onEliminarPago
-  });
-  
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
   const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-  
-  console.log('📊 CalendarioPagos - Valores normalizados:', {
-    tipoPago,
-    frecuencia,
-    esAnual: tipoPago?.toUpperCase() === 'ANUAL',
-    esFraccionado: tipoPago?.toUpperCase() === 'FRACCIONADO'
-  });
   
   // Validar que tenga los datos mínimos necesarios
   if (!expediente.inicio_vigencia) {

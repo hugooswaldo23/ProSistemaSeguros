@@ -80,6 +80,11 @@ export const TIPOS_EVENTO = {
   ENDOSO_APLICADO: 'endoso_aplicado',
   DATOS_ACTUALIZADOS: 'datos_actualizados',
   
+  // 🆕 Operaciones de cliente
+  CLIENTE_SELECCIONADO: 'cliente_seleccionado',
+  CLIENTE_CREADO: 'cliente_creado',
+  CLIENTE_ACTUALIZADO: 'cliente_actualizado',
+  
   // Documentos
   DOCUMENTO_CARGADO: 'documento_cargado',
   DOCUMENTO_ENVIADO: 'documento_enviado',
@@ -141,6 +146,12 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.ENDOSO_APLICADO]: { icon: '📝', color: '#007bff', bgColor: '#cce5ff' },
     [TIPOS_EVENTO.DATOS_ACTUALIZADOS]: { icon: '✏️', color: '#6c757d', bgColor: '#e2e3e5' },
+    'edicion_manual_expediente': { icon: '✏️', color: '#fd7e14', bgColor: '#ffe5d0' },
+    
+    // 🆕 Operaciones de cliente
+    [TIPOS_EVENTO.CLIENTE_SELECCIONADO]: { icon: '👤', color: '#17a2b8', bgColor: '#d1ecf1' },
+    [TIPOS_EVENTO.CLIENTE_CREADO]: { icon: '👤➕', color: '#28a745', bgColor: '#d4edda' },
+    [TIPOS_EVENTO.CLIENTE_ACTUALIZADO]: { icon: '👤✏️', color: '#ffc107', bgColor: '#fff3cd' },
     
     [TIPOS_EVENTO.DOCUMENTO_CARGADO]: { icon: '📎', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.DOCUMENTO_ENVIADO]: { icon: '📤', color: '#28a745', bgColor: '#d4edda' },
@@ -201,6 +212,12 @@ export const obtenerTituloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.ENDOSO_APLICADO]: 'Endoso Aplicado',
     [TIPOS_EVENTO.DATOS_ACTUALIZADOS]: 'Datos Actualizados',
+    'edicion_manual_expediente': 'Edición Manual de Expediente',
+    
+    // 🆕 Operaciones de cliente
+    [TIPOS_EVENTO.CLIENTE_SELECCIONADO]: 'Cliente Seleccionado',
+    [TIPOS_EVENTO.CLIENTE_CREADO]: 'Cliente Creado',
+    [TIPOS_EVENTO.CLIENTE_ACTUALIZADO]: 'Cliente Actualizado',
     
     [TIPOS_EVENTO.DOCUMENTO_CARGADO]: 'Documento Cargado',
     [TIPOS_EVENTO.DOCUMENTO_ENVIADO]: 'Documento Enviado',
@@ -431,16 +448,17 @@ export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterio
  * @param {Object} destinatario - { nombre, contacto }
  * @param {string} mensaje - Mensaje completo (se descartará, solo para compatibilidad)
  * @param {string} documentoUrl - URL del documento (opcional)
+ * @param {Object} datosPoliza - { compania, numero_poliza, tipo_pago } para descripción estructurada
  */
-export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, destinatario, mensaje, documentoUrl = null) => {
+export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, destinatario, mensaje, documentoUrl = null, datosPoliza = {}) => {
   const tipoEvento = canal === 'Email' 
     ? TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL 
     : TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP;
   
   const usuario = obtenerUsuarioActual();
   
-  // 📝 Descripción simplificada: Solo lo esencial
-  const descripcion = `Enviado a ${destinatario.nombre} por ${canal} (${destinatario.contacto})`;
+  // 📝 Descripción estructurada: Acción | Aseguradora | Póliza | Canal | Destinatario
+  const descripcion = `Envío de póliza | ${datosPoliza.compania || 'Sin aseguradora'} | Póliza: ${datosPoliza.numero_poliza || 'Sin número'} | Vía ${canal} | Para: ${destinatario.nombre} (${destinatario.contacto})`;
   
   return await registrarEvento({
     expediente_id: expedienteId,
@@ -457,7 +475,10 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     datos_adicionales: {
       // ✅ NO guardamos el mensaje completo, solo metadata esencial
       canal: canal,
-      tiene_documento: !!documentoUrl
+      tiene_documento: !!documentoUrl,
+      compania: datosPoliza.compania,
+      numero_poliza: datosPoliza.numero_poliza,
+      tipo_pago: datosPoliza.tipo_pago
     }
   });
 };

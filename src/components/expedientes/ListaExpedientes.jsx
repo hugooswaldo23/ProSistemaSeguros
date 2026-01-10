@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, Upload, DollarSign, Share2, AlertCircle, Search, XCircle } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, FileText, Upload, DollarSign, Share2, AlertCircle, Search, XCircle, RefreshCw, CheckCircle } from 'lucide-react';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
@@ -42,7 +42,11 @@ const ListaExpedientes = React.memo(({
   eliminarExpediente,
   calcularProximoPago,
   clientesMap,
-  abrirModalCompartir
+  abrirModalCompartir,
+  // 🔄 Funciones de renovación
+  iniciarCotizacionRenovacion,
+  marcarRenovacionAutorizada,
+  abrirModalPolizaRenovada
 }) => {
   // Estado para carpeta/categoría seleccionada
   const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
@@ -853,6 +857,64 @@ const ListaExpedientes = React.memo(({
                               ) : null;
                             })()}
 
+                            {/* === BOTONES DE RENOVACIÓN === */}
+                            {/* Mostrar botones solo en carpetas Por Renovar o Vencidas */}
+                            {(() => {
+                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                              
+                              if (!estaPorRenovar) return null;
+                              
+                              const etapaActual = expediente.etapa_activa || '';
+                              
+                              // 1. Botón COTIZAR - Solo si está en etapa inicial (no ha iniciado proceso)
+                              const puedeIniciarCotizacion = !etapaActual.includes('Cotización') && 
+                                                              !etapaActual.includes('Renovación') &&
+                                                              !etapaActual.includes('Pendiente de Emisión');
+                              
+                              // 2. Botón AUTORIZAR - Solo si está en "En Cotización" o "Renovación Enviada"
+                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
+                                                             etapaActual === 'Renovación Enviada';
+                              
+                              // 3. Botón AGREGAR RENOVADA - Solo si está en "Pendiente de Emisión"
+                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                              
+                              return (
+                                <>
+                                  {puedeIniciarCotizacion && (
+                                    <button
+                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                      className="btn btn-warning btn-sm me-1"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Cotizar Renovación"
+                                    >
+                                      <FileText size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeMarcarAutorizado && (
+                                    <button
+                                      onClick={() => marcarRenovacionAutorizada(expediente)}
+                                      className="btn btn-success btn-sm me-1"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Marcar como Autorizado"
+                                    >
+                                      ✓
+                                    </button>
+                                  )}
+                                  
+                                  {puedeAgregarRenovada && (
+                                    <button
+                                      onClick={() => abrirModalPolizaRenovada(expediente)}
+                                      className="btn btn-info btn-sm me-1"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Agregar Póliza Renovada"
+                                    >
+                                      <RefreshCw size={12} />
+                                    </button>
+                                  )}
+                                </>
+                              );
+                            })()}
                             
                             {expediente.etapa_activa !== 'Cancelada' && (
                               <button

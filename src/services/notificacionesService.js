@@ -23,6 +23,7 @@ export const TIPOS_NOTIFICACION = {
  */
 export const TIPOS_MENSAJE = {
   EMISION: 'emision',
+  RENOVACION_EMISION: 'renovacion_emision',
   RECORDATORIO_PAGO: 'recordatorio_pago',
   PAGO_VENCIDO: 'pago_vencido',
   PAGO_RECIBIDO: 'pago_recibido',
@@ -126,7 +127,12 @@ export function determinarTipoMensaje(expediente) {
     return TIPOS_MENSAJE.RECORDATORIO_PAGO;
   }
 
-  // PRIORIDAD 3: Si es emisión o envío al cliente (solo si pagos están OK)
+  // PRIORIDAD 3: Si es renovación emitida o enviada
+  if (expediente.etapa_activa === 'Renovación Emitida' || expediente.etapa_activa === 'Renovación Enviada') {
+    return TIPOS_MENSAJE.RENOVACION_EMISION;
+  }
+
+  // PRIORIDAD 4: Si es emisión o envío al cliente (solo si pagos están OK)
   if (expediente.etapa_activa === 'Emitida' || expediente.etapa_activa === 'Enviada al Cliente') {
     // Si el pago está al día, mostrar mensaje de emisión
     if (expediente.estatusPago === 'Pagado' || expediente.estatusPago === 'Pendiente') {
@@ -134,7 +140,7 @@ export function determinarTipoMensaje(expediente) {
     }
   }
 
-  // PRIORIDAD 4: Si ya está pagado
+  // PRIORIDAD 5: Si ya está pagado
   if (expediente.estatusPago === 'Pagado') {
     return TIPOS_MENSAJE.PAGO_RECIBIDO;
   }

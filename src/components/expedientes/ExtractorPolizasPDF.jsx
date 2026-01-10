@@ -12,6 +12,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
+import toast from 'react-hot-toast';
 import DetalleExpediente from '../DetalleExpediente';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
@@ -386,63 +387,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.warn('⚠️ Error durante validación de pagos fraccionados:', e);
       }
 
-      console.log('📋 ========== DATOS EXTRAÍDOS COMPLETOS ==========');
-      console.log('👤 CLIENTE:', {
-        tipo_persona: resultado.tipo_persona,
-        nombre: resultado.nombre,
-        apellido_paterno: resultado.apellido_paterno,
-        apellido_materno: resultado.apellido_materno,
-        razonSocial: resultado.razonSocial,
-        rfc: resultado.rfc,
-        rfcLength: resultado.rfc?.length,
-        curp: resultado.curp
-      });
-      console.log('📍 DIRECCIÓN:', {
-        domicilio: resultado.domicilio,
-        municipio: resultado.municipio,
-        estado: resultado.estado,
-        codigo_postal: resultado.codigo_postal
-      });
-      console.log('📞 CONTACTO:', {
-        email: resultado.email,
-        telefono_movil: resultado.telefono_movil,
-        telefono_fijo: resultado.telefono_fijo
-      });
-      console.log('📄 PÓLIZA:', {
-        numero_poliza: resultado.numero_poliza,
-        compania: resultado.compania,
-        producto: resultado.producto,
-        tipo_cobertura: resultado.tipo_cobertura
-      });
-      console.log('📅 FECHAS:', {
-        fecha_emision: resultado.fecha_emision,
-        fecha_captura: resultado.fecha_captura,
-        inicio_vigencia: resultado.inicio_vigencia,
-        termino_vigencia: resultado.termino_vigencia
-      });
-      console.log('💰 MONTOS:', {
-        prima_pagada: resultado.prima_pagada,
-        gastos_expedicion: resultado.gastos_expedicion,
-        cargo_pago_fraccionado: resultado.cargo_pago_fraccionado,
-        iva: resultado.iva,
-        total: resultado.total,
-        primer_pago: resultado.primer_pago,
-        pagos_subsecuentes: resultado.pagos_subsecuentes
-      });
-      console.log('🚗 VEHÍCULO:', {
-        marca: resultado.marca,
-        modelo: resultado.modelo,
-        anio: resultado.anio,
-        placas: resultado.placas,
-        serie: resultado.serie,
-        vin: resultado.vin
-      });
-      console.log('👨‍💼 AGENTE:', {
-        clave_agente: resultado.clave_agente,
-        agente: resultado.agente
-      });
-      console.log('================================================');
-
+      // Datos extraídos exitosamente
       setDatosExtraidos(resultado);
       
       // Guardar información del cliente encontrado (o null si no existe)
@@ -630,6 +575,29 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
         console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', clienteNormalizado.id);
         console.log('✅ Cliente normalizado:', clienteNormalizado);
+        
+        // 📝 LOGGING: Registro de cliente creado
+        // Nota: El logging se hará cuando se guarde el expediente en NvoExpedientes.jsx
+        // Aquí solo agregamos un flag para que sepa que fue creado durante PDF
+        if (window.__clienteCreadoDurantePDF) {
+          window.__clienteCreadoDurantePDF = null; // Limpiar flag anterior
+        }
+        window.__clienteCreadoDurantePDF = {
+          cliente: clienteNormalizado,
+          metodo: 'Extractor PDF',
+          fecha: new Date().toISOString()
+        };
+        
+        // 🔄 Notificar a la vista de clientes que se creó un nuevo cliente
+        window.dispatchEvent(new CustomEvent('clientes-actualizados', {
+          detail: {
+            clienteId: clienteNormalizado.id,
+            cliente: clienteNormalizado,
+            accion: 'creado',
+            metodo: 'Extractor PDF'
+          }
+        }));
+        console.log('📡 Evento clientes-actualizados disparado - cliente creado');
       } else if (resultado.success && !resultado.data) {
         console.warn('⚠️ El servidor devolvió success pero sin datos. Intentando recargar clientes...');
         
@@ -657,6 +625,27 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
             console.log('✅ Cliente recuperado después de creación:', nombreCliente, 'ID:', clienteNormalizado.id);
             console.log('✅ Cliente normalizado:', clienteNormalizado);
+            
+            // 📝 LOGGING: Registro de cliente creado (recuperado)
+            if (window.__clienteCreadoDurantePDF) {
+              window.__clienteCreadoDurantePDF = null; // Limpiar flag anterior
+            }
+            window.__clienteCreadoDurantePDF = {
+              cliente: clienteNormalizado,
+              metodo: 'Extractor PDF',
+              fecha: new Date().toISOString()
+            };
+            
+            // 🔄 Notificar a la vista de clientes que se creó un nuevo cliente
+            window.dispatchEvent(new CustomEvent('clientes-actualizados', {
+              detail: {
+                clienteId: clienteNormalizado.id,
+                cliente: clienteNormalizado,
+                accion: 'creado',
+                metodo: 'Extractor PDF'
+              }
+            }));
+            console.log('📡 Evento clientes-actualizados disparado - cliente recuperado');
           } else {
             console.error('❌ No se pudo encontrar el cliente recién creado');
             setErrores(['El cliente se creó pero no se pudo recuperar. Por favor, reintenta.']);
@@ -699,10 +688,10 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     let tipoPersonaFinal = '';
     
     if (opcion === 'fisica') {
-      rfcFinal = 'XAXX010101000'; // 13 caracteres
+      rfcFinal = 'XAXX010101000'; // 13 caracteres - RFC genérico persona física
       tipoPersonaFinal = 'Fisica';
     } else if (opcion === 'moral') {
-      rfcFinal = 'XAXX010101'; // 12 caracteres
+      rfcFinal = 'XEXX010101000'; // 12 caracteres - RFC genérico persona moral
       tipoPersonaFinal = 'Moral';
     } else if (opcion === 'capturar' && rfcManual) {
       rfcFinal = rfcManual.toUpperCase().trim();
@@ -791,6 +780,29 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const nombreCliente = clienteNormalizado.razonSocial || `${clienteNormalizado.nombre} ${clienteNormalizado.apellidoPaterno || ''}`.trim();
         console.log('✅ Cliente creado correctamente:', nombreCliente, 'ID:', clienteNormalizado.id);
         toast.success('✅ Cliente creado correctamente');
+        
+        // 📝 LOGGING: Registro de cliente creado
+        // Nota: El logging se hará cuando se guarde el expediente en NvoExpedientes.jsx
+        // Aquí solo agregamos un flag para que sepa que fue creado durante PDF
+        if (window.__clienteCreadoDurantePDF) {
+          window.__clienteCreadoDurantePDF = null; // Limpiar flag anterior
+        }
+        window.__clienteCreadoDurantePDF = {
+          cliente: clienteNormalizado,
+          metodo: 'Extractor PDF',
+          fecha: new Date().toISOString()
+        };
+        
+        // 🔄 Notificar a la vista de clientes que se creó un nuevo cliente
+        window.dispatchEvent(new CustomEvent('clientes-actualizados', {
+          detail: {
+            clienteId: clienteNormalizado.id,
+            cliente: clienteNormalizado,
+            accion: 'creado',
+            metodo: 'Extractor PDF'
+          }
+        }));
+        console.log('📡 Evento clientes-actualizados disparado - cliente creado');
         
         // Pasar a validación de agente
         setEstado('validando-agente');
@@ -1284,10 +1296,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // PASO 3: Aplicar datos al formulario
   const aplicarDatos = useCallback(() => {
     if (datosExtraidos && onDataExtracted) {
-      console.log('🔍 DEBUG aplicarDatos:');
-      console.log('   - clienteEncontrado:', clienteEncontrado);
-      console.log('   - clienteEncontrado.id:', clienteEncontrado?.id);
-      console.log('   - datosExtraidos.cliente_id:', datosExtraidos.cliente_id);
+      // Aplicando datos del cliente
       
       // Combinar los datos extraídos del PDF con los datos normalizados del cliente
       const datosConCliente = {
@@ -1295,7 +1304,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
       };
       
-      console.log('   - datosConCliente.cliente_id FINAL:', datosConCliente.cliente_id);
+      // Cliente vinculado
 
       // Si tenemos clienteEncontrado, usar sus datos normalizados (ya en camelCase)
       if (clienteEncontrado) {
@@ -1384,17 +1393,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         primer_pago: datosConCliente.primer_pago,
         pagos_subsecuentes: datosConCliente.pagos_subsecuentes
       });
-
-      // Log financiero para verificar que todos los campos lleguen (aun en 0.00)
-      console.log('📋 Desglose financiero (preview) - 6 campos en orden:');
-      console.log('─────────────────────────────────────────────────');
-      console.log('1. Prima Neta:                          $', datosConCliente.prima_pagada || '0.00');
-      console.log('2. Otros Descuentos:                    $', datosConCliente.otros_descuentos || '0.00');
-      console.log('3. Financiamiento por pago fraccionado: $', datosConCliente.cargo_pago_fraccionado || '0.00');
-      console.log('4. Gastos de expedición:                $', datosConCliente.gastos_expedicion || '0.00');
-      console.log('5. I.V.A.:                              $', datosConCliente.iva || '0.00');
-      console.log('6. Total a pagar:                       $', datosConCliente.total || '0.00');
-      console.log('─────────────────────────────────────────────────');
 
       // ================== CAMPOS ADICIONALES POLIZA (Uso/Servicio/Movimiento) ==================
       // Si existen y el formulario espera camelCase, mantenerlos así.
@@ -1503,7 +1501,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         agente: datosConCliente.agente
       };
       
-      console.log('📤 Aplicando datos completos al formulario:', datosConCliente);
+      // Aplicando al formulario
       onDataExtracted(datosConCliente);
       onClose();
     }
