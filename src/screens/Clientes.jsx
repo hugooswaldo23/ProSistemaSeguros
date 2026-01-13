@@ -496,19 +496,19 @@ const ModuloClientes = () => {
       emailRepresentante: formularioCliente.emailRepresentante,
       
       // Contacto
-      rfc: formularioCliente.rfc,
-      email: formularioCliente.email,
-      telefonoFijo: formularioCliente.telefonoFijo,
-      telefonoMovil: formularioCliente.telefonoMovil,
+      rfc: formularioCliente.rfc || '',
+      email: formularioCliente.email || '',
+      telefonoFijo: formularioCliente.telefonoFijo || '',
+      telefonoMovil: formularioCliente.telefonoMovil || '',
       
       // Contacto Principal (para ambos tipos de persona)
-      contacto_nombre: formularioCliente.contacto_nombre,
-      contacto_apellido_paterno: formularioCliente.contacto_apellido_paterno,
-      contacto_apellido_materno: formularioCliente.contacto_apellido_materno,
-      contacto_email: formularioCliente.contacto_email,
-      contacto_telefono_fijo: formularioCliente.contacto_telefono_fijo,
-      contacto_telefono_movil: formularioCliente.contacto_telefono_movil,
-      contacto_puesto: formularioCliente.contacto_puesto,
+      contacto_nombre: formularioCliente.contacto_nombre || '',
+      contacto_apellido_paterno: formularioCliente.contacto_apellido_paterno || '',
+      contacto_apellido_materno: formularioCliente.contacto_apellido_materno || '',
+      contacto_email: formularioCliente.contacto_email || '',
+      contacto_telefono_fijo: formularioCliente.contacto_telefono_fijo || '',
+      contacto_telefono_movil: formularioCliente.contacto_telefono_movil || '',
+      contacto_puesto: formularioCliente.contacto_puesto || '',
       
       // Dirección
       direccion: formularioCliente.direccion,

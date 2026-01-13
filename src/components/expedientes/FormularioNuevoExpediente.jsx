@@ -50,7 +50,6 @@ const FormularioNuevoExpediente = ({
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
-  const [camposModificadosPostPDF, setCamposModificadosPostPDF] = useState([]);
 
   /**
    * Handler para seleccionar modo de captura
@@ -195,11 +194,9 @@ const FormularioNuevoExpediente = ({
         // 🔥 MARCAR que estos datos vienen del PDF extractor
         nuevosDatos._datos_desde_pdf = true;
         nuevosDatos._metodo_captura = 'pdf';
-        nuevosDatos._snapshot_pdf = JSON.stringify(nuevosDatos); // Snapshot para detectar cambios
         
         // 🔥 GUARDAR SNAPSHOT GLOBAL para detectar cambios en guardarExpediente
         window.__datosOriginalesPDF = { ...nuevosDatos };
-        console.log('📸 Snapshot de datos originales del PDF guardado globalmente');
         
         return nuevosDatos;
       });
@@ -217,8 +214,6 @@ const FormularioNuevoExpediente = ({
       setDatosImportadosDesdePDF(true);
       setMostrarExtractorPDF(false);
       
-      console.log('✅ Datos del PDF aplicados al formulario');
-      
     } catch (error) {
       console.error('❌ Error al procesar datos del PDF:', error);
       // Aún así aplicar lo que se pueda
@@ -232,50 +227,30 @@ const FormularioNuevoExpediente = ({
   }, [setFormulario, actualizarCalculosAutomaticos, handleClienteSeleccionado]);
 
   /**
-   * useEffect para detectar cambios manuales post-PDF
+   * useEffect para capturar recibos calculados por CalendarioPagos
+   * Este efecto se ejecuta cuando el formulario tiene recibos calculados
    */
   useEffect(() => {
-    if (formulario._metodo_captura === 'pdf' && formulario._snapshot_pdf && datosImportadosDesdePDF) {
-      try {
-        const snapshot = JSON.parse(formulario._snapshot_pdf);
-        const camposModificados = [];
+    // Solo capturar si vienen de PDF y los recibos fueron calculados
+    if (datosImportadosDesdePDF && 
+        formulario.recibos && 
+        Array.isArray(formulario.recibos) && 
+        formulario.recibos.length > 0) {
+      
+      // Actualizar snapshot global para incluir los recibos
+      if (window.__datosOriginalesPDF) {
+        window.__datosOriginalesPDF = {
+          ...window.__datosOriginalesPDF,
+          recibos: formulario.recibos
+        };
         
-        // Campos importantes a monitorear
-        const camposClave = [
-          'numero_poliza', 'compania', 'producto', 'numero_endoso',
-          'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
-          'prima_neta', 'total', 'tipo_pago', 'frecuenciaPago',
-          'marca', 'modelo', 'anio', 'placas', 'numero_serie',
-          'agente', 'estatusPago', 'fecha_vencimiento_pago'
-        ];
-        
-        camposClave.forEach(campo => {
-          const valorOriginal = snapshot[campo];
-          const valorActual = formulario[campo];
-          
-          // Detectar cambio (ignorando campos temporales)
-          if (valorOriginal !== valorActual && 
-              !campo.startsWith('_') &&
-              valorOriginal !== undefined &&
-              valorActual !== undefined) {
-            camposModificados.push(campo);
-          }
-        });
-        
-        if (camposModificados.length > 0) {
-          setCamposModificadosPostPDF(prev => {
-            const nuevoSet = new Set([...prev, ...camposModificados]);
-            return Array.from(nuevoSet);
-          });
-        }
-      } catch (err) {
-        console.error('Error al comparar snapshot:', err);
+        console.log('📸 Snapshot actualizado con recibos:', formulario.recibos.length, 'recibos');
       }
     }
-  }, [formulario, datosImportadosDesdePDF]);
+  }, [datosImportadosDesdePDF, formulario.recibos]);
 
   /**
-   * Wrapper para setFormulario simplificado (sin detección sincrónica)
+   * Wrapper para setFormulario simplificado
    */
   const setFormularioConDeteccion = useCallback((updater) => {
     setFormulario(prev => {
@@ -460,13 +435,6 @@ const FormularioNuevoExpediente = ({
               return Promise.resolve(); // No guardar si falla validación
             }
             
-            // Agregar información de campos modificados antes de guardar
-            if (camposModificadosPostPDF.length > 0) {
-              setFormulario(prev => ({
-                ...prev,
-                _campos_modificados_post_pdf: camposModificadosPostPDF
-              }));
-            }
             return guardarExpediente();
           }}
           companias={companias}

@@ -243,11 +243,20 @@ export const actualizarCalculosAutomaticos = (formularioActual) => {
   // Calcular estatus de pago
   const estatusPago = calcularEstatusPago(proximoPago, formularioActual.estatus_pago);
   
+  // Calcular fecha de aviso de renovación (Término - 30 días)
+  let fecha_aviso_renovacion = '';
+  if (termino_vigencia) {
+    const fechaTermino = new Date(termino_vigencia);
+    fechaTermino.setDate(fechaTermino.getDate() - 30);
+    fecha_aviso_renovacion = fechaTermino.toISOString().split('T')[0];
+  }
+  
   return {
     ...formularioActual,
     termino_vigencia,
     periodo_gracia: periodoGracia,
     fecha_vencimiento_pago: proximoPago,
-    estatus_pago: estatusPago
+    estatus_pago: estatusPago,
+    fecha_aviso_renovacion
   };
 };

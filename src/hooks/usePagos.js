@@ -116,50 +116,8 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
 
       console.log('✅ Pago aplicado correctamente');
 
-      // 3. 📝 Registrar evento en historial de trazabilidad
-      try {
-        const esFraccionado = (expedienteParaPago.tipo_pago === 'Fraccionado') || 
-                              (expedienteParaPago.forma_pago?.toUpperCase() === 'FRACCIONADO');
-        
-        const montoAplicado = esFraccionado 
-          ? (numeroReciboPago === 1 ? expedienteParaPago.primer_pago : expedienteParaPago.pagos_subsecuentes)
-          : expedienteParaPago.total;
-        
-        await historialService.registrarEvento({
-          expediente_id: expedienteParaPago.id,
-          cliente_id: expedienteParaPago.cliente_id,
-          tipo_evento: historialService.TIPOS_EVENTO.PAGO_REGISTRADO,
-          usuario_nombre: 'Sistema',
-          descripcion: esFraccionado 
-            ? `Aplicación de pago | ${expedienteParaPago.compania || 'Sin aseguradora'} | Póliza: ${expedienteParaPago.numero_poliza || 'Sin número'} | Recibo #${numeroReciboPago} de ${CONSTANTS.PAGOS_POR_FRECUENCIA[expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago] || 'N/A'} | Monto: $${montoAplicado || '0'} | Fecha: ${fechaUltimoPago}`
-            : `Aplicación de pago | ${expedienteParaPago.compania || 'Sin aseguradora'} | Póliza: ${expedienteParaPago.numero_poliza || 'Sin número'} | Pago completo | Monto: $${montoAplicado || '0'} | Fecha: ${fechaUltimoPago}`,
-          datos_adicionales: {
-            numero_poliza: expedienteParaPago.numero_poliza,
-            compania: expedienteParaPago.compania,
-            monto: montoAplicado,
-            fecha_pago_real: fechaUltimoPago,
-            numero_recibo: esFraccionado ? numeroReciboPago : null,
-            tipo_pago: expedienteParaPago.tipo_pago,
-            frecuencia_pago: expedienteParaPago.frecuenciaPago || expedienteParaPago.frecuencia_pago,
-            comprobante_nombre: comprobantePago?.name || null,
-            comprobante_url: comprobanteUrl || null,
-            nuevo_estatus: resultado.nuevoEstatusPago || 'Pagado'
-          }
-        });
-        console.log('✅ Evento de pago registrado en historial');
-      } catch (errorHistorial) {
-        console.error('⚠️ Error al registrar evento en historial (no crítico):', errorHistorial);
-      }
-
-      // 🔄 Cambiar etapa a "Pagada" si tenemos la función disponible
-      if (cambiarEstadoExpediente && typeof cambiarEstadoExpediente === 'function') {
-        try {
-          await cambiarEstadoExpediente(expedienteParaPago.id, 'Pagada');
-          console.log('✅ Etapa cambiada a "Pagada"');
-        } catch (errorEtapa) {
-          console.error('⚠️ Error al cambiar etapa (no crítico):', errorEtapa);
-        }
-      }
+      // 3. El registro de evento y cambio de etapa ya se hace en pagosService.js
+      // No duplicar logs aquí
 
       // 4. Actualizar estatus del recibo específico en la tabla recibos_pago
       try {

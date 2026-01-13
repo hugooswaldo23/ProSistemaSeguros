@@ -161,7 +161,10 @@ export async function aplicarPago(expediente, datosPago) {
     }
 
     // 9. Registrar evento en trazabilidad
-    const fechaPagoFormateada = new Date(fechaUltimoPago).toLocaleDateString('es-MX', { 
+    // Evitar conversión de zona horaria agregando hora local
+    const [año, mes, dia] = fechaUltimoPago.split('-');
+    const fechaPagoLocal = new Date(año, mes - 1, dia);
+    const fechaPagoFormateada = fechaPagoLocal.toLocaleDateString('es-MX', { 
       day: 'numeric', month: 'long', year: 'numeric' 
     });
     const fechaCapturaFormateada = new Date().toLocaleDateString('es-MX', { 
@@ -176,8 +179,25 @@ export async function aplicarPago(expediente, datosPago) {
         const fechaProximoRecibo = new Date(proximoReciboInfo.fecha_vencimiento).toLocaleDateString('es-MX', { 
           day: 'numeric', month: 'long', year: 'numeric' 
         });
+        
+        // Calcular estatus del próximo recibo
+        const fechaVencProximo = new Date(proximoReciboInfo.fecha_vencimiento);
+        const hoyCalc = new Date();
+        hoyCalc.setHours(0, 0, 0, 0);
+        fechaVencProximo.setHours(0, 0, 0, 0);
+        const diffDias = Math.ceil((fechaVencProximo - hoyCalc) / (1000 * 60 * 60 * 24));
+        
+        let estatusProximo;
+        if (diffDias < 0) {
+          estatusProximo = 'Vencido';
+        } else if (diffDias <= 5) {
+          estatusProximo = 'Por vencer';
+        } else {
+          estatusProximo = 'Pendiente';
+        }
+        
         siguienteReciboTexto = `\n\n📋 Próximo Recibo a Pagar:\n` +
-                              `   • Recibo: ${proximoReciboInfo.numero}\n` +
+                              `   • Recibo: ${proximoReciboInfo.numero}/${totalRecibos} ${estatusProximo}\n` +
                               `   • Monto: $${parseFloat(proximoReciboInfo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
                               `   • Vencimiento: ${fechaProximoRecibo}`;
       } else if (proximoPago) {
@@ -190,7 +210,7 @@ export async function aplicarPago(expediente, datosPago) {
       comentario = `💰 Pago Registrado\n` +
                   `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
                   `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
-                  `📄 Recibo/Pago: ${numeroPago}\n` +
+                  `📄 Recibo/Pago: ${numeroPago}/${totalRecibos} Pagado\n` +
                   `🧾 Comprobante: ${comprobantePago?.name || 'N/A'}\n` +
                   `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}${siguienteReciboTexto}\n` +
                   `📊 Estado: ${etapaFinal} | ${estatusReciboActual}`;
@@ -198,7 +218,7 @@ export async function aplicarPago(expediente, datosPago) {
       comentario = `💰 Pago Registrado (Final)\n` +
                   `📅 Fecha de pago: ${fechaPagoFormateada}\n` +
                   `📝 Fecha de captura: ${fechaCapturaFormateada}\n` +
-                  `📄 Recibo/Pago: ${numeroPago}\n` +
+                  `📄 Recibo/Pago: ${numeroPago}/${totalRecibos} Pagado\n` +
                   `🧾 Comprobante: ${comprobantePago?.name || 'N/A'}\n` +
                   `💵 Monto: $${parseFloat(montoRecibo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}\n` +
                   `✅ Póliza completamente pagada → ${etapaFinal} | ${estatusReciboActual}\n` +

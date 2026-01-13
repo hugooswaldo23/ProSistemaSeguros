@@ -260,6 +260,8 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
       `📅 *Vigencia:* ${inicioVig} → ${finVig}`,
       `💵 *Prima total:* ${primaTotal}`,
       `💳 *Forma de pago:* ${expediente.tipo_pago || 'N/A'}`,
+      ...(expediente.fecha_vencimiento_pago ? [`📆 *Fecha límite de pago:* ${fechaPagoFmt}`] : []),
+      ...(expediente.estatusPago ? [`💳 *Estatus del pago:* ${expediente.estatusPago}`] : []),
       ...infoRecibos,
       '',
       pdfUrl ? `📄 *Consulta tu póliza:* ${pdfUrl}` : '',

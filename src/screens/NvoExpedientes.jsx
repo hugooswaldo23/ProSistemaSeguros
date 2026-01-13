@@ -204,8 +204,6 @@ const ModuloNvoExpedientes = () => {
         setAgentes(agentesData);
         setAseguradoras(aseguradorasData);
         setTiposProductos(['Automóvil', 'Moto', 'Camión', 'Hogar', 'Empresa', 'GMM', 'Vida']);
-
-        console.log('✅ Datos iniciales cargados con recibos');
       } catch (error) {
         console.error('❌ Error al cargar datos iniciales:', error);
         if (mounted) {
@@ -419,13 +417,6 @@ const ModuloNvoExpedientes = () => {
       if (!clienteParaActualizar || !tipoDatoFaltante) {
         throw new Error('Datos incompletos para actualizar cliente');
       }
-
-      console.log('💾 Actualizando cliente con contacto faltante:', {
-        cliente_id: clienteParaActualizar.id,
-        campo: tipoDatoFaltante,
-        valor: valorContacto
-      });
-      console.log('📋 Cliente completo:', clienteParaActualizar);
 
       // Preparar datos según tipo de persona - LÓGICA ORIGINAL
       const datosActualizacion = {};
@@ -856,7 +847,7 @@ const ModuloNvoExpedientes = () => {
 
   // 🔄 DETECTAR Y ACTUALIZAR CAMBIOS EN DATOS DE LA PÓLIZA/EXPEDIENTE
   const actualizarPolizaSiCambio = useCallback(async (datosActuales, expedienteId, datosOriginales) => {
-    console.log('🔍 Detectando y actualizando cambios en datos de PÓLIZA...');
+
     
     if (!datosOriginales || !expedienteId) {
       console.log('❌ No hay datos originales o expedienteId para comparar');
@@ -885,14 +876,13 @@ const ModuloNvoExpedientes = () => {
           nuevo: valorActual
         };
         hayCambios = true;
-        console.log(`✅ CAMBIO PÓLIZA DETECTADO en ${campo}: "${valorOriginal}" → "${valorActual}"`);
       }
     });
 
     // Si hay cambios, actualizar en BD
     if (hayCambios) {
       try {
-        console.log('🔄 Actualizando póliza/expediente en BD...', cambiosDetectados);
+
         
         // Preparar datos para actualización (solo valores nuevos)
         const datosActualizacion = {};
@@ -910,7 +900,7 @@ const ModuloNvoExpedientes = () => {
           throw new Error(`Error ${response.status}: ${await response.text()}`);
         }
 
-        console.log('✅ Póliza/expediente actualizado exitosamente');
+
       } catch (error) {
         console.error('❌ Error al actualizar póliza:', error);
         // No interrumpir el flujo, solo loggear
@@ -931,22 +921,8 @@ const ModuloNvoExpedientes = () => {
     try {
       // Solo actualizar si hay cliente seleccionado y estamos en modo edición
       if (!clienteSeleccionado || !datosFormulario.cliente_id) {
-        console.log('🔍 No hay cliente seleccionado o cliente_id, saltando actualización');
         return;
       }
-
-      console.log('🔍 INICIANDO actualizarClienteSiCambio...');
-      console.log('👤 Cliente seleccionado:', clienteSeleccionado);
-      console.log('📝 Datos del formulario (relevantes):', {
-        telefono_fijo: datosFormulario.telefono_fijo,
-        telefono_movil: datosFormulario.telefono_movil,
-        contacto_telefono_fijo: datosFormulario.contacto_telefono_fijo,
-        contacto_telefono_movil: datosFormulario.contacto_telefono_movil
-      });
-      
-      // 🚨 DEBUG: Ver TODOS los campos del cliente para identificar el problema
-      console.log('🔍 DEBUGGING - TODOS los campos del cliente:', Object.keys(clienteSeleccionado));
-      console.log('🔍 DEBUGGING - Estructura completa del cliente:', clienteSeleccionado);
 
       // Verificar cambios en datos del cliente
 
@@ -994,15 +970,29 @@ const ModuloNvoExpedientes = () => {
         const valorFormulario = datosFormulario[campoFormulario];
         const valorCliente = clienteSeleccionado[campoCliente];
         
+        // Normalizar valores: undefined → null, mantener '' y otros valores
+        const valorFormNormalizado = valorFormulario === undefined ? null : valorFormulario;
+        const valorClienteNormalizado = valorCliente === undefined ? null : valorCliente;
+        
+        // Comparación: '' vs null se consideran diferentes si uno tiene valor
+        const sonDiferentes = (() => {
+          // Si ambos son nulos/vacíos, no hay cambio
+          if (!valorFormNormalizado && !valorClienteNormalizado) return false;
+          // Si uno es null/vacío y el otro tiene valor, sí hay cambio
+          if (!valorFormNormalizado && valorClienteNormalizado) return true;
+          if (valorFormNormalizado && !valorClienteNormalizado) return true;
+          // Si ambos tienen valor, comparar
+          return valorFormNormalizado !== valorClienteNormalizado;
+        })();
+        
         console.log(`🔍 Comparando ${campoFormulario}:`, {
           formulario: valorFormulario,
           cliente: valorCliente,
-          sonDiferentes: valorFormulario && valorFormulario !== valorCliente
+          sonDiferentes
         });
         
-        // Solo actualizar si el valor del formulario existe y es diferente
-        if (valorFormulario && valorFormulario !== valorCliente) {
-          // Usar el nombre del campo del formulario para el backend (snake_case)
+        // Detectar cambios
+        if (sonDiferentes) {
           cambiosDetectados[campoFormulario] = {
             anterior: valorCliente || '',
             nuevo: valorFormulario
@@ -1012,7 +1002,7 @@ const ModuloNvoExpedientes = () => {
         }
       }
 
-      console.log('📊 Resumen de cambios:', { hayCambios, cambiosDetectados });
+
 
       if (!hayCambios) {
         console.log('❌ No hay cambios, saltando actualización');
@@ -1062,7 +1052,9 @@ const ModuloNvoExpedientes = () => {
       Object.keys(cambiosDetectados).forEach(campo => {
         // Solo incluir si es un campo válido del cliente
         if (camposValidosActualizar.includes(campo)) {
-          datosActualizacion[campo] = cambiosDetectados[campo].nuevo;
+          const valorNuevo = cambiosDetectados[campo].nuevo;
+          // Enviar null si está vacío, o el valor tal cual
+          datosActualizacion[campo] = valorNuevo === '' ? null : valorNuevo;
         }
       });
       
@@ -1071,7 +1063,6 @@ const ModuloNvoExpedientes = () => {
         console.log('ℹ️ No hay cambios válidos de cliente para actualizar');
         return null;
       }
-      
       // Aplicar los cambios sobre los campos válidos
       const datosCompletos = {
         ...camposValidosCliente,
@@ -1105,7 +1096,7 @@ const ModuloNvoExpedientes = () => {
       }));
 
       // Registrar evento de actualización
-      console.log('🔍 Verificando datosFormulario.id:', datosFormulario.id, 'tipo:', typeof datosFormulario.id);
+
       
       if (datosFormulario.id) { 
         // Caso: editando expediente existente - NO registrar evento separado
@@ -1170,6 +1161,212 @@ const ModuloNvoExpedientes = () => {
     }
   }, [clienteSeleccionado]);
 
+  /**
+   * 🔍 FUNCIÓN CENTRALIZADA: Comparar snapshot del PDF vs datos actuales del formulario
+   * Detecta cambios en TODOS los campos del formulario y recibos para el LOG de historial
+   * NO modifica la BD, solo retorna los cambios detectados
+   */
+  const compararConSnapshot = useCallback((snapshot, datosActuales) => {
+    if (!snapshot) {
+      return { hayDiferencias: false, campos: [], detalles: {}, recibos: null };
+    }
+
+    const cambios = {
+      hayDiferencias: false,
+      campos: [],
+      detalles: {}
+    };
+
+    // Función auxiliar para normalizar valores
+    const normalizarValor = (valor) => {
+      if (valor === null || valor === undefined) return '';
+      if (typeof valor === 'string' && valor.includes('T')) {
+        return valor.split('T')[0]; // Fecha ISO -> solo fecha
+      }
+      return String(valor).trim();
+    };
+
+    // 1. CAMPOS DEL CLIENTE - Persona Física
+    const camposClienteFisica = [
+      'nombre', 'apellido_paterno', 'apellido_materno'
+    ];
+
+    // 2. CAMPOS DEL CLIENTE - Persona Moral
+    const camposClienteMoral = [
+      'razon_social', 'nombre_comercial'
+    ];
+
+    // 3. DATOS GENERALES DEL CLIENTE
+    const camposGeneralesCliente = [
+      'rfc', 'telefono_fijo', 'telefono_movil', 'email'
+    ];
+
+    // 4. DATOS DE CONTACTO PRINCIPAL (Persona Moral)
+    const camposContactoPrincipal = [
+      'contacto_telefono_fijo', 'contacto_telefono_movil', 'contacto_email',
+      'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno'
+    ];
+
+    // 5. ASEGURADORA Y PRODUCTO
+    const camposAseguradora = [
+      'compania', 'producto'
+    ];
+
+    // 6. AGENTES Y VENDEDORES
+    const camposAgentes = [
+      'agente', 'agente_id', 'clave_agente',
+      'sub_agente', 'subagente_id', 'vendedor_id'
+    ];
+
+    // 7. NÚMEROS DE PÓLIZA
+    const camposPoliza = [
+      'numero_poliza', 'numero_endoso'
+    ];
+
+    // 8. FECHAS DE PÓLIZA
+    const camposFechas = [
+      'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
+      'fecha_vencimiento_pago', 'fecha_aviso_renovacion'
+    ];
+
+    // 9. MONTOS Y CÁLCULOS
+    const camposMontos = [
+      'prima_neta', 'cargo_pago_fraccionado', 'gastos_expedicion',
+      'iva', 'subtotal', 'total'
+    ];
+
+    // 10. TIPO DE PAGO
+    const camposPago = [
+      'tipo_pago', 'frecuenciaPago', 'periodo_gracia',
+      'primer_pago', 'pagos_subsecuentes', 'estatusPago'
+    ];
+
+    // 11. DATOS DEL VEHÍCULO
+    const camposVehiculo = [
+      'marca', 'modelo', 'anio', 'numero_serie', 'placas',
+      'color', 'tipo_vehiculo', 'tipo_cobertura', 'suma_asegurada',
+      'conductor_habitual', 'edad_conductor', 'licencia_conducir'
+    ];
+
+    // Combinar todos los campos a comparar
+    const todosCampos = [
+      ...camposClienteFisica,
+      ...camposClienteMoral,
+      ...camposGeneralesCliente,
+      ...camposContactoPrincipal,
+      ...camposAseguradora,
+      ...camposAgentes,
+      ...camposPoliza,
+      ...camposFechas,
+      ...camposMontos,
+      ...camposPago,
+      ...camposVehiculo
+    ];
+
+    // Comparar cada campo
+    todosCampos.forEach(campo => {
+      const valorSnapshot = normalizarValor(snapshot[campo]);
+      const valorActual = normalizarValor(datosActuales[campo]);
+
+      if (valorSnapshot !== valorActual && (valorSnapshot || valorActual)) {
+        cambios.hayDiferencias = true;
+        cambios.campos.push(campo);
+        cambios.detalles[campo] = {
+          pdf: valorSnapshot || '(vacío)',
+          final: valorActual || '(vacío)'
+        };
+      }
+    });
+
+    // 12. COMPARAR RECIBOS (fechas de vencimiento y montos)
+    const recibosSnapshot = snapshot.recibos || [];
+    const recibosActuales = datosActuales.recibos || [];
+
+    // Parsear si vienen como string JSON
+    let recibosSnapParsed = recibosSnapshot;
+    let recibosActualesParsed = recibosActuales;
+
+    if (typeof recibosSnapParsed === 'string') {
+      try {
+        recibosSnapParsed = JSON.parse(recibosSnapParsed);
+      } catch (e) {
+        recibosSnapParsed = [];
+      }
+    }
+    if (typeof recibosActualesParsed === 'string') {
+      try {
+        recibosActualesParsed = JSON.parse(recibosActualesParsed);
+      } catch (e) {
+        recibosActualesParsed = [];
+      }
+    }
+
+    // Asegurar que sean arrays
+    if (!Array.isArray(recibosSnapParsed)) recibosSnapParsed = [];
+    if (!Array.isArray(recibosActualesParsed)) recibosActualesParsed = [];
+
+    if (recibosSnapParsed.length > 0 || recibosActualesParsed.length > 0) {
+      const cambiosRecibos = [];
+      const maxLength = Math.max(recibosSnapParsed.length, recibosActualesParsed.length);
+
+      for (let i = 0; i < maxLength; i++) {
+        const reciboSnap = recibosSnapParsed[i];
+        const reciboActual = recibosActualesParsed[i];
+
+        // Recibo agregado
+        if (!reciboSnap && reciboActual) {
+          cambios.hayDiferencias = true;
+          cambiosRecibos.push({
+            recibo: reciboActual.numero_recibo || (i + 1),
+            tipo_cambio: 'agregado',
+            fecha_pdf: null,
+            fecha_final: reciboActual.fecha_vencimiento || reciboActual.fecha,
+            monto: reciboActual.monto
+          });
+        }
+        // Recibo eliminado
+        else if (reciboSnap && !reciboActual) {
+          cambios.hayDiferencias = true;
+          cambiosRecibos.push({
+            recibo: i + 1,
+            tipo_cambio: 'eliminado',
+            fecha_pdf: reciboSnap.fecha_vencimiento || reciboSnap.fecha,
+            fecha_final: null,
+            monto: reciboSnap.monto
+          });
+        }
+        // Recibo editado (comparar fecha y monto)
+        else if (reciboSnap && reciboActual) {
+          const fechaSnap = normalizarValor(reciboSnap.fecha_vencimiento || reciboSnap.fecha);
+          const fechaActual = normalizarValor(reciboActual.fecha_vencimiento || reciboActual.fecha);
+          const montoSnap = normalizarValor(reciboSnap.monto);
+          const montoActual = normalizarValor(reciboActual.monto);
+
+          if (fechaSnap !== fechaActual || montoSnap !== montoActual) {
+            cambios.hayDiferencias = true;
+            cambiosRecibos.push({
+              recibo: reciboActual.numero_recibo || (i + 1),
+              tipo_cambio: 'editado',
+              fecha_pdf: reciboSnap.fecha_vencimiento || reciboSnap.fecha,
+              fecha_final: reciboActual.fecha_vencimiento || reciboActual.fecha,
+              monto_pdf: reciboSnap.monto,
+              monto_final: reciboActual.monto
+            });
+          }
+        }
+      }
+
+      if (cambiosRecibos.length > 0) {
+        cambios.recibos = {
+          cantidad: cambiosRecibos.length,
+          detalles: cambiosRecibos
+        };
+      }
+    }
+
+    return cambios;
+  }, []);
+
   const guardarExpediente = useCallback(async () => {
     if (!validarFormulario()) {
       return;
@@ -1180,71 +1377,52 @@ const ModuloNvoExpedientes = () => {
     try {
       const datos = { ...formulario };
       
-      // 🔄 DETECTAR CAMBIOS DE CLIENTE (solo sus datos personales)
+      // 🔄 PASO 1: ACTUALIZAR CLIENTE EN BD (si cambió)
       console.log('🔍 Actualizando cliente si cambió...');
       const cambiosClienteDetectados = await actualizarClienteSiCambio(datos);
       
-      // 🔄 DETECTAR Y ACTUALIZAR CAMBIOS DE PÓLIZA/EXPEDIENTE  
-      console.log('🔍 Detectando y actualizando cambios en datos de póliza...');
-      let datosOriginales = {};
-      if (modoEdicion && expedienteSeleccionado) {
-        datosOriginales = { ...expedienteSeleccionado };
-      } else {
-        // Para nuevos expedientes, usar datos originales guardados o asumir que todo es nuevo
-        datosOriginales = window.__datosOriginalesPDF || {};
-        console.log('📋 Datos originales del PDF:', datosOriginales);
-      }
+      // 🔄 PASO 2: DETECTAR CAMBIOS MANUALES POST-PDF (para el LOG)
+      let cambiosManualesDetectados = null;
+      const fueExtractorPDF = datos._datos_desde_pdf === true;
       
-      // Necesitamos el expedienteId para actualizar - obtenerlo después de guardar si es nuevo
-      let cambiosPoliza = { hayCambios: false };
+      console.log('🔍 ===== DEBUG DETECCIÓN DE CAMBIOS =====');
+      console.log('🔍 modoEdicion:', modoEdicion);
+      console.log('🔍 fueExtractorPDF:', fueExtractorPDF);
+      console.log('🔍 window.__datosOriginalesPDF existe:', !!window.__datosOriginalesPDF);
       
-      // Solo detectar cambios si tenemos datos originales válidos
-      if (Object.keys(datosOriginales).length > 0) {
-        if (modoEdicion && expedienteSeleccionado?.id) {
-          // Si es edición, actualizar inmediatamente
-          cambiosPoliza = await actualizarPolizaSiCambio(datos, expedienteSeleccionado.id, datosOriginales);
-        } else {
-          // Si es creación, detectar cambios para el log
-          const camposPoliza = [
-            'fecha_emision', 'inicio_vigencia', 'termino_vigencia', 
-            'prima_neta', 'iva', 'prima_total', 'total',
-            'tipo_pago', 'frecuenciaPago', 
-            'primer_pago', 'pagos_subsecuentes',
-            'periodo_gracia', 'fecha_vencimiento_pago',
-            'compania', 'numero_poliza', 'producto',
-            'marca', 'modelo', 'anio', 'placas'
-          ];
-          const cambiosDetectados = {};
-          let hayCambios = false;
-          
-          camposPoliza.forEach(campo => {
-            const valorActual = datos[campo];
-            const valorOriginal = datosOriginales[campo];
-            if (valorActual && String(valorActual) !== String(valorOriginal)) {
-              cambiosDetectados[campo] = { anterior: valorOriginal || '', nuevo: valorActual };
-              hayCambios = true;
-              console.log(`✅ CAMBIO PÓLIZA: ${campo}: "${valorOriginal}" → "${valorActual}"`);
-            }
-          });
-          
-          if (hayCambios) {
-            const descripcionCambios = Object.keys(cambiosDetectados).map(campo => {
-              const cambio = cambiosDetectados[campo];
-              const nombreCampo = campo.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-              return `${nombreCampo}: "${cambio.anterior}" → "${cambio.nuevo}"`;
-            }).join(' | ');
-            cambiosPoliza = { hayCambios, cambiosDetectados, descripcionCambios };
+      if (!modoEdicion && fueExtractorPDF && window.__datosOriginalesPDF) {
+        console.log('🔍 Detectando cambios manuales post-PDF...');
+        console.log('🔍 Snapshot original:', window.__datosOriginalesPDF);
+        console.log('🔍 Datos actuales:', datos);
+        
+        cambiosManualesDetectados = compararConSnapshot(window.__datosOriginalesPDF, datos);
+        
+        console.log('🔍 Resultado de comparación:', cambiosManualesDetectados);
+        
+        if (cambiosManualesDetectados.hayDiferencias) {
+          console.log('✅ ===== CAMBIOS DETECTADOS =====');
+          console.log('✅ Campos editados:', cambiosManualesDetectados.campos.length);
+          console.log('✅ Lista de campos:', cambiosManualesDetectados.campos);
+          console.log('✅ Detalles:', cambiosManualesDetectados.detalles);
+          console.log('✅ Recibos editados:', cambiosManualesDetectados.recibos?.cantidad || 0);
+          if (cambiosManualesDetectados.recibos) {
+            console.log('✅ Detalles recibos:', cambiosManualesDetectados.recibos.detalles);
           }
+          console.log('✅ ================================');
+        } else {
+          console.log('ℹ️ No se detectaron cambios manuales');
         }
       } else {
-        console.log('⚠️ No hay datos originales - no se pueden detectar cambios de póliza');
+        console.log('⚠️ NO se ejecutó detección de cambios. Razones:');
+        if (modoEdicion) console.log('  - Es modo edición');
+        if (!fueExtractorPDF) console.log('  - No fue extractor PDF');
+        if (!window.__datosOriginalesPDF) console.log('  - No hay snapshot');
       }
+      console.log('🔍 ======================================');
       
-      console.log('✅ Cambios en póliza:', cambiosPoliza);
-      
-      
-      // �🔍 En modo edición, guardar snapshot del estado ORIGINAL antes de los cambios
+      // 🔍 En modo edición, guardar snapshot del estado ORIGINAL antes de los cambios
       let snapshotOriginal = null;
+      let snapshotRecibosOriginales = null;
       if (modoEdicion && expedienteSeleccionado) {
         snapshotOriginal = {
           fecha_emision: expedienteSeleccionado.fecha_emision,
@@ -1261,6 +1439,15 @@ const ModuloNvoExpedientes = () => {
           producto: expedienteSeleccionado.producto,
           tipo_cobertura: expedienteSeleccionado.tipo_cobertura
         };
+        
+        // 📋 Guardar snapshot de recibos originales si existen
+        if (expedienteSeleccionado.recibos && Array.isArray(expedienteSeleccionado.recibos)) {
+          snapshotRecibosOriginales = expedienteSeleccionado.recibos.map(r => ({
+            numero_recibo: r.numero_recibo,
+            fecha_vencimiento: r.fecha_vencimiento,
+            monto: r.monto
+          }));
+        }
       }
       
       // Capturar si cambió algún campo que afecta los recibos ANTES de limpiar las banderas
@@ -1277,18 +1464,10 @@ const ModuloNvoExpedientes = () => {
         cambioFrecuenciaPago || cambioTotal || cambioPrimerPago || cambioPagosSubsecuentes
       );
       
-      // 🔥 GUARDAR flags y snapshot ANTES de eliminarlos (para el log de trazabilidad)
-      const fueExtractorPDF = datos._datos_desde_pdf === true;
-      const camposModificadosPostPDF = datos._campos_modificados_post_pdf || [];
-      const metodoCaptura = datos._metodo_captura || (fueExtractorPDF ? 'pdf' : 'manual');
-      const snapshotPDF = datos._snapshot_pdf; // Guardar snapshot antes de limpiar
-      
       // Limpiar campos temporales y banderas
       delete datos._fechaManual;
       delete datos._datos_desde_pdf;
       delete datos._metodo_captura;
-      delete datos._snapshot_pdf;
-      delete datos._campos_modificados_post_pdf;
       delete datos._inicio_vigencia_changed;
       delete datos._periodo_gracia_changed;
       delete datos._tipo_pago_changed;
@@ -1296,8 +1475,6 @@ const ModuloNvoExpedientes = () => {
       delete datos._total_changed;
       delete datos._primer_pago_changed;
       delete datos._pagos_subsecuentes_changed;
-      delete datos.cliente;
-      delete datos.historial;
       delete datos.cliente;
       delete datos.historial;
 
@@ -1365,9 +1542,12 @@ const ModuloNvoExpedientes = () => {
           delete datos.recibos;
         }
       }
-
+      
+      console.log('💾 ========== GUARDANDO EXPEDIENTE ==========');
+      console.log('💾 Recibos en datos a guardar:', datos.recibos);
+      console.log('💾 ===========================================');
+      
       // Enviando al backend
-      // Enviando datos al backend
 
       let response;
       if (modoEdicion) {
@@ -1396,25 +1576,83 @@ const ModuloNvoExpedientes = () => {
       // Obtener ID del expediente (para creación o edición)
       const expedienteId = resultado.data?.id || resultado.id;
       
-      // Si es creación y no vienen recibos, obtenerlos del backend
+      // Si es creación y no vienen recibos, obtenerlos del backend o usar los que tenemos
       let recibosParaLog = resultado.data?.recibos || resultado.recibos || null;
+      console.log('🔍 recibosParaLog inicial:', recibosParaLog);
+      console.log('🔍 datos.recibos disponible:', datos.recibos);
+      
       if (!modoEdicion && !recibosParaLog && (datos.tipo_pago === 'Fraccionado' || datos.tipo_pago === 'Anual')) {
         try {
           const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
           if (resRecibos.ok) {
             const dataRecibos = await resRecibos.json();
             recibosParaLog = dataRecibos.data || dataRecibos || null;
-            // Recibos obtenidos
+            console.log('🔍 recibosParaLog del backend:', recibosParaLog);
           }
         } catch (err) {
           console.error('⚠️ Error al obtener recibos para log:', err);
         }
       }
       
-      // 📝 Registrar evento en historial de trazabilidad
+      // Si aún no hay recibos pero están en datos, usarlos
+      if (!recibosParaLog && datos.recibos && Array.isArray(datos.recibos) && datos.recibos.length > 0) {
+        recibosParaLog = datos.recibos;
+        console.log('✅ Usando recibos de datos.recibos:', recibosParaLog.length);
+      }
+      
+      // 📋 Si es edición y se regeneraron recibos, obtener los nuevos para comparar
+      if (modoEdicion && debeRegenerarRecibos) {
+        try {
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          if (resRecibos.ok) {
+            const dataRecibos = await resRecibos.json();
+            recibosParaLog = dataRecibos.data || dataRecibos || null;
+          }
+        } catch (err) {
+          console.error('⚠️ Error al obtener recibos actualizados:', err);
+        }
+      }
+      
+      // 📊 Detectar cambios en fechas de recibos en EDICIÓN
+      let cambiosRecibosEdicion = null;
+      if (modoEdicion && snapshotRecibosOriginales && recibosParaLog && debeRegenerarRecibos) {
+        const cambiosDetectados = [];
+        
+        // Comparar cada recibo
+        recibosParaLog.forEach((reciboNuevo, idx) => {
+          const reciboOriginal = snapshotRecibosOriginales[idx];
+          if (reciboOriginal) {
+            const fechaOriginal = reciboOriginal.fecha_vencimiento;
+            const fechaNueva = reciboNuevo.fecha_vencimiento;
+            
+            if (fechaOriginal !== fechaNueva) {
+              cambiosDetectados.push({
+                numero_recibo: reciboNuevo.numero_recibo,
+                fecha_anterior: fechaOriginal,
+                fecha_nueva: fechaNueva,
+                monto: reciboNuevo.monto
+              });
+            }
+          }
+        });
+        
+        if (cambiosDetectados.length > 0) {
+          cambiosRecibosEdicion = {
+            cantidad_cambios: cambiosDetectados.length,
+            cambios_detallados: cambiosDetectados
+          };
+        }
+      }
+      
+      // 🧹 Limpiar snapshot global después de usarlo
+      if (window.__datosOriginalesPDF) {
+        window.__datosOriginalesPDF = null;
+      }
+      
+      //  Registrar evento en historial de trazabilidad
       try {
         if (modoEdicion) {
-          // Registro de EDICIÓN - detectar qué campos cambiaron
+          // REGISTRO DE EDICIÓN
           const camposEditados = {};
           if (snapshotOriginal) {
             // Comparar campos importantes
@@ -1437,11 +1675,9 @@ const ModuloNvoExpedientes = () => {
             // Función para normalizar valores antes de comparar
             const normalizarValor = (valor) => {
               if (!valor) return '';
-              // Si es fecha ISO, extraer solo la parte de fecha
               if (typeof valor === 'string' && valor.includes('T')) {
                 return valor.split('T')[0];
               }
-              // Convertir a string y limpiar espacios
               return String(valor).trim();
             };
             
@@ -1449,7 +1685,6 @@ const ModuloNvoExpedientes = () => {
               const valorAnterior = snapshotOriginal[campo];
               const valorNuevo = datos[campo] || datos[campo.replace(/_/g, '')] || datos[campo.replace(/_([a-z])/g, (m, p1) => p1.toUpperCase())];
               
-              // Normalizar ambos valores antes de comparar
               const valorAnteriorNormalizado = normalizarValor(valorAnterior);
               const valorNuevoNormalizado = normalizarValor(valorNuevo);
               
@@ -1464,23 +1699,13 @@ const ModuloNvoExpedientes = () => {
           
           const cantidadCambios = Object.keys(camposEditados).length;
           
-          // Función auxiliar para formatear fechas (eliminar hora si es ISO)
-          const formatearFecha = (valor) => {
-            if (!valor) return 'vacío';
-            // Si es una fecha ISO (contiene T), extraer solo la fecha
-            if (typeof valor === 'string' && valor.includes('T')) {
-              return valor.split('T')[0];
-            }
-            return valor;
-          };
-          
-          // Formatear campos editados para el nuevo formato
+          // Formatear campos editados
           const cambiosDetallados = {};
           Object.entries(camposEditados).forEach(([etiqueta, cambio]) => {
             const nombreCampo = etiqueta.toLowerCase().replace(/ /g, '_');
             cambiosDetallados[nombreCampo] = {
-              anterior: formatearFecha(cambio.antes),
-              nuevo: formatearFecha(cambio.despues)
+              anterior: cambio.antes,
+              nuevo: cambio.despues
             };
           });
           
@@ -1491,7 +1716,6 @@ const ModuloNvoExpedientes = () => {
             usuario_nombre: 'Sistema',
             descripcion: `Edición manual de expediente | ${datos.compania || 'Sin aseguradora'} | Póliza: ${datos.numero_poliza || 'Sin número'} | ${cantidadCambios} campo(s) modificado(s)`,
             datos_adicionales: {
-              // Datos básicos que siempre se muestran
               metodo_captura: 'Edición Manual',
               fecha_edicion: new Date().toISOString(),
               aseguradora: datos.compania,
@@ -1514,72 +1738,28 @@ const ModuloNvoExpedientes = () => {
                 }
               }),
               
-              // Cambios detectados (mismo formato que captura PDF)
+              // Cambios detectados en póliza
               poliza_cambios: cantidadCambios > 0 ? {
                 descripcion: 'Datos de póliza editados manualmente',
                 campos_actualizados: Object.keys(cambiosDetallados),
                 cambios_detallados: cambiosDetallados
-              } : null
+              } : null,
+              
+              // Cambios en recibos (fechas de vencimiento)
+              ...(cambiosRecibosEdicion && {
+                recibos_cambios: {
+                  descripcion: 'Fechas de vencimiento de recibos actualizadas por cambio en vigencia',
+                  cantidad_cambios: cambiosRecibosEdicion.cantidad_cambios,
+                  cambios_detallados: cambiosRecibosEdicion.cambios_detallados
+                }
+              })
             }
           });
-          // Evento registrado
         } else {
-          // Registro de CREACIÓN
+          // REGISTRO DE CREACIÓN
           const expedienteId = resultado.data?.id || resultado.id;
           
-          // Construir nombre completo del cliente
-          let nombreCliente = '';
-          if (datos.razon_social || datos.razonSocial) {
-            nombreCliente = datos.razon_social || datos.razonSocial;
-          } else {
-            const partes = [
-              datos.nombre,
-              datos.apellido_paterno || datos.apellidoPaterno,
-              datos.apellido_materno || datos.apellidoMaterno
-            ].filter(Boolean);
-            nombreCliente = partes.join(' ') || 'Sin nombre';
-          }
-          
-          // Calcular fechas límite de pago
-          let fechasLimitePago = [];
-          if (datos.tipo_pago === 'Fraccionado' && (datos.frecuenciaPago || datos.frecuencia_pago)) {
-            const frecuencia = datos.frecuenciaPago || datos.frecuencia_pago;
-            const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-            
-            // Si hay recibos generados, obtener sus fechas
-            if (resultado.data?.recibos && Array.isArray(resultado.data.recibos)) {
-              fechasLimitePago = resultado.data.recibos.map(r => r.fecha_vencimiento);
-            }
-          } else {
-            // Pago anual: solo una fecha
-            fechasLimitePago = [datos.fecha_vencimiento_pago || datos.proximoPago || datos.fecha_pago || null];
-          }
-          
-          // Preparar información de campos editados (si hubo extracción PDF)
-          let camposEditados = null;
-          if (fueExtractorPDF && camposModificadosPostPDF.length > 0 && snapshotPDF) {
-            try {
-              const snapshot = JSON.parse(snapshotPDF);
-              camposEditados = {};
-              
-              camposModificadosPostPDF.forEach(campo => {
-                const valorOriginal = snapshot[campo];
-                const valorFinal = datos[campo];
-                
-                if (valorOriginal !== valorFinal) {
-                  camposEditados[campo] = {
-                    antes: valorOriginal || 'vacío',
-                    despues: valorFinal || 'vacío'
-                  };
-                }
-              });
-            } catch (err) {
-              console.error('Error al procesar campos editados:', err);
-            }
-          }
-          
           // Construir descripción del log
-          let descripcionCaptura = '';
           const aseguradora = datos.compania || 'Sin aseguradora';
           const numPoliza = datos.numero_poliza || 'Sin número';
           const tipoPago = datos.tipo_pago || 'Sin tipo de pago';
@@ -1588,30 +1768,128 @@ const ModuloNvoExpedientes = () => {
             : '';
           const totalFormateado = `$${datos.total || '0'}`;
           
+          let descripcionCaptura = '';
           if (fueExtractorPDF) {
             descripcionCaptura = `Captura de póliza (PDF) | ${aseguradora} | Póliza: ${numPoliza} | ${tipoPago} ${frecuencia} | Total: ${totalFormateado}`;
-            if (camposModificadosPostPDF.length > 0) {
-              descripcionCaptura += ` | ${camposModificadosPostPDF.length} campo(s) modificado(s)`;
-            }
             
-            // Añadir cambios si los hay
-            const cambiosDescripciones = [];
-            if (cambiosClienteDetectados?.descripcionCambios) {
-              cambiosDescripciones.push(`Cliente: ${cambiosClienteDetectados.descripcionCambios}`);
-            }
-            if (cambiosPoliza?.hayCambios && cambiosPoliza.descripcionCambios) {
-              cambiosDescripciones.push(`Póliza: ${cambiosPoliza.descripcionCambios}`);
-            }
-            
-            if (cambiosDescripciones.length > 0) {
-              console.log('✅ INCLUYENDO cambios en evento de captura:', cambiosDescripciones.join(' | '));
-              descripcionCaptura += ` | Datos editados manualmente: ${cambiosDescripciones.join(' | ')}`;
-            } else {
-              console.log('⚠️ NO hay cambios para incluir');
+            // Añadir mención de cambios manuales si los hay
+            if (cambiosManualesDetectados?.hayDiferencias) {
+              const totalCambios = cambiosManualesDetectados.campos.length + (cambiosManualesDetectados.recibos?.cantidad || 0);
+              descripcionCaptura += ` | ${totalCambios} cambio(s) manual(es)`;
             }
           } else {
             descripcionCaptura = `Captura de póliza (Manual) | ${aseguradora} | Póliza: ${numPoliza} | ${tipoPago} ${frecuencia} | Total: ${totalFormateado}`;
           }
+          
+          // Obtener información del agente
+          let agenteInfo = null;
+          if (datos.agente_id) {
+            try {
+              const agenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${datos.agente_id}`);
+              if (agenteResponse.ok) {
+                const agenteData = await agenteResponse.json();
+                const agente = agenteData.data || agenteData;
+                if (agente) {
+                  agenteInfo = {
+                    nombre: `${agente.nombre || ''} ${agente.apellidoPaterno || agente.apellido_paterno || ''} ${agente.apellidoMaterno || agente.apellido_materno || ''}`.trim() || 'Sin nombre',
+                    clave: datos.clave_agente || 'Sin clave'
+                  };
+                }
+              }
+            } catch (err) {
+              console.error('⚠️ Error al obtener info del agente:', err);
+            }
+          }
+          
+          // Obtener información del sub-agente/vendedor
+          let subAgenteInfo = null;
+          const subAgenteId = datos.subagente_id || datos.vendedor_id || datos.sub_agente;
+          
+          // Solo intentar fetch si parece ser un ID válido (número o UUID)
+          const esIdValido = subAgenteId && (
+            !isNaN(subAgenteId) || 
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(subAgenteId)
+          );
+          
+          if (esIdValido) {
+            try {
+              const subAgenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${subAgenteId}`);
+              if (subAgenteResponse.ok) {
+                const subAgenteData = await subAgenteResponse.json();
+                const subAgente = subAgenteData.data || subAgenteData;
+                if (subAgente) {
+                  subAgenteInfo = {
+                    nombre: `${subAgente.nombre || ''} ${subAgente.apellidoPaterno || subAgente.apellido_paterno || ''} ${subAgente.apellidoMaterno || subAgente.apellido_materno || ''}`.trim() || 'Sin nombre'
+                  };
+                }
+              }
+            } catch (err) {
+              console.error('⚠️ Error al obtener info del sub-agente:', err);
+            }
+          } else if (subAgenteId) {
+            // Si no es un ID válido pero existe, usar el valor directo como nombre
+            subAgenteInfo = {
+              nombre: String(subAgenteId)
+            };
+          }
+          
+          // Determinar origen del cliente
+          let codigoCliente = 'Sin código';
+          let origenCliente = '';
+          let clienteNuevoInfo = null;
+          
+          if (window.__clienteCreadoDurantePDF) {
+            const datosCliente = window.__clienteCreadoDurantePDF;
+            const cliente = datosCliente.cliente;
+            codigoCliente = cliente?.codigo || datos.codigo_cliente || 'Sin código';
+            
+            const nombreCliente = cliente.razonSocial || cliente.razon_social || 
+                                 `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''} ${cliente.apellidoMaterno || cliente.apellido_materno || ''}`.trim() || 
+                                 'Sin nombre';
+            
+            origenCliente = `Cliente nuevo (#${codigoCliente})`;
+            
+            // Guardar info del cliente nuevo para incluir en datos_adicionales
+            clienteNuevoInfo = {
+              cliente_id: cliente.id,
+              codigo: codigoCliente,
+              nombre_cliente: nombreCliente,
+              rfc: cliente.rfc,
+              tipo_persona: cliente.tipoPersona || 'No definido',
+              email: cliente.email || null,
+              telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || null,
+              metodo_creacion: datosCliente.metodo
+            };
+            
+            // Limpiar flag
+            window.__clienteCreadoDurantePDF = null;
+          } else {
+            codigoCliente = clienteSeleccionado?.codigo || datos.codigo_cliente || 'Sin código';
+            origenCliente = `Cliente seleccionado (#${codigoCliente})`;
+          }
+          
+          // Calcular fechas límite de pago
+          let fechasLimitePago = [];
+          if (datos.tipo_pago === 'Fraccionado' && (datos.frecuenciaPago || datos.frecuencia_pago)) {
+            if (recibosParaLog && Array.isArray(recibosParaLog)) {
+              fechasLimitePago = recibosParaLog.map(r => r.fecha_vencimiento);
+            }
+          } else {
+            fechasLimitePago = [datos.fecha_vencimiento_pago || datos.proximoPago || datos.fecha_pago || null];
+          }
+          
+          // Registrar evento en historial
+          console.log('📝 ===== REGISTRANDO EN HISTORIAL =====');
+          console.log('📝 Tipo evento:', fueExtractorPDF ? 'CAPTURA_EXTRACTOR_PDF' : 'CAPTURA_MANUAL');
+          console.log('📝 Descripción:', descripcionCaptura);
+          console.log('📝 ¿Hay cambios manuales?', !!cambiosManualesDetectados?.hayDiferencias);
+          if (cambiosManualesDetectados?.hayDiferencias) {
+            console.log('📝 Cambios que se van a guardar:', {
+              campos: cambiosManualesDetectados.campos.length,
+              recibos: cambiosManualesDetectados.recibos?.cantidad || 0
+            });
+          }
+          console.log('📝 ====================================');
           
           await historialService.registrarEvento({
             expediente_id: expedienteId,
@@ -1622,19 +1900,27 @@ const ModuloNvoExpedientes = () => {
             usuario_nombre: 'Sistema',
             descripcion: descripcionCaptura,
             datos_adicionales: {
-              // 🔍 1. Método de captura
-              metodo_captura: metodoCaptura === 'pdf' ? 'Extractor PDF' : 'Captura Manual',
+              // 1. Método de captura
+              metodo_captura: fueExtractorPDF ? 'Extractor PDF' : 'Captura Manual',
               
-              // 🏢 2. Aseguradora
+              // 2. Información básica
               aseguradora: datos.compania || 'Sin aseguradora',
-              
-              // 📄 3. Número de póliza
               numero_poliza: datos.numero_poliza || 'Sin número',
-              
-              // 📅 4. Fecha de captura
               fecha_captura: new Date().toISOString(),
               
-              // 👥 CAMBIOS DE CLIENTE (si los hay)
+              // 3. Cliente
+              cliente_origen: origenCliente,
+              
+              // 3.1 Si es cliente nuevo, incluir sus datos
+              ...(clienteNuevoInfo && {
+                cliente_nuevo: clienteNuevoInfo
+              }),
+              
+              // 4. Agente y Vendedor
+              agente: agenteInfo,
+              subagente: subAgenteInfo,
+              
+              // 5. Cambios de cliente (si los hay - actualizaciones en BD)
               ...(cambiosClienteDetectados && {
                 cliente_cambios: {
                   descripcion: 'Datos personales del cliente editados',
@@ -1643,118 +1929,113 @@ const ModuloNvoExpedientes = () => {
                 }
               }),
               
-              // � CAMBIOS DE PÓLIZA (si los hay)
-              ...(cambiosPoliza && cambiosPoliza.hayCambios && {
-                poliza_cambios: {
-                  descripcion: 'Datos de póliza editados manualmente distintos a la extracción del PDF',
-                  campos_actualizados: Object.keys(cambiosPoliza.cambiosDetectados),
-                  cambios_detallados: cambiosPoliza.cambiosDetectados
+              // 6. ✨ CAMBIOS MANUALES POST-PDF (usando la nueva función compararConSnapshot)
+              ...(cambiosManualesDetectados?.hayDiferencias && {
+                cambios_manuales: {
+                  descripcion: 'Datos editados manualmente después de extraer del PDF',
+                  campos_editados: cambiosManualesDetectados.campos.length > 0 ? {
+                    cantidad: cambiosManualesDetectados.campos.length,
+                    lista: cambiosManualesDetectados.campos,
+                    detalles: cambiosManualesDetectados.detalles
+                  } : null,
+                  recibos_editados: cambiosManualesDetectados.recibos || null
                 }
               }),
               
-              // 📅 5. Fecha de emisión
+              // 7. Fechas importantes
               fecha_emision: datos.fecha_emision || null,
-              
-              // 📅 6. Inicio de vigencia
               inicio_vigencia: datos.inicio_vigencia || null,
-              
-              // 📅 7. Término de vigencia
               termino_vigencia: datos.termino_vigencia || null,
               
-              // 💰 8. Fecha(s) límite de pago
+              // 8. Fechas límite de pago
               fechas_limite_pago: fechasLimitePago,
               tipo_pago: datos.tipo_pago || null,
               frecuencia_pago: datos.tipo_pago === 'Fraccionado' ? (datos.frecuenciaPago || datos.frecuencia_pago) : null,
               
-              // � Información de recibos generados
-              recibos_generados: recibosParaLog ? {
-                cantidad: recibosParaLog.length,
-                detalles: recibosParaLog.map(r => ({
-                  numero: r.numero_recibo,
-                  monto: r.monto,
-                  fecha_vencimiento: r.fecha_vencimiento,
-                  estatus: r.estatus_pago
-                }))
-              } : null,
+              // 9. Información de recibos generados
+              recibos_generados: (() => {
+                try {
+                  // datos.recibos puede ser string JSON o array
+                  let recibosArray = datos.recibos;
+                  if (typeof recibosArray === 'string') {
+                    recibosArray = JSON.parse(recibosArray);
+                  }
+                  
+                  if (recibosArray && Array.isArray(recibosArray) && recibosArray.length > 0) {
+                    return {
+                      cantidad: recibosArray.length,
+                      detalles: recibosArray.map(r => ({
+                        numero: r.numero_recibo,
+                        monto: r.monto,
+                        fecha_vencimiento: r.fecha_vencimiento,
+                        estatus: r.estatus_pago || 'Pendiente'
+                      }))
+                    };
+                  }
+                } catch (err) {
+                  console.error('⚠️ Error al parsear recibos:', err);
+                }
+                return null;
+              })(),
               monto_total: datos.total || null,
               monto_primer_pago: datos.tipo_pago === 'Fraccionado' ? datos.primer_pago : datos.total,
               monto_pagos_subsecuentes: datos.tipo_pago === 'Fraccionado' ? datos.pagos_subsecuentes : null,
               
-              // �👤 9. Quién capturó
-              usuario_capturo: 'Sistema', // TODO: Obtener usuario real del login
+              // 10. Estatus de pago (calcular del recibo más viejo pendiente)
+              estatus_pago: (() => {
+                try {
+                  let recibosArray = datos.recibos;
+                  if (typeof recibosArray === 'string') {
+                    recibosArray = JSON.parse(recibosArray);
+                  }
+                  
+                  if (recibosArray && Array.isArray(recibosArray) && recibosArray.length > 0) {
+                    // Ordenar por fecha de vencimiento (más viejo primero)
+                    const recibosOrdenados = [...recibosArray].sort((a, b) => 
+                      new Date(a.fecha_vencimiento || a.fecha) - new Date(b.fecha_vencimiento || b.fecha)
+                    );
+                    
+                    // Tomar el primer recibo (más viejo)
+                    const primerRecibo = recibosOrdenados[0];
+                    const fechaVenc = new Date(primerRecibo.fecha_vencimiento || primerRecibo.fecha);
+                    const hoy = new Date();
+                    hoy.setHours(0, 0, 0, 0);
+                    fechaVenc.setHours(0, 0, 0, 0);
+                    const diffDias = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+                    
+                    if (primerRecibo.estatus_pago === 'Pagado') return 'Pagado';
+                    if (diffDias < 0) return 'Vencido';
+                    if (diffDias <= 5) return 'Por Vencer';
+                    return 'Pendiente';
+                  }
+                } catch (err) {
+                  console.error('⚠️ Error al calcular estatus de pago:', err);
+                }
+                return 'Pendiente';
+              })(),
               
-              // 🎯 10. Etapa en que quedó
-              etapa_inicial: datos.etapa_activa || 'Captura',
-              
-              // ✏️ Campos editados manualmente (si hubo extracción PDF)
-              campos_editados_manualmente: camposEditados
+              // 11. Quién capturó y etapa
+              usuario_capturo: 'Sistema',
+              etapa_inicial: datos.etapa_activa || 'Captura'
             }
           });
-          console.log('✅ Evento de creación registrado en historial:', fueExtractorPDF ? 'PDF' : 'Manual');
-          
-          // 📝 LOGGING ADICIONAL: Cliente creado durante extracción PDF
-          if (window.__clienteCreadoDurantePDF) {
-            try {
-              const datosCliente = window.__clienteCreadoDurantePDF;
-              const cliente = datosCliente.cliente;
-              
-              // Construir nombre completo del cliente
-              let nombreCliente = '';
-              if (cliente.razonSocial || cliente.razon_social) {
-                nombreCliente = cliente.razonSocial || cliente.razon_social;
-              } else {
-                const partes = [
-                  cliente.nombre,
-                  cliente.apellidoPaterno || cliente.apellido_paterno,
-                  cliente.apellidoMaterno || cliente.apellido_materno
-                ].filter(Boolean);
-                nombreCliente = partes.join(' ') || 'Sin nombre';
-              }
-              
-              await historialService.registrarEvento({
-                expediente_id: expedienteId,
-                cliente_id: cliente.id,
-                tipo_evento: historialService.TIPOS_EVENTO.CLIENTE_CREADO,
-                usuario_nombre: 'Sistema',
-                descripcion: `Cliente creado | ${cliente.tipoPersona || 'Tipo no definido'} | ${nombreCliente} | RFC: ${cliente.rfc} | Método: ${datosCliente.metodo}`,
-                datos_adicionales: {
-                  cliente_id: cliente.id,
-                  nombre_cliente: nombreCliente,
-                  rfc: cliente.rfc,
-                  tipo_persona: cliente.tipoPersona || 'No definido',
-                  email: cliente.email || 'No definido',
-                  telefono_movil: cliente.telefonoMovil || cliente.telefono_movil || 'No definido',
-                  fecha_creacion: datosCliente.fecha,
-                  metodo_creacion: datosCliente.metodo,
-                  contexto: 'Creado automáticamente durante extracción de PDF',
-                  datos_extraidos: {
-                    razon_social: cliente.razonSocial || cliente.razon_social || null,
-                    nombre_comercial: cliente.nombreComercial || cliente.nombre_comercial || null,
-                    nombre: cliente.nombre || null,
-                    apellido_paterno: cliente.apellidoPaterno || cliente.apellido_paterno || null,
-                    apellido_materno: cliente.apellidoMaterno || cliente.apellido_materno || null,
-                    telefono_fijo: cliente.telefonoFijo || cliente.telefono_fijo || null
-                  }
-                }
-              });
-              console.log('✅ Evento de cliente creado registrado en historial');
-              
-              // Limpiar flag
-              window.__clienteCreadoDurantePDF = null;
-            } catch (errorClienteHistorial) {
-              console.error('⚠️ Error al registrar cliente creado en historial:', errorClienteHistorial);
-            }
-          }
-          
-          // TODO: Registrar segundo evento de etapa cuando se arregle el parser
+
         }
       } catch (errorHistorial) {
         console.error('⚠️ Error al registrar en historial (no crítico):', errorHistorial);
+        console.error('⚠️ Detalles del error:', {
+          message: errorHistorial.message,
+          stack: errorHistorial.stack,
+          expedienteId: resultado.data?.id || resultado.id,
+          clienteId: datos.cliente_id
+        });
+        // Mostrar el error al usuario para debugging
+        toast.error('No se pudo registrar el evento en el historial: ' + errorHistorial.message);
       }
       
       // ✅ Todos los cambios (cliente + póliza) se incluyen en el evento de captura PDF
       if (cambiosClienteDetectados || (cambiosPoliza && cambiosPoliza.hayCambios)) {
-        console.log('✅ Cambios registrados dentro del evento de captura PDF');
+
         setCambiosClientePendientes(null); // Limpiar
       }
       
@@ -1770,7 +2051,7 @@ const ModuloNvoExpedientes = () => {
     } finally {
       setGuardando(false);
     }
-  }, [formulario, modoEdicion, validarFormulario, limpiarFormulario]);
+  }, [formulario, modoEdicion, validarFormulario, limpiarFormulario, clienteSeleccionado]);
 
   const abrirNuevoExpediente = useCallback(() => {
     limpiarFormulario();
@@ -1859,7 +2140,7 @@ const ModuloNvoExpedientes = () => {
         const fechaInicio = new Date(expedienteCompleto.inicio_vigencia);
         fechaInicio.setDate(fechaInicio.getDate() + parseInt(expedienteCompleto.periodo_gracia));
         fechaVencimientoPago = fechaInicio.toISOString().split('T')[0];
-        console.log('🔧 CALCULANDO: inicio:', expedienteCompleto.inicio_vigencia, '+ gracia:', expedienteCompleto.periodo_gracia, '= fecha límite:', fechaVencimientoPago);
+
       } else {
         fechaVencimientoPago = expedienteCompleto.fecha_vencimiento_pago || expedienteCompleto.proximoPago;
       }
@@ -1907,7 +2188,7 @@ const ModuloNvoExpedientes = () => {
         licencia_conducir: expedienteCompleto.licencia_conducir || ''
       };
 
-      console.log('✅ Datos procesados para el formulario:', datosFormulario);
+
       console.log('📅 Recibos parseados:', recibosParseados);
       console.log('💰 Tipo de pago:', datosFormulario.tipo_pago, '| Frecuencia:', datosFormulario.frecuenciaPago);
 
@@ -1979,7 +2260,7 @@ const ModuloNvoExpedientes = () => {
         const recibosArray = recibosData?.data || recibosData || [];
         
         if (Array.isArray(recibosArray)) {
-          console.log('✅ [VER] Recibos cargados:', recibosArray.length);
+
           expedienteConRecibos.recibos = recibosArray;
         }
       }
@@ -2093,7 +2374,7 @@ const ModuloNvoExpedientes = () => {
             accion: 'Datos del cliente cargados en formulario'
           }
         });
-        console.log('✅ Evento de cliente seleccionado registrado en historial');
+
       } catch (errorHistorial) {
         console.error('⚠️ Error al registrar cliente seleccionado en historial:', errorHistorial);
       }
@@ -2180,7 +2461,7 @@ const ModuloNvoExpedientes = () => {
       const fechaInicio = new Date(formularioActual.inicio_vigencia);
       fechaInicio.setDate(fechaInicio.getDate() + periodoGracia);
       fechaLimitePago = fechaInicio.toISOString().split('T')[0];
-      console.log('🔧 actualizarCalculosAutomaticos: inicio:', formularioActual.inicio_vigencia, '+ gracia:', periodoGracia, '= límite:', fechaLimitePago);
+
     }
     
     // 4. Calcular estatus de pago basado en la fecha límite
@@ -2202,24 +2483,8 @@ const ModuloNvoExpedientes = () => {
       }
     }
     
-    // 5. Si cambió cualquier campo que afecte los recibos, limpiar para forzar recálculo
+    // 5. Mantener recibos actuales (ya vienen recalculados del frontend)
     let recibosActualizados = formularioActual.recibos;
-    const debeRecalcularRecibos = (
-      formularioActual._inicio_vigencia_changed ||
-      formularioActual._periodo_gracia_changed ||
-      formularioActual._frecuencia_pago_changed ||
-      formularioActual._tipo_pago_changed ||
-      formularioActual._total_changed ||
-      formularioActual._primer_pago_changed ||
-      formularioActual._pagos_subsecuentes_changed
-    );
-    
-    if (debeRecalcularRecibos) {
-      recibosActualizados = undefined; // Forzar recálculo en CalendarioPagos
-      console.log('🔄 Forzando recálculo de recibos por cambios detectados');
-      console.log('💾 Recibos antes del recálculo:', formularioActual.recibos?.length || 0);
-      console.log('💾 Recibos después del recálculo:', recibosActualizados);
-    }
     
     // Retornar formulario actualizado
     const resultado = {

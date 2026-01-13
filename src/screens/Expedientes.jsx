@@ -391,7 +391,7 @@ const ModuloExpedientes = () => {
             id: 'cliente',
             nombre: nombreCliente,
             telefono: cliente.telefonoMovil || cliente.telefono_movil,
-            email: cliente.email,
+            email: cliente.contacto_email || cliente.email,
             tipo: 'Cliente'
           });
         }
@@ -481,7 +481,7 @@ const ModuloExpedientes = () => {
             id: 'cliente',
             nombre: nombreCliente,
             telefono: cliente.telefonoMovil || cliente.telefono_movil,
-            email: cliente.email,
+            email: cliente.contacto_email || cliente.email,
             tipo: 'Cliente'
           });
         }
@@ -523,7 +523,27 @@ const ModuloExpedientes = () => {
     }
   }, [enviarAvisoPago]);
   
-  const cerrarModalCompartir = useCallback(() => {
+  const cerrarModalCompartir = useCallback(async (compartidoExitosamente = false, tipoCompartido = null) => {
+    // Si se compartió exitosamente y fue póliza, cambiar etapa
+    if (compartidoExitosamente && tipoCompartido === 'poliza' && expedienteParaCompartir) {
+      console.log('🔍 Verificando cambio de etapa después de compartir póliza...');
+      console.log('🔍 Etapa actual:', expedienteParaCompartir.etapa_activa);
+      
+      if (expedienteParaCompartir.etapa_activa === 'Emitida') {
+        console.log('✅ Cambiando etapa de "Emitida" a "Enviada al Cliente"...');
+        try {
+          await cambiarEstadoExpediente(expedienteParaCompartir.id, 'Enviada al Cliente');
+          console.log('✅ Etapa cambiada correctamente');
+          
+          // Recargar listado para mostrar cambios
+          await cargarExpedientes();
+          toast.success('Póliza compartida y etapa actualizada');
+        } catch (error) {
+          console.error('❌ Error al cambiar etapa:', error);
+        }
+      }
+    }
+    
     setMostrarModalCompartir(false);
     setExpedienteParaCompartir(null);
     setDestinatariosCompartir([]);
@@ -531,7 +551,7 @@ const ModuloExpedientes = () => {
     setTipoEnvio('poliza');
     setPagoSeleccionado(null);
     setPagoSeleccionado(null);
-  }, []);
+  }, [expedienteParaCompartir, cambiarEstadoExpediente, cargarExpedientes]);
 
   const [aseguradoras, setAseguradoras] = useState([]);
   const [tiposProductos, setTiposProductos] = useState([]);
@@ -1730,23 +1750,45 @@ const ModuloExpedientes = () => {
           'WhatsApp',
           { nombre: nombreDestinatario, contacto: telefono },
           mensaje,
-          pdfUrl
+          pdfUrl,
+          {
+            compania: expediente.compania,
+            numero_poliza: expediente.numero_poliza,
+            tipo_pago: expediente.tipo_pago,
+            estatus_pago: expediente.estatusPago,
+            monto_total: expediente.total,
+            fecha_emision: expediente.fecha_emision,
+            inicio_vigencia: expediente.inicio_vigencia,
+            termino_vigencia: expediente.termino_vigencia,
+            fecha_vencimiento_pago: expediente.fecha_vencimiento_pago
+          }
         );
         console.log('✅ Evento registrado en historial de trazabilidad');
+        
+        // 🔄 Disparar evento para recargar el historial automáticamente
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        
+        // 📜 Abrir el acordeón de historial si estamos en la vista de detalle
+        setTimeout(() => {
+          const historialAccordion = document.querySelector('[data-accordion="historial"]');
+          if (historialAccordion && !historialAccordion.classList.contains('show')) {
+            historialAccordion.click();
+          }
+        }, 500);
       } catch (error) {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
       
-      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
-      if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
-        await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
-      }
+      // ✅ Cerrar modal indicando que se compartió exitosamente
+      cerrarModalCompartir(true, 'poliza');
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
       toast.error('Error al compartir por WhatsApp. Intenta nuevamente.');
     }
-  }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado]);
+  }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado, cerrarModalCompartir]);
 
     // Compartir póliza por Email - PREPARADA PARA IMPLEMENTACIÓN FUTURA
     const compartirPorEmail = useCallback(async (expediente) => {
@@ -1838,9 +1880,33 @@ const ModuloExpedientes = () => {
             'Email',
             { nombre: nombreDestinatario, contacto: email },
             cuerpo,
-            pdfUrl
+            pdfUrl,
+            {
+              compania: expediente.compania,
+              numero_poliza: expediente.numero_poliza,
+              tipo_pago: expediente.tipo_pago,
+              estatus_pago: expediente.estatusPago,
+              monto_total: expediente.total,
+              fecha_emision: expediente.fecha_emision,
+              inicio_vigencia: expediente.inicio_vigencia,
+              termino_vigencia: expediente.termino_vigencia,
+              fecha_vencimiento_pago: expediente.fecha_vencimiento_pago
+            }
           );
           console.log('✅ Evento registrado en historial de trazabilidad');
+          
+          // 🔄 Disparar evento para recargar el historial automáticamente
+          window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+            detail: { expedienteId: expediente.id } 
+          }));
+          
+          // 📜 Abrir el acordeón de historial si estamos en la vista de detalle
+          setTimeout(() => {
+            const historialAccordion = document.querySelector('[data-accordion="historial"]');
+            if (historialAccordion && !historialAccordion.classList.contains('show')) {
+              historialAccordion.click();
+            }
+          }, 500);
         } catch (error) {
           console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
         }
@@ -1852,16 +1918,14 @@ const ModuloExpedientes = () => {
         //   body: JSON.stringify({ email, asunto, cuerpo, pdfUrl })
         // });
       
-        // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
-        if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
-          await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
-        }
+        // ✅ Cerrar modal indicando que se compartió exitosamente
+        cerrarModalCompartir(true, 'poliza');
       
       } catch (error) {
         console.error('Error al compartir por Email:', error);
         toast.error('Error al compartir por Email. Intenta nuevamente.');
       }
-    }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado]);
+    }, [cambiarEstadoExpediente, destinatarioCompartirSeleccionado, cerrarModalCompartir]);
 
   // 💰 Las funciones enviarAvisoPagoWhatsApp y enviarAvisoPagoEmail vienen del hook useCompartirExpediente
   

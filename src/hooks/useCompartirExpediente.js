@@ -66,8 +66,16 @@ export const useCompartirExpediente = ({
       
       // Validar que el número tenga al menos 10 dígitos y solo contenga números
       if (!/^\d{10,15}$/.test(telefonoLimpio)) {
-        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp.\n\nDebe contener entre 10 y 15 dígitos.\n\nPor favor, actualiza el teléfono del cliente.`);
-        console.error('❌ Número de teléfono inválido:', telefono, '→', telefonoLimpio);
+        console.log('⚠️ Número de teléfono inválido, abriendo modal de captura');
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp. Por favor actualízalo.`);
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (respCliente?.success) {
+          setClienteParaActualizar(respCliente.data);
+          setTipoDatoFaltante('telefono_movil');
+          setCanalEnvio('WhatsApp');
+          setExpedienteEnEspera(expediente);
+          setMostrarModalContacto(true);
+        }
         return;
       }
       
@@ -326,7 +334,17 @@ export const useCompartirExpediente = ({
       
       // Validar formato
       if (!/^\d{10,15}$/.test(telefonoLimpio)) {
-        toast.error(`El número de teléfono "${telefono}" no es válido para WhatsApp`);
+        console.log('⚠️ Número de teléfono inválido, abriendo modal de captura para aviso de pago');
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp. Por favor actualízalo.`);
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        const cliente = respCliente?.success ? respCliente.data : null;
+        setClienteParaActualizar(cliente);
+        setTipoDatoFaltante('telefono_movil');
+        setCanalEnvio('WhatsApp');
+        setExpedienteEnEspera(expediente);
+        setPagoParaNotificar(pago);
+        setMostrarModalContacto(true);
+        cerrarModalAvisoPago();
         return;
       }
       
@@ -368,6 +386,50 @@ export const useCompartirExpediente = ({
         mensajeImportante = '💡 *Te recordamos* que tienes un pago pendiente. Mantén tu póliza al día para garantizar tu cobertura sin interrupciones.';
       }
       
+      // Construir resumen de todos los recibos
+      let resumenRecibos = '';
+      let todosRecibos = [];
+      if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+        resumenRecibos = '\n📊 *ESTADO DE TODOS TUS PAGOS:*\n';
+        
+        expediente.recibos.forEach((recibo) => {
+          const fechaRecibo = new Date(recibo.fecha_vencimiento || recibo.fecha);
+          const hoyCalc = new Date();
+          hoyCalc.setHours(0, 0, 0, 0);
+          fechaRecibo.setHours(0, 0, 0, 0);
+          const diffDias = Math.ceil((fechaRecibo - hoyCalc) / (1000 * 60 * 60 * 24));
+          
+          let icono, estadoRecibo, detalle;
+          if (recibo.estado_pago === 'Pagado' || recibo.estatus_pago === 'Pagado') {
+            icono = '✅';
+            estadoRecibo = 'Pagado';
+            detalle = '';
+          } else if (diffDias < 0) {
+            icono = '🚨';
+            estadoRecibo = 'VENCIDO';
+            detalle = ` (hace ${Math.abs(diffDias)} día${Math.abs(diffDias) !== 1 ? 's' : ''})`;
+          } else if (diffDias <= 5) {
+            icono = '⏰';
+            estadoRecibo = 'Por vencer';
+            detalle = ` (${diffDias === 0 ? 'vence HOY' : `vence en ${diffDias} día${diffDias !== 1 ? 's' : ''}`})`;
+          } else {
+            icono = '⏳';
+            estadoRecibo = 'Pendiente';
+            detalle = ` (vence ${utils.formatearFecha(recibo.fecha_vencimiento || recibo.fecha, 'corta')})`;
+          }
+          
+          resumenRecibos += `${icono} Pago ${recibo.numero_recibo}: ${estadoRecibo}${detalle}\n`;
+          
+          todosRecibos.push({
+            numero: recibo.numero_recibo,
+            estatus: estadoRecibo,
+            fecha: recibo.fecha_vencimiento || recibo.fecha,
+            monto: recibo.monto,
+            dias_restantes: diffDias
+          });
+        });
+      }
+      
       const mensaje = `Hola ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
@@ -375,7 +437,8 @@ export const useCompartirExpediente = ({
         `*Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}*\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
         `Monto: *$${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}*\n` +
-        `Estado: ${estadoFinal}\n\n` +
+        `Estado: ${estadoFinal}\n` +
+        `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
         `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
         `Saludos cordiales`;
@@ -430,7 +493,8 @@ export const useCompartirExpediente = ({
             fecha_pago: pago.fecha,
             monto: pago.monto,
             estado_pago: pago.estado,
-            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso',
+            resumen_recibos: todosRecibos
           }
         });
         console.log('✅ Evento de pago registrado en trazabilidad');
@@ -535,6 +599,50 @@ export const useCompartirExpediente = ({
         mensajeImportante = `Le recordamos que tiene un pago pendiente. Mantener su póliza al día garantiza su cobertura sin interrupciones.`;
       }
       
+      // Construir resumen de todos los recibos (igual que WhatsApp)
+      let resumenRecibos = '';
+      let todosRecibos = [];
+      if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+        resumenRecibos = '\n📊 ESTADO DE TODOS LOS PAGOS:\n';
+        
+        expediente.recibos.forEach((recibo) => {
+          const fechaRecibo = new Date(recibo.fecha_vencimiento || recibo.fecha);
+          const hoyCalc = new Date();
+          hoyCalc.setHours(0, 0, 0, 0);
+          fechaRecibo.setHours(0, 0, 0, 0);
+          const diffDias = Math.ceil((fechaRecibo - hoyCalc) / (1000 * 60 * 60 * 24));
+          
+          let icono, estadoRecibo, detalle;
+          if (recibo.estado_pago === 'Pagado' || recibo.estatus_pago === 'Pagado') {
+            icono = '✅';
+            estadoRecibo = 'Pagado';
+            detalle = '';
+          } else if (diffDias < 0) {
+            icono = '🚨';
+            estadoRecibo = 'VENCIDO';
+            detalle = ` (hace ${Math.abs(diffDias)} día${Math.abs(diffDias) !== 1 ? 's' : ''})`;
+          } else if (diffDias <= 5) {
+            icono = '⏰';
+            estadoRecibo = 'Por vencer';
+            detalle = ` (${diffDias === 0 ? 'vence HOY' : `vence en ${diffDias} día${diffDias !== 1 ? 's' : ''}`})`;
+          } else {
+            icono = '⏳';
+            estadoRecibo = 'Pendiente';
+            detalle = ` (vence ${utils.formatearFecha(recibo.fecha_vencimiento || recibo.fecha, 'corta')})`;
+          }
+          
+          resumenRecibos += `${icono} Pago ${recibo.numero_recibo}: ${estadoRecibo}${detalle}\n`;
+          
+          todosRecibos.push({
+            numero: recibo.numero_recibo,
+            estatus: estadoRecibo,
+            fecha: recibo.fecha_vencimiento || recibo.fecha,
+            monto: recibo.monto,
+            dias_restantes: diffDias
+          });
+        });
+      }
+      
       const cuerpo = `Estimado/a ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
@@ -542,7 +650,8 @@ export const useCompartirExpediente = ({
         `Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
         `Monto: $${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}\n` +
-        `Estado: ${estadoFinal}\n\n` +
+        `Estado: ${estadoFinal}\n` +
+        `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
         `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
         `Saludos cordiales`;
@@ -593,7 +702,8 @@ export const useCompartirExpediente = ({
             fecha_pago: pago.fecha,
             monto: pago.monto,
             estado_pago: pago.estado,
-            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+            tipo_aviso: esVencido ? 'recordatorio' : 'aviso',
+            resumen_recibos: todosRecibos
           }
         });
         console.log('✅ Evento de pago registrado en trazabilidad');

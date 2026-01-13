@@ -12,13 +12,14 @@ import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
 import { Badge } from './UIComponents';
 
-const CalendarioPagos = React.memo(({ 
+const CalendarioPagos = ({ 
   expediente, 
   calcularProximoPago, 
   mostrarResumen = true,
   compacto = false,
   onEnviarAviso, // Callback para enviar avisos de pago
   onEliminarPago, // Callback para eliminar un pago (solo en modo edición)
+  onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
   // Normalizar campos (aceptar múltiples nombres)
@@ -49,67 +50,134 @@ const CalendarioPagos = React.memo(({
 
   // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
-  let pagos = [];
   
-  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
-  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    pagos = expediente.recibos
-      .filter(r => r.numero_recibo <= numeroPagos)
-      .map(r => {
-        // IMPORTANTE: Normalizar estatus del backend
-        // Backend usa: "Pago por vencer" | Frontend usa: "Por Vencer"
-        const estatusNormalizado = estatusPagosUtils.normalizarEstatusBackend(r.estatus);
-        
-        return {
-          numero: r.numero_recibo,
-          fecha: r.fecha_vencimiento,
-          monto: parseFloat(r.monto).toFixed(2),
-          estatusBackend: estatusNormalizado,
-          comprobante_url: r.comprobante_url,
-          comprobante_nombre: r.comprobante_nombre,
-          fecha_pago_real: r.fecha_pago_real
-        };
-      });
-  } else {
-    // Fallback: Calcular recibos en el frontend (método antiguo)
-    const periodoGracia = expediente.periodo_gracia 
-      ? parseInt(expediente.periodo_gracia, 10)
-      : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+  // 🔥 useMemo para recalcular pagos cuando cambien las dependencias importantes
+  const pagos = React.useMemo(() => {
+    let pagosList = [];
     
-    const primerPagoField = expediente.primer_pago || expediente.primerPago;
-    const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
-    
-    const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
-    const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
-    const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
-    const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
-    
-    for (let i = 1; i <= numeroPagos; i++) {
-      const fechaPago = calcularProximoPago(
-        expediente.inicio_vigencia,
-        tipoPago,
-        frecuencia,
-        expediente.compania,
-        i,
-        periodoGracia
-      );
-      
-      if (fechaPago) {
-        let monto = montoPorDefecto;
-        if (usarMontosExactos) {
-          monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
-        }
-        
-        pagos.push({
-          numero: i,
-          fecha: fechaPago,
-          monto: monto
+    // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
+    if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+      pagosList = expediente.recibos
+        .filter(r => r.numero_recibo <= numeroPagos)
+        .map(r => {
+          // IMPORTANTE: Solo usar estatusBackend si el recibo tiene estatus del backend
+          // Si no tiene estatus, dejarlo sin estatusBackend para que se calcule en frontend
+          const tieneEstatusBackend = r.estatus || r.estatus_pago;
+          const estatusNormalizado = tieneEstatusBackend ? estatusPagosUtils.normalizarEstatusBackend(r.estatus || r.estatus_pago) : null;
+          
+          return {
+            numero: r.numero_recibo,
+            fecha: r.fecha_vencimiento,
+            monto: parseFloat(r.monto).toFixed(2),
+            estatusBackend: estatusNormalizado, // Puede ser null si no viene del backend
+            comprobante_url: r.comprobante_url,
+            comprobante_nombre: r.comprobante_nombre,
+            fecha_pago_real: r.fecha_pago_real
+          };
         });
+    } else {
+      // Fallback: Calcular recibos en el frontend (método antiguo)
+      const periodoGracia = expediente.periodo_gracia 
+        ? parseInt(expediente.periodo_gracia, 10)
+        : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+      
+      const primerPagoField = expediente.primer_pago || expediente.primerPago;
+      const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+      
+      const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
+      const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
+      const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
+      const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+      
+      for (let i = 1; i <= numeroPagos; i++) {
+        const fechaPago = calcularProximoPago(
+          expediente.inicio_vigencia,
+          tipoPago,
+          frecuencia,
+          expediente.compania,
+          i,
+          periodoGracia
+        );
+        
+        if (fechaPago) {
+          let monto = montoPorDefecto;
+          if (usarMontosExactos) {
+            monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
+          }
+          
+          pagosList.push({
+            numero: i,
+            fecha: fechaPago,
+            monto: monto
+          });
+        }
       }
     }
-  }
+    
+    return pagosList;
+  }, [
+    expediente.inicio_vigencia,
+    expediente.tipo_pago,
+    expediente.forma_pago,
+    expediente.frecuenciaPago,
+    expediente.frecuencia_pago,
+    expediente.periodo_gracia,
+    expediente.compania,
+    expediente.total,
+    expediente.primer_pago,
+    expediente.primerPago,
+    expediente.pagos_subsecuentes,
+    expediente.pagosSubsecuentes,
+    expediente.recibos,
+    numeroPagos,
+    tipoPago,
+    frecuencia,
+    calcularProximoPago
+  ]);
 
-  // 🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
+  // 📸 Notificar que se calcularon los recibos (cada vez que cambien fechas clave)
+  const recibosCalculadosRef = React.useRef(false);
+  const ultimoInicioVigenciaRef = React.useRef(expediente.inicio_vigencia);
+  const ultimoTipoPagoRef = React.useRef(tipoPago);
+  const ultimaFrecuenciaRef = React.useRef(frecuencia);
+  
+  // 🔄 Resetear el flag cuando cambien datos que afectan los recibos
+  React.useEffect(() => {
+    if (
+      ultimoInicioVigenciaRef.current !== expediente.inicio_vigencia ||
+      ultimoTipoPagoRef.current !== tipoPago ||
+      ultimaFrecuenciaRef.current !== frecuencia
+    ) {
+      console.log('🔄 CalendarioPagos: Detectado cambio en fechas/tipo de pago, reseteando flag de notificación');
+      recibosCalculadosRef.current = false;
+      ultimoInicioVigenciaRef.current = expediente.inicio_vigencia;
+      ultimoTipoPagoRef.current = tipoPago;
+      ultimaFrecuenciaRef.current = frecuencia;
+    }
+  }, [expediente.inicio_vigencia, tipoPago, frecuencia]);
+  
+  // Crear un hash de las fechas para detectar cambios
+  const hashFechasPagos = React.useMemo(() => {
+    return pagos.map(p => `${p.numero}:${p.fecha}:${p.monto}`).join('|');
+  }, [pagos]);
+  
+  React.useEffect(() => {
+    if (onRecibosCalculados && pagos.length > 0 && !expediente.recibos?.length && !recibosCalculadosRef.current) {
+      const recibosParaSnapshot = pagos.map(p => ({
+        numero_recibo: p.numero,
+        fecha_vencimiento: p.fecha,
+        monto: p.monto
+        // NO incluir estatus - se calculará dinámicamente cada vez
+      }));
+      console.log('📅 CalendarioPagos: Notificando recibos calculados al formulario');
+      console.log('📅 Cantidad de recibos:', recibosParaSnapshot.length);
+      console.log('📅 Recibos:', recibosParaSnapshot);
+      onRecibosCalculados(recibosParaSnapshot);
+      recibosCalculadosRef.current = true;
+    }
+  }, [pagos.length, hashFechasPagos, onRecibosCalculados, expediente.recibos?.length]);
+
+  // �🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
   const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
   let totalPagado = 0;
   let totalPendiente = 0;
@@ -425,6 +493,8 @@ const CalendarioPagos = React.memo(({
       </div>
     </div>
   );
-});
+};
+
+CalendarioPagos.displayName = 'CalendarioPagos';
 
 export default CalendarioPagos;

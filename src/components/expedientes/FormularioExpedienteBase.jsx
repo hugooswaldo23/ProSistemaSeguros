@@ -96,7 +96,6 @@ const FormularioExpedienteBase = React.memo(({
         );
         
         if (formulario.estatusPago !== estatusCalculado) {
-          console.log('🔄 Sincronizando estatus del formulario con calendario:', estatusCalculado);
           setFormulario(prev => ({
             ...prev,
             estatusPago: estatusCalculado
@@ -751,20 +750,29 @@ const FormularioExpedienteBase = React.memo(({
                 <label className="form-label">
                   Agente 
                   {agenteIdSeleccionado && <span className="text-success ms-2">✅ Detectado</span>}
+                  {formulario._datos_desde_pdf && <span className="text-info ms-2">🔒 Del PDF</span>}
                 </label>
                 <input
                   type="text"
-                  className={`form-control ${agenteIdSeleccionado ? 'is-valid' : formulario.agente ? 'is-invalid' : ''}`}
+                  className={`form-control ${formulario._datos_desde_pdf ? 'bg-light' : ''} ${agenteIdSeleccionado ? 'is-valid' : formulario.agente ? 'is-invalid' : ''}`}
                   value={formulario.agente ?? ''}
                   onChange={(e) => {
                     const nuevoAgente = e.target.value;
                     setFormulario(prev => ({ ...prev, agente: nuevoAgente }));
                   }}
                   placeholder="Nombre del agente"
+                  readOnly={formulario._datos_desde_pdf}
+                  disabled={formulario._datos_desde_pdf}
+                  style={formulario._datos_desde_pdf ? { cursor: 'not-allowed' } : {}}
                 />
-                {!agenteIdSeleccionado && formulario.agente && (
+                {!agenteIdSeleccionado && formulario.agente && !formulario._datos_desde_pdf && (
                   <small className="text-danger">
                     ⚠️ Agente no encontrado en el catálogo - no se podrán asignar vendedores
+                  </small>
+                )}
+                {formulario._datos_desde_pdf && (
+                  <small className="text-muted">
+                    Agente extraído del PDF (no editable)
                   </small>
                 )}
               </div>
@@ -962,12 +970,14 @@ const FormularioExpedienteBase = React.memo(({
                 <label className="form-label mb-1" style={{ fontSize: '0.8rem' }}>Fecha de Captura</label>
                 <input
                   type="date"
-                  className="form-control form-control-sm"
+                  className="form-control form-control-sm bg-light"
                   value={formatearFechaParaInput(formulario.fecha_captura) || new Date().toISOString().split('T')[0]}
-                  onChange={(e) => setFormulario(prev => ({ ...prev, fecha_captura: e.target.value }))}
+                  readOnly
+                  disabled
+                  style={{ cursor: 'not-allowed' }}
                 />
                 <small className="form-text text-muted" style={{ fontSize: '0.65rem' }}>
-                  Fecha de registro en el sistema
+                  Fecha de registro (solo lectura)
                 </small>
               </div>
               <div className="col-md-2">
@@ -977,15 +987,13 @@ const FormularioExpedienteBase = React.memo(({
                   className="form-control form-control-sm"
                   value={formatearFechaParaInput(formulario.inicio_vigencia) || ''}
                   onChange={(e) => {
-                    console.log('📅 Cambio en inicio_vigencia:', e.target.value);
                     const nuevoFormulario = { 
                       ...formulario, 
                       inicio_vigencia: e.target.value,
-                      _inicio_vigencia_changed: true // Marcar que cambió para forzar recálculo de recibos
+                      _inicio_vigencia_changed: true,
+                      recibos: [] // 🔥 Limpiar recibos para forzar recálculo
                     };
-                    console.log('📝 Formulario antes de actualizar:', nuevoFormulario);
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
-                    console.log('✅ Formulario después de actualizar:', formularioActualizado);
                     setFormulario(formularioActualizado);
                   }}
                 />
@@ -1230,6 +1238,13 @@ const FormularioExpedienteBase = React.memo(({
                     calcularProximoPago={calcularProximoPago}
                     mostrarResumen={false}
                     onEliminarPago={onEliminarPago}
+                    onRecibosCalculados={(recibos) => {
+                      // 📸 Guardar recibos calculados en el formulario
+                      setFormulario(prev => ({
+                        ...prev,
+                        recibos: recibos
+                      }));
+                    }}
                   />
                 </div>
               )}

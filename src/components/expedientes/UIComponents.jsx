@@ -190,10 +190,6 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
         estatus = 'Pendiente';
       }
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ Badge estatus calculado:', estatus);
-        console.groupEnd();
-      }
       return estatus;
     }
     

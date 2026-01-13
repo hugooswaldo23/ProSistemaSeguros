@@ -478,7 +478,13 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
       tiene_documento: !!documentoUrl,
       compania: datosPoliza.compania,
       numero_poliza: datosPoliza.numero_poliza,
-      tipo_pago: datosPoliza.tipo_pago
+      tipo_pago: datosPoliza.tipo_pago,
+      estatus_pago: datosPoliza.estatus_pago,
+      monto_total: datosPoliza.monto_total,
+      fecha_emision: datosPoliza.fecha_emision,
+      inicio_vigencia: datosPoliza.inicio_vigencia,
+      termino_vigencia: datosPoliza.termino_vigencia,
+      fecha_vencimiento_pago: datosPoliza.fecha_vencimiento_pago
     }
   });
 };
