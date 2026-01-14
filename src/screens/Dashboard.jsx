@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 const API_URL = import.meta.env.VITE_API_URL;
 import { 
   Plus, FileText, DollarSign, AlertCircle, 
@@ -10,6 +11,7 @@ import {
   Building2, Briefcase, FileCheck, Filter, Download
 } from 'lucide-react';
 const DashboardComponent = () => {
+  const navigate = useNavigate();
   const [expedientes, setExpedientes] = useState([]);
   const [tramites, setTramites] = useState([]);
   const [cargando, setCargando] = useState(false);
@@ -689,7 +691,10 @@ const DashboardComponent = () => {
                     <RefreshCw size={14} className={`me-1 ${cargando ? 'spinner-border spinner-border-sm' : ''}`} />
                     <span className="d-none d-sm-inline">Actualizar</span>
                   </button>
-                  <button className="btn btn-primary btn-sm flex-fill flex-md-grow-0">
+                  <button 
+                    className="btn btn-primary btn-sm flex-fill flex-md-grow-0"
+                    onClick={() => navigate('/polizas?accion=nueva&origen=dashboard')}
+                  >
                     <Plus size={14} className="me-1" />
                     <span className="d-none d-sm-inline">Nueva </span>Póliza
                   </button>

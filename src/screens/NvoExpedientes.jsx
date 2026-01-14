@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Plus, Share2, Mail, DollarSign, Calendar, Upload, CheckCircle, X, AlertCircle, Loader, FileText, RefreshCw, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import FormularioNuevoExpediente from '../components/expedientes/FormularioNuevoExpediente';
@@ -77,10 +78,15 @@ const estadoInicialFormulario = {
 };
 
 const ModuloNvoExpedientes = () => {
+  // Hook de navegación para detectar parámetros de URL
+  const location = useLocation();
+  const navigate = useNavigate();
+  
   // Estados
   const [vistaActual, setVistaActual] = useState('lista'); // 'lista', 'formulario', 'detalles'
   const [modoEdicion, setModoEdicion] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [origenNavegacion, setOrigenNavegacion] = useState(null); // 'dashboard' o null
   
   // Datos
   const [expedientes, setExpedientes] = useState([]);
@@ -248,6 +254,25 @@ const ModuloNvoExpedientes = () => {
       sessionStorage.removeItem('vista_actual');
     }
   }, [expedientes]);
+
+  // 🆕 Detectar parámetro ?accion=nueva desde Dashboard u otra pantalla
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('accion') === 'nueva') {
+      console.log('📋 Abriendo formulario de nueva póliza desde navegación');
+      // Guardar origen para saber a dónde regresar después de guardar
+      const origen = params.get('origen');
+      if (origen) {
+        setOrigenNavegacion(origen);
+        console.log('📍 Origen de navegación guardado:', origen);
+      }
+      limpiarFormulario();
+      setModoEdicion(false);
+      setVistaActual('formulario');
+      // Limpiar el parámetro de la URL sin recargar
+      navigate('/polizas', { replace: true });
+    }
+  }, [location.search, navigate]);
 
   // 🔄 RECARGAR CLIENTES cuando se dispara el evento 'clientes-actualizados'
   const recargarClientes = useCallback(async () => {
@@ -2243,7 +2268,14 @@ const ModuloNvoExpedientes = () => {
       
       toast.success(`✅ Expediente ${modoEdicion ? 'actualizado' : 'creado'} correctamente`);
       limpiarFormulario();
-      setVistaActual('lista');
+      
+      // Si vino del Dashboard, regresar allá
+      if (origenNavegacion === 'dashboard') {
+        setOrigenNavegacion(null); // Limpiar origen
+        navigate('/');
+      } else {
+        setVistaActual('lista');
+      }
     } catch (error) {
       console.error('❌ Error al guardar:', error);
       toast.error('Error al guardar: ' + error.message);
