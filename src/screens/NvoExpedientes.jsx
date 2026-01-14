@@ -219,6 +219,29 @@ const ModuloNvoExpedientes = () => {
     };
   }, []);
 
+  // 🔄 RECARGAR CLIENTES cuando se dispara el evento 'clientes-actualizados'
+  const recargarClientes = useCallback(async () => {
+    try {
+      console.log('🔄 Recargando clientes tras evento...');
+      const resClientes = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`);
+      const clientesData = await resClientes.json();
+      const mapa = {};
+      clientesData.forEach(c => { mapa[c.id] = c; });
+      setClientes(clientesData);
+      setClientesMap(mapa);
+      console.log('✅ ClientesMap actualizado:', Object.keys(mapa).length, 'clientes');
+    } catch (error) {
+      console.error('❌ Error recargando clientes tras evento:', error);
+    }
+  }, []);
+
+  // Listener para evento de actualización de clientes
+  useEffect(() => {
+    const handler = () => recargarClientes();
+    window.addEventListener('clientes-actualizados', handler);
+    return () => window.removeEventListener('clientes-actualizados', handler);
+  }, [recargarClientes]);
+
   const recargarExpedientes = async () => {
     try {
       const response = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
@@ -326,9 +349,6 @@ const ModuloNvoExpedientes = () => {
           case 'Emitida':
             tipoEvento = historialService.TIPOS_EVENTO.POLIZA_EMITIDA;
             break;
-          case 'Enviada al Cliente':
-            tipoEvento = historialService.TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL; // Se registra por método de envío
-            break;
           case 'Pagada':
             tipoEvento = historialService.TIPOS_EVENTO.POLIZA_PAGADA;
             break;
@@ -338,15 +358,21 @@ const ModuloNvoExpedientes = () => {
           case 'Renovación Emitida':
             tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_EMITIDA;
             break;
-          case 'Renovación Enviada':
-            tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_ENVIADA;
-            break;
           case 'Renovación Pagada':
             tipoEvento = historialService.TIPOS_EVENTO.RENOVACION_PAGADA;
             break;
           case 'Cancelada':
             tipoEvento = historialService.TIPOS_EVENTO.POLIZA_CANCELADA;
             descripcion = motivo ? `Motivo: ${motivo}` : 'Póliza cancelada sin especificar motivo';
+            break;
+          case 'Enviada al Cliente':
+          case 'Renovación Enviada':
+            // ⚠️ ESTOS eventos ya se registran en compartirPorWhatsApp/Email
+            // No duplicar eventos - salir sin registrar
+            return;
+          default:
+            // Cualquier otra etapa usa el evento genérico
+            tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS;
             break;
         }
         
@@ -396,7 +422,8 @@ const ModuloNvoExpedientes = () => {
     compartirPorWhatsApp,
     compartirPorEmail,
     enviarAvisoPagoWhatsApp,
-    enviarAvisoPagoEmail
+    enviarAvisoPagoEmail,
+    actualizarCampoCliente
   } = useCompartirExpediente({
     destinatarioCompartirSeleccionado,
     destinatarioSeleccionado,
@@ -411,69 +438,32 @@ const ModuloNvoExpedientes = () => {
     utils
   });
 
-  // � Guardar contacto faltante (teléfono o email) - VERSIÓN ORIGINAL SIMPLIFICADA
+  // 🔧 FUNCIÓN: Guardar contacto faltante usando el hook (actualización específica de campo)
   const handleGuardarContactoFaltante = useCallback(async (valorContacto) => {
     try {
       if (!clienteParaActualizar || !tipoDatoFaltante) {
         throw new Error('Datos incompletos para actualizar cliente');
       }
 
-      // Preparar datos según tipo de persona - LÓGICA ORIGINAL
-      const datosActualizacion = {};
-      
-      if (clienteParaActualizar.tipoPersona === 'Persona Moral') {
-        // Persona Moral: actualizar contacto_* (contacto principal)
-        if (tipoDatoFaltante === 'email') {
-          datosActualizacion.contacto_email = valorContacto;
-        } else if (tipoDatoFaltante === 'telefono_movil') {
-          datosActualizacion.contacto_telefono_movil = valorContacto;
-        }
-      } else {
-        // Persona Física: actualizar campos principales del cliente
-        if (tipoDatoFaltante === 'email') {
-          datosActualizacion.email = valorContacto;
-        } else if (tipoDatoFaltante === 'telefono_movil') {
-          datosActualizacion.telefonoMovil = valorContacto;
-        }
-      }
-
-      // Enviando actualización
-
-      // Actualizar en BD - IGUAL QUE LA VERSIÓN ORIGINAL
-      const response = await fetch(`${API_URL}/api/clientes/${clienteParaActualizar.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(datosActualizacion)
+      console.log('🔧 Usando función del hook para actualizar campo:', {
+        clienteId: clienteParaActualizar.id,
+        tipoPersona: clienteParaActualizar.tipoPersona,
+        campo: tipoDatoFaltante,
+        valor: valorContacto
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Error del servidor:', response.status, errorText);
-        try {
-          const errorJson = JSON.parse(errorText);
-          console.error('❌ Error parseado:', errorJson);
-        } catch (e) {
-          console.error('❌ Error no es JSON válido');
-        }
-        throw new Error(`Error al actualizar cliente: ${response.status} - ${errorText}`);
-      }
+      // Usar la función del hook que actualiza solo el campo específico
+      const clienteCompleto = await actualizarCampoCliente(
+        clienteParaActualizar.id,
+        tipoDatoFaltante,
+        valorContacto,
+        clienteParaActualizar.tipoPersona
+      );
 
-      const resultado = await response.json();
-      // Actualización exitosa
-
-      // Actualizar clientesMap local - EXACTAMENTE IGUAL QUE LA VERSIÓN ORIGINAL
-      const clienteActualizado = resultado.data || resultado;
+      // Actualizar clientesMap local con cliente completo
       setClientesMap(prevMap => ({
         ...prevMap,
-        [clienteParaActualizar.id]: {
-          ...prevMap[clienteParaActualizar.id],
-          ...clienteActualizado,
-          // Normalizar campos
-          email: clienteActualizado.email,
-          telefono_movil: clienteActualizado.telefono_movil || clienteActualizado.telefonoMovil,
-          contacto_email: clienteActualizado.contacto_email,
-          contacto_telefono_movil: clienteActualizado.contacto_telefono_movil
-        }
+        [clienteParaActualizar.id]: clienteCompleto
       }));
 
       // Cerrar modal
@@ -483,8 +473,14 @@ const ModuloNvoExpedientes = () => {
       const tipoContacto = tipoDatoFaltante === 'email' ? 'Correo electrónico' : 'Teléfono de contacto';
       toast.success(`${tipoContacto} actualizado correctamente${canalEnvio ? '. Reintentando envío…' : '. Puedes continuar con el envío.'}`);
 
-      // Disparar evento para recargar vista de clientes
-      window.dispatchEvent(new CustomEvent('clientes-actualizados'));
+      // Disparar evento para recargar vista de clientes con datos del cliente completo
+      window.dispatchEvent(new CustomEvent('clientes-actualizados', {
+        detail: { 
+          clienteId: clienteParaActualizar.id,
+          razon: 'captura_contacto_faltante_hook',
+          cliente: clienteCompleto
+        }
+      }));
 
       // Limpiar parcialmente (dejamos canalEnvio y expedienteEnEspera para el reintento)
       setClienteParaActualizar(null);
@@ -492,11 +488,12 @@ const ModuloNvoExpedientes = () => {
 
     } catch (error) {
       console.error('❌ Error al guardar contacto:', error);
+      toast.error(`Error al actualizar contacto: ${error.message}`);
       throw error; // Propagar error para que el modal lo muestre
     }
-  }, [clienteParaActualizar, tipoDatoFaltante, canalEnvio]);
+  }, [clienteParaActualizar, tipoDatoFaltante, canalEnvio, actualizarCampoCliente, setClientesMap]);
 
-  // �🚀 MODULARIZACIÓN: Hooks para funcionalidades de pagos
+  // 🚀 MODULARIZACIÓN: Hooks para funcionalidades de pagos
   const {
     mostrarModalPago,
     setMostrarModalPago,
@@ -929,41 +926,21 @@ const ModuloNvoExpedientes = () => {
       const cambiosDetectados = {};
       let hayCambios = false;
 
-      // 🔧 COMPARACIÓN CORREGIDA: usar los nombres REALES que tiene el cliente (sin duplicados)
+      // 🔧 CAMPOS EDITABLES DESDE EXPEDIENTE: Solo 9 campos específicos
       const camposAComparar = [
-        // 👤 DATOS BÁSICOS DEL CLIENTE/ASEGURADO
-        { formulario: 'nombre', cliente: 'nombre' },
-        { formulario: 'apellido_paterno', cliente: 'apellidoPaterno' }, // BD usa camelCase
-        { formulario: 'apellido_materno', cliente: 'apellidoMaterno' }, // BD usa camelCase
-        { formulario: 'rfc', cliente: 'rfc' },
-        { formulario: 'curp', cliente: 'curp' },
-        { formulario: 'fecha_nacimiento', cliente: 'fechaNacimiento' },
-        
-        // �📞 CONTACTO DEL CLIENTE/ASEGURADO (sus propios teléfonos y email)
+        // 📞 CONTACTO DEL CLIENTE/ASEGURADO (3 campos editables)
         { formulario: 'email', cliente: 'email' },
-        { formulario: 'telefono_fijo', cliente: 'telefonoFijo' }, // BD usa camelCase
-        { formulario: 'telefono_movil', cliente: 'telefonoMovil' }, // BD usa camelCase
+        { formulario: 'telefono_fijo', cliente: 'telefonoFijo' },
+        { formulario: 'telefono_movil', cliente: 'telefonoMovil' },
         
-        // 🏢 PARA PERSONA MORAL ÚNICAMENTE
-        { formulario: 'razon_social', cliente: 'razonSocial' },
-        { formulario: 'nombre_comercial', cliente: 'nombreComercial' },
-        
-        // 🏠 DIRECCIÓN Y UBICACIÓN DEL CLIENTE
-        { formulario: 'domicilio', cliente: 'direccion' }, // BD usa 'direccion'
-        { formulario: 'colonia', cliente: 'colonia' },
-        { formulario: 'municipio', cliente: 'municipio' },
-        { formulario: 'estado', cliente: 'estado' },
-        { formulario: 'codigo_postal', cliente: 'codigoPostal' }, // BD usa camelCase
-        
-        // 👨‍💼 CONTACTO PRINCIPAL/GESTOR/RESPONSABLE (persona que maneja la cuenta)
-        // Físicas: OPCIONAL (pueden tener contacto responsable además de sus datos)
-        // Morales: OBLIGATORIO (la empresa no tiene contacto propio, solo el responsable)
+        // 👨‍💼 CONTACTO PRINCIPAL/GESTOR (6 campos editables)
         { formulario: 'contacto_nombre', cliente: 'contacto_nombre' },
         { formulario: 'contacto_apellido_paterno', cliente: 'contacto_apellido_paterno' },
         { formulario: 'contacto_apellido_materno', cliente: 'contacto_apellido_materno' },
         { formulario: 'contacto_email', cliente: 'contacto_email' },
         { formulario: 'contacto_telefono_fijo', cliente: 'contacto_telefono_fijo' },
         { formulario: 'contacto_telefono_movil', cliente: 'contacto_telefono_movil' }
+        // NOTA: Nombre, apellidos y RFC del cliente NO son editables desde expediente
       ];
 
       for (const { formulario: campoFormulario, cliente: campoCliente } of camposAComparar) {
@@ -1002,97 +979,66 @@ const ModuloNvoExpedientes = () => {
         }
       }
 
-
+      console.log('🔍 === RESUMEN DE DETECCIÓN DE CAMBIOS ===');
+      console.log('🔍 Cambios detectados:', cambiosDetectados);
+      console.log('🔍 Campos cambiados:', Object.keys(cambiosDetectados));
+      console.log('🔍 Total cambios:', Object.keys(cambiosDetectados).length);
 
       if (!hayCambios) {
         console.log('❌ No hay cambios, saltando actualización');
         return; // No hay cambios
       }
 
-      // Filtrar solo los campos válidos que el backend espera
-      const camposValidosCliente = {
-        id: clienteSeleccionado.id,
-        codigo: clienteSeleccionado.codigo,
-        categoria_id: clienteSeleccionado.categoria_id,
-        nombre: clienteSeleccionado.nombre,
-        apellido_paterno: clienteSeleccionado.apellidoPaterno || clienteSeleccionado.apellido_paterno,
-        apellido_materno: clienteSeleccionado.apellidoMaterno || clienteSeleccionado.apellido_materno,
-        razon_social: clienteSeleccionado.razonSocial || clienteSeleccionado.razon_social,
-        nombre_comercial: clienteSeleccionado.nombreComercial || clienteSeleccionado.nombre_comercial,
-        rfc: clienteSeleccionado.rfc,
-        curp: clienteSeleccionado.curp,
-        fecha_nacimiento: clienteSeleccionado.fecha_nacimiento,
-        email: clienteSeleccionado.email,
-        telefono_fijo: clienteSeleccionado.telefonoFijo || clienteSeleccionado.telefono_fijo,
-        telefono_movil: clienteSeleccionado.telefonoMovil || clienteSeleccionado.telefono_movil,
-        domicilio: clienteSeleccionado.domicilio,
-        colonia: clienteSeleccionado.colonia,
-        municipio: clienteSeleccionado.municipio,
-        estado: clienteSeleccionado.estado,
-        codigo_postal: clienteSeleccionado.codigo_postal,
-        contacto_nombre: clienteSeleccionado.contacto_nombre,
-        contacto_apellido_paterno: clienteSeleccionado.contacto_apellido_paterno,
-        contacto_apellido_materno: clienteSeleccionado.contacto_apellido_materno,
-        contacto_email: clienteSeleccionado.contacto_email,
-        contacto_telefono_fijo: clienteSeleccionado.contacto_telefono_fijo,
-        contacto_telefono_movil: clienteSeleccionado.contacto_telefono_movil,
-        activo: clienteSeleccionado.activo
+      // 🔧 ENVIAR TODOS LOS DATOS DEL FORMULARIO al CRUD (objeto completo)
+      const datosCompletos = {
+        // Datos básicos del cliente desde formulario
+        nombre: datosFormulario.nombre || '',
+        apellido_paterno: datosFormulario.apellido_paterno || '',
+        apellido_materno: datosFormulario.apellido_materno || '',
+        rfc: datosFormulario.rfc || '',
+        email: datosFormulario.email || '',
+        telefono_fijo: datosFormulario.telefono_fijo || '',    
+        telefono_movil: datosFormulario.telefono_movil || '',  
+        // También enviar en camelCase para compatibilidad
+        telefonoFijo: datosFormulario.telefono_fijo || '',     // 🔧 FIX: también camelCase
+        telefonoMovil: datosFormulario.telefono_movil || '',   // 🔧 FIX: también camelCase
+        // Datos del contacto principal desde formulario  
+        contacto_nombre: datosFormulario.contacto_nombre || '',
+        contacto_apellido_paterno: datosFormulario.contacto_apellido_paterno || '',
+        contacto_apellido_materno: datosFormulario.contacto_apellido_materno || '',
+        contacto_email: datosFormulario.contacto_email || '',
+        contacto_telefono_fijo: datosFormulario.contacto_telefono_fijo || '',
+        contacto_telefono_movil: datosFormulario.contacto_telefono_movil || ''
       };
 
-      // Preparar datos para actualización (extraer SOLO campos válidos del cliente)
-      const camposValidosActualizar = [
-        'nombre', 'apellido_paterno', 'apellido_materno', 'rfc', 'curp', 'fecha_nacimiento',
-        'email', 'telefono_fijo', 'telefono_movil', 'razon_social', 'nombre_comercial',
-        'domicilio', 'colonia', 'municipio', 'estado', 'codigo_postal',
-        'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
-        'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
-      ];
+      console.log('🔧 Enviando datos COMPLETOS al CRUD (como formulario normal):', datosCompletos);
+
+      // Usar el servicio CRUD existente con datos completos
+      const resultadoActualizacion = await clientesService.actualizarCliente(clienteSeleccionado.id, datosCompletos);
       
-      const datosActualizacion = {};
-      Object.keys(cambiosDetectados).forEach(campo => {
-        // Solo incluir si es un campo válido del cliente
-        if (camposValidosActualizar.includes(campo)) {
-          const valorNuevo = cambiosDetectados[campo].nuevo;
-          // Enviar null si está vacío, o el valor tal cual
-          datosActualizacion[campo] = valorNuevo === '' ? null : valorNuevo;
-        }
-      });
-      
-      // Si no hay cambios válidos de cliente, no actualizar
-      if (Object.keys(datosActualizacion).length === 0) {
-        console.log('ℹ️ No hay cambios válidos de cliente para actualizar');
+      if (!resultadoActualizacion.success) {
+        console.error('❌ Error al actualizar cliente con CRUD:', resultadoActualizacion.error);
+        toast.error(`Los datos de la póliza se guardaron, pero hubo un problema al actualizar el cliente: ${resultadoActualizacion.error}`);
         return null;
       }
-      // Aplicar los cambios sobre los campos válidos
-      const datosCompletos = {
-        ...camposValidosCliente,
-        ...datosActualizacion
-      };
 
-      // Usar el servicio de clientes para actualizar
-      const response = await fetch(`${API_URL}/api/clientes/${clienteSeleccionado.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(datosCompletos)
-      });
+      console.log('✅ Cliente actualizado exitosamente con CRUD:', resultadoActualizacion.data);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Error al actualizar cliente:', response.status, errorText);
-        // No lanzar error para no interrumpir guardado de póliza
-        toast.error('Los datos de la póliza se guardaron, pero hubo un problema al actualizar el cliente');
-        return;
-      }
-
-      const resultado = await response.json();
-      // Cliente actualizado exitosamente
-
-      // Actualizar clienteSeleccionado y clientesMap local
-      const clienteActualizado = resultado.data || resultado;
+      // 🔄 FORZAR RECARGA DEL CACHE DE CLIENTES
+      // En lugar de actualizar manualmente, forzamos la recarga completa del cache
+      console.log('🔄 Forzando recarga del cache de clientes...');
+      
+      // También actualizamos el clienteSeleccionado local
+      const clienteActualizado = resultadoActualizacion.data;
       setClienteSeleccionado(prev => ({ ...prev, ...clienteActualizado }));
-      setClientesMap(prevMap => ({
-        ...prevMap,
-        [clienteSeleccionado.id]: { ...prevMap[clienteSeleccionado.id], ...clienteActualizado }
+      
+      // Disparar evento para que ListaExpedientes recargue su clientesMap
+      window.dispatchEvent(new CustomEvent('clientes-actualizados', {
+        detail: { 
+          clienteId: clienteSeleccionado.id,
+          razon: 'actualizacion_desde_expediente',
+          cliente: clienteActualizado
+        }
       }));
 
       // Registrar evento de actualización
@@ -1139,7 +1085,7 @@ const ModuloNvoExpedientes = () => {
         setCambiosClientePendientes(cambiosConDescripcion);
         
         // Disparar evento para recargar vista de clientes
-        const clienteActualizado = resultado.data || resultado;
+        const clienteActualizado = resultadoActualizacion.data || resultadoActualizacion;
         window.dispatchEvent(new CustomEvent('clientes-actualizados', {
           detail: { 
             clienteId: clienteSeleccionado.id, 
@@ -2033,9 +1979,8 @@ const ModuloNvoExpedientes = () => {
         toast.error('No se pudo registrar el evento en el historial: ' + errorHistorial.message);
       }
       
-      // ✅ Todos los cambios (cliente + póliza) se incluyen en el evento de captura PDF
-      if (cambiosClienteDetectados || (cambiosPoliza && cambiosPoliza.hayCambios)) {
-
+      // ✅ Limpiar cambios pendientes del cliente si los había
+      if (cambiosClienteDetectados) {
         setCambiosClientePendientes(null); // Limpiar
       }
       
@@ -2070,11 +2015,32 @@ const ModuloNvoExpedientes = () => {
       
       console.log('📦 Expediente completo desde backend:', expedienteCompleto);
 
+      // 🔧 FIX: Consultar cliente FRESH desde la API para datos actualizados
       let clienteEncontrado = null;
       if (expedienteCompleto.cliente_id) {
-        clienteEncontrado = clientesMap[expedienteCompleto.cliente_id];
-        console.log('👤 Cliente encontrado:', clienteEncontrado);
-        console.log('🗺️ ClientesMap keys:', Object.keys(clientesMap));
+        try {
+          console.log('🔍 Consultando cliente fresh desde API:', expedienteCompleto.cliente_id);
+          const clienteResponse = await fetch(`${API_URL}/api/clientes/${expedienteCompleto.cliente_id}`);
+          if (clienteResponse.ok) {
+            const clienteData = await clienteResponse.json();
+            clienteEncontrado = clienteData?.data ?? clienteData;
+            console.log('✅ Cliente fresh obtenido:', clienteEncontrado);
+            
+            // Actualizar el clientesMap para futuras consultas
+            setClientesMap(prevMap => ({
+              ...prevMap,
+              [expedienteCompleto.cliente_id]: clienteEncontrado
+            }));
+          } else {
+            console.warn('⚠️ No se pudo obtener cliente fresh, usando cache');
+            clienteEncontrado = clientesMap[expedienteCompleto.cliente_id];
+          }
+        } catch (error) {
+          console.warn('⚠️ Error al obtener cliente fresh, usando cache:', error);
+          clienteEncontrado = clientesMap[expedienteCompleto.cliente_id];
+        }
+        
+        console.log('👤 Cliente final para edición:', clienteEncontrado);
       }
 
       // 🔧 PROCESAR DATOS PARA EL FORMULARIO
@@ -2952,7 +2918,7 @@ const ModuloNvoExpedientes = () => {
                         <label className="form-label mb-1"><strong>Seleccionar Pago:</strong></label>
                         <select
                           className="form-select form-select-sm"
-                          value={pagoSeleccionado?.numero_recibo || ''}
+                          value={pagoSeleccionado?.numero_recibo || (expedienteParaCompartir.recibos?.[0]?.numero_recibo || '')}
                           onChange={(e) => {
                             const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
                             setPagoSeleccionado(pago);
@@ -3015,7 +2981,7 @@ const ModuloNvoExpedientes = () => {
                         <label className="form-label mb-1"><strong>Enviar a:</strong></label>
                         <select 
                           className="form-select form-select-sm"
-                          value={destinatarioCompartirSeleccionado?.id || ''}
+                          value={destinatarioCompartirSeleccionado?.id || (destinatariosCompartir?.[0]?.id || '')}
                           onChange={(e) => {
                             const dest = destinatariosCompartir.find(d => d.id === e.target.value);
                             setDestinatarioCompartirSeleccionado(dest);

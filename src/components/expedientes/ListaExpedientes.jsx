@@ -622,6 +622,7 @@ const ListaExpedientes = React.memo(({
                                   
                                   let estatusDisplay = 'Pagado';
                                   let colorClass = 'text-success fw-bold';
+                                  let numeroReciboActual = recibosTotal; // Por defecto, si todos están pagados
                                   
                                   // Si no todos están pagados, encontrar el primer recibo pendiente
                                   if (recibosPagados < recibosTotal) {
@@ -631,6 +632,7 @@ const ListaExpedientes = React.memo(({
                                       .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
                                     
                                     if (primerReciboPendiente) {
+                                      numeroReciboActual = primerReciboPendiente.numero_recibo;
                                       estatusDisplay = 'Pendiente';
                                       colorClass = 'text-info';
                                       
@@ -656,7 +658,7 @@ const ListaExpedientes = React.memo(({
                                   return (
                                     <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
                                       <span className={colorClass}>
-                                        {recibosPagados}/{recibosTotal} {estatusDisplay}
+                                        {numeroReciboActual}/{recibosTotal} {estatusDisplay}
                                       </span>
                                     </div>
                                   );
@@ -703,13 +705,13 @@ const ListaExpedientes = React.memo(({
                                   }
                                 }
                                 
-                                // Mostrar progreso y estatus
-                                const proximoRecibo = pagosRealizados + 1;
+                                // Mostrar progreso y estatus - CORREGIDO: mostrar el recibo actual, no los pagados
+                                const reciboActual = pagosRealizados + 1; // El siguiente recibo a pagar
                                 
                                 return (
                                   <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
                                     <span className={colorClass}>
-                                      {pagosRealizados >= numeroPagos ? numeroPagos : pagosRealizados}/{numeroPagos} {estatusDisplay}
+                                      {pagosRealizados >= numeroPagos ? numeroPagos : reciboActual}/{numeroPagos} {estatusDisplay}
                                     </span>
                                   </div>
                                 );

@@ -2155,51 +2155,49 @@ const ModuloClientes = () => {
                         </div>
                       </div>
                       
-                      {/* Gestor/Contacto Principal (si existe) */}
-                      {(clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre) && (
-                        <div className="card border-info mt-3">
-                          <div className="card-header bg-info bg-opacity-10 py-2">
-                            <strong className="text-info">
-                              <User size={16} className="me-2" />
-                              Gestor/Contacto Principal (Persona que gestiona las pólizas)
-                            </strong>
-                          </div>
-                          <div className="card-body">
-                            <div className="row g-3">
-                              <div className="col-md-6">
-                                <div className="d-flex align-items-center mb-1">
-                                  <User size={14} className="text-muted me-2" />
-                                  <strong className="text-muted small">Nombre:</strong>
-                                </div>
-                                <div>
-                                  {clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre || ''} {clienteSeleccionado.contacto_apellido_paterno || clienteSeleccionado.contactoApellidoPaterno || ''} {clienteSeleccionado.contacto_apellido_materno || clienteSeleccionado.contactoApellidoMaterno || ''}
-                                </div>
+                      {/* Gestor/Contacto Principal - Siempre mostrar para diagnosticar */}
+                      <div className="card border-info mt-3">
+                        <div className="card-header bg-info bg-opacity-10 py-2">
+                          <strong className="text-info">
+                            <User size={16} className="me-2" />
+                            Gestor/Contacto Principal (Persona que gestiona las pólizas)
+                          </strong>
+                        </div>
+                        <div className="card-body">
+                          <div className="row g-3">
+                            <div className="col-md-6">
+                              <div className="d-flex align-items-center mb-1">
+                                <User size={14} className="text-muted me-2" />
+                                <strong className="text-muted small">Nombre:</strong>
                               </div>
-                              <div className="col-md-6">
-                                <div className="d-flex align-items-center mb-1">
-                                  <Mail size={14} className="text-muted me-2" />
-                                  <strong className="text-muted small">Email:</strong>
-                                </div>
-                                <div>{clienteSeleccionado.contacto_email || clienteSeleccionado.contactoEmail || '-'}</div>
+                              <div>
+                                {clienteSeleccionado.contacto_nombre || clienteSeleccionado.contactoNombre || '-'} {clienteSeleccionado.contacto_apellido_paterno || clienteSeleccionado.contactoApellidoPaterno || ''} {clienteSeleccionado.contacto_apellido_materno || clienteSeleccionado.contactoApellidoMaterno || ''}
                               </div>
-                              <div className="col-md-6">
-                                <div className="d-flex align-items-center mb-1">
-                                  <Phone size={14} className="text-muted me-2" />
-                                  <strong className="text-muted small">Teléfono Móvil:</strong>
-                                </div>
-                                <div>{clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contactoTelefonoMovil || '-'}</div>
+                            </div>
+                            <div className="col-md-6">
+                              <div className="d-flex align-items-center mb-1">
+                                <Mail size={14} className="text-muted me-2" />
+                                <strong className="text-muted small">Email:</strong>
                               </div>
-                              <div className="col-md-6">
-                                <div className="d-flex align-items-center mb-1">
-                                  <Phone size={14} className="text-muted me-2" />
-                                  <strong className="text-muted small">Teléfono Fijo:</strong>
-                                </div>
-                                <div>{clienteSeleccionado.contacto_telefono_fijo || clienteSeleccionado.contactoTelefonoFijo || '-'}</div>
+                              <div>{clienteSeleccionado.contacto_email || clienteSeleccionado.contactoEmail || '-'}</div>
+                            </div>
+                            <div className="col-md-6">
+                              <div className="d-flex align-items-center mb-1">
+                                <Phone size={14} className="text-muted me-2" />
+                                <strong className="text-muted small">Teléfono Móvil:</strong>
                               </div>
+                              <div>{clienteSeleccionado.contacto_telefono_movil || clienteSeleccionado.contactoTelefonoMovil || '-'}</div>
+                            </div>
+                            <div className="col-md-6">
+                              <div className="d-flex align-items-center mb-1">
+                                <Phone size={14} className="text-muted me-2" />
+                                <strong className="text-muted small">Teléfono Fijo:</strong>
+                              </div>
+                              <div>{clienteSeleccionado.contacto_telefono_fijo || clienteSeleccionado.contactoTelefonoFijo || '-'}</div>
                             </div>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </>
                   ) : (
                     // Para Persona Moral - mostrar contacto principal + múltiples contactos

@@ -45,8 +45,9 @@ export const TIPOS_EVENTO = {
   // Pagos
   PAGO_REGISTRADO: 'pago_registrado',
   PAGO_VENCIDO: 'pago_vencido',
-  RECORDATORIO_PAGO_ENVIADO: 'recordatorio_pago_enviado',
-  AVISO_PAGO_ENVIADO: 'aviso_pago_enviado',
+  AVISO_PAGO_VENCIDO_ENVIADO: 'aviso_pago_vencido_enviado',
+  AVISO_PAGO_POR_VENCER_ENVIADO: 'aviso_pago_por_vencer_enviado',
+  AVISO_PAGO_PENDIENTE_ENVIADO: 'aviso_pago_pendiente_enviado',
   PAGO_APLICADO_MANUALMENTE: 'pago_aplicado_manualmente',
   PAGO_REMOVIDO: 'pago_removido',
   POLIZA_PAGADA: 'poliza_pagada', // 🆕 Cambio de etapa a "Pagada"
@@ -62,7 +63,6 @@ export const TIPOS_EVENTO = {
   COTIZACION_RENOVACION_ENVIADA: 'cotizacion_renovacion_enviada',
   RENOVACION_PENDIENTE_EMISION: 'renovacion_pendiente_emision',
   RENOVACION_EMITIDA: 'renovacion_emitida',
-  RENOVACION_ENVIADA: 'renovacion_enviada', // 🆕 Renovación enviada al cliente
   RENOVACION_PAGADA: 'renovacion_pagada', // 🆕 Renovación pagada
   PAGO_RENOVACION_REGISTRADO: 'pago_renovacion_registrado',
   RENOVACION_VIGENTE: 'renovacion_vigente',
@@ -116,8 +116,9 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.PAGO_REGISTRADO]: { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.PAGO_VENCIDO]: { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
-    [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
-    [TIPOS_EVENTO.AVISO_PAGO_ENVIADO]: { icon: '📢', color: '#17a2b8', bgColor: '#d1ecf1' },
+    [TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO]: { icon: '🚨', color: '#dc3545', bgColor: '#f8d7da' },
+    [TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO]: { icon: '📋', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE]: { icon: '✏️', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_REMOVIDO]: { icon: '🔙', color: '#fd7e14', bgColor: '#ffe5d0' },
     [TIPOS_EVENTO.POLIZA_PAGADA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
@@ -132,7 +133,6 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: { icon: '📧', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: { icon: '⏳', color: '#f59e0b', bgColor: '#fef3c7' },
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: { icon: '📄', color: '#8b5cf6', bgColor: '#ede9fe' },
-    [TIPOS_EVENTO.RENOVACION_ENVIADA]: { icon: '📨', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_PAGADA]: { icon: '✅', color: '#059669', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: { icon: '💰', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: { icon: '🔁', color: '#059669', bgColor: '#d1fae5' },
@@ -185,7 +185,9 @@ export const obtenerTituloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.PAGO_REGISTRADO]: 'Pago Registrado',
     [TIPOS_EVENTO.PAGO_VENCIDO]: 'Pago Vencido',
-    [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: 'Recordatorio de Pago Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO]: 'Aviso de Pago Vencido Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO]: 'Aviso de Pago Por Vencer Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO]: 'Aviso de Pago Pendiente Enviado',
     [TIPOS_EVENTO.POLIZA_PAGADA]: 'Póliza Pagada',
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: 'Proceso de Renovación Iniciado',
@@ -198,7 +200,6 @@ export const obtenerTituloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: 'Cotización de Renovación Enviada',
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: 'Renovación Pendiente de Emisión',
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: 'Renovación Emitida',
-    [TIPOS_EVENTO.RENOVACION_ENVIADA]: 'Renovación Enviada al Cliente',
     [TIPOS_EVENTO.RENOVACION_PAGADA]: 'Renovación Pagada',
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: 'Pago de Renovación Registrado',
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: 'Renovación Vigente',

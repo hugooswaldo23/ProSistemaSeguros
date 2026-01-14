@@ -13,6 +13,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, FileText, Eye, Trash2, Upload, Loader } from 'lucide-react';
 import FormularioExpedienteBase from './FormularioExpedienteBase';
 import * as pdfService from '../../services/pdfService';
+import * as historialExpedienteService from '../../services/historialExpedienteService';
 import toast from 'react-hot-toast';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -99,6 +100,45 @@ const FormularioEditarExpediente = ({
     
     console.log('🔍 Cambios detectados:', cambios);
     return cambios;
+  };
+
+  /**
+   * Helper: Obtener etiqueta amigable de los campos
+   */
+  const obtenerEtiquetaCampo = (campo) => {
+    const etiquetas = {
+      // Información básica
+      'tipo_tramite': 'Tipo de Trámite',
+      'aseguradora': 'Aseguradora',
+      'agente_id': 'Agente',
+      'vendedor_id': 'Vendedor',
+      'etapa': 'Etapa',
+      'prioridad': 'Prioridad',
+      'observaciones': 'Observaciones',
+      
+      // Cliente
+      'nombre_cliente': 'Nombre del Cliente',
+      'rfc_cliente': 'RFC del Cliente',
+      'telefono_cliente': 'Teléfono',
+      'email_cliente': 'Email',
+      'direccion_cliente': 'Dirección',
+      
+      // Póliza
+      'numero_poliza': 'Número de Póliza',
+      'vigencia_inicio': 'Fecha de Inicio',
+      'vigencia_fin': 'Fecha de Fin',
+      'suma_asegurada': 'Suma Asegurada',
+      'prima_total': 'Prima Total',
+      'frecuencia_pago': 'Frecuencia de Pago',
+      'numero_recibos': 'Número de Recibos',
+      
+      // Fechas
+      'fecha_creacion': 'Fecha de Creación',
+      'fecha_modificacion': 'Fecha de Modificación',
+      'fecha_expedicion': 'Fecha de Expedición'
+    };
+    
+    return etiquetas[campo] || campo.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
   /**
@@ -287,29 +327,52 @@ const FormularioEditarExpediente = ({
    * Wrapper del guardarExpediente para incluir detección de cambios
    */
   const guardarConAuditoria = async () => {
-    // 1. Detectar cambios antes de guardar
-    const cambios = detectarCambios();
-    
-    // 2. Guardar el expediente (llamar al original)
-    await guardarExpediente();
-    
-    // 3. TODO: Enviar cambios al sistema de auditoría
-    if (Object.keys(cambios).length > 0) {
-      console.log('📝 Cambios para auditoría:', cambios);
-      // Aquí se enviaría al endpoint de historial cuando esté implementado
-      /*
-      await fetch(`${API_URL}/api/expedientes/${formulario.id}/historial`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          usuario: 'Sistema', // TODO: Usuario autenticado
-          tipo_evento: 'DATOS_ACTUALIZADOS',
-          descripcion: `Campos modificados: ${Object.keys(cambios).join(', ')}`,
-          datos_anteriores: formularioOriginal,
-          datos_nuevos: formulario
-        })
-      });
-      */
+    try {
+      // 1. Detectar cambios antes de guardar
+      const cambios = detectarCambios();
+      
+      // 2. Guardar el expediente (llamar al original)
+      await guardarExpediente();
+      
+      // 3. Registrar cambios en el historial si los hay
+      if (Object.keys(cambios).length > 0) {
+        console.log('📝 Registrando cambios para auditoría:', cambios);
+        
+        // Formatear descripción de cambios para el historial
+        const camposModificados = Object.keys(cambios).map(campo => {
+          const etiqueta = obtenerEtiquetaCampo(campo);
+          const valorAnterior = cambios[campo].anterior || 'Vacío';
+          const valorNuevo = cambios[campo].nuevo || 'Vacío';
+          return `${etiqueta}: "${valorAnterior}" → "${valorNuevo}"`;
+        });
+        
+        const descripcion = `Expediente actualizado. Campos modificados: ${camposModificados.join(', ')}`;
+        
+        try {
+          // Registrar evento de actualización en el historial
+          await historialExpedienteService.registrarEvento({
+            expediente_id: formulario.id,
+            cliente_id: formulario.cliente_id,
+            usuario_nombre: 'Sistema', // TODO: Usuario autenticado
+            tipo_evento: historialExpedienteService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
+            descripcion: descripcion,
+            detalles_adicionales: {
+              campos_modificados: Object.keys(cambios),
+              cambios_detallados: cambios,
+              total_cambios: Object.keys(cambios).length
+            }
+          });
+          
+          console.log('✅ Cambios registrados exitosamente en el historial');
+        } catch (historialError) {
+          console.error('❌ Error al registrar cambios en historial:', historialError);
+          toast.error('Error al registrar cambios en el historial');
+          // No relanzar el error para no impedir el guardado
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error al guardar expediente:', error);
+      throw error; // Relanzar error del guardado principal
     }
   };
 

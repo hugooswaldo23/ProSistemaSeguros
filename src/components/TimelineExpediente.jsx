@@ -767,16 +767,27 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             )}
                             
                             {/* Estatus de pago - USAR DATOS DEL EXPEDIENTE ACTUAL */}
-                            {(expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) && (
-                              <div className="text-muted">
-                                💳 Estatus de pago: <strong className={`${
-                                  (expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) === 'Vencido' ? 'text-danger' : 
-                                  (expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) === 'Pagado' ? 'text-success' : 
-                                  (expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) === 'Por Vencer' ? 'text-warning' : 
-                                  'text-dark'
-                                }`}>{expedienteData?.estatusPago || evento.datos_adicionales.estatus_pago}</strong>
-                              </div>
-                            )}
+                            {(expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) && (() => {
+                              const estatus = expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago;
+                              const estatusNormalizado = estatus.toLowerCase();
+                              
+                              let colorClass = 'text-dark';
+                              if (estatusNormalizado.includes('vencido') || estatusNormalizado.includes('vencida')) {
+                                colorClass = 'text-danger fw-bold';
+                              } else if (estatusNormalizado.includes('pagado') || estatusNormalizado.includes('pagada')) {
+                                colorClass = 'text-success fw-bold';
+                              } else if (estatusNormalizado.includes('por vencer') || estatusNormalizado.includes('vencer')) {
+                                colorClass = 'text-warning fw-bold';
+                              } else if (estatusNormalizado.includes('pendiente')) {
+                                colorClass = 'text-info fw-bold';
+                              }
+                              
+                              return (
+                                <div className="text-muted">
+                                  💳 Estatus de pago: <strong className={colorClass}>{estatus}</strong>
+                                </div>
+                              );
+                            })()}
                             
                             {/* Monto total - USAR DATOS DEL EXPEDIENTE ACTUAL */}
                             {(expedienteData?.total || evento.datos_adicionales?.monto_total) && (
@@ -805,7 +816,9 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             )}
                           </div>
                         </div>
-                      ) : (evento.tipo_evento === 'aviso_pago_enviado' || evento.tipo_evento === 'recordatorio_pago_enviado') ? (
+                      ) : (evento.tipo_evento === 'aviso_pago_vencido_enviado' ||
+                           evento.tipo_evento === 'aviso_pago_por_vencer_enviado' ||
+                           evento.tipo_evento === 'aviso_pago_pendiente_enviado') ? (
                         /* Vista vertical para eventos de aviso/recordatorio de pago */
                         <div className="mb-1">
                           {/* Información en formato vertical compacto */}
@@ -1023,7 +1036,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                   } else if (/\d+\/\d+\s+Vencido/.test(parte)) {
                                     return <span key={idx} className="fw-bold text-danger">{parte}</span>;
                                   } else if (/\d+\/\d+\s+Pendiente/.test(parte)) {
-                                    return <span key={idx} className="fw-bold text-secondary">{parte}</span>;
+                                    return <span key={idx} className="fw-bold text-info">{parte}</span>;
                                   }
                                   return parte;
                                 });
