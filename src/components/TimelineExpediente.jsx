@@ -940,6 +940,22 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                               🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
                             </div>
                             
+                            {/* Link al PDF compartido */}
+                            {evento.documento_url && (
+                              <div className="text-muted">
+                                📄 PDF compartido:{' '}
+                                <a 
+                                  href={evento.documento_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-primary text-decoration-underline"
+                                  style={{ cursor: 'pointer' }}
+                                >
+                                  {expedienteData?.pdf_nombre || evento.datos_adicionales?.numero_poliza || 'Ver documento'}
+                                </a>
+                              </div>
+                            )}
+                            
                             {/* Cambio de etapa (si aplica) */}
                             {evento.etapa_anterior && evento.etapa_nueva && (
                               <div className="text-muted">
