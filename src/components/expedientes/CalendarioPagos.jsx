@@ -18,7 +18,7 @@ const CalendarioPagos = ({
   mostrarResumen = true,
   compacto = false,
   onEnviarAviso, // Callback para enviar avisos de pago
-  onEliminarPago, // Callback para eliminar un pago (solo en modo edición)
+  onEliminarPago, // Callback para eliminar un pago (abre modal de confirmación)
   onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
@@ -176,7 +176,25 @@ const CalendarioPagos = ({
       recibosCalculadosRef.current = true;
     }
   }, [pagos.length, hashFechasPagos, onRecibosCalculados, expediente.recibos?.length]);
-
+  // 🔙 Detectar pagos que fueron removidos (buscar en historial)
+  const pagosRemovidos = React.useMemo(() => {
+    if (!historial || !Array.isArray(historial)) return {};
+    
+    const removidos = {};
+    historial.forEach(evento => {
+      if (evento.tipo_evento === 'pago_removido' && evento.datos_adicionales?.numero_recibo) {
+        const numRecibo = evento.datos_adicionales.numero_recibo;
+        // Guardar el más reciente
+        if (!removidos[numRecibo] || new Date(evento.fecha_evento) > new Date(removidos[numRecibo].fecha)) {
+          removidos[numRecibo] = {
+            fecha: evento.fecha_evento,
+            motivo: evento.datos_adicionales.motivo || 'No especificado'
+          };
+        }
+      }
+    });
+    return removidos;
+  }, [historial]);
   // �🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
   const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
   let totalPagado = 0;
@@ -192,25 +210,30 @@ const CalendarioPagos = ({
       const estatusNorm = pago.estatusBackend.toLowerCase();
       const pagado = estatusNorm === 'pagado';
       
+      // 🔧 Detectar variantes de "Por Vencer"
+      const esPorVencer = estatusNorm === 'pago por vencer' || 
+                          estatusNorm === 'por vencer' || 
+                          estatusNorm.includes('por vencer');
+      
       if (pagado) {
         totalPagado += parseFloat(pago.monto) || 0;
       } else if (estatusNorm === 'vencido') {
         totalVencido += parseFloat(pago.monto) || 0;
-      } else if (estatusNorm === 'pago por vencer') {
+      } else if (esPorVencer) {
         totalPorVencer += parseFloat(pago.monto) || 0;
       } else {
         totalPendiente += parseFloat(pago.monto) || 0;
       }
       
       let estado = pago.estatusBackend;
-      let badgeClass = 'bg-secondary';
+      let badgeClass = 'bg-info'; // Pendiente = azul
       
       if (estatusNorm === 'pagado') {
         badgeClass = 'bg-success';
       } else if (estatusNorm === 'vencido') {
         badgeClass = 'bg-danger';
-      } else if (estatusNorm === 'pago por vencer') {
-        badgeClass = 'bg-warning';
+      } else if (esPorVencer) {
+        badgeClass = 'bg-warning text-dark';
       }
       
       // console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
@@ -239,7 +262,7 @@ const CalendarioPagos = ({
     }
     
     let estado = 'Pendiente';
-    let badgeClass = 'bg-secondary';
+    let badgeClass = 'bg-info'; // Pendiente = azul
     
     if (pagado) {
       estado = 'Pagado';
@@ -253,11 +276,11 @@ const CalendarioPagos = ({
     } else if (diasRestantes <= 15) {
       // Por Pagar: cuando faltan 15 días o menos (listo para cobrar)
       estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por Pagar';
-      badgeClass = 'bg-warning';
+      badgeClass = 'bg-warning text-dark';
     } else {
       // Pendiente: cuando falta más de 15 días (aún no urgente)
       estado = 'Pendiente';
-      badgeClass = 'bg-secondary';
+      badgeClass = 'bg-info';
     }
     
     // console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
@@ -308,11 +331,11 @@ const CalendarioPagos = ({
             
             {/* Por Vencer */}
             <div className="col">
-              <div className="card bg-warning text-white h-100">
+              <div className="card bg-warning h-100">
                 <div className="card-body text-center p-2">
-                  <small className="d-block mb-1">⚠️ Por Vencer</small>
-                  <h5 className="mb-0">{utils.formatearMoneda(totalPorVencer)}</h5>
-                  <small className="d-block mt-1">≤ 15 días</small>
+                  <small className="text-dark d-block mb-1">⚠️ Por Vencer</small>
+                  <h5 className="mb-0 text-dark">{utils.formatearMoneda(totalPorVencer)}</h5>
+                  <small className="text-dark d-block mt-1">≤ 15 días</small>
                 </div>
               </div>
             </div>
@@ -353,23 +376,40 @@ const CalendarioPagos = ({
               </tr>
             </thead>
             <tbody>
-              {pagosProcesados.map((pago) => (
+              {pagosProcesados.map((pago) => {
+                const fueRemovido = pagosRemovidos[pago.numero];
+                
+                return (
                 <tr key={pago.numero} className={pago.pagado ? 'table-success' : ''}>
                   <td><strong>#{pago.numero}</strong></td>
                   <td>{utils.formatearFecha(pago.fecha, 'larga')}</td>
                   <td><strong>${pago.monto}</strong></td>
                   <td>
-                    <span className={`badge ${pago.badgeClass}`}>
-                      {pago.pagado && '✓ '}
-                      {pago.estado}
-                    </span>
+                    <div className="d-flex align-items-center gap-1">
+                      <span className={`badge ${pago.badgeClass}`}>
+                        {pago.pagado && '✓ '}
+                        {pago.estado}
+                      </span>
+                      {/* Indicador de pago removido */}
+                      {fueRemovido && !pago.pagado && (
+                        <span 
+                          className="badge bg-warning text-dark" 
+                          style={{ fontSize: '0.65rem', cursor: 'help' }}
+                          title={`Pago removido: ${fueRemovido.motivo}`}
+                        >
+                          🔙 Removido
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
+                    <div className="d-flex gap-1">
                     {pago.pagado ? (
                       <>
                         {/* Botón para ver comprobante de pago */}
                         <button 
-                          className="btn btn-sm btn-success"
+                          className="btn btn-outline-success btn-sm"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                           onClick={() => {
                           // Normalizar fechas para comparación (solo YYYY-MM-DD)
                           const normalizarFecha = (fecha) => {
@@ -410,58 +450,18 @@ const CalendarioPagos = ({
                         }}
                         title="Ver comprobante de pago"
                       >
-                        <FileText size={14} className="me-1" />
-                        Ver Comprobante
+                        <FileText size={12} />
                         </button>
                       
-                        {/* Botón para eliminar pago (solo en modo edición) */}
+                        {/* Botón para eliminar pago */}
                         {onEliminarPago && (
                           <button 
-                            className="btn btn-sm btn-outline-danger ms-1"
-                            onClick={async () => {
-                              console.log('🚀 [DEBUG] Botón eliminar pago clickeado');
-                              console.log('🚀 [DEBUG] Pago:', pago);
-                              console.log('🚀 [DEBUG] Expediente:', expediente);
-                              console.log('🚀 [DEBUG] onEliminarPago function:', typeof onEliminarPago);
-                              
-                              if (window.confirm(`¿Eliminar el pago del recibo #${pago.numero}? El estatus se recalculará automáticamente.`)) {
-                                // 🔥 IMPLEMENTACIÓN DIRECTA - en lugar de llamar onEliminarPago, hacer la eliminación aquí
-                                try {
-                                  console.log('💰 [DIRECTO] Eliminando pago del recibo', pago.numero, 'del expediente', expediente.id);
-                                  
-                                  const API_URL = import.meta.env.VITE_API_URL;
-                                  const response = await fetch(`${API_URL}/api/recibos/${expediente.id}/${pago.numero}/pago`, {
-                                    method: 'DELETE'
-                                  });
-                                  
-                                  if (!response.ok) {
-                                    const errorData = await response.json();
-                                    throw new Error(errorData.error || 'Error al eliminar el pago');
-                                  }
-                                  
-                                  console.log('✅ [DIRECTO] Pago eliminado correctamente del recibo', pago.numero);
-                                  
-                                  // Mostrar mensaje de éxito
-                                  if (window.toast && window.toast.success) {
-                                    window.toast.success(`Pago eliminado del recibo ${pago.numero}`);
-                                  }
-                                  
-                                  // Recargar la página para reflejar cambios
-                                  window.location.reload();
-                                  
-                                } catch (error) {
-                                  console.error('❌ [DIRECTO] Error eliminando pago:', error);
-                                  
-                                  if (window.toast && window.toast.error) {
-                                    window.toast.error(`Error al eliminar pago: ${error.message}`);
-                                  }
-                                }
-                              }
-                            }}
-                            title="Eliminar este pago y recalcular estatus"
+                            className="btn btn-outline-danger btn-sm"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={() => onEliminarPago(pago, expediente)}
+                            title="Eliminar pago"
                           >
-                            <Trash2 size={14} className="me-1" />
-                            Eliminar pago
+                            <Trash2 size={12} />
                           </button>
                         )}
                       </>
@@ -469,16 +469,18 @@ const CalendarioPagos = ({
                       // Botón para enviar aviso/recordatorio
                       <button 
                         className={`btn btn-sm ${pago.estado === 'Vencido' ? 'btn-danger' : 'btn-outline-info'}`}
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                         onClick={() => onEnviarAviso && onEnviarAviso(pago, expediente)}
                         title={pago.estado === 'Vencido' ? 'Enviar recordatorio de pago vencido' : 'Enviar aviso de pago'}
                       >
-                        <Mail size={14} className="me-1" />
-                        {pago.estado === 'Vencido' ? 'Recordatorio' : 'Enviar Aviso'}
+                        <Mail size={12} />
                       </button>
                     )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             {expediente.total && (
               <tfoot>

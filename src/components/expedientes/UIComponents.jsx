@@ -110,20 +110,6 @@ export const InfoCliente = React.memo(({ expediente, cliente }) => {
     ? (cliente?.contacto_email || cliente?.contactoEmail || '')
     : (cliente?.email || expediente.email || '');
 
-  // DEBUG: Mostrar qué datos tiene el cliente
-  if (expediente.numero_poliza === '0005161150') {
-    console.log('🔍 DEBUG InfoCliente para póliza 0005161150:', {
-      tieneContacto,
-      cliente: cliente,
-      telefono_fijo_snake: cliente?.telefono_fijo,
-      telefono_movil_snake: cliente?.telefono_movil,
-      telefonoFijo_camel: cliente?.telefonoFijo,
-      telefonoMovil_camel: cliente?.telefonoMovil,
-      telefonoFijoContacto: cliente?.contacto_telefono_fijo,
-      telefonoMovilContacto: cliente?.contacto_telefono_movil
-    });
-  }
-
   // Teléfonos: priorizar campos camelCase (que es lo que guarda el CRUD) y snake_case como fallback
   const telContactoMovil = cliente?.contacto_telefono_movil || cliente?.contactoTelefonoMovil || '';
   const telContactoFijo = cliente?.contacto_telefono_fijo || cliente?.contactoTelefonoFijo || '';

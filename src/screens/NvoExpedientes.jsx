@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Share2, Mail, DollarSign, Calendar, Upload, CheckCircle, X, AlertCircle, Loader, FileText, RefreshCw } from 'lucide-react';
+import { Plus, Share2, Mail, DollarSign, Calendar, Upload, CheckCircle, X, AlertCircle, Loader, FileText, RefreshCw, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import FormularioNuevoExpediente from '../components/expedientes/FormularioNuevoExpediente';
 import FormularioEditarExpediente from '../components/expedientes/FormularioEditarExpediente';
@@ -111,6 +111,7 @@ const ModuloNvoExpedientes = () => {
   // 📞 Estados para Modal de Captura de Contacto (teléfono/email faltante)
   const [mostrarModalContacto, setMostrarModalContacto] = useState(false);
   const [clienteParaActualizar, setClienteParaActualizar] = useState(null);
+  const [destinatarioParaModal, setDestinatarioParaModal] = useState(null); // Destinatario para mostrar en modal
   const [tipoDatoFaltante, setTipoDatoFaltante] = useState(''); // 'telefono_movil' o 'email'
   const [canalEnvio, setCanalEnvio] = useState(''); // 'WhatsApp' o 'Email'
   const [expedienteEnEspera, setExpedienteEnEspera] = useState(null);
@@ -122,7 +123,14 @@ const ModuloNvoExpedientes = () => {
   const [destinatariosDisponibles, setDestinatariosDisponibles] = useState([]);
   const [destinatarioSeleccionado, setDestinatarioSeleccionado] = useState(null);
 
-  // 🔄 Estados para flujo de renovación
+  // �️ Estados para Modal de Eliminar Pago
+  const [mostrarModalEliminarPago, setMostrarModalEliminarPago] = useState(false);
+  const [pagoParaEliminar, setPagoParaEliminar] = useState(null);
+  const [expedienteParaEliminarPago, setExpedienteParaEliminarPago] = useState(null);
+  const [motivoEliminacion, setMotivoEliminacion] = useState('');
+  const [eliminandoPago, setEliminandoPago] = useState(false);
+
+  // �🔄 Estados para flujo de renovación
   const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
   const [mostrarModalAutorizarRenovacion, setMostrarModalAutorizarRenovacion] = useState(false);
   const [mostrarModalPolizaRenovada, setMostrarModalPolizaRenovada] = useState(false);
@@ -218,6 +226,27 @@ const ModuloNvoExpedientes = () => {
       mounted = false;
     };
   }, []);
+
+  // 🔄 RESTAURAR ESTADO después de reload (por eliminación de pago u otras acciones)
+  useEffect(() => {
+    const expedienteId = sessionStorage.getItem('expediente_seleccionado_id');
+    const vistaGuardada = sessionStorage.getItem('vista_actual');
+    
+    if (expedienteId && vistaGuardada && expedientes.length > 0) {
+      console.log('🔄 Restaurando estado guardado:', { expedienteId, vistaGuardada });
+      
+      const expedienteRestaurar = expedientes.find(e => e.id === expedienteId || e.id === parseInt(expedienteId));
+      if (expedienteRestaurar) {
+        setExpedienteSeleccionado(expedienteRestaurar);
+        setVistaActual(vistaGuardada);
+        console.log('✅ Estado restaurado:', expedienteRestaurar.numero_poliza);
+      }
+      
+      // Limpiar sessionStorage después de restaurar
+      sessionStorage.removeItem('expediente_seleccionado_id');
+      sessionStorage.removeItem('vista_actual');
+    }
+  }, [expedientes]);
 
   // 🔄 RECARGAR CLIENTES cuando se dispara el evento 'clientes-actualizados'
   const recargarClientes = useCallback(async () => {
@@ -428,6 +457,7 @@ const ModuloNvoExpedientes = () => {
     destinatarioCompartirSeleccionado,
     destinatarioSeleccionado,
     setClienteParaActualizar,
+    setDestinatarioParaModal,
     setTipoDatoFaltante,
     setCanalEnvio,
     setExpedienteEnEspera,
@@ -457,7 +487,8 @@ const ModuloNvoExpedientes = () => {
         clienteParaActualizar.id,
         tipoDatoFaltante,
         valorContacto,
-        clienteParaActualizar.tipoPersona
+        clienteParaActualizar.tipoPersona,
+        clienteParaActualizar._destinatarioSeleccionado // Usar info preservada del destinatario
       );
 
       // Actualizar clientesMap local con cliente completo
@@ -471,7 +502,23 @@ const ModuloNvoExpedientes = () => {
 
       // Notificar éxito
       const tipoContacto = tipoDatoFaltante === 'email' ? 'Correo electrónico' : 'Teléfono de contacto';
-      toast.success(`${tipoContacto} actualizado correctamente${canalEnvio ? '. Reintentando envío…' : '. Puedes continuar con el envío.'}`);
+      toast.success(`${tipoContacto} actualizado correctamente. Enviando...`);
+
+      // 🔍 DEBUG: Información disponible tras captura exitosa
+      console.log('🔍 DEBUG TRAS CAPTURA EXITOSA:', {
+        clienteSeleccionado: clienteParaActualizar?.nombre,
+        destinatarioSeleccionado: clienteParaActualizar?._destinatarioSeleccionado?.nombre,
+        emailCapturado: valorContacto,
+        tipoDato: tipoDatoFaltante,
+        canalEnvio: canalEnvio,
+        expedienteEnEspera: expedienteEnEspera?.numero_poliza,
+        clienteCompleto: {
+          id: clienteCompleto.id,
+          nombre: clienteCompleto.nombre,
+          contacto_email: clienteCompleto.contacto_email,
+          email: clienteCompleto.email
+        }
+      });
 
       // Disparar evento para recargar vista de clientes con datos del cliente completo
       window.dispatchEvent(new CustomEvent('clientes-actualizados', {
@@ -482,16 +529,113 @@ const ModuloNvoExpedientes = () => {
         }
       }));
 
-      // Limpiar parcialmente (dejamos canalEnvio y expedienteEnEspera para el reintento)
+      // ✨ NUEVA FUNCIONALIDAD: Detectar si es póliza o aviso de pago y manejar apropiadamente
+      if (expedienteEnEspera && clienteParaActualizar._destinatarioSeleccionado) {
+        // 🔧 FIX: Detectar correctamente si se actualizó teléfono (puede ser 'telefono' o 'telefono_movil')
+        const esActualizacionTelefono = tipoDatoFaltante === 'telefono' || tipoDatoFaltante === 'telefono_movil';
+        const esActualizacionEmail = tipoDatoFaltante === 'email' || tipoDatoFaltante === 'contacto_email';
+        
+        const destinatarioActualizado = {
+          ...clienteParaActualizar._destinatarioSeleccionado,
+          email: esActualizacionEmail ? valorContacto : clienteParaActualizar._destinatarioSeleccionado.email,
+          telefono: esActualizacionTelefono ? valorContacto : clienteParaActualizar._destinatarioSeleccionado.telefono
+        };
+
+        console.log('🎯 Detectando tipo de envío:', {
+          expediente: expedienteEnEspera.numero_poliza,
+          destinatario: destinatarioActualizado.nombre,
+          contactoActualizado: valorContacto,
+          esAvisoPago: !!pagoParaNotificar,
+          canal: canalEnvio
+        });
+
+        if (pagoParaNotificar) {
+          // 📧 CASO: AVISO DE PAGO
+          console.log('💰 Procesando aviso de pago automáticamente');
+          
+          // 🔧 FIX: Actualizar el destinatario seleccionado ANTES de llamar a enviarAvisoPago
+          // para que el hook use el email/teléfono recién capturado
+          setDestinatarioCompartirSeleccionado(destinatarioActualizado);
+          
+          // Transformar recibo a formato esperado para avisos de pago
+          const pagoTransformado = {
+            numero: pagoParaNotificar.numero_recibo || pagoParaNotificar.numero,
+            fecha: pagoParaNotificar.fecha_vencimiento || pagoParaNotificar.fecha,
+            monto: pagoParaNotificar.monto,
+            estado: pagoParaNotificar.estado_pago || pagoParaNotificar.estado,
+            totalPagos: expedienteEnEspera.recibos?.length || null
+          };
+
+          setTimeout(async () => {
+            if (canalEnvio === 'Email') {
+              console.log('📧 Ejecutando aviso de pago automático por Email con destinatario:', destinatarioActualizado);
+              // 🔧 FIX: Pasar destinatarioActualizado como tercer parámetro para evitar problema de timing
+              await enviarAvisoPagoEmail(pagoTransformado, expedienteEnEspera, destinatarioActualizado);
+            } else if (canalEnvio === 'WhatsApp') {
+              console.log('📱 Ejecutando aviso de pago automático por WhatsApp con destinatario:', destinatarioActualizado);
+              // 🔧 FIX: Pasar destinatarioActualizado como tercer parámetro para evitar problema de timing
+              await enviarAvisoPagoWhatsApp(pagoTransformado, expedienteEnEspera, destinatarioActualizado);
+            }
+
+            // Refrescar vista después del envío
+            setTimeout(() => {
+              if (expedienteSeleccionado) {
+                console.log('🔄 Refrescando vista de detalle tras aviso de pago');
+              } else {
+                console.log('🔄 Refrescando listado tras aviso de pago');
+                recargarExpedientes();
+              }
+            }, 1000);
+
+          }, 500);
+
+        } else {
+          // 📄 CASO: COMPARTIR PÓLIZA (lógica existente)
+          setExpedienteParaCompartir(expedienteEnEspera);
+          setDestinatarioCompartirSeleccionado(destinatarioActualizado);
+          setMostrarModalCompartir(true);
+          
+          setTimeout(async () => {
+            if (canalEnvio === 'Email') {
+              console.log('🚀 Ejecutando envío automático por Email');
+              await compartirPorEmail(expedienteEnEspera, destinatarioActualizado);
+            } else if (canalEnvio === 'WhatsApp') {
+              console.log('🚀 Ejecutando envío automático por WhatsApp');
+              await compartirPorWhatsApp(expedienteEnEspera, destinatarioActualizado);
+            }
+
+            // Refrescar vista después del envío
+            setTimeout(() => {
+              if (expedienteSeleccionado) {
+                console.log('🔄 Refrescando vista de detalle de póliza');
+              } else {
+                console.log('🔄 Refrescando listado de pólizas');
+                recargarExpedientes();
+              }
+              
+              // Cerrar modal de compartir
+              setMostrarModalCompartir(false);
+              setExpedienteParaCompartir(null);
+              
+            }, 1000);
+          }, 500);
+        }
+      }
+
+      // Limpiar datos del modal
       setClienteParaActualizar(null);
+      setDestinatarioParaModal(null);
       setTipoDatoFaltante(null);
+      setCanalEnvio(null);
+      setExpedienteEnEspera(null);
+      setPagoParaNotificar(null); // 🔧 FIX: Limpiar también el pago pendiente
 
     } catch (error) {
       console.error('❌ Error al guardar contacto:', error);
       toast.error(`Error al actualizar contacto: ${error.message}`);
       throw error; // Propagar error para que el modal lo muestre
     }
-  }, [clienteParaActualizar, tipoDatoFaltante, canalEnvio, actualizarCampoCliente, setClientesMap]);
+  }, [clienteParaActualizar, tipoDatoFaltante, canalEnvio, pagoParaNotificar, actualizarCampoCliente, setClientesMap, expedienteEnEspera, enviarAvisoPagoEmail, enviarAvisoPagoWhatsApp, compartirPorEmail, compartirPorWhatsApp, expedienteSeleccionado, recargarExpedientes, setDestinatarioCompartirSeleccionado]);
 
   // 🚀 MODULARIZACIÓN: Hooks para funcionalidades de pagos
   const {
@@ -514,7 +658,79 @@ const ModuloNvoExpedientes = () => {
     cambiarEstadoExpediente
   });
 
-  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
+  // �️ Abrir Modal para Confirmar Eliminación de Pago
+  const abrirModalEliminarPago = useCallback((pago, expediente) => {
+    console.log('🗑️ Abriendo modal eliminar pago:', { pago, expediente: expediente?.id });
+    setPagoParaEliminar(pago);
+    setExpedienteParaEliminarPago(expediente);
+    setMotivoEliminacion('');
+    setMostrarModalEliminarPago(true);
+  }, []);
+
+  // 🗑️ Confirmar y ejecutar eliminación de pago
+  const confirmarEliminarPago = useCallback(async () => {
+    if (!pagoParaEliminar || !expedienteParaEliminarPago) return;
+    
+    setEliminandoPago(true);
+    try {
+      console.log('💰 Eliminando pago del recibo', pagoParaEliminar.numero, 'del expediente', expedienteParaEliminarPago.id);
+      console.log('📝 Motivo:', motivoEliminacion || 'No especificado');
+      
+      const response = await fetch(`${API_URL}/api/recibos/${expedienteParaEliminarPago.id}/${pagoParaEliminar.numero}/pago`, {
+        method: 'DELETE'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Error al eliminar el pago');
+      }
+      
+      console.log('✅ Pago eliminado correctamente del recibo', pagoParaEliminar.numero);
+      
+      // 📝 Registrar en historial
+      try {
+        await historialService.registrarEvento({
+          expediente_id: expedienteParaEliminarPago.id,
+          tipo_evento: historialService.TIPOS_EVENTO.PAGO_REMOVIDO,
+          descripcion: `Pago del recibo #${pagoParaEliminar.numero} eliminado`,
+          datos_adicionales: {
+            numero_recibo: pagoParaEliminar.numero,
+            monto: pagoParaEliminar.monto,
+            fecha_pago: pagoParaEliminar.fecha,
+            motivo: motivoEliminacion || 'No especificado',
+            aseguradora: expedienteParaEliminarPago.compania || expedienteParaEliminarPago.aseguradora,
+            numero_poliza: expedienteParaEliminarPago.numero_poliza
+          }
+        });
+        console.log('📝 Evento de pago removido registrado en historial');
+      } catch (errorHistorial) {
+        console.error('⚠️ Error registrando en historial (no crítico):', errorHistorial);
+      }
+      
+      toast.success(`✅ Pago del recibo #${pagoParaEliminar.numero} eliminado`);
+      
+      // Cerrar modal
+      setMostrarModalEliminarPago(false);
+      setPagoParaEliminar(null);
+      setExpedienteParaEliminarPago(null);
+      setMotivoEliminacion('');
+      
+      // Guardar estado para restaurar después del reload
+      sessionStorage.setItem('expediente_seleccionado_id', expedienteParaEliminarPago.id);
+      sessionStorage.setItem('vista_actual', 'detalles');
+      
+      // Recargar la página
+      window.location.reload();
+      
+    } catch (error) {
+      console.error('❌ Error eliminando pago:', error);
+      toast.error(`Error al eliminar pago: ${error.message}`);
+    } finally {
+      setEliminandoPago(false);
+    }
+  }, [pagoParaEliminar, expedienteParaEliminarPago, motivoEliminacion]);
+
+  // �📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
   const abrirModalCompartir = useCallback(async (expediente) => {
     // Validar que el expediente tenga cliente_id
     if (!expediente?.cliente_id) {
@@ -1645,6 +1861,23 @@ const ModuloNvoExpedientes = () => {
           
           const cantidadCambios = Object.keys(camposEditados).length;
           
+          // 🔍 DEBUG: Ver qué cambios se detectaron
+          console.log('🔍 ===== DEBUG EDICIÓN =====');
+          console.log('🔍 snapshotOriginal:', snapshotOriginal);
+          console.log('🔍 datos actuales:', {
+            fecha_emision: datos.fecha_emision,
+            inicio_vigencia: datos.inicio_vigencia,
+            termino_vigencia: datos.termino_vigencia,
+            tipo_pago: datos.tipo_pago,
+            frecuencia_pago: datos.frecuencia_pago || datos.frecuenciaPago,
+            total: datos.total,
+            compania: datos.compania,
+            producto: datos.producto
+          });
+          console.log('🔍 camposEditados:', camposEditados);
+          console.log('🔍 cantidadCambios:', cantidadCambios);
+          console.log('🔍 ===========================');
+          
           // Formatear campos editados
           const cambiosDetallados = {};
           Object.entries(camposEditados).forEach(([etiqueta, cambio]) => {
@@ -1655,52 +1888,31 @@ const ModuloNvoExpedientes = () => {
             };
           });
           
-          await historialService.registrarEvento({
-            expediente_id: datos.id,
-            cliente_id: datos.cliente_id,
-            tipo_evento: 'edicion_manual_expediente',
-            usuario_nombre: 'Sistema',
-            descripcion: `Edición manual de expediente | ${datos.compania || 'Sin aseguradora'} | Póliza: ${datos.numero_poliza || 'Sin número'} | ${cantidadCambios} campo(s) modificado(s)`,
-            datos_adicionales: {
-              metodo_captura: 'Edición Manual',
-              fecha_edicion: new Date().toISOString(),
-              aseguradora: datos.compania,
-              numero_poliza: datos.numero_poliza,
-              fecha_emision: datos.fecha_emision,
-              inicio_vigencia: datos.inicio_vigencia,
-              termino_vigencia: datos.termino_vigencia,
-              monto_total: datos.total,
-              tipo_pago: datos.tipo_pago,
-              frecuencia_pago: datos.frecuenciaPago || datos.frecuencia_pago,
-              usuario_edito: 'Sistema',
-              etapa_actual: datos.etapa_activa || 'Sin etapa',
-              
-              // Cambios de cliente (si los hay)
-              ...(cambiosClienteDetectados && {
-                cliente_cambios: {
-                  descripcion: 'Datos de contacto editados',
-                  campos_actualizados: cambiosClienteDetectados.campos_actualizados,
-                  cambios_detallados: cambiosClienteDetectados.cambios_detallados
-                }
-              }),
-              
-              // Cambios detectados en póliza
-              poliza_cambios: cantidadCambios > 0 ? {
-                descripcion: 'Datos de póliza editados manualmente',
-                campos_actualizados: Object.keys(cambiosDetallados),
-                cambios_detallados: cambiosDetallados
-              } : null,
-              
-              // Cambios en recibos (fechas de vencimiento)
-              ...(cambiosRecibosEdicion && {
-                recibos_cambios: {
-                  descripcion: 'Fechas de vencimiento de recibos actualizadas por cambio en vigencia',
-                  cantidad_cambios: cambiosRecibosEdicion.cantidad_cambios,
-                  cambios_detallados: cambiosRecibosEdicion.cambios_detallados
-                }
-              })
-            }
-          });
+          console.log('🔍 cambiosDetallados para el log:', cambiosDetallados);
+          console.log('🔍 cambiosClienteDetectados:', cambiosClienteDetectados);
+          
+          // Contar cambios totales (póliza + cliente)
+          const cantidadCambiosCliente = cambiosClienteDetectados?.campos_actualizados?.length || 0;
+          const cantidadCambiosTotal = cantidadCambios + cantidadCambiosCliente;
+          
+          // Construir descripción más informativa
+          let descripcionCambios = [];
+          if (cantidadCambios > 0) {
+            descripcionCambios.push(`${cantidadCambios} campo(s) de póliza`);
+          }
+          if (cantidadCambiosCliente > 0) {
+            descripcionCambios.push(`${cantidadCambiosCliente} dato(s) de cliente`);
+          }
+          const textoDescripcion = descripcionCambios.length > 0 
+            ? descripcionCambios.join(' + ') 
+            : 'Sin cambios detectados';
+          
+          // 🔇 NOTA: El registro de edición ahora se hace en FormularioEditarExpediente.jsx
+          // con la función guardarConAuditoria() que tiene un snapshot más preciso.
+          // Solo registramos aquí si hay cambios de cliente detectados que no se capturan allá.
+          // await historialService.registrarEvento({...}) -- DESHABILITADO
+          console.log('ℹ️ Registro de edición delegado a FormularioEditarExpediente.jsx');
+          
         } else {
           // REGISTRO DE CREACIÓN
           const expedienteId = resultado.data?.id || resultado.id;
@@ -2538,7 +2750,7 @@ const ModuloNvoExpedientes = () => {
           calcularProximoPago={calcularProximoPago}
           handleClienteSeleccionado={handleClienteSeleccionado}
           clienteSeleccionado={clienteSeleccionado}
-          onEliminarPago={() => {}}
+          onEliminarPago={abrirModalEliminarPago}
         />
       )}
 
@@ -2567,7 +2779,7 @@ const ModuloNvoExpedientes = () => {
           calcularProximoPago={calcularProximoPago}
           handleClienteSeleccionado={handleClienteSeleccionado}
           clienteSeleccionado={clienteSeleccionado}
-          onEliminarPago={() => {}}
+          onEliminarPago={abrirModalEliminarPago}
         />
       )}
 
@@ -2583,12 +2795,123 @@ const ModuloNvoExpedientes = () => {
           calculartermino_vigencia={calculartermino_vigencia}
           calcularProximoPago={calcularProximoPago}
           abrirModalCompartir={abrirModalCompartir}
+          onEliminarPago={abrirModalEliminarPago}
           historial={historialExpediente}
           setHistorialExpediente={setHistorialExpediente}
         />
       )}
 
       {/* MODALES */}
+      
+      {/* Modal Eliminar Pago */}
+      {mostrarModalEliminarPago && pagoParaEliminar && expedienteParaEliminarPago && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-danger text-white py-2 px-3">
+                <h6 className="modal-title mb-0" style={{ fontSize: '0.95rem' }}>
+                  <Trash2 size={18} className="me-2" />
+                  Eliminar Pago
+                </h6>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalEliminarPago(false);
+                    setPagoParaEliminar(null);
+                    setExpedienteParaEliminarPago(null);
+                    setMotivoEliminacion('');
+                  }}
+                  disabled={eliminandoPago}
+                ></button>
+              </div>
+              
+              <div className="modal-body py-3 px-3">
+                <div className="alert alert-warning mb-3 py-2">
+                  <strong>⚠️ Atención:</strong> Esta acción eliminará el pago registrado y recalculará el calendario de pagos.
+                </div>
+                
+                {/* Información del pago */}
+                <div className="card mb-3">
+                  <div className="card-body py-2 px-3">
+                    <div className="row">
+                      <div className="col-6">
+                        <small className="text-muted d-block">Recibo</small>
+                        <strong>#{pagoParaEliminar.numero}</strong>
+                      </div>
+                      <div className="col-6">
+                        <small className="text-muted d-block">Monto</small>
+                        <strong className="text-success">${pagoParaEliminar.monto}</strong>
+                      </div>
+                    </div>
+                    <div className="row mt-2">
+                      <div className="col-6">
+                        <small className="text-muted d-block">Fecha de Pago</small>
+                        <span>{pagoParaEliminar.fecha}</span>
+                      </div>
+                      <div className="col-6">
+                        <small className="text-muted d-block">Póliza</small>
+                        <span>{expedienteParaEliminarPago.numero_poliza || 'N/A'}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Campo de motivo */}
+                <div className="mb-0">
+                  <label className="form-label mb-1" style={{ fontSize: '0.85rem' }}>
+                    <strong>Motivo de la eliminación:</strong>
+                  </label>
+                  <textarea
+                    className="form-control"
+                    rows="2"
+                    placeholder="Ej: Pago duplicado, error de captura, pago no válido..."
+                    value={motivoEliminacion}
+                    onChange={(e) => setMotivoEliminacion(e.target.value)}
+                    disabled={eliminandoPago}
+                    style={{ fontSize: '0.85rem' }}
+                  />
+                </div>
+              </div>
+              
+              <div className="modal-footer py-2 px-3">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setMostrarModalEliminarPago(false);
+                    setPagoParaEliminar(null);
+                    setExpedienteParaEliminarPago(null);
+                    setMotivoEliminacion('');
+                  }}
+                  disabled={eliminandoPago}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-danger btn-sm"
+                  onClick={confirmarEliminarPago}
+                  disabled={eliminandoPago}
+                >
+                  {eliminandoPago ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                      Eliminando...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} className="me-1" />
+                      Confirmar Eliminación
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal Aplicar Pago con Comprobante */}
       {mostrarModalPago && expedienteParaPago && (
         <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -2808,61 +3131,26 @@ const ModuloNvoExpedientes = () => {
         onClose={() => {
           setMostrarModalContacto(false);
           setClienteParaActualizar(null);
+          setDestinatarioParaModal(null);
           setTipoDatoFaltante(null);
           setCanalEnvio(null);
           setExpedienteEnEspera(null);
         }}
         onGuardar={handleGuardarContactoFaltante}
-        onGuardarYContinuar={() => {
-          // Después de guardar, reintentar el envío conservando estado necesario
-          if (expedienteEnEspera && canalEnvio) {
-            const loadingId = toast.loading(`Abriendo ${canalEnvio}…`);
-            setTimeout(() => {
-              console.log('🔄 Reintentando envío por', canalEnvio);
-              if (canalEnvio === 'WhatsApp') {
-                // Verificar si es envío de aviso de pago o compartir póliza
-                if (pagoParaNotificar) {
-                  // Transformar recibo a formato esperado
-                  const pagoTransformado = {
-                    numero: pagoParaNotificar.numero_recibo || pagoParaNotificar.numero,
-                    fecha: pagoParaNotificar.fecha_vencimiento || pagoParaNotificar.fecha,
-                    monto: pagoParaNotificar.monto,
-                    estado: pagoParaNotificar.estado_pago || pagoParaNotificar.estado,
-                    totalPagos: expedienteEnEspera.recibos?.length || null
-                  };
-                  enviarAvisoPagoWhatsApp(pagoTransformado, expedienteEnEspera);
-                } else {
-                  compartirPorWhatsApp(expedienteEnEspera);
-                }
-              } else if (canalEnvio === 'Email') {
-                // Verificar si es envío de aviso de pago o compartir póliza
-                if (pagoParaNotificar) {
-                  // Transformar recibo a formato esperado
-                  const pagoTransformado = {
-                    numero: pagoParaNotificar.numero_recibo || pagoParaNotificar.numero,
-                    fecha: pagoParaNotificar.fecha_vencimiento || pagoParaNotificar.fecha,
-                    monto: pagoParaNotificar.monto,
-                    estado: pagoParaNotificar.estado_pago || pagoParaNotificar.estado,
-                    totalPagos: expedienteEnEspera.recibos?.length || null
-                  };
-                  enviarAvisoPagoEmail(pagoTransformado, expedienteEnEspera);
-                } else {
-                  compartirPorEmail(expedienteEnEspera);
-                }
-              }
-              // Limpieza diferida tras el reintento
-              setTimeout(() => {
-                toast.dismiss(loadingId);
-                setCanalEnvio(null);
-                setExpedienteEnEspera(null);
-                setPagoParaNotificar(null);
-              }, 300);
-            }, 500);
-          }
-        }}
         cliente={clienteParaActualizar}
+        destinatario={destinatarioParaModal}
         tipoDatoFaltante={tipoDatoFaltante}
         canalEnvio={canalEnvio}
+        onGuardarYContinuar={() => {
+          // ✨ NUEVA LÓGICA: Solo guardar y cerrar, sin reintento automático
+          // El usuario deberá dar click nuevamente en "Compartir" → ALVARO ya tendrá email
+          toast.success('Email guardado. Puedes volver a enviar la póliza.');
+          
+          // Limpiar estado del modal
+          setCanalEnvio(null);
+          setExpedienteEnEspera(null);
+          setPagoParaNotificar(null);
+        }}
       />
 
       {/* �📤 Modal de Compartir Expediente */}

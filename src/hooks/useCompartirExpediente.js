@@ -28,6 +28,7 @@ export const useCompartirExpediente = ({
   destinatarioCompartirSeleccionado,
   destinatarioSeleccionado,
   setClienteParaActualizar,
+  setDestinatarioParaModal,
   setTipoDatoFaltante,
   setCanalEnvio,
   setExpedienteEnEspera,
@@ -46,7 +47,7 @@ export const useCompartirExpediente = ({
    * @param {string} tipoPersona - Tipo de persona para determinar el campo correcto
    * @returns {Object} Cliente actualizado completo
    */
-  const actualizarCampoCliente = useCallback(async (clienteId, campo, valor, tipoPersona) => {
+  const actualizarCampoCliente = useCallback(async (clienteId, campo, valor, tipoPersona, destinatarioSeleccionado = null) => {
     try {
       // Primero obtener el cliente completo actual
       const respCliente = await clientesService.obtenerClientePorId(clienteId);
@@ -65,12 +66,22 @@ export const useCompartirExpediente = ({
         apellido_materno: clienteActual.apellido_materno
       });
 
-      // Determinar el campo correcto según el tipo de persona
+      // Determinar el campo correcto según QUÉ DESTINATARIO se seleccionó
       let campoReal = campo;
+      const destinatarioActual = destinatarioSeleccionado || destinatarioCompartirSeleccionado;
+      
       if (campo === 'telefono_movil') {
-        campoReal = tipoPersona === 'Persona Moral' ? 'contacto_telefono_movil' : 'telefonoMovil';
+        // Si se seleccionó contacto principal → contacto_telefono_movil
+        // Si se seleccionó cliente directo → telefonoMovil  
+        campoReal = destinatarioActual?.tipo === 'Contacto Principal' 
+          ? 'contacto_telefono_movil' 
+          : 'telefonoMovil';
       } else if (campo === 'email') {
-        campoReal = tipoPersona === 'Persona Moral' ? 'contacto_email' : 'email';
+        // Si se seleccionó contacto principal → contacto_email
+        // Si se seleccionó cliente directo → email
+        campoReal = destinatarioActual?.tipo === 'Contacto Principal'
+          ? 'contacto_email' 
+          : 'email';
       }
 
       // 🔧 MAPEAR todos los campos existentes del cliente (preservar estructura original)
@@ -84,7 +95,7 @@ export const useCompartirExpediente = ({
       if (clienteActual.id) camposValidosCliente.id = clienteActual.id;
       if (clienteActual.nombre) camposValidosCliente.nombre = clienteActual.nombre;
       
-      // ❌ CLIENTE DIRECTO - Apellidos (raramente se usan, generalmente están vacíos)
+      // ❌ CLIENTE DIRECTO - Usar campos como el CRUD de clientes (camelCase)
       if (clienteActual.apellidoPaterno) {
         camposValidosCliente.apellidoPaterno = clienteActual.apellidoPaterno;
       } else if (clienteActual.apellido_paterno) {
@@ -97,7 +108,7 @@ export const useCompartirExpediente = ({
         camposValidosCliente.apellidoMaterno = clienteActual.apellido_materno;
       }
 
-      // Otros campos importantes
+      // Otros campos importantes con prioridad camelCase (como CRUD)
       if (clienteActual.rfc) camposValidosCliente.rfc = clienteActual.rfc;
       if (clienteActual.curp) camposValidosCliente.curp = clienteActual.curp;
       if (clienteActual.fechaNacimiento) camposValidosCliente.fechaNacimiento = clienteActual.fechaNacimiento;
@@ -107,10 +118,13 @@ export const useCompartirExpediente = ({
       if (clienteActual.razonSocial) camposValidosCliente.razonSocial = clienteActual.razonSocial;
       if (clienteActual.razon_social) camposValidosCliente.razonSocial = clienteActual.razon_social;
       if (clienteActual.email) camposValidosCliente.email = clienteActual.email;
+      
+      // ✅ CONTACTO CLIENTE DIRECTO - Usar camelCase como CRUD
       if (clienteActual.telefonoMovil) camposValidosCliente.telefonoMovil = clienteActual.telefonoMovil;
-      if (clienteActual.telefono_movil) camposValidosCliente.telefonoMovil = clienteActual.telefono_movil;
+      if (clienteActual.telefono_movil && !camposValidosCliente.telefonoMovil) camposValidosCliente.telefonoMovil = clienteActual.telefono_movil;
       if (clienteActual.telefonoFijo) camposValidosCliente.telefonoFijo = clienteActual.telefonoFijo;
-      if (clienteActual.telefono_fijo) camposValidosCliente.telefono_fijo = clienteActual.telefono_fijo;
+      if (clienteActual.telefono_fijo && !camposValidosCliente.telefonoFijo) camposValidosCliente.telefonoFijo = clienteActual.telefono_fijo;
+      
       if (clienteActual.direccion) camposValidosCliente.direccion = clienteActual.direccion;
       if (clienteActual.ciudad) camposValidosCliente.ciudad = clienteActual.ciudad;
       if (clienteActual.estado) camposValidosCliente.estado = clienteActual.estado;
@@ -162,14 +176,17 @@ export const useCompartirExpediente = ({
   /**
    * Compartir póliza completa por WhatsApp
    */
-  const compartirPorWhatsApp = useCallback(async (expediente) => {
+  const compartirPorWhatsApp = useCallback(async (expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 USAR DESTINATARIO FORZADO SI SE PROPORCIONA, SINO EL SELECCIONADO
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado;
+      
+      // Usar destinatario actual si está disponible, sino obtener del cliente
       let telefono, nombreDestinatario;
       
-      if (destinatarioCompartirSeleccionado) {
-        telefono = destinatarioCompartirSeleccionado.telefono;
-        nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+      if (destinatarioActual) {
+        telefono = destinatarioActual.telefono;
+        nombreDestinatario = destinatarioActual.nombre;
       } else {
         // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
@@ -189,10 +206,19 @@ export const useCompartirExpediente = ({
         console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         if (respCliente?.success) {
-          setClienteParaActualizar(respCliente.data);
+          setClienteParaActualizar({
+            ...respCliente.data,
+            // 🔧 GUARDAR INFO DEL DESTINATARIO SELECCIONADO
+            _destinatarioSeleccionado: destinatarioActual
+          });
+          setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
           setTipoDatoFaltante('telefono_movil');
           setCanalEnvio('WhatsApp');
-          setExpedienteEnEspera(expediente);
+          setExpedienteEnEspera({
+            ...expediente,
+            // 🔧 PRESERVAR DESTINATARIO PARA EL REINTENTO
+            _destinatarioOriginal: destinatarioActual
+          });
           setMostrarModalContacto(true);
         }
         return;
@@ -246,11 +272,16 @@ export const useCompartirExpediente = ({
       
       // Registrar evento en el historial de trazabilidad (log único y completo)
       try {
+        // 🔧 USAR NOMBRE CORRECTO DEL DESTINATARIO FINAL (después del modal)
+        const nombreFinalDestinatario = destinatarioCompartirSeleccionado 
+          ? destinatarioCompartirSeleccionado.nombre 
+          : nombreDestinatario;
+          
         await historialService.registrarEnvioDocumento(
           expediente.id,
           expediente.cliente_id,
           'WhatsApp',
-          { nombre: nombreDestinatario, contacto: telefono },
+          { nombre: nombreFinalDestinatario, contacto: telefono },
           mensaje,
           pdfUrl,
           { 
@@ -292,14 +323,29 @@ export const useCompartirExpediente = ({
   /**
    * Compartir póliza completa por Email
    */
-  const compartirPorEmail = useCallback(async (expediente) => {
+  const compartirPorEmail = useCallback(async (expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 USAR DESTINATARIO FORZADO SI SE PROPORCIONA, SINO EL SELECCIONADO
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado;
+      
+      // 🔧 PRESERVAR NOMBRE DEL DESTINATARIO DESDE EL INICIO
+      const nombreOriginalDestinatario = destinatarioActual 
+        ? destinatarioActual.nombre 
+        : null;
+        
+      console.log('🔍 DEBUG Email - Nombres:', {
+        nombreOriginalDestinatario,
+        destinatarioActual,
+        destinatarioForzado,
+        tieneDestinatario: !!destinatarioActual
+      });
+        
+      // Usar destinatario actual si está disponible, sino obtener del cliente
       let email, nombreDestinatario;
       
-      if (destinatarioCompartirSeleccionado) {
-        email = destinatarioCompartirSeleccionado.email;
-        nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+      if (destinatarioActual) {
+        email = destinatarioActual.email;
+        nombreDestinatario = destinatarioActual.nombre;
       } else {
         // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
@@ -319,10 +365,19 @@ export const useCompartirExpediente = ({
         console.log('⚠️ Destinatario sin email, abriendo modal de captura');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         if (respCliente?.success) {
-          setClienteParaActualizar(respCliente.data);
+          setClienteParaActualizar({
+            ...respCliente.data,
+            // 🔧 GUARDAR INFO DEL DESTINATARIO SELECCIONADO
+            _destinatarioSeleccionado: destinatarioActual
+          });
+          setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
           setTipoDatoFaltante('email');
           setCanalEnvio('Email');
-          setExpedienteEnEspera(expediente);
+          setExpedienteEnEspera({
+            ...expediente,
+            // 🔧 PRESERVAR DESTINATARIO PARA EL REINTENTO
+            _destinatarioOriginal: destinatarioActual
+          });
           setMostrarModalContacto(true);
         }
         return;
@@ -350,11 +405,21 @@ export const useCompartirExpediente = ({
     
       // Registrar evento en el historial de trazabilidad (log único y completo)
       try {
+        // 🔧 USAR NOMBRE PRESERVADO DESDE EL INICIO (no depende del estado actual)
+        const nombreFinalDestinatario = nombreOriginalDestinatario || nombreDestinatario;
+        
+        console.log('🔍 DEBUG Log Email:', {
+          nombreOriginalDestinatario,
+          nombreDestinatario,
+          nombreFinalDestinatario,
+          email
+        });
+          
         await historialService.registrarEnvioDocumento(
           expediente.id,
           expediente.cliente_id,
           'Email',
-          { nombre: nombreDestinatario, contacto: email },
+          { nombre: nombreFinalDestinatario, contacto: email },
           cuerpo,
           pdfUrl,
           { 
@@ -396,49 +461,50 @@ export const useCompartirExpediente = ({
   /**
    * Enviar aviso de pago por WhatsApp
    */
-  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
+  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente, destinatarioForzado = null) => {
     try {
-      // 🔧 FIX: Usar SOLO el teléfono del destinatario seleccionado
+      // 🔧 FIX: Usar destinatarioForzado primero, luego destinatarioCompartirSeleccionado, luego destinatarioSeleccionado
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado || destinatarioSeleccionado;
       let telefono, nombreDestinatario;
       
-      if (destinatarioSeleccionado) {
-        telefono = destinatarioSeleccionado.telefono;
-        nombreDestinatario = destinatarioSeleccionado.nombre;
-      } else {
-        // Fallback: obtener datos del cliente solo si no hay destinatario seleccionado
-        console.log('⚠️ No hay destinatario seleccionado, consultando cliente...');
-        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-        if (!respCliente?.success) {
-          toast.error('No se pudo obtener la información del cliente');
-          return;
-        }
-        const cliente = respCliente.data;
-        // Para el fallback, usar solo teléfono del cliente (NO contacto principal)
-        telefono = cliente?.telefonoMovil || cliente?.telefono_movil;
-        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
-          ? cliente.razonSocial || cliente.razon_social
-          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
-      }
-      
-      console.log('🔍 Datos para WhatsApp:', { 
-        destinatario: nombreDestinatario, 
-        telefono, 
-        destinatarioId: destinatarioSeleccionado?.id,
-        tipoDestinatario: destinatarioSeleccionado?.tipo 
+      console.log('🔍 DEBUG enviarAvisoPagoWhatsApp - destinatarioActual:', {
+        destinatarioActual,
+        telefono: destinatarioActual?.telefono,
+        nombre: destinatarioActual?.nombre,
+        fuente: destinatarioForzado ? 'forzado' : destinatarioCompartirSeleccionado ? 'modal_compartir' : destinatarioSeleccionado ? 'selector_aviso' : 'ninguno'
       });
       
-      // Si no tiene teléfono, abrir modal para capturarlo
+      if (destinatarioActual) {
+        telefono = destinatarioActual.telefono;
+        nombreDestinatario = destinatarioActual.nombre;
+        console.log('📱 Usando destinatario seleccionado:', { nombre: nombreDestinatario, telefono, tieneTelefono: !!telefono });
+      }
+      
+      // 🔧 FIX: Si el destinatario seleccionado NO tiene teléfono, NO hacer fallback al cliente
+      // En su lugar, abrir modal de captura (igual que compartirPorWhatsApp)
       if (!telefono) {
         console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura para aviso de pago');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         const cliente = respCliente?.success ? respCliente.data : null;
-        setClienteParaActualizar(cliente);
+        
+        // Construir nombre del destinatario si no existe
+        if (!nombreDestinatario && cliente) {
+          nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+            ? cliente.razonSocial || cliente.razon_social
+            : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        }
+        
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, telefono: null }
+        });
+        setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
         setTipoDatoFaltante('telefono_movil');
         setCanalEnvio('WhatsApp');
         setExpedienteEnEspera(expediente);
         setPagoParaNotificar(pago);
         setMostrarModalContacto(true);
-        cerrarModalAvisoPago();
         return;
       }
 
@@ -451,13 +517,17 @@ export const useCompartirExpediente = ({
         toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp. Por favor actualízalo.`);
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         const cliente = respCliente?.success ? respCliente.data : null;
-        setClienteParaActualizar(cliente);
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, telefono: null }
+        });
         setTipoDatoFaltante('telefono_movil');
         setCanalEnvio('WhatsApp');
         setExpedienteEnEspera(expediente);
         setPagoParaNotificar(pago);
         setMostrarModalContacto(true);
-        cerrarModalAvisoPago();
+        // 🔧 FIX: NO llamar cerrarModalAvisoPago() porque borra pagoParaNotificar
         return;
       }
       
@@ -640,45 +710,55 @@ export const useCompartirExpediente = ({
       console.error('Error al enviar aviso por WhatsApp:', error);
       toast.error('Error al enviar aviso por WhatsApp');
     }
-  }, [cerrarModalAvisoPago, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
+  }, [cerrarModalAvisoPago, destinatarioCompartirSeleccionado, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
 
   /**
    * Enviar aviso de pago por Email
    */
-  const enviarAvisoPagoEmail = useCallback(async (pago, expediente) => {
+  const enviarAvisoPagoEmail = useCallback(async (pago, expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 FIX: Usar destinatarioForzado primero, luego destinatarioCompartirSeleccionado, luego destinatarioSeleccionado
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado || destinatarioSeleccionado;
       let email, nombreDestinatario;
       
-      if (destinatarioSeleccionado) {
-        email = destinatarioSeleccionado.email;
-        nombreDestinatario = destinatarioSeleccionado.nombre;
-      } else {
-        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
-        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-        if (!respCliente?.success) {
-          toast.error('No se pudo obtener la información del cliente');
-          return;
-        }
-        const cliente = respCliente.data;
-        email = cliente?.contacto_email || cliente?.email;
-        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
-          ? cliente.razonSocial || cliente.razon_social
-          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      console.log('🔍 DEBUG enviarAvisoPagoEmail - destinatarioActual:', {
+        destinatarioActual,
+        email: destinatarioActual?.email,
+        nombre: destinatarioActual?.nombre,
+        fuente: destinatarioForzado ? 'forzado' : destinatarioCompartirSeleccionado ? 'modal_compartir' : destinatarioSeleccionado ? 'selector_aviso' : 'ninguno'
+      });
+      
+      if (destinatarioActual) {
+        email = destinatarioActual.email;
+        nombreDestinatario = destinatarioActual.nombre;
+        console.log('📧 Usando destinatario seleccionado:', { nombre: nombreDestinatario, email, tieneEmail: !!email });
       }
       
-      // Si no tiene email, abrir modal para capturarlo
+      // 🔧 FIX: Si el destinatario seleccionado NO tiene email, NO hacer fallback al cliente
+      // En su lugar, abrir modal de captura (igual que compartirPorEmail)
       if (!email) {
         console.log('⚠️ Destinatario sin email, abriendo modal de captura para aviso de pago');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         const cliente = respCliente?.success ? respCliente.data : null;
-        setClienteParaActualizar(cliente);
+        
+        // Construir nombre del destinatario si no existe
+        if (!nombreDestinatario && cliente) {
+          nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+            ? cliente.razonSocial || cliente.razon_social
+            : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        }
+        
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, email: null }
+        });
+        setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
         setTipoDatoFaltante('email');
         setCanalEnvio('Email');
         setExpedienteEnEspera(expediente);
         setPagoParaNotificar(pago);
         setMostrarModalContacto(true);
-        cerrarModalAvisoPago();
         return;
       }
       
@@ -863,7 +943,7 @@ export const useCompartirExpediente = ({
       console.error('Error al enviar aviso por Email:', error);
       toast.error('Error al enviar aviso por Email');
     }
-  }, [cerrarModalAvisoPago, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
+  }, [cerrarModalAvisoPago, destinatarioCompartirSeleccionado, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
 
   return {
     compartirPorWhatsApp,

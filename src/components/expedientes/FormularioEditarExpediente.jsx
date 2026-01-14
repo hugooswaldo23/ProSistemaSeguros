@@ -65,38 +65,149 @@ const FormularioEditarExpediente = ({
   /**
    * 🔍 DETECTAR CAMBIOS entre formularioOriginal y formulario actual
    * Esta función se puede llamar antes de guardar para generar logs
+   * COMPLETO: Incluye todos los campos y recibos
    */
   const detectarCambios = () => {
     if (!formularioOriginal) return {};
     
     const cambios = {};
+    
+    // Función auxiliar para normalizar valores antes de comparar
+    const normalizarValor = (valor) => {
+      if (valor === null || valor === undefined) return '';
+      if (typeof valor === 'string' && valor.includes('T')) {
+        return valor.split('T')[0]; // Fecha ISO -> solo fecha
+      }
+      return String(valor).trim();
+    };
+    
+    // TODOS los campos a comparar
     const camposAComparar = [
-      // Datos básicos
-      'numero_poliza', 'compania', 'producto', 'etapa_activa',
+      // Datos básicos de póliza
+      'numero_poliza', 'numero_endoso', 'compania', 'producto', 'etapa_activa',
+      
       // Fechas
-      'fecha_emision', 'inicio_vigencia', 'termino_vigencia',
-      // Montos
-      'prima_neta', 'total', 'iva', 'subtotal',
+      'fecha_emision', 'inicio_vigencia', 'termino_vigencia', 
+      'fecha_vencimiento_pago', 'proximoPago', 'fecha_aviso_renovacion',
+      
+      // Montos y cálculos
+      'prima_neta', 'cargo_pago_fraccionado', 'gastos_expedicion',
+      'iva', 'subtotal', 'total', 'primer_pago', 'pagos_subsecuentes',
+      
+      // Datos de pago
+      'tipo_pago', 'frecuenciaPago', 'frecuencia_pago', 'periodo_gracia', 
+      'estatusPago', 'estatus_pago',
+      
       // Vehículo
-      'marca', 'modelo', 'anio', 'placas', 'numero_serie',
+      'marca', 'modelo', 'anio', 'placas', 'numero_serie', 'color',
+      'tipo_vehiculo', 'tipo_cobertura', 'suma_asegurada',
+      'conductor_habitual', 'edad_conductor', 'licencia_conducir',
+      
       // Agentes
-      'agente', 'sub_agente',
-      // Pagos
-      'tipo_pago', 'frecuenciaPago', 'periodo_gracia', 'estatusPago'
+      'agente', 'agente_id', 'clave_agente',
+      'sub_agente', 'subagente_id', 'vendedor_id',
+      
+      // Cliente
+      'nombre', 'apellido_paterno', 'apellido_materno',
+      'razon_social', 'nombre_comercial', 'rfc',
+      'email', 'telefono_fijo', 'telefono_movil',
+      'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
+      'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
     ];
     
     camposAComparar.forEach(campo => {
-      const valorOriginal = formularioOriginal[campo];
-      const valorActual = formulario[campo];
+      const valorOriginal = normalizarValor(formularioOriginal[campo]);
+      const valorActual = normalizarValor(formulario[campo]);
       
-      // Comparar solo si son diferentes
-      if (valorOriginal !== valorActual) {
+      // Comparar solo si son diferentes y al menos uno tiene valor
+      if (valorOriginal !== valorActual && (valorOriginal || valorActual)) {
         cambios[campo] = {
-          anterior: valorOriginal,
-          nuevo: valorActual
+          anterior: formularioOriginal[campo] || '(vacío)',
+          nuevo: formulario[campo] || '(vacío)'
         };
       }
     });
+    
+    // 🔍 COMPARAR RECIBOS
+    const recibosOriginales = formularioOriginal.recibos || [];
+    const recibosActuales = formulario.recibos || [];
+    
+    // Parsear si vienen como string
+    let recibosOrigParsed = recibosOriginales;
+    let recibosActualesParsed = recibosActuales;
+    
+    if (typeof recibosOrigParsed === 'string') {
+      try { recibosOrigParsed = JSON.parse(recibosOrigParsed); } 
+      catch (e) { recibosOrigParsed = []; }
+    }
+    if (typeof recibosActualesParsed === 'string') {
+      try { recibosActualesParsed = JSON.parse(recibosActualesParsed); } 
+      catch (e) { recibosActualesParsed = []; }
+    }
+    
+    // Asegurar arrays
+    if (!Array.isArray(recibosOrigParsed)) recibosOrigParsed = [];
+    if (!Array.isArray(recibosActualesParsed)) recibosActualesParsed = [];
+    
+    // Comparar recibos
+    const cambiosRecibos = [];
+    const maxLength = Math.max(recibosOrigParsed.length, recibosActualesParsed.length);
+    
+    for (let i = 0; i < maxLength; i++) {
+      const reciboOrig = recibosOrigParsed[i];
+      const reciboActual = recibosActualesParsed[i];
+      
+      if (!reciboOrig && reciboActual) {
+        // Recibo agregado
+        cambiosRecibos.push({
+          numero_recibo: reciboActual.numero_recibo || (i + 1),
+          tipo_cambio: 'agregado',
+          fecha_anterior: null,
+          fecha_nueva: reciboActual.fecha_vencimiento,
+          monto: reciboActual.monto,
+          estatus: reciboActual.estatus || reciboActual.estatus_pago
+        });
+      } else if (reciboOrig && !reciboActual) {
+        // Recibo eliminado
+        cambiosRecibos.push({
+          numero_recibo: reciboOrig.numero_recibo || (i + 1),
+          tipo_cambio: 'eliminado',
+          fecha_anterior: reciboOrig.fecha_vencimiento,
+          fecha_nueva: null,
+          monto: reciboOrig.monto,
+          estatus: reciboOrig.estatus || reciboOrig.estatus_pago
+        });
+      } else if (reciboOrig && reciboActual) {
+        // Comparar campos del recibo
+        const fechaOrig = normalizarValor(reciboOrig.fecha_vencimiento);
+        const fechaActual = normalizarValor(reciboActual.fecha_vencimiento);
+        const montoOrig = normalizarValor(reciboOrig.monto);
+        const montoActual = normalizarValor(reciboActual.monto);
+        const estatusOrig = normalizarValor(reciboOrig.estatus || reciboOrig.estatus_pago);
+        const estatusActual = normalizarValor(reciboActual.estatus || reciboActual.estatus_pago);
+        
+        if (fechaOrig !== fechaActual || montoOrig !== montoActual || estatusOrig !== estatusActual) {
+          cambiosRecibos.push({
+            numero_recibo: reciboActual.numero_recibo || (i + 1),
+            tipo_cambio: 'editado',
+            fecha_anterior: reciboOrig.fecha_vencimiento,
+            fecha_nueva: reciboActual.fecha_vencimiento,
+            monto_anterior: reciboOrig.monto,
+            monto_nuevo: reciboActual.monto,
+            estatus_anterior: reciboOrig.estatus || reciboOrig.estatus_pago,
+            estatus_nuevo: reciboActual.estatus || reciboActual.estatus_pago
+          });
+        }
+      }
+    }
+    
+    // Agregar recibos al objeto de cambios si hay
+    if (cambiosRecibos.length > 0) {
+      cambios._recibos = {
+        cantidad: cambiosRecibos.length,
+        detalles: cambiosRecibos
+      };
+    }
     
     console.log('🔍 Cambios detectados:', cambios);
     return cambios;
@@ -335,31 +446,119 @@ const FormularioEditarExpediente = ({
       await guardarExpediente();
       
       // 3. Registrar cambios en el historial si los hay
-      if (Object.keys(cambios).length > 0) {
-        console.log('📝 Registrando cambios para auditoría:', cambios);
+      // Separar cambios de recibos de cambios de campos
+      const cambiosRecibos = cambios._recibos;
+      delete cambios._recibos;
+      
+      const cantidadCampos = Object.keys(cambios).length;
+      const cantidadRecibos = cambiosRecibos?.cantidad || 0;
+      const hayAlgunCambio = cantidadCampos > 0 || cantidadRecibos > 0;
+      
+      if (hayAlgunCambio) {
+        console.log('📝 Registrando cambios para auditoría:', { cambios, cambiosRecibos });
         
         // Formatear descripción de cambios para el historial
-        const camposModificados = Object.keys(cambios).map(campo => {
-          const etiqueta = obtenerEtiquetaCampo(campo);
-          const valorAnterior = cambios[campo].anterior || 'Vacío';
-          const valorNuevo = cambios[campo].nuevo || 'Vacío';
-          return `${etiqueta}: "${valorAnterior}" → "${valorNuevo}"`;
-        });
+        const camposModificados = Object.keys(cambios)
+          .filter(campo => !campo.startsWith('_'))
+          .map(campo => {
+            const etiqueta = obtenerEtiquetaCampo(campo);
+            const valorAnterior = cambios[campo].anterior || 'Vacío';
+            const valorNuevo = cambios[campo].nuevo || 'Vacío';
+            return `${etiqueta}: "${valorAnterior}" → "${valorNuevo}"`;
+          });
         
-        const descripcion = `Expediente actualizado. Campos modificados: ${camposModificados.join(', ')}`;
+        // Construir descripción
+        let descripcionPartes = [];
+        if (cantidadCampos > 0) {
+          descripcionPartes.push(`${cantidadCampos} campo(s) de póliza`);
+        }
+        if (cantidadRecibos > 0) {
+          descripcionPartes.push(`${cantidadRecibos} recibo(s)`);
+        }
+        
+        const descripcion = `Expediente actualizado | ${descripcionPartes.join(' + ')}${camposModificados.length > 0 ? ': ' + camposModificados.join(', ') : ''}`;
         
         try {
+          // Separar cambios por categorías para mejor visualización
+          const cambiosPorCategoria = {
+            // Cambios en póliza (excluir campos de cliente)
+            poliza: {},
+            // Cambios en cliente
+            cliente: {},
+            // Cambios en recibos
+            recibos: cambiosRecibos
+          };
+          
+          const camposCliente = [
+            'nombre', 'apellido_paterno', 'apellido_materno',
+            'razon_social', 'nombre_comercial', 'rfc',
+            'email', 'telefono_fijo', 'telefono_movil',
+            'contacto_nombre', 'contacto_apellido_paterno', 'contacto_apellido_materno',
+            'contacto_email', 'contacto_telefono_fijo', 'contacto_telefono_movil'
+          ];
+          
+          Object.entries(cambios).forEach(([campo, valor]) => {
+            if (camposCliente.includes(campo)) {
+              cambiosPorCategoria.cliente[campo] = valor;
+            } else {
+              cambiosPorCategoria.poliza[campo] = valor;
+            }
+          });
+          
           // Registrar evento de actualización en el historial
+          // Usamos 'edicion_manual_expediente' para que tenga el mismo formato visual
           await historialExpedienteService.registrarEvento({
             expediente_id: formulario.id,
             cliente_id: formulario.cliente_id,
-            usuario_nombre: 'Sistema', // TODO: Usuario autenticado
-            tipo_evento: historialExpedienteService.TIPOS_EVENTO.DATOS_ACTUALIZADOS,
-            descripcion: descripcion,
-            detalles_adicionales: {
-              campos_modificados: Object.keys(cambios),
-              cambios_detallados: cambios,
-              total_cambios: Object.keys(cambios).length
+            usuario_nombre: 'Sistema',
+            tipo_evento: 'edicion_manual_expediente',
+            descripcion: `Edición manual de expediente | ${formulario.compania || 'Sin aseguradora'} | Póliza: ${formulario.numero_poliza || 'Sin número'} | ${descripcionPartes.join(' + ')}`,
+            datos_adicionales: {
+              metodo_captura: 'Edición Manual',
+              fecha_edicion: new Date().toISOString(),
+              aseguradora: formulario.compania,
+              numero_poliza: formulario.numero_poliza,
+              usuario_edito: 'Sistema',
+              etapa_actual: formulario.etapa_activa || 'Sin etapa',
+              
+              // Cambios en campos de póliza
+              ...(Object.keys(cambiosPorCategoria.poliza).length > 0 && {
+                poliza_cambios: {
+                  descripcion: 'Datos de póliza editados',
+                  campos_actualizados: Object.keys(cambiosPorCategoria.poliza),
+                  cambios_detallados: Object.fromEntries(
+                    Object.entries(cambiosPorCategoria.poliza).map(([campo, valor]) => [
+                      campo,
+                      { anterior: valor.anterior, nuevo: valor.nuevo }
+                    ])
+                  )
+                }
+              }),
+              
+              // Cambios en campos de cliente
+              ...(Object.keys(cambiosPorCategoria.cliente).length > 0 && {
+                cliente_cambios: {
+                  descripcion: 'Datos de cliente editados',
+                  campos_actualizados: Object.keys(cambiosPorCategoria.cliente),
+                  cambios_detallados: Object.fromEntries(
+                    Object.entries(cambiosPorCategoria.cliente).map(([campo, valor]) => [
+                      campo,
+                      { anterior: valor.anterior, nuevo: valor.nuevo }
+                    ])
+                  )
+                }
+              }),
+              
+              // Cambios en recibos
+              ...(cambiosPorCategoria.recibos && {
+                recibos_cambios: {
+                  descripcion: 'Calendario de pagos modificado',
+                  cantidad_cambios: cambiosPorCategoria.recibos.cantidad,
+                  cambios_detallados: cambiosPorCategoria.recibos.detalles
+                }
+              }),
+              
+              total_cambios: cantidadCampos + cantidadRecibos
             }
           });
           

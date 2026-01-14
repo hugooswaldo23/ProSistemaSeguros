@@ -36,6 +36,7 @@ const DetallesExpediente = React.memo(({
   calcularProximoPago,
   abrirModalCompartir,
   enviarAvisoPago,
+  onEliminarPago, // Callback para eliminar pago (abre modal)
   historial = [], // Historial del expediente
   setHistorialExpediente
 }) => {
@@ -241,6 +242,7 @@ const DetallesExpediente = React.memo(({
                     calcularProximoPago={calcularProximoPago}
                     mostrarResumen={true}
                     onEnviarAviso={enviarAvisoPago}
+                    onEliminarPago={onEliminarPago}
                     historial={historial}
                   />
                 </div>

@@ -647,6 +647,8 @@ const ModuloClientes = () => {
       telefonoMovil: cliente.telefonoMovil || cliente.telefono_movil || '',
       codigoPostal: cliente.codigoPostal || cliente.codigo_postal || '',
       tipoPersona: cliente.tipoPersona || cliente.tipo_persona || 'Persona Física',
+      segmento: cliente.segmento || 'Estándar', // Asegurar que segmento no sea null
+      notas: cliente.notas || '', // Asegurar que notas no sea null
       // Mapear campos de contacto principal (para ambos tipos de persona)
       contacto_nombre: cliente.contacto_nombre || '',
       contacto_apellido_paterno: cliente.contacto_apellido_paterno || '',
@@ -1382,7 +1384,7 @@ const ModuloClientes = () => {
                   <label className="form-label">Categoría</label>
                   <select
                     className="form-select"
-                    value={formularioCliente.segmento}
+                    value={formularioCliente.segmento || 'Estándar'}
                     onChange={(e) => setFormularioCliente({...formularioCliente, segmento: e.target.value})}
                   >
                     {segmentosCliente.map(categoria => (
@@ -1967,7 +1969,7 @@ const ModuloClientes = () => {
                   <textarea
                     className="form-control"
                     rows="3"
-                    value={formularioCliente.notas}
+                    value={formularioCliente.notas || ''}
                     onChange={(e) => setFormularioCliente({...formularioCliente, notas: e.target.value})}
                     placeholder="Información adicional sobre el cliente..."
                   />
