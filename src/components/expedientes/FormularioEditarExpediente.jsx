@@ -273,62 +273,54 @@ const FormularioEditarExpediente = ({
   };
 
   /**
-   * Subir PDF de la póliza (pendiente implementación backend)
+   * Subir PDF de la póliza (usado internamente)
    */
-  const subirPDFPoliza = async (expedienteId) => {
-    if (!archivoSeleccionado) {
-      toast.error('Selecciona un archivo PDF primero');
-      return;
-    }
-    
-    setSubiendoPDF(true);
+  const subirPDFPoliza = async (expedienteId, archivo) => {
+    if (!archivo) return null;
     
     try {
-      // TODO: Implementar cuando Hugo complete el backend
-      toast.error('Funcionalidad pendiente de implementación en el backend');
-      console.log('📤 Subir PDF:', { expedienteId, archivo: archivoSeleccionado.name });
-      
-      // Código de ejemplo para cuando esté listo:
-      /*
-      const result = await pdfService.subirPDFPoliza(expedienteId, archivoSeleccionado);
-      
-      if (result.success) {
-        toast.success('PDF subido exitosamente');
-        setFormulario(prev => ({
-          ...prev,
-          pdf_nombre: result.data.pdf_nombre,
-          pdf_size: result.data.pdf_size,
-          pdf_fecha_subida: result.data.pdf_fecha_subida
-        }));
-        setArchivoSeleccionado(null);
-      }
-      */
+      console.log('📤 Subiendo PDF:', { expedienteId, archivo: archivo.name });
+      const result = await pdfService.subirPDFPoliza(expedienteId, archivo);
+      console.log('✅ PDF subido:', result);
+      return result;
     } catch (error) {
       console.error('Error al subir PDF:', error);
-      toast.error('Error al subir el PDF: ' + error.message);
-    } finally {
-      setSubiendoPDF(false);
+      throw error;
     }
   };
 
   /**
-   * Eliminar PDF de la póliza (pendiente implementación backend)
+   * Eliminar PDF de la póliza
    */
   const eliminarPDFPoliza = async (expedienteId) => {
-    // TODO: Implementar cuando Hugo complete el backend
-    toast.error('Funcionalidad pendiente de implementación en el backend');
-    console.log('🗑️ Eliminar PDF:', { expedienteId });
+    if (!confirm('¿Estás seguro de eliminar el PDF de esta póliza?')) {
+      return;
+    }
+    
+    try {
+      await pdfService.eliminarPDFPoliza(expedienteId);
+      
+      // Actualizar formulario local
+      setFormulario(prev => ({
+        ...prev,
+        pdf_url: null,
+        pdf_nombre: null,
+        pdf_key: null,
+        pdf_size: null,
+        pdf_fecha_subida: null
+      }));
+      
+      toast.success('PDF eliminado correctamente');
+    } catch (error) {
+      console.error('❌ Error al eliminar PDF:', error);
+      toast.error('Error al eliminar PDF: ' + error.message);
+    }
   };
 
   // Sección de PDF inferior: Visualización y gestión de PDF existente
   const seccionPDFInferior = formulario.id && (
     <div className="mb-4">
       <h5 className="card-title border-bottom pb-2">Documento de Póliza (PDF)</h5>
-      <div className="alert alert-info" role="alert">
-        <AlertCircle size={16} className="me-2" />
-        <strong>Funcionalidad en preparación:</strong> Esta sección estará disponible cuando Hugo complete la implementación del backend y AWS S3.
-        Ver documento: <code>docs/BACKEND-COMPROBANTES-PAGO-S3.md</code>
-      </div>
     
       {/* Mostrar PDF actual si existe */}
       {formulario.pdf_nombre && (
@@ -361,22 +353,27 @@ const FormularioEditarExpediente = ({
                     }
                   }}
                   className="btn btn-sm btn-outline-primary"
-                  disabled
-                  title="Disponible cuando se implemente el backend"
                 >
                   <Eye size={14} className="me-1" />
                   Ver
                 </button>
-                <button
-                  type="button"
-                  onClick={() => eliminarPDFPoliza(formulario.id)}
-                  className="btn btn-sm btn-outline-danger"
-                  disabled
-                  title="Disponible cuando se implemente el backend"
-                >
-                  <Trash2 size={14} className="me-1" />
-                  Eliminar
-                </button>
+                <label className="btn btn-sm btn-outline-secondary mb-0" style={{ cursor: 'pointer' }}>
+                  <Upload size={14} className="me-1" />
+                  Cambiar
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        // Solo guardar en estado - se subirá al dar "Actualizar Expediente"
+                        setArchivoSeleccionado(file);
+                        toast.success(`PDF seleccionado: ${file.name}. Guarda los cambios para aplicar.`);
+                      }
+                    }}
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -439,6 +436,43 @@ const FormularioEditarExpediente = ({
    */
   const guardarConAuditoria = async () => {
     try {
+      // 0. Verificar si hay PDF pendiente de subir
+      let cambioPDF = null;
+      if (archivoSeleccionado) {
+        const pdfAnterior = formulario.pdf_nombre;
+        const pdfKeyAnterior = formulario.pdf_key; // Guardar key anterior para historial
+        setSubiendoPDF(true);
+        try {
+          const resultPDF = await subirPDFPoliza(formulario.id, archivoSeleccionado);
+          if (resultPDF) {
+            cambioPDF = {
+              esReemplazo: !!pdfAnterior,
+              anterior: pdfAnterior || null,
+              anterior_key: pdfKeyAnterior || null, // Key para poder abrir el PDF anterior
+              nuevo: archivoSeleccionado.name,
+              nuevo_key: resultPDF.pdf_key, // Key del nuevo PDF
+              size: resultPDF.pdf_size
+            };
+            // Actualizar formulario con datos del PDF
+            setFormulario(prev => ({
+              ...prev,
+              pdf_nombre: resultPDF.pdf_nombre,
+              pdf_size: resultPDF.pdf_size,
+              pdf_key: resultPDF.pdf_key,
+              pdf_url: resultPDF.pdf_url,
+              pdf_fecha_subida: resultPDF.pdf_fecha_subida
+            }));
+            setArchivoSeleccionado(null);
+          }
+        } catch (errorPDF) {
+          toast.error('Error al subir PDF: ' + errorPDF.message);
+          setSubiendoPDF(false);
+          return; // No continuar si falla el PDF
+        } finally {
+          setSubiendoPDF(false);
+        }
+      }
+      
       // 1. Detectar cambios antes de guardar
       const cambios = detectarCambios();
       
@@ -452,7 +486,7 @@ const FormularioEditarExpediente = ({
       
       const cantidadCampos = Object.keys(cambios).length;
       const cantidadRecibos = cambiosRecibos?.cantidad || 0;
-      const hayAlgunCambio = cantidadCampos > 0 || cantidadRecibos > 0;
+      const hayAlgunCambio = cantidadCampos > 0 || cantidadRecibos > 0 || cambioPDF;
       
       if (hayAlgunCambio) {
         console.log('📝 Registrando cambios para auditoría:', { cambios, cambiosRecibos });
@@ -474,6 +508,9 @@ const FormularioEditarExpediente = ({
         }
         if (cantidadRecibos > 0) {
           descripcionPartes.push(`${cantidadRecibos} recibo(s)`);
+        }
+        if (cambioPDF) {
+          descripcionPartes.push(cambioPDF.esReemplazo ? 'PDF reemplazado' : 'PDF agregado');
         }
         
         const descripcion = `Expediente actualizado | ${descripcionPartes.join(' + ')}${camposModificados.length > 0 ? ': ' + camposModificados.join(', ') : ''}`;
@@ -558,7 +595,19 @@ const FormularioEditarExpediente = ({
                 }
               }),
               
-              total_cambios: cantidadCampos + cantidadRecibos
+              // Cambios en PDF (incluye keys para poder abrir ambos archivos)
+              ...(cambioPDF && {
+                pdf_cambios: {
+                  descripcion: cambioPDF.esReemplazo ? 'PDF de póliza reemplazado' : 'PDF de póliza agregado',
+                  anterior: cambioPDF.anterior,
+                  anterior_key: cambioPDF.anterior_key,
+                  nuevo: cambioPDF.nuevo,
+                  nuevo_key: cambioPDF.nuevo_key,
+                  size: cambioPDF.size
+                }
+              }),
+              
+              total_cambios: cantidadCampos + cantidadRecibos + (cambioPDF ? 1 : 0)
             }
           });
           

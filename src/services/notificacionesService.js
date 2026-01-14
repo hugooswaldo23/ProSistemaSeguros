@@ -264,7 +264,10 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
       ...(expediente.estatusPago ? [`💳 *Estatus del pago:* ${expediente.estatusPago}`] : []),
       ...infoRecibos,
       '',
-      pdfUrl ? `📄 *Consulta tu póliza:* ${pdfUrl}` : '',
+      ...(pdfUrl ? [
+        `📄 *Descarga tu póliza aquí:*`,
+        `👉 ${pdfUrl}`
+      ] : []),
       '',
       '◆ Cualquier duda, estamos para servirte.',
       '',
@@ -470,7 +473,8 @@ Vigencia: ${inicioVig} al ${finVig}
 Prima Total: $${primaTotal}
 Fecha de pago: ${fechaPago}${pdfUrl ? `
 
-📄 Consulte su póliza en: ${pdfUrl}` : ''}
+📄 Descargue su póliza aquí:
+${pdfUrl}` : ''}
 
 Cualquier duda, estamos a sus órdenes.
 

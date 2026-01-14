@@ -53,7 +53,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     // Verificar si ya hay un archivo seleccionado desde el modal anterior
     if (window._selectedPDFFile && window._autoExtractorMode) {
       const file = window._selectedPDFFile;
-      delete window._selectedPDFFile; // Limpiar
+      // 📄 NO borrar window._selectedPDFFile aquí - se necesita para subir a S3 después de guardar
+      // Solo borrar el flag de auto-extracción
       delete window._autoExtractorMode; // Limpiar flag
       
       // Configurar método automático y procesar directamente
@@ -466,6 +467,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     const file = e.target.files[0];
     if (file && file.type === 'application/pdf') {
       setArchivo(file);
+      // 📄 Guardar referencia para subir a S3 después de guardar el expediente
+      window._selectedPDFFile = file;
       setInformacionArchivo({
         nombre: file.name,
         tamaño: `${(file.size / 1024).toFixed(2)} KB`,

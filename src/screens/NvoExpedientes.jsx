@@ -19,6 +19,7 @@ import { usePagos } from '../hooks/usePagos';
 import { useCompartirExpediente } from '../hooks/useCompartirExpediente';
 import * as clientesService from '../services/clientesService';
 import * as historialService from '../services/historialExpedienteService';
+import * as pdfService from '../services/pdfService';
 import utils from '../utils/expedientesUtils';
 import { CONSTANTS } from '../utils/expedientesConstants';
 
@@ -731,7 +732,12 @@ const ModuloNvoExpedientes = () => {
   }, [pagoParaEliminar, expedienteParaEliminarPago, motivoEliminacion]);
 
   // �📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
-  const abrirModalCompartir = useCallback(async (expediente) => {
+  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
+  // tipoEnvioInicial: 'poliza' (default) o 'pago' para preseleccionar
+  const abrirModalCompartir = useCallback(async (expediente, tipoEnvioInicial = 'poliza') => {
+    // Preseleccionar tipo de envío
+    setTipoEnvio(tipoEnvioInicial);
+    
     // Validar que el expediente tenga cliente_id
     if (!expediente?.cliente_id) {
       toast.error('Esta póliza no tiene un cliente asociado');
@@ -1639,6 +1645,16 @@ const ModuloNvoExpedientes = () => {
       delete datos._pagos_subsecuentes_changed;
       delete datos.cliente;
       delete datos.historial;
+      
+      // 📄 En modo edición, NO enviar campos de PDF (se actualizan por separado al subir)
+      // Esto evita sobrescribir el pdf_key nuevo con el viejo
+      if (modoEdicion) {
+        delete datos.pdf_key;
+        delete datos.pdf_url;
+        delete datos.pdf_nombre;
+        delete datos.pdf_size;
+        delete datos.pdf_fecha_subida;
+      }
 
       // Serializar coberturas
       if (datos.coberturas && Array.isArray(datos.coberturas)) {
@@ -1737,6 +1753,32 @@ const ModuloNvoExpedientes = () => {
       
       // Obtener ID del expediente (para creación o edición)
       const expedienteId = resultado.data?.id || resultado.id;
+      
+      // 📄 SUBIR PDF A S3 (si es creación desde extractor PDF)
+      console.log('📄 ===== DEBUG SUBIDA PDF =====');
+      console.log('📄 modoEdicion:', modoEdicion);
+      console.log('📄 window._selectedPDFFile:', window._selectedPDFFile);
+      console.log('📄 fueExtractorPDF:', fueExtractorPDF);
+      console.log('📄 expedienteId:', expedienteId);
+      console.log('📄 ==============================');
+      
+      if (!modoEdicion && window._selectedPDFFile) {
+        try {
+          console.log('📤 Subiendo PDF del extractor a S3...');
+          const pdfData = await pdfService.subirPDFPoliza(expedienteId, window._selectedPDFFile);
+          console.log('✅ PDF subido correctamente:', pdfData);
+          
+          // Limpiar archivo temporal
+          window._selectedPDFFile = null;
+          window._autoExtractorMode = null;
+        } catch (errorPDF) {
+          console.error('⚠️ Error al subir PDF (no crítico):', errorPDF);
+          toast.error('No se pudo subir el PDF: ' + errorPDF.message);
+          // Continuar con el flujo aunque falle la subida del PDF
+        }
+      } else if (!modoEdicion && fueExtractorPDF) {
+        console.warn('⚠️ Fue extractor PDF pero window._selectedPDFFile está vacío');
+      }
       
       // Si es creación y no vienen recibos, obtenerlos del backend o usar los que tenemos
       let recibosParaLog = resultado.data?.recibos || resultado.recibos || null;
@@ -2795,6 +2837,7 @@ const ModuloNvoExpedientes = () => {
           calculartermino_vigencia={calculartermino_vigencia}
           calcularProximoPago={calcularProximoPago}
           abrirModalCompartir={abrirModalCompartir}
+          enviarAvisoPago={(pago, expediente) => abrirModalCompartir(expediente, 'pago')}
           onEliminarPago={abrirModalEliminarPago}
           historial={historialExpediente}
           setHistorialExpediente={setHistorialExpediente}

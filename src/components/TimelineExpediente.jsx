@@ -12,10 +12,13 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
-  ExternalLink
+  ExternalLink,
+  FileText
 } from 'lucide-react';
 import { obtenerNotificacionesPorExpediente } from '../services/notificacionesService';
 import * as historialService from '../services/historialExpedienteService';
+import * as pdfService from '../services/pdfService';
+import toast from 'react-hot-toast';
 
 const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const [historial, setHistorial] = useState([]);
@@ -579,6 +582,55 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                         </div>
                                       ))}
                                     </>
+                                  )}
+                                  
+                                  {/* ✨ CAMBIOS EN PDF (para edicion_manual_expediente) */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.pdf_cambios && (
+                                    <div className="text-muted mt-2">
+                                      📄 <strong>{evento.datos_adicionales.pdf_cambios.descripcion}:</strong>{' '}
+                                      {evento.datos_adicionales.pdf_cambios.anterior ? (
+                                        <>
+                                          <span 
+                                            className="text-danger" 
+                                            style={{ cursor: 'help', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                                            title="📋 PDF anterior guardado en historial. Funcionalidad de consulta pendiente de implementación en backend."
+                                          >
+                                            {evento.datos_adicionales.pdf_cambios.anterior}
+                                          </span> → <span 
+                                            className="text-success" 
+                                            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                            onClick={async () => {
+                                              try {
+                                                // Usar el endpoint existente con expedienteId
+                                                const data = await pdfService.obtenerURLFirmadaPDF(expedienteId);
+                                                window.open(data.signed_url, '_blank');
+                                              } catch (err) {
+                                                toast.error('Error al abrir PDF: ' + err.message);
+                                              }
+                                            }}
+                                            title="Clic para ver PDF actual"
+                                          >
+                                            {evento.datos_adicionales.pdf_cambios.nuevo}
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span 
+                                          className="text-success" 
+                                          style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                          onClick={async () => {
+                                            try {
+                                              const data = await pdfService.obtenerURLFirmadaPDF(expedienteId);
+                                              window.open(data.signed_url, '_blank');
+                                            } catch (err) {
+                                              toast.error('Error al abrir PDF: ' + err.message);
+                                            }
+                                          }}
+                                          title="Clic para ver PDF"
+                                        >
+                                          {evento.datos_adicionales.pdf_cambios.nuevo}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
                                   
                                   {/* Información del cliente (origen) */}

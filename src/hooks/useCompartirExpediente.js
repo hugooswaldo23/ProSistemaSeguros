@@ -247,14 +247,25 @@ export const useCompartirExpediente = ({
       // Obtener URL firmada del PDF si existe
       let pdfUrl = null;
       let pdfExpiracion = null;
+      
+      // Debug: verificar si tiene PDF
+      console.log('📄 Verificando PDF del expediente:', {
+        pdf_key: expediente.pdf_key,
+        pdf_url: expediente.pdf_url,
+        pdf_nombre: expediente.pdf_nombre
+      });
+      
       if (expediente.pdf_key) {
         try {
           const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
           pdfUrl = pdfData.signed_url;
           pdfExpiracion = new Date(Date.now() + 86400 * 1000).toISOString();
+          console.log('✅ URL del PDF obtenida:', pdfUrl?.substring(0, 50) + '...');
         } catch (error) {
-          console.warn('No se pudo obtener URL del PDF:', error);
+          console.warn('❌ No se pudo obtener URL del PDF:', error);
         }
+      } else {
+        console.log('⚠️ El expediente no tiene pdf_key - No se puede incluir link de descarga');
       }
       
       // Generar mensaje dinámico según el estado usando el servicio
