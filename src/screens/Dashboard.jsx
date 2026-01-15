@@ -369,53 +369,55 @@ const DashboardComponent = () => {
       
       return f >= inicio && f <= fin;
     };
-    
-    // ==================== TARJETA 1: PRIMAS EMITIDAS ====================
-    // Filtrar SOLO por fecha_emision en rango de 2 meses (sin más filtros)
-    const emitidasMesActual = expedientes.filter(p => 
-      estaEnRango(p.fecha_emision, inicioMesActual, finMesActual)
-    );
-    
-    const emitidasMesAnterior = expedientes.filter(p => 
-      estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior)
-    );
-    
-    const primasEmitidasMesActual = emitidasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
-    const primasEmitidasMesAnterior = emitidasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
-    const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
 
-    // ==================== TARJETA 2: PÓLIZAS PAGADAS ====================
-    // 🔥 NUEVA LÓGICA: Trabajar directamente con RECIBOS
-    // Extraer TODOS los recibos de todas las pólizas
+    // ==================== EXTRAER TODOS LOS RECIBOS ====================
+    // Crear "recibos virtuales" para pólizas sin recibos (fallback)
     const todosLosRecibos = expedientes.flatMap(p => {
       if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
-        // Póliza sin recibos (anual simple): crear un "recibo virtual"
-        const estatusPoliza = (p.estatus_pago || p.estatusPago || '').toLowerCase();
-        if (estatusPoliza === 'pagado' || estatusPoliza === 'pagada') {
-          return [{
-            expediente_id: p.id,
-            monto: resolverMonto(p),
-            estatus: 'Pagado',
-            fecha_pago_real: p.fecha_pago,
-            fecha_vencimiento: p.fecha_vencimiento_pago || p.proximo_pago,
-            _esPolizaAnual: true
-          }];
-        }
-        // Para pólizas no pagadas sin recibos
+        // Póliza sin recibos: crear un "recibo virtual" con datos de la póliza
         return [{
           expediente_id: p.id,
           monto: resolverMonto(p),
-          estatus: estatusPoliza,
-          fecha_pago_real: null,
+          estatus: p.estatus_pago || p.estatusPago || 'Pendiente',
+          fecha_pago_real: p.fecha_pago,
           fecha_vencimiento: p.fecha_vencimiento_pago || p.proximo_pago,
+          created_at: p.fecha_emision || p.created_at, // Fecha de emisión del recibo
           _esPolizaAnual: true
         }];
       }
       // Póliza con recibos: agregar referencia al expediente
-      return p.recibos.map(r => ({ ...r, expediente_id: p.id }));
+      return p.recibos.map(r => ({ 
+        ...r, 
+        expediente_id: p.id,
+        // Usar created_at del recibo, o fallback a fecha_emision de póliza
+        created_at: r.created_at || p.fecha_emision || p.created_at
+      }));
     });
 
-    // RECIBOS PAGADOS: filtrar por fecha_pago_real en rango
+    // ==================== TARJETA 1: PÓLIZAS EMITIDAS ====================
+    // Todos los recibos filtrados por created_at (fecha de emisión del recibo)
+    const recibosEmitidosMesActual = todosLosRecibos.filter(r => 
+      estaEnRango(r.created_at, inicioMesActual, finMesActual)
+    );
+    
+    const recibosEmitidosMesAnterior = todosLosRecibos.filter(r => 
+      estaEnRango(r.created_at, inicioMesAnterior, finMesAnterior)
+    );
+    
+    const primasEmitidasMesActual = recibosEmitidosMesActual.reduce((sum, r) => {
+      const monto = Number(r.monto || r.importe || 0);
+      return sum + (isNaN(monto) ? 0 : monto);
+    }, 0);
+    
+    const primasEmitidasMesAnterior = recibosEmitidosMesAnterior.reduce((sum, r) => {
+      const monto = Number(r.monto || r.importe || 0);
+      return sum + (isNaN(monto) ? 0 : monto);
+    }, 0);
+    
+    const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
+
+    // ==================== TARJETA 2: PÓLIZAS PAGADAS ====================
+    // Recibos con estatus "Pagado" filtrados por fecha_pago_real
     const recibosPagadosMesActual = todosLosRecibos.filter(r => {
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
       const estaPagado = estatus === 'pagado' || estatus === 'pagada';
@@ -441,7 +443,7 @@ const DashboardComponent = () => {
     const primasPagadasTotal = primasPagadasMesActual + primasPagadasMesAnterior;
 
     // ==================== TARJETA 3: POR VENCER ====================
-    // RECIBOS por vencer (estatus = "Por Vencer" o "Pago por vencer")
+    // TODOS los recibos con estatus "Por Vencer" (sin filtro de mes)
     const recibosPorVencer = todosLosRecibos.filter(r => {
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
       return estatus === 'por vencer' || estatus === 'pago por vencer';
@@ -452,18 +454,19 @@ const DashboardComponent = () => {
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
 
-    // ==================== TARJETA 4: VENCIDAS ====================
-    // RECIBOS vencidos (estatus = "Vencido")
+    // ==================== TARJETA 4: VENCIDOS ====================
+    // Recibos con estatus "Vencido", separados por fecha_vencimiento
     const recibosVencidosTodos = todosLosRecibos.filter(r => {
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
       return estatus === 'vencido';
     });
     
-    // Separar por mes de vencimiento
+    // Vencidos en el mes actual
     const recibosVencidosMesActual = recibosVencidosTodos.filter(r => 
       estaEnRango(r.fecha_vencimiento, inicioMesActual, finMesActual)
     );
     
+    // Vencidos en MESES anteriores (acumulado histórico)
     const recibosVencidosAnteriores = recibosVencidosTodos.filter(r => {
       if (!r.fecha_vencimiento) return false;
       const fechaStr = String(r.fecha_vencimiento).split('T')[0];
@@ -471,7 +474,7 @@ const DashboardComponent = () => {
       if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
       const f = new Date(year, month - 1, day);
       f.setHours(0, 0, 0, 0);
-      return f < inicioMesActual;
+      return f < inicioMesActual; // Todo lo anterior al mes actual
     });
     
     const primasVencidasMesActual = recibosVencidosMesActual.reduce((sum, r) => {
@@ -514,14 +517,14 @@ const DashboardComponent = () => {
     const stats = {
       primasEmitidas: {
         monto: primasEmitidasTotal,
-        cantidad: emitidasMesActual.length + emitidasMesAnterior.length,
+        cantidad: recibosEmitidosMesActual.length + recibosEmitidosMesAnterior.length, // Cantidad de RECIBOS emitidos
         mesActual: {
           monto: primasEmitidasMesActual,
-          cantidad: emitidasMesActual.length
+          cantidad: recibosEmitidosMesActual.length
         },
         mesAnterior: {
           monto: primasEmitidasMesAnterior,
-          cantidad: emitidasMesAnterior.length
+          cantidad: recibosEmitidosMesAnterior.length
         }
       },
       primasPagadas: {
@@ -538,7 +541,7 @@ const DashboardComponent = () => {
       },
       primasPorVencer: {
         monto: primasPorVencer,
-        cantidad: recibosPorVencer.length // Cantidad de RECIBOS por vencer
+        cantidad: recibosPorVencer.length // Cantidad de RECIBOS por vencer (sin desglose por mes)
       },
       primasVencidas: {
         monto: primasVencidasTotal,
@@ -849,7 +852,7 @@ const DashboardComponent = () => {
                       ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} pólizas • Mes actual
+                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} recibos • Mes actual
                     </small>
                   </div>
                 </div>
