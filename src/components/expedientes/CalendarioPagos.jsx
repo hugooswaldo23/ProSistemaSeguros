@@ -12,36 +12,19 @@ import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
 import { Badge } from './UIComponents';
 
-const CalendarioPagos = React.memo(({ 
+const CalendarioPagos = ({ 
   expediente, 
   calcularProximoPago, 
   mostrarResumen = true,
   compacto = false,
   onEnviarAviso, // Callback para enviar avisos de pago
-  onEliminarPago, // Callback para eliminar un pago (solo en modo edición)
+  onEliminarPago, // Callback para eliminar un pago (abre modal de confirmación)
+  onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
-  // Debug: verificar datos recibidos
-  console.log('🔄 CalendarioPagos - Renderizando con:', {
-    cantidad_recibos: expediente.recibos?.length || 0,
-    recibos: expediente.recibos,
-    tipo_pago: expediente.tipo_pago,
-    frecuenciaPago: expediente.frecuenciaPago,
-    inicio_vigencia: expediente.inicio_vigencia,
-    onEliminarPago_defined: !!onEliminarPago,
-    onEliminarPago_type: typeof onEliminarPago
-  });
-  
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
   const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-  
-  console.log('📊 CalendarioPagos - Valores normalizados:', {
-    tipoPago,
-    frecuencia,
-    esAnual: tipoPago?.toUpperCase() === 'ANUAL',
-    esFraccionado: tipoPago?.toUpperCase() === 'FRACCIONADO'
-  });
   
   // Validar que tenga los datos mínimos necesarios
   if (!expediente.inicio_vigencia) {
@@ -67,67 +50,152 @@ const CalendarioPagos = React.memo(({
 
   // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
-  let pagos = [];
   
-  // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
-  if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    pagos = expediente.recibos
-      .filter(r => r.numero_recibo <= numeroPagos)
-      .map(r => {
-        // IMPORTANTE: Normalizar estatus del backend
-        // Backend usa: "Pago por vencer" | Frontend usa: "Por Vencer"
-        const estatusNormalizado = estatusPagosUtils.normalizarEstatusBackend(r.estatus);
-        
-        return {
-          numero: r.numero_recibo,
-          fecha: r.fecha_vencimiento,
-          monto: parseFloat(r.monto).toFixed(2),
-          estatusBackend: estatusNormalizado,
-          comprobante_url: r.comprobante_url,
-          comprobante_nombre: r.comprobante_nombre,
-          fecha_pago_real: r.fecha_pago_real
-        };
-      });
-  } else {
-    // Fallback: Calcular recibos en el frontend (método antiguo)
-    const periodoGracia = expediente.periodo_gracia 
-      ? parseInt(expediente.periodo_gracia, 10)
-      : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+  // 🔥 useMemo para recalcular pagos cuando cambien las dependencias importantes
+  const pagos = React.useMemo(() => {
+    let pagosList = [];
     
-    const primerPagoField = expediente.primer_pago || expediente.primerPago;
-    const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
-    
-    const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
-    const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
-    const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
-    const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
-    
-    for (let i = 1; i <= numeroPagos; i++) {
-      const fechaPago = calcularProximoPago(
-        expediente.inicio_vigencia,
-        tipoPago,
-        frecuencia,
-        expediente.compania,
-        i,
-        periodoGracia
-      );
-      
-      if (fechaPago) {
-        let monto = montoPorDefecto;
-        if (usarMontosExactos) {
-          monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
-        }
-        
-        pagos.push({
-          numero: i,
-          fecha: fechaPago,
-          monto: monto
+    // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
+    if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+      pagosList = expediente.recibos
+        .filter(r => r.numero_recibo <= numeroPagos)
+        .map(r => {
+          // IMPORTANTE: Solo usar estatusBackend si el recibo tiene estatus del backend
+          // Si no tiene estatus, dejarlo sin estatusBackend para que se calcule en frontend
+          const tieneEstatusBackend = r.estatus || r.estatus_pago;
+          const estatusNormalizado = tieneEstatusBackend ? estatusPagosUtils.normalizarEstatusBackend(r.estatus || r.estatus_pago) : null;
+          
+          return {
+            numero: r.numero_recibo,
+            fecha: r.fecha_vencimiento,
+            monto: parseFloat(r.monto).toFixed(2),
+            estatusBackend: estatusNormalizado, // Puede ser null si no viene del backend
+            comprobante_url: r.comprobante_url,
+            comprobante_nombre: r.comprobante_nombre,
+            fecha_pago_real: r.fecha_pago_real
+          };
         });
+    } else {
+      // Fallback: Calcular recibos en el frontend (método antiguo)
+      const periodoGracia = expediente.periodo_gracia 
+        ? parseInt(expediente.periodo_gracia, 10)
+        : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+      
+      const primerPagoField = expediente.primer_pago || expediente.primerPago;
+      const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
+      
+      const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
+      const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
+      const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
+      const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+      
+      for (let i = 1; i <= numeroPagos; i++) {
+        const fechaPago = calcularProximoPago(
+          expediente.inicio_vigencia,
+          tipoPago,
+          frecuencia,
+          expediente.compania,
+          i,
+          periodoGracia
+        );
+        
+        if (fechaPago) {
+          let monto = montoPorDefecto;
+          if (usarMontosExactos) {
+            monto = (i === 1 ? primerPagoMonto : pagosSubsecuentesMonto).toFixed(2);
+          }
+          
+          pagosList.push({
+            numero: i,
+            fecha: fechaPago,
+            monto: monto
+          });
+        }
       }
     }
-  }
+    
+    return pagosList;
+  }, [
+    expediente.inicio_vigencia,
+    expediente.tipo_pago,
+    expediente.forma_pago,
+    expediente.frecuenciaPago,
+    expediente.frecuencia_pago,
+    expediente.periodo_gracia,
+    expediente.compania,
+    expediente.total,
+    expediente.primer_pago,
+    expediente.primerPago,
+    expediente.pagos_subsecuentes,
+    expediente.pagosSubsecuentes,
+    expediente.recibos,
+    numeroPagos,
+    tipoPago,
+    frecuencia,
+    calcularProximoPago
+  ]);
 
-  // 🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
+  // 📸 Notificar que se calcularon los recibos (cada vez que cambien fechas clave)
+  const recibosCalculadosRef = React.useRef(false);
+  const ultimoInicioVigenciaRef = React.useRef(expediente.inicio_vigencia);
+  const ultimoTipoPagoRef = React.useRef(tipoPago);
+  const ultimaFrecuenciaRef = React.useRef(frecuencia);
+  
+  // 🔄 Resetear el flag cuando cambien datos que afectan los recibos
+  React.useEffect(() => {
+    if (
+      ultimoInicioVigenciaRef.current !== expediente.inicio_vigencia ||
+      ultimoTipoPagoRef.current !== tipoPago ||
+      ultimaFrecuenciaRef.current !== frecuencia
+    ) {
+      console.log('🔄 CalendarioPagos: Detectado cambio en fechas/tipo de pago, reseteando flag de notificación');
+      recibosCalculadosRef.current = false;
+      ultimoInicioVigenciaRef.current = expediente.inicio_vigencia;
+      ultimoTipoPagoRef.current = tipoPago;
+      ultimaFrecuenciaRef.current = frecuencia;
+    }
+  }, [expediente.inicio_vigencia, tipoPago, frecuencia]);
+  
+  // Crear un hash de las fechas para detectar cambios
+  const hashFechasPagos = React.useMemo(() => {
+    return pagos.map(p => `${p.numero}:${p.fecha}:${p.monto}`).join('|');
+  }, [pagos]);
+  
+  React.useEffect(() => {
+    if (onRecibosCalculados && pagos.length > 0 && !expediente.recibos?.length && !recibosCalculadosRef.current) {
+      const recibosParaSnapshot = pagos.map(p => ({
+        numero_recibo: p.numero,
+        fecha_vencimiento: p.fecha,
+        monto: p.monto
+        // NO incluir estatus - se calculará dinámicamente cada vez
+      }));
+      console.log('📅 CalendarioPagos: Notificando recibos calculados al formulario');
+      console.log('📅 Cantidad de recibos:', recibosParaSnapshot.length);
+      console.log('📅 Recibos:', recibosParaSnapshot);
+      onRecibosCalculados(recibosParaSnapshot);
+      recibosCalculadosRef.current = true;
+    }
+  }, [pagos.length, hashFechasPagos, onRecibosCalculados, expediente.recibos?.length]);
+  // 🔙 Detectar pagos que fueron removidos (buscar en historial)
+  const pagosRemovidos = React.useMemo(() => {
+    if (!historial || !Array.isArray(historial)) return {};
+    
+    const removidos = {};
+    historial.forEach(evento => {
+      if (evento.tipo_evento === 'pago_removido' && evento.datos_adicionales?.numero_recibo) {
+        const numRecibo = evento.datos_adicionales.numero_recibo;
+        // Guardar el más reciente
+        if (!removidos[numRecibo] || new Date(evento.fecha_evento) > new Date(removidos[numRecibo].fecha)) {
+          removidos[numRecibo] = {
+            fecha: evento.fecha_evento,
+            motivo: evento.datos_adicionales.motivo || 'No especificado'
+          };
+        }
+      }
+    });
+    return removidos;
+  }, [historial]);
+  // �🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
   const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
   let totalPagado = 0;
   let totalPendiente = 0;
@@ -142,25 +210,30 @@ const CalendarioPagos = React.memo(({
       const estatusNorm = pago.estatusBackend.toLowerCase();
       const pagado = estatusNorm === 'pagado';
       
+      // 🔧 Detectar variantes de "Por Vencer"
+      const esPorVencer = estatusNorm === 'pago por vencer' || 
+                          estatusNorm === 'por vencer' || 
+                          estatusNorm.includes('por vencer');
+      
       if (pagado) {
         totalPagado += parseFloat(pago.monto) || 0;
       } else if (estatusNorm === 'vencido') {
         totalVencido += parseFloat(pago.monto) || 0;
-      } else if (estatusNorm === 'pago por vencer') {
+      } else if (esPorVencer) {
         totalPorVencer += parseFloat(pago.monto) || 0;
       } else {
         totalPendiente += parseFloat(pago.monto) || 0;
       }
       
       let estado = pago.estatusBackend;
-      let badgeClass = 'bg-secondary';
+      let badgeClass = 'bg-info'; // Pendiente = azul
       
       if (estatusNorm === 'pagado') {
         badgeClass = 'bg-success';
       } else if (estatusNorm === 'vencido') {
         badgeClass = 'bg-danger';
-      } else if (estatusNorm === 'pago por vencer') {
-        badgeClass = 'bg-warning';
+      } else if (esPorVencer) {
+        badgeClass = 'bg-warning text-dark';
       }
       
       // console.log(`✅ [RECIBO ${pago.numero}] Estado final: "${estado}" | Badge: ${badgeClass}`);
@@ -189,7 +262,7 @@ const CalendarioPagos = React.memo(({
     }
     
     let estado = 'Pendiente';
-    let badgeClass = 'bg-secondary';
+    let badgeClass = 'bg-info'; // Pendiente = azul
     
     if (pagado) {
       estado = 'Pagado';
@@ -203,11 +276,11 @@ const CalendarioPagos = React.memo(({
     } else if (diasRestantes <= 15) {
       // Por Pagar: cuando faltan 15 días o menos (listo para cobrar)
       estado = diasRestantes <= 7 ? `Vence en ${diasRestantes} días` : 'Por Pagar';
-      badgeClass = 'bg-warning';
+      badgeClass = 'bg-warning text-dark';
     } else {
       // Pendiente: cuando falta más de 15 días (aún no urgente)
       estado = 'Pendiente';
-      badgeClass = 'bg-secondary';
+      badgeClass = 'bg-info';
     }
     
     // console.log(`✅ [RECIBO ${pago.numero}] Estado calculado en frontend: "${estado}" | Badge: ${badgeClass}`);
@@ -258,11 +331,11 @@ const CalendarioPagos = React.memo(({
             
             {/* Por Vencer */}
             <div className="col">
-              <div className="card bg-warning text-white h-100">
+              <div className="card bg-warning h-100">
                 <div className="card-body text-center p-2">
-                  <small className="d-block mb-1">⚠️ Por Vencer</small>
-                  <h5 className="mb-0">{utils.formatearMoneda(totalPorVencer)}</h5>
-                  <small className="d-block mt-1">≤ 15 días</small>
+                  <small className="text-dark d-block mb-1">⚠️ Por Vencer</small>
+                  <h5 className="mb-0 text-dark">{utils.formatearMoneda(totalPorVencer)}</h5>
+                  <small className="text-dark d-block mt-1">≤ 15 días</small>
                 </div>
               </div>
             </div>
@@ -303,23 +376,40 @@ const CalendarioPagos = React.memo(({
               </tr>
             </thead>
             <tbody>
-              {pagosProcesados.map((pago) => (
+              {pagosProcesados.map((pago) => {
+                const fueRemovido = pagosRemovidos[pago.numero];
+                
+                return (
                 <tr key={pago.numero} className={pago.pagado ? 'table-success' : ''}>
                   <td><strong>#{pago.numero}</strong></td>
                   <td>{utils.formatearFecha(pago.fecha, 'larga')}</td>
                   <td><strong>${pago.monto}</strong></td>
                   <td>
-                    <span className={`badge ${pago.badgeClass}`}>
-                      {pago.pagado && '✓ '}
-                      {pago.estado}
-                    </span>
+                    <div className="d-flex align-items-center gap-1">
+                      <span className={`badge ${pago.badgeClass}`}>
+                        {pago.pagado && '✓ '}
+                        {pago.estado}
+                      </span>
+                      {/* Indicador de pago removido */}
+                      {fueRemovido && !pago.pagado && (
+                        <span 
+                          className="badge bg-warning text-dark" 
+                          style={{ fontSize: '0.65rem', cursor: 'help' }}
+                          title={`Pago removido: ${fueRemovido.motivo}`}
+                        >
+                          🔙 Removido
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
+                    <div className="d-flex gap-1">
                     {pago.pagado ? (
                       <>
                         {/* Botón para ver comprobante de pago */}
                         <button 
-                          className="btn btn-sm btn-success"
+                          className="btn btn-outline-success btn-sm"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                           onClick={() => {
                           // Normalizar fechas para comparación (solo YYYY-MM-DD)
                           const normalizarFecha = (fecha) => {
@@ -360,58 +450,18 @@ const CalendarioPagos = React.memo(({
                         }}
                         title="Ver comprobante de pago"
                       >
-                        <FileText size={14} className="me-1" />
-                        Ver Comprobante
+                        <FileText size={12} />
                         </button>
                       
-                        {/* Botón para eliminar pago (solo en modo edición) */}
+                        {/* Botón para eliminar pago */}
                         {onEliminarPago && (
                           <button 
-                            className="btn btn-sm btn-outline-danger ms-1"
-                            onClick={async () => {
-                              console.log('🚀 [DEBUG] Botón eliminar pago clickeado');
-                              console.log('🚀 [DEBUG] Pago:', pago);
-                              console.log('🚀 [DEBUG] Expediente:', expediente);
-                              console.log('🚀 [DEBUG] onEliminarPago function:', typeof onEliminarPago);
-                              
-                              if (window.confirm(`¿Eliminar el pago del recibo #${pago.numero}? El estatus se recalculará automáticamente.`)) {
-                                // 🔥 IMPLEMENTACIÓN DIRECTA - en lugar de llamar onEliminarPago, hacer la eliminación aquí
-                                try {
-                                  console.log('💰 [DIRECTO] Eliminando pago del recibo', pago.numero, 'del expediente', expediente.id);
-                                  
-                                  const API_URL = import.meta.env.VITE_API_URL;
-                                  const response = await fetch(`${API_URL}/api/recibos/${expediente.id}/${pago.numero}/pago`, {
-                                    method: 'DELETE'
-                                  });
-                                  
-                                  if (!response.ok) {
-                                    const errorData = await response.json();
-                                    throw new Error(errorData.error || 'Error al eliminar el pago');
-                                  }
-                                  
-                                  console.log('✅ [DIRECTO] Pago eliminado correctamente del recibo', pago.numero);
-                                  
-                                  // Mostrar mensaje de éxito
-                                  if (window.toast && window.toast.success) {
-                                    window.toast.success(`Pago eliminado del recibo ${pago.numero}`);
-                                  }
-                                  
-                                  // Recargar la página para reflejar cambios
-                                  window.location.reload();
-                                  
-                                } catch (error) {
-                                  console.error('❌ [DIRECTO] Error eliminando pago:', error);
-                                  
-                                  if (window.toast && window.toast.error) {
-                                    window.toast.error(`Error al eliminar pago: ${error.message}`);
-                                  }
-                                }
-                              }
-                            }}
-                            title="Eliminar este pago y recalcular estatus"
+                            className="btn btn-outline-danger btn-sm"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={() => onEliminarPago(pago, expediente)}
+                            title="Eliminar pago"
                           >
-                            <Trash2 size={14} className="me-1" />
-                            Eliminar pago
+                            <Trash2 size={12} />
                           </button>
                         )}
                       </>
@@ -419,16 +469,18 @@ const CalendarioPagos = React.memo(({
                       // Botón para enviar aviso/recordatorio
                       <button 
                         className={`btn btn-sm ${pago.estado === 'Vencido' ? 'btn-danger' : 'btn-outline-info'}`}
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                         onClick={() => onEnviarAviso && onEnviarAviso(pago, expediente)}
                         title={pago.estado === 'Vencido' ? 'Enviar recordatorio de pago vencido' : 'Enviar aviso de pago'}
                       >
-                        <Mail size={14} className="me-1" />
-                        {pago.estado === 'Vencido' ? 'Recordatorio' : 'Enviar Aviso'}
+                        <Mail size={12} />
                       </button>
                     )}
+                    </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             {expediente.total && (
               <tfoot>
@@ -443,6 +495,8 @@ const CalendarioPagos = React.memo(({
       </div>
     </div>
   );
-});
+};
+
+CalendarioPagos.displayName = 'CalendarioPagos';
 
 export default CalendarioPagos;

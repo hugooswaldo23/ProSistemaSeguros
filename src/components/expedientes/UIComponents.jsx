@@ -110,11 +110,11 @@ export const InfoCliente = React.memo(({ expediente, cliente }) => {
     ? (cliente?.contacto_email || cliente?.contactoEmail || '')
     : (cliente?.email || expediente.email || '');
 
-  // Teléfonos: mostrar AMBOS si existen (móvil y fijo). Priorizar contacto_* y si no hay, caer a los del cliente
+  // Teléfonos: priorizar campos camelCase (que es lo que guarda el CRUD) y snake_case como fallback
   const telContactoMovil = cliente?.contacto_telefono_movil || cliente?.contactoTelefonoMovil || '';
   const telContactoFijo = cliente?.contacto_telefono_fijo || cliente?.contactoTelefonoFijo || '';
-  const telClienteMovil = cliente?.telefono_movil || cliente?.telefonoMovil || expediente.telefono_movil || '';
-  const telClienteFijo = cliente?.telefono_fijo || cliente?.telefonoFijo || expediente.telefono_fijo || '';
+  const telClienteMovil = cliente?.telefonoMovil || cliente?.telefono_movil || '';  // ✅ FIX: priorizar camelCase
+  const telClienteFijo = cliente?.telefonoFijo || cliente?.telefono_fijo || '';     // ✅ FIX: priorizar camelCase
 
   return (
     <div>
@@ -159,26 +159,13 @@ InfoCliente.displayName = 'InfoCliente';
  * @returns {string} Estatus de pago calculado
  */
 export const obtenerEstatusPagoDesdeBackend = (expediente) => {
-  // Usar groupCollapsed para logs agrupados y silenciosos
-  if (process.env.NODE_ENV === 'development') {
-    console.groupCollapsed(`📊 Badge Estatus: ${expediente.numero_poliza}`);
-  }
-  
   // NUEVA LÓGICA: Si tiene recibos, usar la misma lógica que en ListaExpedientes
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
     const recibosTotal = expediente.recibos.length;
     const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
     
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🧮 Con recibos:', { total: recibosTotal, pagados: recibosPagados });
-    }
-    
     // Si todos están pagados
     if (recibosPagados >= recibosTotal) {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ Badge: Todos pagados');
-        console.groupEnd();
-      }
       return 'Pagado';
     }
     
@@ -194,14 +181,6 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
       hoy.setHours(0, 0, 0, 0);
       const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🎯 Badge - Primer recibo pendiente:', {
-          numero: primerReciboPendiente.numero_recibo,
-          fecha_vencimiento: primerReciboPendiente.fecha_vencimiento,
-          diasRestantes
-        });
-      }
-      
       let estatus;
       if (diasRestantes < 0) {
         estatus = 'Vencido';
@@ -211,10 +190,6 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
         estatus = 'Pendiente';
       }
       
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ Badge estatus calculado:', estatus);
-        console.groupEnd();
-      }
       return estatus;
     }
     

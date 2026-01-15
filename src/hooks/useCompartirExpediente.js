@@ -8,11 +8,27 @@ import * as historialService from '../services/historialExpedienteService';
 /**
  * Custom Hook para manejar la lógica de compartir expedientes
  * por WhatsApp y Email (pólizas y avisos de pago)
+ * 
+ * ⚠️ CAMPOS IMPORTANTES - NO CONFUNDIR JAMÁS:
+ * 
+ * 📋 CLIENTE DIRECTO (raramente usado):
+ * - apellidoPaterno/apellido_paterno
+ * - apellidoMaterno/apellido_materno  
+ * - email, telefonoMovil/telefono_movil
+ * 
+ * 📋 CONTACTO PRINCIPAL (MÁS COMÚN - lo que se ve en pantalla):
+ * - contacto_nombre
+ * - contacto_apellido_paterno ⚠️ NUNCA OLVIDES
+ * - contacto_apellido_materno ⚠️ NUNCA OLVIDES  
+ * - contacto_email, contacto_telefono_movil
+ * 
+ * 🚨 Al actualizar cliente SIEMPRE incluir AMBOS tipos
  */
 export const useCompartirExpediente = ({
   destinatarioCompartirSeleccionado,
   destinatarioSeleccionado,
   setClienteParaActualizar,
+  setDestinatarioParaModal,
   setTipoDatoFaltante,
   setCanalEnvio,
   setExpedienteEnEspera,
@@ -22,17 +38,155 @@ export const useCompartirExpediente = ({
   cambiarEstadoExpediente,
   utils
 }) => {
+
+  /**
+   * 🔧 FUNCIÓN: Actualizar solo un campo específico del cliente (enviando cliente COMPLETO)
+   * @param {number} clienteId - ID del cliente
+   * @param {string} campo - Campo a actualizar ('email', 'telefono_movil')
+   * @param {string} valor - Nuevo valor del campo
+   * @param {string} tipoPersona - Tipo de persona para determinar el campo correcto
+   * @returns {Object} Cliente actualizado completo
+   */
+  const actualizarCampoCliente = useCallback(async (clienteId, campo, valor, tipoPersona, destinatarioSeleccionado = null) => {
+    try {
+      // Primero obtener el cliente completo actual
+      const respCliente = await clientesService.obtenerClientePorId(clienteId);
+      if (!respCliente?.success) {
+        throw new Error('No se pudo obtener los datos actuales del cliente');
+      }
+
+      const clienteActual = respCliente.data;
+
+      // 🔍 DEBUG: Ver exactamente qué campos vienen del cliente
+      console.log('🔍 DEBUG - Cliente actual completo:', clienteActual);
+      console.log('🔍 DEBUG - Apellidos específicos:', {
+        apellidoPaterno: clienteActual.apellidoPaterno,
+        apellido_paterno: clienteActual.apellido_paterno,
+        apellidoMaterno: clienteActual.apellidoMaterno,
+        apellido_materno: clienteActual.apellido_materno
+      });
+
+      // Determinar el campo correcto según QUÉ DESTINATARIO se seleccionó
+      let campoReal = campo;
+      const destinatarioActual = destinatarioSeleccionado || destinatarioCompartirSeleccionado;
+      
+      if (campo === 'telefono_movil') {
+        // Si se seleccionó contacto principal → contacto_telefono_movil
+        // Si se seleccionó cliente directo → telefonoMovil  
+        campoReal = destinatarioActual?.tipo === 'Contacto Principal' 
+          ? 'contacto_telefono_movil' 
+          : 'telefonoMovil';
+      } else if (campo === 'email') {
+        // Si se seleccionó contacto principal → contacto_email
+        // Si se seleccionó cliente directo → email
+        campoReal = destinatarioActual?.tipo === 'Contacto Principal'
+          ? 'contacto_email' 
+          : 'email';
+      }
+
+      // 🔧 MAPEAR todos los campos existentes del cliente (preservar estructura original)
+      const camposValidosCliente = {};
+      
+      // ⚠️ IMPORTANTE: NO CONFUNDIR CAMPOS DE CLIENTE vs CONTACTO PRINCIPAL
+      // - Cliente directo: apellidoPaterno, apellidoMaterno (raramente usado)  
+      // - Contacto Principal: contacto_apellido_paterno, contacto_apellido_materno (MÁS COMÚN)
+      
+      // Campos básicos con mapeo dinámico
+      if (clienteActual.id) camposValidosCliente.id = clienteActual.id;
+      if (clienteActual.nombre) camposValidosCliente.nombre = clienteActual.nombre;
+      
+      // ❌ CLIENTE DIRECTO - Usar campos como el CRUD de clientes (camelCase)
+      if (clienteActual.apellidoPaterno) {
+        camposValidosCliente.apellidoPaterno = clienteActual.apellidoPaterno;
+      } else if (clienteActual.apellido_paterno) {
+        camposValidosCliente.apellidoPaterno = clienteActual.apellido_paterno;
+      }
+      
+      if (clienteActual.apellidoMaterno) {
+        camposValidosCliente.apellidoMaterno = clienteActual.apellidoMaterno;
+      } else if (clienteActual.apellido_materno) {
+        camposValidosCliente.apellidoMaterno = clienteActual.apellido_materno;
+      }
+
+      // Otros campos importantes con prioridad camelCase (como CRUD)
+      if (clienteActual.rfc) camposValidosCliente.rfc = clienteActual.rfc;
+      if (clienteActual.curp) camposValidosCliente.curp = clienteActual.curp;
+      if (clienteActual.fechaNacimiento) camposValidosCliente.fechaNacimiento = clienteActual.fechaNacimiento;
+      if (clienteActual.fecha_nacimiento) camposValidosCliente.fechaNacimiento = clienteActual.fecha_nacimiento;
+      if (clienteActual.tipoPersona) camposValidosCliente.tipoPersona = clienteActual.tipoPersona;
+      if (clienteActual.tipo_persona) camposValidosCliente.tipoPersona = clienteActual.tipo_persona;
+      if (clienteActual.razonSocial) camposValidosCliente.razonSocial = clienteActual.razonSocial;
+      if (clienteActual.razon_social) camposValidosCliente.razonSocial = clienteActual.razon_social;
+      if (clienteActual.email) camposValidosCliente.email = clienteActual.email;
+      
+      // ✅ CONTACTO CLIENTE DIRECTO - Usar camelCase como CRUD
+      if (clienteActual.telefonoMovil) camposValidosCliente.telefonoMovil = clienteActual.telefonoMovil;
+      if (clienteActual.telefono_movil && !camposValidosCliente.telefonoMovil) camposValidosCliente.telefonoMovil = clienteActual.telefono_movil;
+      if (clienteActual.telefonoFijo) camposValidosCliente.telefonoFijo = clienteActual.telefonoFijo;
+      if (clienteActual.telefono_fijo && !camposValidosCliente.telefonoFijo) camposValidosCliente.telefonoFijo = clienteActual.telefono_fijo;
+      
+      if (clienteActual.direccion) camposValidosCliente.direccion = clienteActual.direccion;
+      if (clienteActual.ciudad) camposValidosCliente.ciudad = clienteActual.ciudad;
+      if (clienteActual.estado) camposValidosCliente.estado = clienteActual.estado;
+      if (clienteActual.codigoPostal) camposValidosCliente.codigoPostal = clienteActual.codigoPostal;
+      if (clienteActual.codigo_postal) camposValidosCliente.codigoPostal = clienteActual.codigo_postal;
+      
+      // ✅ CONTACTO PRINCIPAL - Los campos MÁS IMPORTANTES (estos son los que se ven en pantalla)
+      // ⚠️ NUNCA OLVIDES ESTOS: contacto_apellido_paterno, contacto_apellido_materno
+      if (clienteActual.contacto_nombre) camposValidosCliente.contacto_nombre = clienteActual.contacto_nombre;
+      if (clienteActual.contacto_apellido_paterno) camposValidosCliente.contacto_apellido_paterno = clienteActual.contacto_apellido_paterno;
+      if (clienteActual.contacto_apellido_materno) camposValidosCliente.contacto_apellido_materno = clienteActual.contacto_apellido_materno;
+      if (clienteActual.contacto_email) camposValidosCliente.contacto_email = clienteActual.contacto_email;
+      if (clienteActual.contacto_telefono_movil) camposValidosCliente.contacto_telefono_movil = clienteActual.contacto_telefono_movil;
+      if (clienteActual.contacto_telefono_fijo) camposValidosCliente.contacto_telefono_fijo = clienteActual.contacto_telefono_fijo;
+      
+      // IDs de relaciones
+      if (clienteActual.categoria_id) camposValidosCliente.categoria_id = clienteActual.categoria_id;
+      if (clienteActual.agente_id) camposValidosCliente.agente_id = clienteActual.agente_id;
+      if (clienteActual.sub_agente_id) camposValidosCliente.sub_agente_id = clienteActual.sub_agente_id;
+      if (clienteActual.fecha_alta) camposValidosCliente.fecha_alta = clienteActual.fecha_alta;
+
+      // Campo actualizado
+      camposValidosCliente[campoReal] = valor;
+      
+      console.log('🔧 Datos finales a enviar:', {
+        clienteId,
+        campoReal,
+        valor,
+        apellidoPaterno: camposValidosCliente.apellidoPaterno,
+        apellidoMaterno: camposValidosCliente.apellidoMaterno,
+        totalCampos: Object.keys(camposValidosCliente).length
+      });
+
+      // Actualizar usando el servicio con campos filtrados
+      const resultado = await clientesService.actualizarCliente(clienteId, camposValidosCliente);
+      
+      if (!resultado.success) {
+        throw new Error(resultado.error);
+      }
+
+      console.log('✅ Campo actualizado exitosamente con cliente completo:', resultado.data);
+      return resultado.data;
+
+    } catch (error) {
+      console.error('❌ Error actualizando campo cliente:', error);
+      throw error;
+    }
+  }, []);
   /**
    * Compartir póliza completa por WhatsApp
    */
-  const compartirPorWhatsApp = useCallback(async (expediente) => {
+  const compartirPorWhatsApp = useCallback(async (expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 USAR DESTINATARIO FORZADO SI SE PROPORCIONA, SINO EL SELECCIONADO
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado;
+      
+      // Usar destinatario actual si está disponible, sino obtener del cliente
       let telefono, nombreDestinatario;
       
-      if (destinatarioCompartirSeleccionado) {
-        telefono = destinatarioCompartirSeleccionado.telefono;
-        nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+      if (destinatarioActual) {
+        telefono = destinatarioActual.telefono;
+        nombreDestinatario = destinatarioActual.nombre;
       } else {
         // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
@@ -52,10 +206,19 @@ export const useCompartirExpediente = ({
         console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         if (respCliente?.success) {
-          setClienteParaActualizar(respCliente.data);
+          setClienteParaActualizar({
+            ...respCliente.data,
+            // 🔧 GUARDAR INFO DEL DESTINATARIO SELECCIONADO
+            _destinatarioSeleccionado: destinatarioActual
+          });
+          setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
           setTipoDatoFaltante('telefono_movil');
           setCanalEnvio('WhatsApp');
-          setExpedienteEnEspera(expediente);
+          setExpedienteEnEspera({
+            ...expediente,
+            // 🔧 PRESERVAR DESTINATARIO PARA EL REINTENTO
+            _destinatarioOriginal: destinatarioActual
+          });
           setMostrarModalContacto(true);
         }
         return;
@@ -66,8 +229,16 @@ export const useCompartirExpediente = ({
       
       // Validar que el número tenga al menos 10 dígitos y solo contenga números
       if (!/^\d{10,15}$/.test(telefonoLimpio)) {
-        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp.\n\nDebe contener entre 10 y 15 dígitos.\n\nPor favor, actualiza el teléfono del cliente.`);
-        console.error('❌ Número de teléfono inválido:', telefono, '→', telefonoLimpio);
+        console.log('⚠️ Número de teléfono inválido, abriendo modal de captura');
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp. Por favor actualízalo.`);
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        if (respCliente?.success) {
+          setClienteParaActualizar(respCliente.data);
+          setTipoDatoFaltante('telefono_movil');
+          setCanalEnvio('WhatsApp');
+          setExpedienteEnEspera(expediente);
+          setMostrarModalContacto(true);
+        }
         return;
       }
       
@@ -76,14 +247,25 @@ export const useCompartirExpediente = ({
       // Obtener URL firmada del PDF si existe
       let pdfUrl = null;
       let pdfExpiracion = null;
+      
+      // Debug: verificar si tiene PDF
+      console.log('📄 Verificando PDF del expediente:', {
+        pdf_key: expediente.pdf_key,
+        pdf_url: expediente.pdf_url,
+        pdf_nombre: expediente.pdf_nombre
+      });
+      
       if (expediente.pdf_key) {
         try {
           const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400); // 24 horas
           pdfUrl = pdfData.signed_url;
           pdfExpiracion = new Date(Date.now() + 86400 * 1000).toISOString();
+          console.log('✅ URL del PDF obtenida:', pdfUrl?.substring(0, 50) + '...');
         } catch (error) {
-          console.warn('No se pudo obtener URL del PDF:', error);
+          console.warn('❌ No se pudo obtener URL del PDF:', error);
         }
+      } else {
+        console.log('⚠️ El expediente no tiene pdf_key - No se puede incluir link de descarga');
       }
       
       // Generar mensaje dinámico según el estado usando el servicio
@@ -99,49 +281,49 @@ export const useCompartirExpediente = ({
       // Abrir WhatsApp
       window.open(url, '_blank');
       
-      // Registrar la notificación en el historial
+      // Registrar evento en el historial de trazabilidad (log único y completo)
       try {
-        await notificacionesService.registrarNotificacion({
-          expediente_id: expediente.id,
-          cliente_id: expediente.cliente_id,
-          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.WHATSAPP,
-          tipo_mensaje: tipoMensaje,
-          destinatario_nombre: nombreDestinatario,
-          destinatario_contacto: telefono,
-          mensaje: mensaje,
-          numero_poliza: expediente.numero_poliza,
-          compania: expediente.compania,
-          producto: expediente.producto,
-          estatus_pago: expediente.estatusPago,
-          fecha_vencimiento_pago: expediente.fecha_vencimiento_pago,
-          pdf_url: pdfUrl,
-          pdf_expiracion: pdfExpiracion,
-          estado_envio: 'enviado'
-        });
-        console.log('✅ Notificación registrada en el historial');
-      } catch (error) {
-        console.error('⚠️ Error al registrar notificación (no crítico):', error);
-      }
-
-      // Registrar evento en el historial de trazabilidad
-      try {
+        // 🔧 USAR NOMBRE CORRECTO DEL DESTINATARIO FINAL (después del modal)
+        const nombreFinalDestinatario = destinatarioCompartirSeleccionado 
+          ? destinatarioCompartirSeleccionado.nombre 
+          : nombreDestinatario;
+          
         await historialService.registrarEnvioDocumento(
           expediente.id,
           expediente.cliente_id,
           'WhatsApp',
-          { nombre: nombreDestinatario, contacto: telefono },
+          { nombre: nombreFinalDestinatario, contacto: telefono },
           mensaje,
-          pdfUrl
+          pdfUrl,
+          { 
+            compania: expediente.compania,
+            numero_poliza: expediente.numero_poliza,
+            tipo_pago: expediente.tipo_pago
+          }
         );
-        console.log('✅ Evento registrado en historial de trazabilidad');
+        console.log('✅ Evento registrado en historial de trazabilidad (WhatsApp)');
       } catch (error) {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
       
-      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+      // Actualizar la etapa según el tipo de mensaje
       if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        toast.success(`✅ Póliza enviada por WhatsApp.\n📬 Etapa avanzada a "Enviada al Cliente"`);
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+        toast.success(`✅ Renovación enviada por WhatsApp.\n📬 Etapa avanzada a "Renovación Enviada"`);
+      } else {
+        toast.success('✅ Mensaje enviado por WhatsApp');
       }
+      
+      // 🔄 Recargar historial automáticamente después de compartir póliza
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada (compartir póliza WhatsApp)');
+      }, 1500);
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
@@ -152,14 +334,29 @@ export const useCompartirExpediente = ({
   /**
    * Compartir póliza completa por Email
    */
-  const compartirPorEmail = useCallback(async (expediente) => {
+  const compartirPorEmail = useCallback(async (expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 USAR DESTINATARIO FORZADO SI SE PROPORCIONA, SINO EL SELECCIONADO
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado;
+      
+      // 🔧 PRESERVAR NOMBRE DEL DESTINATARIO DESDE EL INICIO
+      const nombreOriginalDestinatario = destinatarioActual 
+        ? destinatarioActual.nombre 
+        : null;
+        
+      console.log('🔍 DEBUG Email - Nombres:', {
+        nombreOriginalDestinatario,
+        destinatarioActual,
+        destinatarioForzado,
+        tieneDestinatario: !!destinatarioActual
+      });
+        
+      // Usar destinatario actual si está disponible, sino obtener del cliente
       let email, nombreDestinatario;
       
-      if (destinatarioCompartirSeleccionado) {
-        email = destinatarioCompartirSeleccionado.email;
-        nombreDestinatario = destinatarioCompartirSeleccionado.nombre;
+      if (destinatarioActual) {
+        email = destinatarioActual.email;
+        nombreDestinatario = destinatarioActual.nombre;
       } else {
         // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
@@ -179,10 +376,19 @@ export const useCompartirExpediente = ({
         console.log('⚠️ Destinatario sin email, abriendo modal de captura');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         if (respCliente?.success) {
-          setClienteParaActualizar(respCliente.data);
+          setClienteParaActualizar({
+            ...respCliente.data,
+            // 🔧 GUARDAR INFO DEL DESTINATARIO SELECCIONADO
+            _destinatarioSeleccionado: destinatarioActual
+          });
+          setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
           setTipoDatoFaltante('email');
           setCanalEnvio('Email');
-          setExpedienteEnEspera(expediente);
+          setExpedienteEnEspera({
+            ...expediente,
+            // 🔧 PRESERVAR DESTINATARIO PARA EL REINTENTO
+            _destinatarioOriginal: destinatarioActual
+          });
           setMostrarModalContacto(true);
         }
         return;
@@ -208,50 +414,54 @@ export const useCompartirExpediente = ({
       const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
       window.location.href = mailtoUrl;
     
-      // Registrar la notificación en el historial
+      // Registrar evento en el historial de trazabilidad (log único y completo)
       try {
-        await notificacionesService.registrarNotificacion({
-          expediente_id: expediente.id,
-          cliente_id: expediente.cliente_id,
-          tipo_notificacion: notificacionesService.TIPOS_NOTIFICACION.EMAIL,
-          tipo_mensaje: tipoMensaje,
-          destinatario_nombre: nombreDestinatario,
-          destinatario_contacto: email,
-          asunto: asunto,
-          mensaje: cuerpo,
-          numero_poliza: expediente.numero_poliza,
-          compania: expediente.compania,
-          producto: expediente.producto,
-          estatus_pago: expediente.estatusPago,
-          fecha_vencimiento_pago: expediente.fecha_vencimiento_pago,
-          pdf_url: pdfUrl,
-          pdf_expiracion: pdfExpiracion,
-          estado_envio: 'enviado'
+        // 🔧 USAR NOMBRE PRESERVADO DESDE EL INICIO (no depende del estado actual)
+        const nombreFinalDestinatario = nombreOriginalDestinatario || nombreDestinatario;
+        
+        console.log('🔍 DEBUG Log Email:', {
+          nombreOriginalDestinatario,
+          nombreDestinatario,
+          nombreFinalDestinatario,
+          email
         });
-        console.log('✅ Notificación registrada en el historial');
-      } catch (error) {
-        console.error('⚠️ Error al registrar notificación (no crítico):', error);
-      }
-
-      // Registrar evento en el historial de trazabilidad
-      try {
+          
         await historialService.registrarEnvioDocumento(
           expediente.id,
           expediente.cliente_id,
           'Email',
-          { nombre: nombreDestinatario, contacto: email },
+          { nombre: nombreFinalDestinatario, contacto: email },
           cuerpo,
-          pdfUrl
+          pdfUrl,
+          { 
+            compania: expediente.compania,
+            numero_poliza: expediente.numero_poliza,
+            tipo_pago: expediente.tipo_pago
+          }
         );
-        console.log('✅ Evento registrado en historial de trazabilidad');
+        console.log('✅ Evento registrado en historial de trazabilidad (Email)');
       } catch (error) {
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
     
-      // Actualizar la etapa a "Enviada al Cliente" solo si es emisión
+      // Actualizar la etapa según el tipo de mensaje
       if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
+        toast.success('✅ Póliza enviada por Email.\n📬 Etapa avanzada a "Enviada al Cliente"');
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+        toast.success('✅ Renovación enviada por Email.\n📬 Etapa avanzada a "Renovación Enviada"');
+      } else {
+        toast.success('✅ Mensaje enviado por Email');
       }
+      
+      // 🔄 Recargar historial automáticamente después de compartir póliza
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('recargarHistorial', { 
+          detail: { expedienteId: expediente.id } 
+        }));
+        console.log('🔄 Recarga automática del historial solicitada (compartir póliza Email)');
+      }, 1500);
     
     } catch (error) {
       console.error('Error al compartir por Email:', error);
@@ -262,40 +472,50 @@ export const useCompartirExpediente = ({
   /**
    * Enviar aviso de pago por WhatsApp
    */
-  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente) => {
+  const enviarAvisoPagoWhatsApp = useCallback(async (pago, expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 FIX: Usar destinatarioForzado primero, luego destinatarioCompartirSeleccionado, luego destinatarioSeleccionado
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado || destinatarioSeleccionado;
       let telefono, nombreDestinatario;
       
-      if (destinatarioSeleccionado) {
-        telefono = destinatarioSeleccionado.telefono;
-        nombreDestinatario = destinatarioSeleccionado.nombre;
-      } else {
-        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
-        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-        if (!respCliente?.success) {
-          toast.error('No se pudo obtener la información del cliente');
-          return;
-        }
-        const cliente = respCliente.data;
-        telefono = cliente?.contacto_telefono_movil || cliente?.telefonoMovil || cliente?.telefono_movil;
-        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
-          ? cliente.razonSocial || cliente.razon_social
-          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      console.log('🔍 DEBUG enviarAvisoPagoWhatsApp - destinatarioActual:', {
+        destinatarioActual,
+        telefono: destinatarioActual?.telefono,
+        nombre: destinatarioActual?.nombre,
+        fuente: destinatarioForzado ? 'forzado' : destinatarioCompartirSeleccionado ? 'modal_compartir' : destinatarioSeleccionado ? 'selector_aviso' : 'ninguno'
+      });
+      
+      if (destinatarioActual) {
+        telefono = destinatarioActual.telefono;
+        nombreDestinatario = destinatarioActual.nombre;
+        console.log('📱 Usando destinatario seleccionado:', { nombre: nombreDestinatario, telefono, tieneTelefono: !!telefono });
       }
       
-      // Si no tiene teléfono, abrir modal para capturarlo
+      // 🔧 FIX: Si el destinatario seleccionado NO tiene teléfono, NO hacer fallback al cliente
+      // En su lugar, abrir modal de captura (igual que compartirPorWhatsApp)
       if (!telefono) {
         console.log('⚠️ Destinatario sin teléfono móvil, abriendo modal de captura para aviso de pago');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         const cliente = respCliente?.success ? respCliente.data : null;
-        setClienteParaActualizar(cliente);
+        
+        // Construir nombre del destinatario si no existe
+        if (!nombreDestinatario && cliente) {
+          nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+            ? cliente.razonSocial || cliente.razon_social
+            : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        }
+        
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, telefono: null }
+        });
+        setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
         setTipoDatoFaltante('telefono_movil');
         setCanalEnvio('WhatsApp');
         setExpedienteEnEspera(expediente);
         setPagoParaNotificar(pago);
         setMostrarModalContacto(true);
-        cerrarModalAvisoPago();
         return;
       }
 
@@ -304,7 +524,21 @@ export const useCompartirExpediente = ({
       
       // Validar formato
       if (!/^\d{10,15}$/.test(telefonoLimpio)) {
-        toast.error(`El número de teléfono "${telefono}" no es válido para WhatsApp`);
+        console.log('⚠️ Número de teléfono inválido, abriendo modal de captura para aviso de pago');
+        toast.error(`❌ El número de teléfono "${telefono}" no es válido para WhatsApp. Por favor actualízalo.`);
+        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
+        const cliente = respCliente?.success ? respCliente.data : null;
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, telefono: null }
+        });
+        setTipoDatoFaltante('telefono_movil');
+        setCanalEnvio('WhatsApp');
+        setExpedienteEnEspera(expediente);
+        setPagoParaNotificar(pago);
+        setMostrarModalContacto(true);
+        // 🔧 FIX: NO llamar cerrarModalAvisoPago() porque borra pagoParaNotificar
         return;
       }
       
@@ -346,6 +580,52 @@ export const useCompartirExpediente = ({
         mensajeImportante = '💡 *Te recordamos* que tienes un pago pendiente. Mantén tu póliza al día para garantizar tu cobertura sin interrupciones.';
       }
       
+      // Construir resumen de todos los recibos
+      let resumenRecibos = '';
+      let todosRecibos = [];
+      if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+        resumenRecibos = '\n📊 *ESTADO DE TODOS TUS PAGOS:*\n';
+        
+        expediente.recibos.forEach((recibo) => {
+          const fechaRecibo = new Date(recibo.fecha_vencimiento || recibo.fecha);
+          const hoyCalc = new Date();
+          hoyCalc.setHours(0, 0, 0, 0);
+          fechaRecibo.setHours(0, 0, 0, 0);
+          const diffDias = Math.ceil((fechaRecibo - hoyCalc) / (1000 * 60 * 60 * 24));
+          
+          let icono, estadoRecibo, detalle;
+          
+          // ✅ CORREGIDO: Verificar si está pagado por fecha_pago_real
+          if (recibo.fecha_pago_real) {
+            icono = '✅';
+            estadoRecibo = 'PAGADO';
+            detalle = ` (pagado ${utils.formatearFecha(recibo.fecha_pago_real, 'corta')})`;
+          } else if (diffDias < 0) {
+            icono = '🚨';
+            estadoRecibo = 'VENCIDO';
+            detalle = ` (hace ${Math.abs(diffDias)} día${Math.abs(diffDias) !== 1 ? 's' : ''})`;
+          } else if (diffDias <= 5) {
+            icono = '⏰';
+            estadoRecibo = 'Por vencer';
+            detalle = ` (${diffDias === 0 ? 'vence HOY' : `vence en ${diffDias} día${diffDias !== 1 ? 's' : ''}`})`;
+          } else {
+            icono = '⏳';
+            estadoRecibo = 'Pendiente';
+            detalle = ` (vence ${utils.formatearFecha(recibo.fecha_vencimiento || recibo.fecha, 'corta')})`;
+          }
+          
+          resumenRecibos += `${icono} Pago ${recibo.numero_recibo}: ${estadoRecibo}${detalle}\n`;
+          
+          todosRecibos.push({
+            numero: recibo.numero_recibo,
+            estatus: estadoRecibo,
+            fecha: recibo.fecha_vencimiento || recibo.fecha,
+            monto: recibo.monto,
+            dias_restantes: diffDias
+          });
+        });
+      }
+      
       const mensaje = `Hola ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
@@ -353,7 +633,8 @@ export const useCompartirExpediente = ({
         `*Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}*\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
         `Monto: *$${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}*\n` +
-        `Estado: ${estadoFinal}\n\n` +
+        `Estado: ${estadoFinal}\n` +
+        `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
         `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
         `Saludos cordiales`;
@@ -389,12 +670,20 @@ export const useCompartirExpediente = ({
       
       // Registrar evento en el historial de trazabilidad
       try {
+        // 🆕 Determinar tipo de evento según estado del pago
+        let tipoEvento;
+        if (esVencido) {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO;
+        } else if (esPorVencer) {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO;
+        } else {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO;
+        }
+        
         await historialService.registrarEvento({
           expediente_id: expediente.id,
           cliente_id: expediente.cliente_id,
-          tipo_evento: esVencido 
-            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
-            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          tipo_evento: tipoEvento,
           usuario_nombre: 'Sistema',
           descripcion: `Enviado a ${nombreDestinatario} por WhatsApp (${telefono})`,
           metodo_contacto: 'WhatsApp',
@@ -408,7 +697,8 @@ export const useCompartirExpediente = ({
             fecha_pago: pago.fecha,
             monto: pago.monto,
             estado_pago: pago.estado,
-            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+            tipo_aviso: esVencido ? 'vencido' : esPorVencer ? 'por_vencer' : 'pendiente',
+            resumen_recibos: todosRecibos
           }
         });
         console.log('✅ Evento de pago registrado en trazabilidad');
@@ -431,45 +721,55 @@ export const useCompartirExpediente = ({
       console.error('Error al enviar aviso por WhatsApp:', error);
       toast.error('Error al enviar aviso por WhatsApp');
     }
-  }, [cerrarModalAvisoPago, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
+  }, [cerrarModalAvisoPago, destinatarioCompartirSeleccionado, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
 
   /**
    * Enviar aviso de pago por Email
    */
-  const enviarAvisoPagoEmail = useCallback(async (pago, expediente) => {
+  const enviarAvisoPagoEmail = useCallback(async (pago, expediente, destinatarioForzado = null) => {
     try {
-      // Usar destinatario seleccionado si está disponible, sino obtener del cliente
+      // 🔧 FIX: Usar destinatarioForzado primero, luego destinatarioCompartirSeleccionado, luego destinatarioSeleccionado
+      const destinatarioActual = destinatarioForzado || destinatarioCompartirSeleccionado || destinatarioSeleccionado;
       let email, nombreDestinatario;
       
-      if (destinatarioSeleccionado) {
-        email = destinatarioSeleccionado.email;
-        nombreDestinatario = destinatarioSeleccionado.nombre;
-      } else {
-        // Obtener datos del cliente (fallback cuando no hay destinatario seleccionado)
-        const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
-        if (!respCliente?.success) {
-          toast.error('No se pudo obtener la información del cliente');
-          return;
-        }
-        const cliente = respCliente.data;
-        email = cliente?.contacto_email || cliente?.email;
-        nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
-          ? cliente.razonSocial || cliente.razon_social
-          : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+      console.log('🔍 DEBUG enviarAvisoPagoEmail - destinatarioActual:', {
+        destinatarioActual,
+        email: destinatarioActual?.email,
+        nombre: destinatarioActual?.nombre,
+        fuente: destinatarioForzado ? 'forzado' : destinatarioCompartirSeleccionado ? 'modal_compartir' : destinatarioSeleccionado ? 'selector_aviso' : 'ninguno'
+      });
+      
+      if (destinatarioActual) {
+        email = destinatarioActual.email;
+        nombreDestinatario = destinatarioActual.nombre;
+        console.log('📧 Usando destinatario seleccionado:', { nombre: nombreDestinatario, email, tieneEmail: !!email });
       }
       
-      // Si no tiene email, abrir modal para capturarlo
+      // 🔧 FIX: Si el destinatario seleccionado NO tiene email, NO hacer fallback al cliente
+      // En su lugar, abrir modal de captura (igual que compartirPorEmail)
       if (!email) {
         console.log('⚠️ Destinatario sin email, abriendo modal de captura para aviso de pago');
         const respCliente = await clientesService.obtenerClientePorId(expediente.cliente_id);
         const cliente = respCliente?.success ? respCliente.data : null;
-        setClienteParaActualizar(cliente);
+        
+        // Construir nombre del destinatario si no existe
+        if (!nombreDestinatario && cliente) {
+          nombreDestinatario = cliente.tipoPersona === 'Persona Moral'
+            ? cliente.razonSocial || cliente.razon_social
+            : `${cliente.nombre || ''} ${cliente.apellidoPaterno || cliente.apellido_paterno || ''}`.trim();
+        }
+        
+        setClienteParaActualizar({
+          ...cliente,
+          // 🔧 FIX: Guardar info del destinatario seleccionado para reintento automático
+          _destinatarioSeleccionado: destinatarioActual || { nombre: nombreDestinatario, email: null }
+        });
+        setDestinatarioParaModal(destinatarioActual); // Pasar destinatario al modal
         setTipoDatoFaltante('email');
         setCanalEnvio('Email');
         setExpedienteEnEspera(expediente);
         setPagoParaNotificar(pago);
         setMostrarModalContacto(true);
-        cerrarModalAvisoPago();
         return;
       }
       
@@ -513,6 +813,52 @@ export const useCompartirExpediente = ({
         mensajeImportante = `Le recordamos que tiene un pago pendiente. Mantener su póliza al día garantiza su cobertura sin interrupciones.`;
       }
       
+      // Construir resumen de todos los recibos (igual que WhatsApp)
+      let resumenRecibos = '';
+      let todosRecibos = [];
+      if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+        resumenRecibos = '\n📊 ESTADO DE TODOS LOS PAGOS:\n';
+        
+        expediente.recibos.forEach((recibo) => {
+          const fechaRecibo = new Date(recibo.fecha_vencimiento || recibo.fecha);
+          const hoyCalc = new Date();
+          hoyCalc.setHours(0, 0, 0, 0);
+          fechaRecibo.setHours(0, 0, 0, 0);
+          const diffDias = Math.ceil((fechaRecibo - hoyCalc) / (1000 * 60 * 60 * 24));
+          
+          let icono, estadoRecibo, detalle;
+          
+          // ✅ CORREGIDO: Verificar si está pagado por fecha_pago_real (Email)
+          if (recibo.fecha_pago_real) {
+            icono = '✅';
+            estadoRecibo = 'PAGADO';
+            detalle = ` (pagado ${utils.formatearFecha(recibo.fecha_pago_real, 'corta')})`;
+          } else if (diffDias < 0) {
+            icono = '🚨';
+            estadoRecibo = 'VENCIDO';
+            detalle = ` (hace ${Math.abs(diffDias)} día${Math.abs(diffDias) !== 1 ? 's' : ''})`;
+          } else if (diffDias <= 5) {
+            icono = '⏰';
+            estadoRecibo = 'Por vencer';
+            detalle = ` (${diffDias === 0 ? 'vence HOY' : `vence en ${diffDias} día${diffDias !== 1 ? 's' : ''}`})`;
+          } else {
+            icono = '⏳';
+            estadoRecibo = 'Pendiente';
+            detalle = ` (vence ${utils.formatearFecha(recibo.fecha_vencimiento || recibo.fecha, 'corta')})`;
+          }
+          
+          resumenRecibos += `${icono} Pago ${recibo.numero_recibo}: ${estadoRecibo}${detalle}\n`;
+          
+          todosRecibos.push({
+            numero: recibo.numero_recibo,
+            estatus: estadoRecibo,
+            fecha: recibo.fecha_vencimiento || recibo.fecha,
+            monto: recibo.monto,
+            dias_restantes: diffDias
+          });
+        });
+      }
+      
       const cuerpo = `Estimado/a ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
@@ -520,7 +866,8 @@ export const useCompartirExpediente = ({
         `Pago #${pago.numero}${pago.totalPagos ? ` de ${pago.totalPagos}` : ''}\n` +
         `Fecha de vencimiento: ${utils.formatearFecha(pago.fecha, 'larga')}\n` +
         `Monto: $${utils.formatearMoneda ? utils.formatearMoneda(pago.monto) : pago.monto}\n` +
-        `Estado: ${estadoFinal}\n\n` +
+        `Estado: ${estadoFinal}\n` +
+        `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
         `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
         `Saludos cordiales`;
@@ -551,12 +898,20 @@ export const useCompartirExpediente = ({
       
       // Registrar evento en el historial de trazabilidad
       try {
+        // 🆕 Determinar tipo de evento según estado del pago (Email)
+        let tipoEvento;
+        if (esVencido) {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO;
+        } else if (esPorVencer) {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO;
+        } else {
+          tipoEvento = historialService.TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO;
+        }
+        
         await historialService.registrarEvento({
           expediente_id: expediente.id,
           cliente_id: expediente.cliente_id,
-          tipo_evento: esVencido 
-            ? historialService.TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO 
-            : historialService.TIPOS_EVENTO.AVISO_PAGO_ENVIADO,
+          tipo_evento: tipoEvento,
           usuario_nombre: 'Sistema',
           descripcion: `Enviado a ${nombreDestinatario} por Email (${email})`,
           metodo_contacto: 'Email',
@@ -571,7 +926,8 @@ export const useCompartirExpediente = ({
             fecha_pago: pago.fecha,
             monto: pago.monto,
             estado_pago: pago.estado,
-            tipo_aviso: esVencido ? 'recordatorio' : 'aviso'
+            tipo_aviso: esVencido ? 'vencido' : esPorVencer ? 'por_vencer' : 'pendiente',
+            resumen_recibos: todosRecibos
           }
         });
         console.log('✅ Evento de pago registrado en trazabilidad');
@@ -598,12 +954,13 @@ export const useCompartirExpediente = ({
       console.error('Error al enviar aviso por Email:', error);
       toast.error('Error al enviar aviso por Email');
     }
-  }, [cerrarModalAvisoPago, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
+  }, [cerrarModalAvisoPago, destinatarioCompartirSeleccionado, destinatarioSeleccionado, setClienteParaActualizar, setTipoDatoFaltante, setCanalEnvio, setExpedienteEnEspera, setPagoParaNotificar, setMostrarModalContacto, utils]);
 
   return {
     compartirPorWhatsApp,
     compartirPorEmail,
     enviarAvisoPagoWhatsApp,
-    enviarAvisoPagoEmail
+    enviarAvisoPagoEmail,
+    actualizarCampoCliente
   };
 };

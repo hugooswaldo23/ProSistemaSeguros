@@ -12,10 +12,13 @@ import {
   Download,
   ChevronDown,
   ChevronUp,
-  ExternalLink
+  ExternalLink,
+  FileText
 } from 'lucide-react';
 import { obtenerNotificacionesPorExpediente } from '../services/notificacionesService';
 import * as historialService from '../services/historialExpedienteService';
+import * as pdfService from '../services/pdfService';
+import toast from 'react-hot-toast';
 
 const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
   const [historial, setHistorial] = useState([]);
@@ -122,8 +125,13 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
       // ✅ Ya NO agregamos eventos sintéticos
       // Los eventos reales (captura, emisión, pago) vienen del sistema de historial
       
-      // Ordenar por fecha descendente (más reciente primero)
-      eventosTimeline.sort((a, b) => new Date(b.fecha_evento) - new Date(a.fecha_evento));
+      // Ordenar por fecha descendente (más reciente primero), y si son iguales, por ID descendente
+      eventosTimeline.sort((a, b) => {
+        const fechaDiff = new Date(b.fecha_evento) - new Date(a.fecha_evento);
+        if (fechaDiff !== 0) return fechaDiff;
+        // Si las fechas son iguales, ordenar por ID (más reciente = ID mayor)
+        return (b.id || 0) - (a.id || 0);
+      });
       
       setHistorial(eventosTimeline);
     } catch (err) {
@@ -178,18 +186,24 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
         // Omitir eventos de "datos actualizados" si solo es cambio de etapa sin modificaciones relevantes
         if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
           // Mostrar si tiene cambios significativos O si hay cambio de pago
-          const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
+          const cambios = evento.datos_adicionales?.cantidad_cambios || evento.datos_adicionales?.total_cambios || 0;
           const tieneCambioPago = evento.datos_adicionales?.cambio_pago || false;
-          return cambios > 0 || tieneCambioPago;
+          const tienePolizaCambios = evento.datos_adicionales?.poliza_cambios?.cambios_detallados && Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).length > 0;
+          const tieneClienteCambios = evento.datos_adicionales?.cliente_cambios?.cambios_detallados && Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).length > 0;
+          const tieneRecibosCambios = evento.datos_adicionales?.recibos_cambios?.cambios_detallados && evento.datos_adicionales.recibos_cambios.cambios_detallados.length > 0;
+          return cambios > 0 || tieneCambioPago || tienePolizaCambios || tieneClienteCambios || tieneRecibosCambios;
         }
         return true; // Mostrar todos los demás eventos
       })
     : historial.filter(evento => {
         // Primero aplicar el filtro de eventos irrelevantes
         if (evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') {
-          const cambios = evento.datos_adicionales?.cantidad_cambios || 0;
+          const cambios = evento.datos_adicionales?.cantidad_cambios || evento.datos_adicionales?.total_cambios || 0;
           const tieneCambioPago = evento.datos_adicionales?.cambio_pago || false;
-          if (cambios === 0 && !tieneCambioPago) return false;
+          const tienePolizaCambios = evento.datos_adicionales?.poliza_cambios?.cambios_detallados && Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).length > 0;
+          const tieneClienteCambios = evento.datos_adicionales?.cliente_cambios?.cambios_detallados && Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).length > 0;
+          const tieneRecibosCambios = evento.datos_adicionales?.recibos_cambios?.cambios_detallados && evento.datos_adicionales.recibos_cambios.cambios_detallados.length > 0;
+          if (cambios === 0 && !tieneCambioPago && !tienePolizaCambios && !tieneClienteCambios && !tieneRecibosCambios) return false;
         }
         
         // Luego aplicar filtro por categoría
@@ -228,6 +242,25 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
     if (esAyer) return `Ayer ${hora}`;
     
     return fecha.toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + hora;
+  };
+
+  // Formatear fechas en formato YYYY-MM-DD sin conversión de zona horaria
+  const formatearFechaSinTZ = (fecha) => {
+    if (!fecha || fecha === '(vacío)') return fecha;
+    
+    // Si la fecha está en formato YYYY-MM-DD, convertirla directamente a DD/MM/YYYY
+    if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      const [year, month, day] = fecha.split('-');
+      return `${day}/${month}/${year}`;
+    }
+    
+    // Si incluye 'T' (ISO timestamp), extraer solo la parte de fecha y convertir
+    if (fecha.includes('T')) {
+      const [year, month, day] = fecha.split('T')[0].split('-');
+      return `${day}/${month}/${year}`;
+    }
+    
+    return fecha;
   };
 
   // Exportar historial
@@ -378,58 +411,442 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                         </strong>
                       </div>
                       
-                      {/* Vista mejorada para eventos de captura */}
-                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf') ? (
+                      {/* Vista mejorada para eventos de captura Y edición */}
+                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf' || evento.tipo_evento === 'edicion_manual_expediente') ? (
                         <div className="mb-1">
-                          {/* Línea principal: nombre del archivo o método */}
-                          {evento.datos_adicionales?.nombre_archivo_pdf ? (
-                            <div className="mb-2">
-                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
-                                📄 {evento.datos_adicionales.nombre_archivo_pdf}
-                              </span>
-                              {evento.datos_adicionales?.modificaciones_manuales && (
-                                <span className="badge bg-warning bg-opacity-10 text-warning ms-2" style={{ fontSize: '0.75rem' }}>
-                                  ✏️ {evento.datos_adicionales?.campos_modificados?.length || 0} campo(s) editado(s)
-                                </span>
-                              )}
-                              {/* Mostrar detalle de campos modificados si existen */}
-                              {evento.datos_adicionales?.campos_modificados && evento.datos_adicionales.campos_modificados.length > 0 && (
-                                <div className="mt-2 p-2 bg-light rounded" style={{ fontSize: '0.75rem' }}>
-                                  <div className="text-muted mb-1">Campos modificados manualmente:</div>
-                                  {evento.datos_adicionales.campos_modificados.map((campo, idx) => (
-                                    <div key={idx} className="text-dark" style={{ lineHeight: '1.4' }}>
-                                      {campo}
+                          {(() => {
+                            // Helper functions
+                            const limpiarValor = (valor) => {
+                              if (!valor || valor === 'vacío') return valor;
+                              if (typeof valor === 'string' && valor.includes('T')) return valor.split('T')[0];
+                              return valor;
+                            };
+                            
+                            // Construir mapa de cambios para búsqueda rápida
+                            const cambiosMap = {};
+                            
+                            // Cambios de cliente
+                            if (evento.datos_adicionales?.cliente_cambios?.cambios_detallados) {
+                              Object.entries(evento.datos_adicionales.cliente_cambios.cambios_detallados).forEach(([campo, cambio]) => {
+                                cambiosMap[campo] = cambio;
+                              });
+                            }
+                            
+                            // Cambios de póliza
+                            if (evento.datos_adicionales?.poliza_cambios?.cambios_detallados) {
+                              Object.entries(evento.datos_adicionales.poliza_cambios.cambios_detallados).forEach(([campo, cambio]) => {
+                                cambiosMap[campo] = cambio;
+                              });
+                            }
+                            
+                            // ✨ NUEVO: Cambios manuales post-PDF
+                            if (evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles) {
+                              Object.entries(evento.datos_adicionales.cambios_manuales.campos_editados.detalles).forEach(([campo, cambio]) => {
+                                cambiosMap[campo] = { anterior: cambio.pdf, nuevo: cambio.final };
+                              });
+                            }
+                            
+                            // Campos editados manualmente (legacy)
+                            if (evento.datos_adicionales?.campos_editados_manualmente) {
+                              Object.entries(evento.datos_adicionales.campos_editados_manualmente).forEach(([campo, cambio]) => {
+                                cambiosMap[campo] = { anterior: cambio.antes, nuevo: cambio.despues };
+                              });
+                            }
+                            
+                            // Helper para verificar si un campo fue editado
+                            const fueEditado = (campo) => {
+                              return cambiosMap[campo] || cambiosMap[campo.replace(/_/g, ' ').toLowerCase()];
+                            };
+                            
+                            return null;
+                          })()}
+                          
+                          {/* Información completa en formato vertical: 10 datos esenciales */}
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {(() => {
+                              const limpiarValor = (valor) => {
+                                if (!valor || valor === 'vacío') return valor;
+                                if (typeof valor === 'string' && valor.includes('T')) return valor.split('T')[0];
+                                return valor;
+                              };
+                              
+                              const cambiosMap = {};
+                              if (evento.datos_adicionales?.cliente_cambios?.cambios_detallados) {
+                                Object.entries(evento.datos_adicionales.cliente_cambios.cambios_detallados).forEach(([campo, cambio]) => {
+                                  cambiosMap[campo] = cambio;
+                                });
+                              }
+                              if (evento.datos_adicionales?.poliza_cambios?.cambios_detallados) {
+                                Object.entries(evento.datos_adicionales.poliza_cambios.cambios_detallados).forEach(([campo, cambio]) => {
+                                  cambiosMap[campo] = cambio;
+                                });
+                              }
+                              if (evento.datos_adicionales?.campos_editados_manualmente) {
+                                Object.entries(evento.datos_adicionales.campos_editados_manualmente).forEach(([campo, cambio]) => {
+                                  cambiosMap[campo] = { anterior: cambio.antes, nuevo: cambio.despues };
+                                });
+                              }
+                              
+                              return (
+                                <>
+                                  {/* 1. Método de captura (SOLO para captura, no para edición) */}
+                                  {evento.datos_adicionales?.metodo_captura && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                    <div className="text-muted">
+                                      📋 Método: <strong className="text-dark">{evento.datos_adicionales.metodo_captura}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Fecha de edición (solo para edición) */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.fecha_edicion && (
+                                    <div className="text-muted">
+                                      🕐 Fecha edición: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_edicion).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* 2. Fecha de captura */}
+                                  {evento.datos_adicionales?.fecha_captura && (
+                                    <div className="text-muted">
+                                      🕐 Fecha captura: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_captura).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* 3. Aseguradora */}
+                                  {evento.datos_adicionales?.aseguradora && (
+                                    <div className="text-muted">
+                                      🏢 Aseguradora: <strong className="text-dark">{evento.datos_adicionales.aseguradora}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* 4. Número de póliza */}
+                                  {evento.datos_adicionales?.numero_poliza && (
+                                    <div className="text-muted">
+                                      📄 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* ✨ CAMBIOS DE PÓLIZA (para edicion_manual_expediente) */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.poliza_cambios?.cambios_detallados && 
+                                   Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).length > 0 && (
+                                    <>
+                                      <div className="text-muted mt-2 mb-1"><strong>📋 Cambios en póliza:</strong></div>
+                                      {Object.entries(evento.datos_adicionales.poliza_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                                        const esFecha = campo.toLowerCase().includes('fecha') || campo.toLowerCase().includes('vigencia');
+                                        const formatearCampo = (c) => c.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                        const valorAnterior = esFecha && cambio.anterior && !cambio.anterior.includes('vacío') 
+                                          ? formatearFechaSinTZ(cambio.anterior) 
+                                          : cambio.anterior;
+                                        const valorNuevo = esFecha && cambio.nuevo && !cambio.nuevo.includes('vacío') 
+                                          ? formatearFechaSinTZ(cambio.nuevo) 
+                                          : cambio.nuevo;
+                                        return (
+                                          <div key={`poliza-cambio-${idx}`} className="text-muted ms-2">
+                                            ✏️ {formatearCampo(campo)}: <span className="text-danger fw-bold">{valorAnterior}</span> → <span className="text-success fw-bold">{valorNuevo}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </>
+                                  )}
+                                  
+                                  {/* ✨ CAMBIOS DE CLIENTE (para edicion_manual_expediente) */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.cliente_cambios?.cambios_detallados && 
+                                   Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).length > 0 && (
+                                    <>
+                                      <div className="text-muted mt-2 mb-1"><strong>👤 Cambios en datos del cliente:</strong></div>
+                                      {Object.entries(evento.datos_adicionales.cliente_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                                        const formatearCampo = (c) => c.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                        return (
+                                          <div key={`cliente-cambio-${idx}`} className="text-muted ms-2">
+                                            ✏️ {formatearCampo(campo)}: <span className="text-danger fw-bold">{cambio.anterior || '(vacío)'}</span> → <span className="text-success fw-bold">{cambio.nuevo || '(vacío)'}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </>
+                                  )}
+                                  
+                                  {/* ✨ CAMBIOS EN RECIBOS (para edicion_manual_expediente) - Formato igual que captura */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.recibos_cambios?.cambios_detallados && 
+                                   evento.datos_adicionales.recibos_cambios.cambios_detallados.length > 0 && (
+                                    <>
+                                      <div className="text-muted mt-2 mb-1"><strong>📋 Recibos de pago modificados:</strong></div>
+                                      {evento.datos_adicionales.recibos_cambios.cambios_detallados.map((cambio, idx) => (
+                                        <div key={`recibo-cambio-${idx}`} className="text-muted ms-2">
+                                          {cambio.tipo_cambio === 'agregado' && (
+                                            <>• Recibo #{cambio.numero_recibo}: <strong className="text-success">${Number(cambio.monto || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong> - Fecha límite de pago: <strong className="text-success">{formatearFechaSinTZ(cambio.fecha_nueva)}</strong> <span className="badge bg-success ms-1">Nuevo</span></>
+                                          )}
+                                          {cambio.tipo_cambio === 'eliminado' && (
+                                            <>• Recibo #{cambio.numero_recibo}: <span className="text-decoration-line-through text-danger">${Number(cambio.monto || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })} - {formatearFechaSinTZ(cambio.fecha_anterior)}</span> <span className="badge bg-danger ms-1">Eliminado</span></>
+                                          )}
+                                          {cambio.tipo_cambio === 'editado' && (
+                                            <>• Recibo #{cambio.numero_recibo}: <strong className="text-dark">${Number(cambio.monto_nuevo || cambio.monto_anterior || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong> - Fecha límite de pago: <strong className="text-dark">{formatearFechaSinTZ(cambio.fecha_nueva)}</strong> <span className="text-muted" style={{ fontSize: '0.8em' }}>(antes: {formatearFechaSinTZ(cambio.fecha_anterior)})</span></>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </>
+                                  )}
+                                  
+                                  {/* ✨ CAMBIOS EN PDF (para edicion_manual_expediente) */}
+                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.pdf_cambios && (
+                                    <div className="text-muted mt-2">
+                                      📄 <strong>{evento.datos_adicionales.pdf_cambios.descripcion}:</strong>{' '}
+                                      {evento.datos_adicionales.pdf_cambios.anterior ? (
+                                        <>
+                                          <span 
+                                            className="text-danger" 
+                                            style={{ cursor: 'help', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                                            title="📋 PDF anterior guardado en historial. Funcionalidad de consulta pendiente de implementación en backend."
+                                          >
+                                            {evento.datos_adicionales.pdf_cambios.anterior}
+                                          </span> → <span 
+                                            className="text-success" 
+                                            style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                            onClick={async () => {
+                                              try {
+                                                // Usar el endpoint existente con expedienteId
+                                                const data = await pdfService.obtenerURLFirmadaPDF(expedienteId);
+                                                window.open(data.signed_url, '_blank');
+                                              } catch (err) {
+                                                toast.error('Error al abrir PDF: ' + err.message);
+                                              }
+                                            }}
+                                            title="Clic para ver PDF actual"
+                                          >
+                                            {evento.datos_adicionales.pdf_cambios.nuevo}
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span 
+                                          className="text-success" 
+                                          style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                          onClick={async () => {
+                                            try {
+                                              const data = await pdfService.obtenerURLFirmadaPDF(expedienteId);
+                                              window.open(data.signed_url, '_blank');
+                                            } catch (err) {
+                                              toast.error('Error al abrir PDF: ' + err.message);
+                                            }
+                                          }}
+                                          title="Clic para ver PDF"
+                                        >
+                                          {evento.datos_adicionales.pdf_cambios.nuevo}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Información del cliente (origen) */}
+                                  {evento.datos_adicionales?.cliente_origen && (
+                                    <div className="text-muted">
+                                      👤 Cliente: <strong className="text-dark">{evento.datos_adicionales.cliente_origen}</strong>
+                                      {/* Si es cliente nuevo, mostrar info adicional */}
+                                      {evento.datos_adicionales?.cliente_nuevo && (
+                                        <div className="ms-3 mt-1" style={{ fontSize: '0.75rem', color: '#28a745' }}>
+                                          ✨ <strong>Nuevo cliente creado:</strong> {evento.datos_adicionales.cliente_nuevo.nombre_cliente} | RFC: {evento.datos_adicionales.cliente_nuevo.rfc} | Tipo: {evento.datos_adicionales.cliente_nuevo.tipo_persona}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Información del agente y clave - SIEMPRE se muestra */}
+                                  {evento.datos_adicionales?.agente && (
+                                    <div className="text-muted">
+                                      👔 Agente: <strong className="text-dark">{evento.datos_adicionales.agente.nombre}</strong>
+                                      {evento.datos_adicionales.agente.clave && evento.datos_adicionales.agente.clave !== 'Sin clave' && (
+                                        <span className="ms-1">(Clave: {evento.datos_adicionales.agente.clave})</span>
+                                      )}
+                                    </div>
+                                  )}
+                                  
+                                  {/* Si el agente fue editado, mostrar el cambio */}
+                                  {evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.agente && (
+                                    <div className="text-muted">
+                                      ✏️ Agente: <span className="text-danger fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.agente.pdf}</span> → <span className="text-success fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.agente.final}</span>
+                                    </div>
+                                  )}
+                                  {evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.agente_id && (
+                                    <div className="text-muted">
+                                      ✏️ Agente ID: <span className="text-danger fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.agente_id.pdf}</span> → <span className="text-success fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.agente_id.final}</span>
+                                    </div>
+                                  )}
+                                  {evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.clave_agente && (
+                                    <div className="text-muted">
+                                      ✏️ Clave Agente: <span className="text-danger fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.clave_agente.pdf}</span> → <span className="text-success fw-bold">{evento.datos_adicionales.cambios_manuales.campos_editados.detalles.clave_agente.final}</span>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Información del sub-agente (solo si NO está en cambios manuales) */}
+                                  {!evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.sub_agente && !evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.subagente_id && !evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.vendedor_id && evento.datos_adicionales?.subagente && (
+                                    <div className="text-muted">
+                                      👔 Sub-agente: <strong className="text-dark">{evento.datos_adicionales.subagente.nombre}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Fecha de emisión (solo si NO está en cambios) */}
+                                  {!evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.fecha_emision && !evento.datos_adicionales?.campos_editados_post_pdf && evento.datos_adicionales?.fecha_emision && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                    <div className="text-muted">
+                                      📅 Fecha emisión: <strong className="text-dark">{evento.datos_adicionales.fecha_emision.includes('T') ? new Date(evento.datos_adicionales.fecha_emision).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.fecha_emision.split('-').reverse().join('/')}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Inicio vigencia (solo si NO está en cambios) */}
+                                  {!evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.inicio_vigencia && !evento.datos_adicionales?.campos_editados_post_pdf && evento.datos_adicionales?.inicio_vigencia && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                    <div className="text-muted">
+                                      📅 Inicio vigencia: <strong className="text-dark">{evento.datos_adicionales.inicio_vigencia.includes('T') ? new Date(evento.datos_adicionales.inicio_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.inicio_vigencia.split('-').reverse().join('/')}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Término vigencia (solo si NO está en cambios) */}
+                                  {!evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.termino_vigencia && !evento.datos_adicionales?.campos_editados_post_pdf && evento.datos_adicionales?.termino_vigencia && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                    <div className="text-muted">
+                                      📅 Término vigencia: <strong className="text-dark">{evento.datos_adicionales.termino_vigencia.includes('T') ? new Date(evento.datos_adicionales.termino_vigencia).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : evento.datos_adicionales.termino_vigencia.split('-').reverse().join('/')}</strong>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Monto total (solo si NO está en cambios) */}
+                                  {!evento.datos_adicionales?.cambios_manuales?.campos_editados?.detalles?.total && evento.datos_adicionales?.monto_total && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                    <div className="text-muted">
+                                      💰 Monto total: <strong className="text-dark">${Number(evento.datos_adicionales.monto_total).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                                    </div>
+                                  )}
+                                </>
+                              );
+                            })()}
+                            
+                            {/* Recibos: cambios o generados */}
+                            {(() => {
+                              const formatearFecha = (fecha) => {
+                                if (!fecha) return 'N/A';
+                                const f = new Date(fecha);
+                                return f.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                              };
+                              
+                              const limpiarValor = (valor) => {
+                                if (valor === null || valor === undefined) return '(vacío)';
+                                if (valor === '') return '(vacío)';
+                                return valor;
+                              };
+                              
+                              // ✨ NUEVO: Procesar cambios_manuales
+                              const cambiosManuales = evento.datos_adicionales?.cambios_manuales;
+                              const camposEditados = cambiosManuales?.campos_editados?.detalles || {};
+                              const recibosEditados = cambiosManuales?.recibos_editados?.detalles || [];
+                              
+                              // Legacy
+                              const cambiosCampos = evento.datos_adicionales?.campos_editados_post_pdf?.cambios_detallados || [];
+                              const cambiosRecibos = evento.datos_adicionales?.recibos_cambios?.cambios_detallados || [];
+                              const recibosGenerados = evento.datos_adicionales?.recibos_generados?.detalles || [];
+                              
+                              // DEBUG: Ver si hay recibos
+                              console.log('🔍 Recibos generados:', recibosGenerados);
+                              console.log('🔍 datos_adicionales completo:', evento.datos_adicionales?.recibos_generados);
+                              
+                              // Función para formatear nombre de campo
+                              const formatearNombreCampo = (campo) => {
+                                return campo
+                                  .replace(/_/g, ' ')
+                                  .replace(/\b\w/g, l => l.toUpperCase());
+                              };
+                              
+                              return (
+                                <>
+                                  {/* ✨ Mostrar campos editados post-PDF en formato de lista */}
+                                  {Object.keys(camposEditados).length > 0 && Object.entries(camposEditados).map(([campo, cambio], idx) => {
+                                    const esFecha = campo.toLowerCase().includes('fecha') || campo.toLowerCase().includes('vigencia');
+                                    const valorPDF = esFecha && cambio.pdf && cambio.pdf !== '(vacío)' ? 
+                                      formatearFechaSinTZ(cambio.pdf) : 
+                                      limpiarValor(cambio.pdf);
+                                    const valorFinal = esFecha && cambio.final && cambio.final !== '(vacío)' ? 
+                                      formatearFechaSinTZ(cambio.final) : 
+                                      limpiarValor(cambio.final);
+                                    
+                                    return (
+                                      <div key={`campo-edit-${idx}`} className="text-muted">
+                                        ✏️ {formatearNombreCampo(campo)}: <span className="text-danger fw-bold">{valorPDF}</span> → <span className="text-success fw-bold">{valorFinal}</span>
+                                      </div>
+                                    );
+                                  })}
+                                  
+                                  {/* ✨ Mostrar recibos editados post-PDF en formato de lista (NO para edicion_manual_expediente) */}
+                                  {evento.tipo_evento !== 'edicion_manual_expediente' && recibosEditados.length > 0 && recibosEditados.map((cambio, idx) => {
+                                    const fechaCambio = cambio.fecha_pdf !== cambio.fecha_final;
+                                    const montoCambio = cambio.monto_pdf !== cambio.monto_final;
+                                    
+                                    return (
+                                      <div key={`recibo-edit-${idx}`} className="text-muted">
+                                        {cambio.tipo_cambio === 'agregado' && (
+                                          <>✏️ 📋 Recibo #{cambio.recibo}: <span className="text-success fw-bold">Agregado - Vence: {formatearFechaSinTZ(cambio.fecha_final)} - ${Number(cambio.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span></>
+                                        )}
+                                        {cambio.tipo_cambio === 'eliminado' && (
+                                          <>✏️ 📋 Recibo #{cambio.recibo}: <span className="text-danger fw-bold">Eliminado (era: {formatearFechaSinTZ(cambio.fecha_pdf)} - ${Number(cambio.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })})</span></>
+                                        )}
+                                        {cambio.tipo_cambio === 'editado' && (
+                                          <>
+                                            ✏️ 📋 Recibo #{cambio.recibo}:
+                                            {fechaCambio && (
+                                              <> Fecha: <span className="text-danger fw-bold">{formatearFechaSinTZ(cambio.fecha_pdf)}</span> → <span className="text-success fw-bold">{formatearFechaSinTZ(cambio.fecha_final)}</span></>
+                                            )}
+                                            {montoCambio && (
+                                              <>{fechaCambio ? ' | ' : ''} Monto: <span className="text-danger fw-bold">${Number(cambio.monto_pdf).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span> → <span className="text-success fw-bold">${Number(cambio.monto_final).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span></>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                  
+                                  {/* Legacy: Cambios en campos del formulario post-PDF (NO para edicion_manual_expediente) */}
+                                  {evento.tipo_evento !== 'edicion_manual_expediente' && cambiosCampos.length > 0 && cambiosCampos.map((cambio, idx) => (
+                                    <div key={`campo-${idx}`} className="text-muted">
+                                      ✏️ <strong className="text-dark">{cambio.campo}:</strong> {limpiarValor(cambio.valor_nuevo)} <span style={{ color: '#6c757d', fontSize: '0.85em' }}>(antes: {limpiarValor(cambio.valor_anterior)})</span>
                                     </div>
                                   ))}
-                                </div>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="mb-1">
-                              <span className="text-dark" style={{ fontSize: '0.85rem' }}>
-                                ✍️ Captura manual del sistema
-                              </span>
-                            </div>
-                          )}
-                          
-                          {/* Información de fechas en formato vertical compacto */}
-                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
-                            {evento.datos_adicionales?.fecha_emision && evento.datos_adicionales.fecha_emision !== 'No especificada' && (
+                                  
+                                  {/* Legacy: Cambios en recibos post-PDF (NO para edicion_manual_expediente) */}
+                                  {evento.tipo_evento !== 'edicion_manual_expediente' && cambiosRecibos.length > 0 && cambiosRecibos.map((cambio, idx) => (
+                                    <div key={`recibo-cambio-${idx}`} className="text-muted">
+                                      ✏️ <strong className="text-dark">Recibo #{cambio.numero_recibo} - Vence:</strong> {formatearFecha(cambio.fecha_nueva)} <span style={{ color: '#6c757d', fontSize: '0.85em' }}>(antes: {formatearFecha(cambio.fecha_anterior)})</span>
+                                    </div>
+                                  ))}
+                                  
+                                  {/* 3. Recibos generados - Solo para captura, NO para edicion (NO para edicion_manual_expediente) */}
+                                  {evento.tipo_evento !== 'edicion_manual_expediente' && recibosGenerados.length > 0 && (
+                                    <>
+                                      <div className="text-muted mt-2 mb-1"><strong>📋 Recibos de pago generados:</strong></div>
+                                      {recibosGenerados.map((recibo, idx) => (
+                                        <div key={`recibo-gen-${idx}`} className="text-muted ms-2">
+                                          • Recibo #{recibo.numero}: <strong className="text-dark">${Number(recibo.monto).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> - Fecha límite de pago: <strong className="text-dark">{recibo.fecha_vencimiento ? formatearFechaSinTZ(recibo.fecha_vencimiento) : 'N/A'}</strong>
+                                        </div>
+                                      ))}
+                                    </>
+                                  )}
+                                </>
+                              );
+                            })()}
+                            
+                            {/* Estatus de pago */}
+                            {evento.datos_adicionales?.estatus_pago && (
                               <div className="text-muted">
-                                📅 Fecha emisión: <strong className="text-dark">{evento.datos_adicionales.fecha_emision}</strong>
+                                📊 Estatus de pago: <strong className={`${
+                                  evento.datos_adicionales.estatus_pago === 'Vencido' ? 'text-danger' : 
+                                  evento.datos_adicionales.estatus_pago === 'Pagado' ? 'text-success' : 
+                                  evento.datos_adicionales.estatus_pago === 'Por Vencer' ? 'text-warning' : 
+                                  'text-dark'
+                                }`}>
+                                  {evento.datos_adicionales.estatus_pago}
+                                </strong>
                               </div>
                             )}
-                            {evento.datos_adicionales?.inicio_vigencia && evento.datos_adicionales.inicio_vigencia !== 'No especificada' && (
+                            
+                            {/* 9. Usuario que capturó o editó */}
+                            {(evento.datos_adicionales?.usuario_capturo || evento.datos_adicionales?.usuario_edito) && (
                               <div className="text-muted">
-                                🔖 Inicio vigencia: <strong className="text-dark">{evento.datos_adicionales.inicio_vigencia}</strong>
+                                👤 Usuario: <strong className="text-dark">{evento.datos_adicionales.usuario_capturo || evento.datos_adicionales.usuario_edito}</strong>
                               </div>
                             )}
-                            <div className="text-muted">
-                              🕐 Fecha captura: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
-                            </div>
-                            {evento.usuario_nombre && (
+                            
+                            {/* 10. Etapa inicial o actual */}
+                            {(evento.datos_adicionales?.etapa_inicial || evento.datos_adicionales?.etapa_actual) && (
                               <div className="text-muted">
-                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                                🎯 Etapa: <strong className="text-dark">{evento.datos_adicionales.etapa_inicial || evento.datos_adicionales.etapa_actual}</strong>
                               </div>
                             )}
                           </div>
@@ -456,7 +873,21 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             {/* Canal de envío */}
                             {evento.metodo_contacto && (
                               <div className="text-muted">
-                                📤 Canal: <strong className="text-dark">{evento.metodo_contacto}</strong>
+                                📤 Canal: <strong className="text-primary">{evento.metodo_contacto}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Aseguradora - NUEVO */}
+                            {(expedienteData?.compania || evento.datos_adicionales?.compania) && (
+                              <div className="text-muted">
+                                🏛️ Aseguradora: <strong className="text-primary">{expedienteData?.compania || evento.datos_adicionales?.compania}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Número de Póliza - NUEVO */}
+                            {(expedienteData?.numero_poliza || evento.datos_adicionales?.numero_poliza) && (
+                              <div className="text-muted">
+                                📋 Póliza: <strong className="text-dark">{expedienteData?.numero_poliza || evento.datos_adicionales?.numero_poliza}</strong>
                               </div>
                             )}
                             
@@ -467,10 +898,63 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                               </div>
                             )}
                             
+                            {/* Estatus de pago - USAR DATOS DEL EXPEDIENTE ACTUAL */}
+                            {(expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago) && (() => {
+                              const estatus = expedienteData?.estatusPago || evento.datos_adicionales?.estatus_pago;
+                              const estatusNormalizado = estatus.toLowerCase();
+                              
+                              let colorClass = 'text-dark';
+                              if (estatusNormalizado.includes('vencido') || estatusNormalizado.includes('vencida')) {
+                                colorClass = 'text-danger fw-bold';
+                              } else if (estatusNormalizado.includes('pagado') || estatusNormalizado.includes('pagada')) {
+                                colorClass = 'text-success fw-bold';
+                              } else if (estatusNormalizado.includes('por vencer') || estatusNormalizado.includes('vencer')) {
+                                colorClass = 'text-warning fw-bold';
+                              } else if (estatusNormalizado.includes('pendiente')) {
+                                colorClass = 'text-info fw-bold';
+                              }
+                              
+                              return (
+                                <div className="text-muted">
+                                  💳 Estatus de pago: <strong className={colorClass}>{estatus}</strong>
+                                </div>
+                              );
+                            })()}
+                            
+                            {/* Monto total - USAR DATOS DEL EXPEDIENTE ACTUAL */}
+                            {(expedienteData?.total || evento.datos_adicionales?.monto_total) && (
+                              <div className="text-muted">
+                                💰 Monto total: <strong className="text-dark">${Number(expedienteData?.total || evento.datos_adicionales.monto_total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha límite de pago - USAR DATOS DEL EXPEDIENTE ACTUAL */}
+                            {(expedienteData?.fecha_vencimiento_pago || evento.datos_adicionales?.fecha_vencimiento_pago) && (
+                              <div className="text-muted">
+                                📅 Fecha límite de pago: <strong className="text-dark">{formatearFechaSinTZ(expedienteData?.fecha_vencimiento_pago || evento.datos_adicionales.fecha_vencimiento_pago)}</strong>
+                              </div>
+                            )}
+                            
                             {/* Fecha y hora del envío */}
                             <div className="text-muted">
                               🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
                             </div>
+                            
+                            {/* Link al PDF compartido */}
+                            {evento.documento_url && (
+                              <div className="text-muted">
+                                📄 PDF compartido:{' '}
+                                <a 
+                                  href={evento.documento_url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer"
+                                  className="text-primary text-decoration-underline"
+                                  style={{ cursor: 'pointer' }}
+                                >
+                                  {expedienteData?.pdf_nombre || evento.datos_adicionales?.numero_poliza || 'Ver documento'}
+                                </a>
+                              </div>
+                            )}
                             
                             {/* Cambio de etapa (si aplica) */}
                             {evento.etapa_anterior && evento.etapa_nueva && (
@@ -480,29 +964,31 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             )}
                           </div>
                         </div>
-                      ) : (evento.tipo_evento === 'aviso_pago_enviado' || evento.tipo_evento === 'recordatorio_pago_enviado') ? (
+                      ) : (evento.tipo_evento === 'aviso_pago_vencido_enviado' ||
+                           evento.tipo_evento === 'aviso_pago_por_vencer_enviado' ||
+                           evento.tipo_evento === 'aviso_pago_pendiente_enviado') ? (
                         /* Vista vertical para eventos de aviso/recordatorio de pago */
                         <div className="mb-1">
                           {/* Información en formato vertical compacto */}
                           <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
-                            {/* Empresa/Cliente */}
-                            {evento.destinatario_nombre && (
+                            {/* Empresa/Cliente - Mostrar tanto destinatario_nombre como datos_adicionales si están disponibles */}
+                            {(evento.destinatario_nombre || evento.datos_adicionales?.destinatario_nombre) && (
                               <div className="text-muted">
-                                🏢 Cliente: <strong className="text-dark">{evento.destinatario_nombre}</strong>
+                                🏢 Cliente: <strong className="text-dark">{evento.destinatario_nombre || evento.datos_adicionales?.destinatario_nombre}</strong>
                               </div>
                             )}
                             
                             {/* Contacto (teléfono o email) */}
-                            {evento.destinatario_contacto && (
+                            {(evento.destinatario_contacto || evento.datos_adicionales?.destinatario_contacto) && (
                               <div className="text-muted">
-                                {evento.metodo_contacto === 'WhatsApp' ? '📱' : '📧'} Contacto: <strong className="text-dark">{evento.destinatario_contacto}</strong>
+                                {evento.metodo_contacto === 'WhatsApp' ? '📱' : '📧'} Contacto: <strong className="text-dark">{evento.destinatario_contacto || evento.datos_adicionales?.destinatario_contacto}</strong>
                               </div>
                             )}
                             
                             {/* Canal de envío */}
-                            {evento.metodo_contacto && (
+                            {(evento.metodo_contacto || evento.datos_adicionales?.canal) && (
                               <div className="text-muted">
-                                📤 Canal: <strong className="text-dark">{evento.metodo_contacto}</strong>
+                                📤 Canal: <strong className="text-primary">{evento.metodo_contacto || evento.datos_adicionales?.canal}</strong>
                               </div>
                             )}
                             
@@ -524,15 +1010,84 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             
                             {evento.datos_adicionales?.monto && (
                               <div className="text-muted">
-                                💵 Monto: <strong className="text-dark">${evento.datos_adicionales.monto}</strong>
+                                💵 Monto: <strong className="text-dark">${Number(evento.datos_adicionales.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong>
                               </div>
                             )}
                             
-                            {evento.datos_adicionales?.estado_pago && (
-                              <div className="text-muted">
-                                📊 Estado: <strong className={`text-${evento.datos_adicionales.estado_pago === 'Vencido' ? 'danger' : evento.datos_adicionales.estado_pago === 'Pagado' ? 'success' : 'warning'}`}>
-                                  {evento.datos_adicionales.estado_pago}
-                                </strong>
+                            {/* Estatus del pago - CALCULAR DESDE FECHA O USAR expedienteData */}
+                            {(evento.datos_adicionales?.fecha_pago || evento.datos_adicionales?.estado_pago) && (() => {
+                              let estatusPago = evento.datos_adicionales?.estado_pago;
+                              
+                              // Si no hay estatus en datos_adicionales, calcular desde fecha
+                              if (!estatusPago && evento.datos_adicionales?.fecha_pago) {
+                                const fechaVenc = new Date(evento.datos_adicionales.fecha_pago);
+                                const hoy = new Date();
+                                hoy.setHours(0, 0, 0, 0);
+                                fechaVenc.setHours(0, 0, 0, 0);
+                                const diffDias = Math.floor((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+                                
+                                if (diffDias < 0) {
+                                  estatusPago = 'Vencido';
+                                } else if (diffDias <= 5) {
+                                  estatusPago = 'Por Vencer';
+                                } else {
+                                  estatusPago = 'Pendiente';
+                                }
+                              }
+                              
+                              // O buscar en recibos del expediente
+                              if (!estatusPago && expedienteData?.recibos && evento.datos_adicionales?.numero_pago) {
+                                const recibo = expedienteData.recibos.find(r => r.numero_recibo === evento.datos_adicionales.numero_pago);
+                                estatusPago = recibo?.estatus_pago || recibo?.estado_pago;
+                              }
+                              
+                              if (estatusPago) {
+                                return (
+                                  <div className="text-muted">
+                                    📊 Estatus del pago: <strong className={`${estatusPago === 'Vencido' ? 'text-danger' : estatusPago === 'Pagado' ? 'text-success' : estatusPago === 'Por Vencer' ? 'text-warning' : 'text-dark'}`}>
+                                      {estatusPago}
+                                    </strong>
+                                  </div>
+                                );
+                              }
+                              return null;
+                            })()}
+                            
+                            {/* Resumen de todos los recibos */}
+                            {evento.datos_adicionales?.resumen_recibos && Array.isArray(evento.datos_adicionales.resumen_recibos) && evento.datos_adicionales.resumen_recibos.length > 0 && (
+                              <div className="mt-2 mb-2 p-2" style={{ backgroundColor: '#f8f9fa', borderRadius: '6px', border: '1px solid #dee2e6' }}>
+                                <div className="text-dark fw-bold mb-2" style={{ fontSize: '0.85rem' }}>
+                                  📊 Estado de todos los pagos:
+                                </div>
+                                {evento.datos_adicionales.resumen_recibos.map((recibo, idx) => {
+                                  let icono, colorClase, detalle;
+                                  
+                                  if (recibo.estatus === 'Pagado') {
+                                    icono = '✅';
+                                    colorClase = 'text-success';
+                                    detalle = '';
+                                  } else if (recibo.estatus === 'VENCIDO') {
+                                    icono = '🚨';
+                                    colorClase = 'text-danger';
+                                    const diasVencido = Math.abs(recibo.dias_restantes);
+                                    detalle = ` (hace ${diasVencido} día${diasVencido !== 1 ? 's' : ''})`;
+                                  } else if (recibo.estatus === 'Por vencer') {
+                                    icono = '⏰';
+                                    colorClase = 'text-warning';
+                                    const dias = recibo.dias_restantes;
+                                    detalle = dias === 0 ? ' (vence HOY)' : ` (vence en ${dias} día${dias !== 1 ? 's' : ''})`;
+                                  } else {
+                                    icono = '⏳';
+                                    colorClase = 'text-secondary';
+                                    detalle = recibo.fecha ? ` (vence ${formatearFechaSinTZ(recibo.fecha)})` : '';
+                                  }
+                                  
+                                  return (
+                                    <div key={idx} className="text-muted" style={{ fontSize: '0.8rem', lineHeight: '1.8' }}>
+                                      {icono} Pago {recibo.numero}: <span className={`fw-bold ${colorClase}`}>{recibo.estatus}</span>{detalle}
+                                    </div>
+                                  );
+                                })}
                               </div>
                             )}
                             
@@ -549,13 +1104,151 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             </div>
                           </div>
                         </div>
+                      ) : evento.tipo_evento === 'pago_removido' ? (
+                        /* Vista vertical para eventos de pago eliminado */
+                        <div className="mb-1">
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Número de recibo */}
+                            {evento.datos_adicionales?.numero_recibo && (
+                              <div className="text-muted">
+                                🧾 Recibo eliminado: <strong className="text-danger">#{evento.datos_adicionales.numero_recibo}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Monto del pago */}
+                            {evento.datos_adicionales?.monto && (
+                              <div className="text-muted">
+                                💵 Monto: <strong className="text-dark">${Number(evento.datos_adicionales.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha del pago que se eliminó */}
+                            {evento.datos_adicionales?.fecha_pago && (
+                              <div className="text-muted">
+                                📅 Fecha pago: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_pago).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Aseguradora */}
+                            {evento.datos_adicionales?.aseguradora && (
+                              <div className="text-muted">
+                                🏛️ Aseguradora: <strong className="text-primary">{evento.datos_adicionales.aseguradora}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Número de póliza */}
+                            {evento.datos_adicionales?.numero_poliza && (
+                              <div className="text-muted">
+                                📋 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Motivo de eliminación */}
+                            {evento.datos_adicionales?.motivo && (
+                              <div className="text-muted mt-1 p-2" style={{ backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
+                                📝 <strong>Motivo:</strong> {evento.datos_adicionales.motivo}
+                              </div>
+                            )}
+                            
+                            {/* Usuario que eliminó */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted">
+                                👤 Eliminado por: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha y hora de eliminación */}
+                            <div className="text-muted">
+                              🕐 Fecha eliminación: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ) : evento.tipo_evento === 'datos-actualizados' ? (
+                        /* Vista vertical para eventos de edición de póliza */
+                        <div className="mb-1">
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Aseguradora */}
+                            {evento.datos_adicionales?.compania && (
+                              <div className="text-muted">
+                                🏢 Aseguradora: <strong className="text-dark">{evento.datos_adicionales.compania}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Número de póliza */}
+                            {evento.datos_adicionales?.numero_poliza && (
+                              <div className="text-muted">
+                                📋 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Cantidad de cambios */}
+                            {evento.datos_adicionales?.cantidad_cambios !== undefined && (
+                              <div className="text-muted">
+                                ✏️ Cambios: <strong className="text-dark">{evento.datos_adicionales.cantidad_cambios} campo(s) modificado(s)</strong>
+                              </div>
+                            )}
+                            
+                            {/* Campos editados - mostrar lista detallada */}
+                            {evento.datos_adicionales?.campos_editados && Object.keys(evento.datos_adicionales.campos_editados).length > 0 && (
+                              <div className="mt-2 p-2 bg-info bg-opacity-10 rounded" style={{ fontSize: '0.75rem' }}>
+                                <div className="text-info mb-1"><strong>📝 Campos modificados:</strong></div>
+                                {Object.entries(evento.datos_adicionales.campos_editados).map(([campo, cambio], idx) => {
+                                  // Formatear fechas si el campo contiene fecha
+                                  const esFecha = campo.toLowerCase().includes('fecha');
+                                  const valorAntes = esFecha && cambio.antes !== 'vacío' ? 
+                                    new Date(cambio.antes).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 
+                                    cambio.antes;
+                                  const valorDespues = esFecha && cambio.despues !== 'vacío' ? 
+                                    new Date(cambio.despues).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' }) : 
+                                    cambio.despues;
+                                  
+                                  return (
+                                    <div key={idx} className="text-muted mt-1" style={{ fontSize: '0.72rem' }}>
+                                      <strong>{campo}:</strong> <span className="text-danger">{valorAntes}</span> → <span className="text-success">{valorDespues}</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            
+                            {/* Usuario */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted mt-1">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha del evento */}
+                            <div className="text-muted">
+                              🕐 Fecha edición: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
                         <>
                           {/* Vista estándar para otros eventos */}
                           {evento.descripcion && (
-                            <p className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4', whiteSpace: 'pre-line' }}>
-                              {evento.descripcion}
-                            </p>
+                            <div className="text-dark mb-1" style={{ fontSize: '0.85rem', lineHeight: '1.4', whiteSpace: 'pre-line' }}>
+                              {(() => {
+                                // Aplicar colores a los estatus en la descripción
+                                const texto = evento.descripcion;
+                                const partes = texto.split(/(\d+\/\d+\s+(?:Pagado|Por vencer|Vencido|Pendiente))/g);
+                                
+                                return partes.map((parte, idx) => {
+                                  // Detectar patrones como "1/4 Pagado", "2/4 Por vencer", etc.
+                                  if (/\d+\/\d+\s+Pagado/.test(parte)) {
+                                    return <span key={idx} className="fw-bold text-success">{parte}</span>;
+                                  } else if (/\d+\/\d+\s+Por vencer/.test(parte)) {
+                                    return <span key={idx} className="fw-bold text-warning">{parte}</span>;
+                                  } else if (/\d+\/\d+\s+Vencido/.test(parte)) {
+                                    return <span key={idx} className="fw-bold text-danger">{parte}</span>;
+                                  } else if (/\d+\/\d+\s+Pendiente/.test(parte)) {
+                                    return <span key={idx} className="fw-bold text-info">{parte}</span>;
+                                  }
+                                  return parte;
+                                });
+                              })()}
+                            </div>
                           )}
                           
                           {/* Metadata estándar (fecha, usuario, destinatario) */}
@@ -613,29 +1306,164 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                   {expandido && evento.datos_adicionales && (
                     <div className="mt-2 pt-2 border-top">
                       {/* Vista mejorada para eventos de "Datos Actualizados" */}
-                      {(evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') && 
-                       evento.datos_adicionales.campos_modificados && 
-                       Array.isArray(evento.datos_adicionales.campos_modificados) ? (
-                        <div>
-                          <small className="text-muted d-block mb-2">
-                            <strong>✏️ Campos modificados ({evento.datos_adicionales.campos_modificados.length}):</strong>
-                          </small>
-                          <div className="d-flex flex-column gap-1">
-                            {evento.datos_adicionales.campos_modificados.map((cambio, idx) => (
-                              <div key={idx} className="text-dark" style={{ fontSize: '0.8rem', lineHeight: '1.5' }}>
-                                <span className="text-muted">•</span> {cambio}
+                      {(evento.tipo_evento === 'datos_actualizados' || evento.tipo_evento === 'DATOS_ACTUALIZADOS') ? (
+                        <div className="d-flex flex-column gap-2" style={{ fontSize: '0.8rem' }}>
+                          {/* Información básica */}
+                          {evento.datos_adicionales?.fecha_edicion && (
+                            <div className="text-muted">
+                              🕐 Fecha edición: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_edicion).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</strong>
+                            </div>
+                          )}
+                          {evento.datos_adicionales?.aseguradora && (
+                            <div className="text-muted">
+                              🏢 Aseguradora: <strong className="text-dark">{evento.datos_adicionales.aseguradora}</strong>
+                            </div>
+                          )}
+                          {evento.datos_adicionales?.numero_poliza && (
+                            <div className="text-muted">
+                              📄 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                            </div>
+                          )}
+                          
+                          {/* Cambios en póliza */}
+                          {evento.datos_adicionales?.poliza_cambios?.cambios_detallados && 
+                           Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).length > 0 && (
+                            <>
+                              <div className="text-muted mt-1"><strong>📋 Cambios en póliza:</strong></div>
+                              {Object.entries(evento.datos_adicionales.poliza_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                                const formatearCampo = (c) => c.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                const esFecha = campo.toLowerCase().includes('fecha') || campo.toLowerCase().includes('vigencia');
+                                const valorAnterior = esFecha && cambio.anterior && !String(cambio.anterior).includes('vacío') 
+                                  ? formatearFechaSinTZ(cambio.anterior) 
+                                  : (cambio.anterior || '(vacío)');
+                                const valorNuevo = esFecha && cambio.nuevo && !String(cambio.nuevo).includes('vacío') 
+                                  ? formatearFechaSinTZ(cambio.nuevo) 
+                                  : (cambio.nuevo || '(vacío)');
+                                return (
+                                  <div key={`poliza-${idx}`} className="text-muted ms-2">
+                                    ✏️ {formatearCampo(campo)}: <span className="text-danger fw-bold">{valorAnterior}</span> → <span className="text-success fw-bold">{valorNuevo}</span>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+                          
+                          {/* Cambios en cliente */}
+                          {evento.datos_adicionales?.cliente_cambios?.cambios_detallados && 
+                           Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).length > 0 && (
+                            <>
+                              <div className="text-muted mt-1"><strong>👤 Cambios en cliente:</strong></div>
+                              {Object.entries(evento.datos_adicionales.cliente_cambios.cambios_detallados).map(([campo, cambio], idx) => {
+                                const formatearCampo = (c) => c.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                                return (
+                                  <div key={`cliente-${idx}`} className="text-muted ms-2">
+                                    ✏️ {formatearCampo(campo)}: <span className="text-danger fw-bold">{cambio.anterior || '(vacío)'}</span> → <span className="text-success fw-bold">{cambio.nuevo || '(vacío)'}</span>
+                                  </div>
+                                );
+                              })}
+                            </>
+                          )}
+                          
+                          {/* Cambios en recibos */}
+                          {evento.datos_adicionales?.recibos_cambios?.cambios_detallados && 
+                           evento.datos_adicionales.recibos_cambios.cambios_detallados.length > 0 && (
+                            <>
+                              <div className="text-muted mt-1"><strong>📋 Cambios en recibos ({evento.datos_adicionales.recibos_cambios.cantidad_cambios}):</strong></div>
+                              {evento.datos_adicionales.recibos_cambios.cambios_detallados.map((cambio, idx) => (
+                                <div key={`recibo-${idx}`} className="text-muted ms-2">
+                                  {cambio.tipo_cambio === 'agregado' && (
+                                    <>✏️ Recibo #{cambio.numero_recibo}: <span className="text-success fw-bold">Agregado</span> - Vence: {formatearFechaSinTZ(cambio.fecha_nueva)} - ${Number(cambio.monto).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</>
+                                  )}
+                                  {cambio.tipo_cambio === 'eliminado' && (
+                                    <>✏️ Recibo #{cambio.numero_recibo}: <span className="text-danger fw-bold">Eliminado</span></>
+                                  )}
+                                  {cambio.tipo_cambio === 'editado' && (
+                                    <>
+                                      ✏️ Recibo #{cambio.numero_recibo}:
+                                      {cambio.fecha_anterior !== cambio.fecha_nueva && (
+                                        <> Fecha: <span className="text-danger fw-bold">{formatearFechaSinTZ(cambio.fecha_anterior)}</span> → <span className="text-success fw-bold">{formatearFechaSinTZ(cambio.fecha_nueva)}</span></>
+                                      )}
+                                      {cambio.monto_anterior !== cambio.monto_nuevo && (
+                                        <> | Monto: <span className="text-danger fw-bold">${Number(cambio.monto_anterior).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span> → <span className="text-success fw-bold">${Number(cambio.monto_nuevo).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span></>
+                                      )}
+                                      {cambio.estatus_anterior !== cambio.estatus_nuevo && (
+                                        <> | Estatus: <span className="text-danger fw-bold">{cambio.estatus_anterior}</span> → <span className="text-success fw-bold">{cambio.estatus_nuevo}</span></>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          
+                          {/* Fallback: Lista antigua de campos modificados */}
+                          {evento.datos_adicionales.campos_modificados && 
+                           Array.isArray(evento.datos_adicionales.campos_modificados) &&
+                           !evento.datos_adicionales.poliza_cambios && 
+                           !evento.datos_adicionales.cliente_cambios && (
+                            <>
+                              <small className="text-muted d-block mb-1">
+                                <strong>✏️ Campos modificados ({evento.datos_adicionales.campos_modificados.length}):</strong>
+                              </small>
+                              <div className="d-flex flex-column gap-1">
+                                {evento.datos_adicionales.campos_modificados.map((cambio, idx) => (
+                                  <div key={idx} className="text-dark ms-2" style={{ fontSize: '0.8rem' }}>
+                                    <span className="text-muted">•</span> {cambio}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                            </>
+                          )}
+                          
+                          {/* Usuario */}
+                          {evento.datos_adicionales?.usuario_edito && (
+                            <div className="text-muted">
+                              👤 Usuario: <strong className="text-dark">{evento.datos_adicionales.usuario_edito}</strong>
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        /* Vista estándar JSON para otros eventos */
-                        <>
-                          <small className="text-muted d-block mb-1"><strong>Datos adicionales:</strong></small>
-                          <pre className="bg-light p-2 rounded mb-0" style={{ fontSize: '0.7rem', maxHeight: '150px', overflow: 'auto' }}>
-                            {JSON.stringify(evento.datos_adicionales, null, 2)}
-                          </pre>
-                        </>
+                        /* Vista estándar JSON para otros eventos - FILTRAR CAMPOS DUPLICADOS */
+                        (() => {
+                          // Obtener lista de campos que ya se muestran en los cambios
+                          const camposEditados = new Set();
+                          
+                          // Agregar campos de cliente_cambios
+                          if (evento.datos_adicionales?.cliente_cambios?.cambios_detallados) {
+                            Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).forEach(campo => {
+                              camposEditados.add(campo);
+                            });
+                          }
+                          
+                          // Agregar campos de poliza_cambios
+                          if (evento.datos_adicionales?.poliza_cambios?.cambios_detallados) {
+                            Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).forEach(campo => {
+                              camposEditados.add(campo);
+                            });
+                          }
+                          
+                          // Agregar campos de campos_editados_manualmente
+                          if (evento.datos_adicionales?.campos_editados_manualmente) {
+                            Object.keys(evento.datos_adicionales.campos_editados_manualmente).forEach(campo => {
+                              camposEditados.add(campo);
+                            });
+                          }
+                          
+                          // Filtrar datos_adicionales para no mostrar campos duplicados
+                          const datosAdicionales = { ...evento.datos_adicionales };
+                          camposEditados.forEach(campo => {
+                            delete datosAdicionales[campo];
+                          });
+                          
+                          return (
+                            <>
+                              <small className="text-muted d-block mb-1"><strong>Datos adicionales:</strong></small>
+                              <pre className="bg-light p-2 rounded mb-0" style={{ fontSize: '0.7rem', maxHeight: '150px', overflow: 'auto' }}>
+                                {JSON.stringify(datosAdicionales, null, 2)}
+                              </pre>
+                            </>
+                          );
+                        })()
                       )}
                     </div>
                   )}

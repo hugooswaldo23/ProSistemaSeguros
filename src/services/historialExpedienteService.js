@@ -3,6 +3,19 @@
  * SERVICIO: Historial de Expedientes
  * PROPÓSITO: Gestionar la trazabilidad completa del ciclo de vida
  * FECHA: 2025-11-10
+ * ACTUALIZADO: 2026-01-09 - Sistema de etapas renovado
+ * ====================================================================
+ * 
+ * 🔄 NUEVO FLUJO DE ETAPAS:
+ * 1. Emitida → 2. Enviada al Cliente → 3. Pagada → 4. Por Renovar →
+ * 5. Renovación Emitida → 6. Renovación Enviada → 7. Renovación Pagada
+ * 
+ * ⚠️ IMPORTANTE - CAMBIO ETAPA AUTOMÁTICA "Por Renovar":
+ * El backend debe calcular dinámicamente cuando una póliza "Pagada" debe
+ * cambiar a "Por Renovar" basándose en fecha_aviso_renovacion.
+ * Ver documentación: docs/BACKEND-CALCULO-DINAMICO-ETAPA-POR-RENOVAR.md
+ * 
+ * El frontend ya está preparado para usar campo 'etapa_calculada' del backend.
  * ====================================================================
  */
 
@@ -32,21 +45,25 @@ export const TIPOS_EVENTO = {
   // Pagos
   PAGO_REGISTRADO: 'pago_registrado',
   PAGO_VENCIDO: 'pago_vencido',
-  RECORDATORIO_PAGO_ENVIADO: 'recordatorio_pago_enviado',
-  AVISO_PAGO_ENVIADO: 'aviso_pago_enviado',
+  AVISO_PAGO_VENCIDO_ENVIADO: 'aviso_pago_vencido_enviado',
+  AVISO_PAGO_POR_VENCER_ENVIADO: 'aviso_pago_por_vencer_enviado',
+  AVISO_PAGO_PENDIENTE_ENVIADO: 'aviso_pago_pendiente_enviado',
   PAGO_APLICADO_MANUALMENTE: 'pago_aplicado_manualmente',
   PAGO_REMOVIDO: 'pago_removido',
+  POLIZA_PAGADA: 'poliza_pagada', // 🆕 Cambio de etapa a "Pagada"
   
   // Renovaciones
   RENOVACION_INICIADA: 'renovacion_iniciada',
   POLIZA_RENOVADA: 'poliza_renovada',
   RECORDATORIO_RENOVACION_ENVIADO: 'recordatorio_renovacion_enviado',
+  POLIZA_POR_RENOVAR: 'poliza_por_renovar', // 🆕 30 días antes del vencimiento
   
   // 🆕 NUEVOS EVENTOS DE RENOVACIÓN (Flujo completo)
   COTIZACION_RENOVACION_INICIADA: 'cotizacion_renovacion_iniciada',
   COTIZACION_RENOVACION_ENVIADA: 'cotizacion_renovacion_enviada',
   RENOVACION_PENDIENTE_EMISION: 'renovacion_pendiente_emision',
   RENOVACION_EMITIDA: 'renovacion_emitida',
+  RENOVACION_PAGADA: 'renovacion_pagada', // 🆕 Renovación pagada
   PAGO_RENOVACION_REGISTRADO: 'pago_renovacion_registrado',
   RENOVACION_VIGENTE: 'renovacion_vigente',
   
@@ -62,6 +79,11 @@ export const TIPOS_EVENTO = {
   // Modificaciones
   ENDOSO_APLICADO: 'endoso_aplicado',
   DATOS_ACTUALIZADOS: 'datos_actualizados',
+  
+  // 🆕 Operaciones de cliente
+  CLIENTE_SELECCIONADO: 'cliente_seleccionado',
+  CLIENTE_CREADO: 'cliente_creado',
+  CLIENTE_ACTUALIZADO: 'cliente_actualizado',
   
   // Documentos
   DOCUMENTO_CARGADO: 'documento_cargado',
@@ -94,20 +116,24 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.PAGO_REGISTRADO]: { icon: '💰', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.PAGO_VENCIDO]: { icon: '⚠️', color: '#dc3545', bgColor: '#f8d7da' },
-    [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
-    [TIPOS_EVENTO.AVISO_PAGO_ENVIADO]: { icon: '📢', color: '#17a2b8', bgColor: '#d1ecf1' },
+    [TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO]: { icon: '🚨', color: '#dc3545', bgColor: '#f8d7da' },
+    [TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO]: { icon: '📋', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_APLICADO_MANUALMENTE]: { icon: '✏️', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.PAGO_REMOVIDO]: { icon: '🔙', color: '#fd7e14', bgColor: '#ffe5d0' },
+    [TIPOS_EVENTO.POLIZA_PAGADA]: { icon: '✅', color: '#28a745', bgColor: '#d4edda' },
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: { icon: '🔄', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.POLIZA_RENOVADA]: { icon: '🔁', color: '#28a745', bgColor: '#d4edda' },
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: { icon: '🔔', color: '#ffc107', bgColor: '#fff3cd' },
+    [TIPOS_EVENTO.POLIZA_POR_RENOVAR]: { icon: '⏰', color: '#ffc107', bgColor: '#fff3cd' },
     
     // 🆕 NUEVOS ESTILOS DE RENOVACIÓN
     [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: { icon: '📝', color: '#3b82f6', bgColor: '#dbeafe' },
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: { icon: '📧', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: { icon: '⏳', color: '#f59e0b', bgColor: '#fef3c7' },
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: { icon: '📄', color: '#8b5cf6', bgColor: '#ede9fe' },
+    [TIPOS_EVENTO.RENOVACION_PAGADA]: { icon: '✅', color: '#059669', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: { icon: '💰', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: { icon: '🔁', color: '#059669', bgColor: '#d1fae5' },
     
@@ -120,6 +146,12 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.ENDOSO_APLICADO]: { icon: '📝', color: '#007bff', bgColor: '#cce5ff' },
     [TIPOS_EVENTO.DATOS_ACTUALIZADOS]: { icon: '✏️', color: '#6c757d', bgColor: '#e2e3e5' },
+    'edicion_manual_expediente': { icon: '✏️', color: '#fd7e14', bgColor: '#ffe5d0' },
+    
+    // 🆕 Operaciones de cliente
+    [TIPOS_EVENTO.CLIENTE_SELECCIONADO]: { icon: '👤', color: '#17a2b8', bgColor: '#d1ecf1' },
+    [TIPOS_EVENTO.CLIENTE_CREADO]: { icon: '👤➕', color: '#28a745', bgColor: '#d4edda' },
+    [TIPOS_EVENTO.CLIENTE_ACTUALIZADO]: { icon: '👤✏️', color: '#ffc107', bgColor: '#fff3cd' },
     
     [TIPOS_EVENTO.DOCUMENTO_CARGADO]: { icon: '📎', color: '#17a2b8', bgColor: '#d1ecf1' },
     [TIPOS_EVENTO.DOCUMENTO_ENVIADO]: { icon: '📤', color: '#28a745', bgColor: '#d4edda' },
@@ -153,17 +185,22 @@ export const obtenerTituloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.PAGO_REGISTRADO]: 'Pago Registrado',
     [TIPOS_EVENTO.PAGO_VENCIDO]: 'Pago Vencido',
-    [TIPOS_EVENTO.RECORDATORIO_PAGO_ENVIADO]: 'Recordatorio de Pago Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_VENCIDO_ENVIADO]: 'Aviso de Pago Vencido Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_POR_VENCER_ENVIADO]: 'Aviso de Pago Por Vencer Enviado',
+    [TIPOS_EVENTO.AVISO_PAGO_PENDIENTE_ENVIADO]: 'Aviso de Pago Pendiente Enviado',
+    [TIPOS_EVENTO.POLIZA_PAGADA]: 'Póliza Pagada',
     
     [TIPOS_EVENTO.RENOVACION_INICIADA]: 'Proceso de Renovación Iniciado',
     [TIPOS_EVENTO.POLIZA_RENOVADA]: 'Póliza Renovada',
     [TIPOS_EVENTO.RECORDATORIO_RENOVACION_ENVIADO]: 'Recordatorio de Renovación Enviado',
+    [TIPOS_EVENTO.POLIZA_POR_RENOVAR]: 'Póliza Por Renovar',
     
     // 🆕 NUEVOS TÍTULOS DE RENOVACIÓN
     [TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA]: 'Cotización de Renovación Iniciada',
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: 'Cotización de Renovación Enviada',
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: 'Renovación Pendiente de Emisión',
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: 'Renovación Emitida',
+    [TIPOS_EVENTO.RENOVACION_PAGADA]: 'Renovación Pagada',
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: 'Pago de Renovación Registrado',
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: 'Renovación Vigente',
     
@@ -176,6 +213,12 @@ export const obtenerTituloEvento = (tipoEvento) => {
     
     [TIPOS_EVENTO.ENDOSO_APLICADO]: 'Endoso Aplicado',
     [TIPOS_EVENTO.DATOS_ACTUALIZADOS]: 'Datos Actualizados',
+    'edicion_manual_expediente': 'Edición Manual de Expediente',
+    
+    // 🆕 Operaciones de cliente
+    [TIPOS_EVENTO.CLIENTE_SELECCIONADO]: 'Cliente Seleccionado',
+    [TIPOS_EVENTO.CLIENTE_CREADO]: 'Cliente Creado',
+    [TIPOS_EVENTO.CLIENTE_ACTUALIZADO]: 'Cliente Actualizado',
     
     [TIPOS_EVENTO.DOCUMENTO_CARGADO]: 'Documento Cargado',
     [TIPOS_EVENTO.DOCUMENTO_ENVIADO]: 'Documento Enviado',
@@ -406,16 +449,17 @@ export const registrarCambioEtapa = async (expedienteId, clienteId, etapaAnterio
  * @param {Object} destinatario - { nombre, contacto }
  * @param {string} mensaje - Mensaje completo (se descartará, solo para compatibilidad)
  * @param {string} documentoUrl - URL del documento (opcional)
+ * @param {Object} datosPoliza - { compania, numero_poliza, tipo_pago } para descripción estructurada
  */
-export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, destinatario, mensaje, documentoUrl = null) => {
+export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, destinatario, mensaje, documentoUrl = null, datosPoliza = {}) => {
   const tipoEvento = canal === 'Email' 
     ? TIPOS_EVENTO.POLIZA_ENVIADA_EMAIL 
     : TIPOS_EVENTO.POLIZA_ENVIADA_WHATSAPP;
   
   const usuario = obtenerUsuarioActual();
   
-  // 📝 Descripción simplificada: Solo lo esencial
-  const descripcion = `Enviado a ${destinatario.nombre} por ${canal} (${destinatario.contacto})`;
+  // 📝 Descripción estructurada: Acción | Aseguradora | Póliza | Canal | Destinatario
+  const descripcion = `Envío de póliza | ${datosPoliza.compania || 'Sin aseguradora'} | Póliza: ${datosPoliza.numero_poliza || 'Sin número'} | Vía ${canal} | Para: ${destinatario.nombre} (${destinatario.contacto})`;
   
   return await registrarEvento({
     expediente_id: expedienteId,
@@ -432,7 +476,16 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     datos_adicionales: {
       // ✅ NO guardamos el mensaje completo, solo metadata esencial
       canal: canal,
-      tiene_documento: !!documentoUrl
+      tiene_documento: !!documentoUrl,
+      compania: datosPoliza.compania,
+      numero_poliza: datosPoliza.numero_poliza,
+      tipo_pago: datosPoliza.tipo_pago,
+      estatus_pago: datosPoliza.estatus_pago,
+      monto_total: datosPoliza.monto_total,
+      fecha_emision: datosPoliza.fecha_emision,
+      inicio_vigencia: datosPoliza.inicio_vigencia,
+      termino_vigencia: datosPoliza.termino_vigencia,
+      fecha_vencimiento_pago: datosPoliza.fecha_vencimiento_pago
     }
   });
 };

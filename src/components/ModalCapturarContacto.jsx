@@ -15,6 +15,7 @@ const ModalCapturarContacto = ({
   onGuardar,
   onGuardarYContinuar, // Nueva prop para continuar automáticamente
   cliente,
+  destinatario, // Nueva prop: información del destinatario seleccionado
   tipoDatoFaltante, // 'email' o 'telefono_movil'
   canalEnvio // 'Email' o 'WhatsApp'
 }) => {
@@ -94,9 +95,18 @@ const ModalCapturarContacto = ({
 
   if (!show) return null;
 
-  const nombreCliente = cliente?.tipoPersona === 'Persona Moral'
-    ? cliente?.razonSocial || cliente?.razon_social || 'Cliente'
-    : `${cliente?.nombre || ''} ${cliente?.apellidoPaterno || cliente?.apellido_paterno || ''}`.trim() || 'Cliente';
+  // Usar destinatario si está disponible, sino el cliente principal
+  const personaParaMostrar = destinatario || cliente;
+  const nombrePersona = destinatario 
+    ? destinatario.nombre // Para destinatarios (contacto principal)
+    : cliente?.tipoPersona === 'Persona Moral'
+      ? cliente?.razonSocial || cliente?.razon_social || 'Cliente'
+      : `${cliente?.nombre || ''} ${cliente?.apellidoPaterno || cliente?.apellido_paterno || ''}`.trim() || 'Cliente';
+
+  // Determinar qué tipo de persona es para el mensaje
+  const tipoPersonaMsg = destinatario 
+    ? `El contacto principal <strong>${nombrePersona}</strong>`
+    : `El cliente <strong>${nombrePersona}</strong>`;
 
   const icono = tipoDatoFaltante === 'email' ? <Mail size={48} /> : <Phone size={48} />;
   const etiqueta = tipoDatoFaltante === 'email' ? 'Correo Electrónico' : 'Teléfono Móvil';
@@ -127,9 +137,7 @@ const ModalCapturarContacto = ({
               <AlertCircle className="me-2 flex-shrink-0" size={20} />
               <div>
                 <strong>No se puede enviar por {canalEnvio}</strong>
-                <p className="mb-0 mt-1">
-                  El cliente <strong>{nombreCliente}</strong> no tiene un {etiqueta.toLowerCase()} registrado.
-                </p>
+                <p className="mb-0 mt-1" dangerouslySetInnerHTML={{ __html: tipoPersonaMsg + ` no tiene un ${etiqueta.toLowerCase()} registrado.` }} />
                 <p className="mb-0 mt-1 small text-muted">
                   Captura el dato ahora para continuar con el envío.
                 </p>

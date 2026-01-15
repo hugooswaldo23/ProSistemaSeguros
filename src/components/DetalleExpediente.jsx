@@ -23,16 +23,6 @@ const DetalleExpediente = ({
   const [openVehiculoCoberturas, setOpenVehiculoCoberturas] = useState(false);
   const [openHistorial, setOpenHistorial] = useState(false);
 
-  // 🔍 DEBUG: Ver qué datos llegan
-  console.log('🔍 DetalleExpediente - datos recibidos:', {
-    numero_poliza: datos?.numero_poliza,
-    tiene_fecha_aviso: !!datos?.fecha_aviso_renovacion,
-    fecha_aviso_renovacion: datos?.fecha_aviso_renovacion,
-    fechaAvisoRenovacion: datos?.fechaAvisoRenovacion,
-    inicio_vigencia: datos?.inicio_vigencia,
-    termino_vigencia: datos?.termino_vigencia
-  });
-
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
   const tipoRiesgo = useMemo(() => {
     const texto = `${datos?.producto || ''} ${datos?.tipo_de_poliza || ''}`.toLowerCase();
@@ -188,7 +178,7 @@ const DetalleExpediente = ({
         <div className="seccion-bloque seccion-financiera">
           <h6 className="text-secondary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>💰 Información Financiera</h6>
           <div className="row g-1">
-            {renderCampo('1. Prima Neta', utils.formatearMoneda?.(datos?.prima_pagada || '0.00'), { forceShow: true })}
+            {renderCampo('1. Prima Neta', utils.formatearMoneda?.(datos?.prima_neta || '0.00'), { forceShow: true })}
             {renderCampo('2. Otros Descuentos', utils.formatearMoneda?.(datos?.otros_servicios || '0.00'), { forceShow: true })}
             {renderCampo('3. Financiamiento por pago fraccionado', utils.formatearMoneda?.(datos?.cargo_pago_fraccionado || '0.00'), { forceShow: true })}
             {renderCampo('4. Gastos de expedición', utils.formatearMoneda?.(datos?.gastos_expedicion || '0.00'), { forceShow: true })}
@@ -357,7 +347,7 @@ const DetalleExpediente = ({
                 <div className="row g-1">
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.6rem' }}>1. Prima Neta:</small>
-                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.prima_pagada || '0.00')}</strong></div>
+                    <div><strong style={{ fontSize: '0.7rem' }}>{utils.formatearMoneda(datos.prima_neta || '0.00')}</strong></div>
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.6rem' }}>2. Otros Descuentos:</small>

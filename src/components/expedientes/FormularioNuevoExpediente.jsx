@@ -9,8 +9,10 @@
  * - Banner de confirmación de importación
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { CheckCircle, FileText, Upload } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { validarContactoCliente } from '../../utils/validacionContacto';
 import FormularioExpedienteBase from './FormularioExpedienteBase';
 import ExtractorPolizasPDF from './ExtractorPolizasPDF';
 
@@ -58,6 +60,12 @@ const FormularioNuevoExpediente = ({
     
     if (modo === 'pdf') {
       setMostrarExtractorPDF(true);
+    } else if (modo === 'manual') {
+      // Marcar que fue captura manual
+      setFormulario(prev => ({
+        ...prev,
+        _metodo_captura: 'manual'
+      }));
     }
   };
 
@@ -182,6 +190,14 @@ const FormularioNuevoExpediente = ({
 
         // 5. NO recalcular automáticamente - usar datos del PDF tal cual
         // Los cálculos solo se aplican cuando el usuario edita campos manualmente
+        
+        // 🔥 MARCAR que estos datos vienen del PDF extractor
+        nuevosDatos._datos_desde_pdf = true;
+        nuevosDatos._metodo_captura = 'pdf';
+        
+        // 🔥 GUARDAR SNAPSHOT GLOBAL para detectar cambios en guardarExpediente
+        window.__datosOriginalesPDF = { ...nuevosDatos };
+        
         return nuevosDatos;
       });
 
@@ -198,8 +214,6 @@ const FormularioNuevoExpediente = ({
       setDatosImportadosDesdePDF(true);
       setMostrarExtractorPDF(false);
       
-      console.log('✅ Datos del PDF aplicados al formulario');
-      
     } catch (error) {
       console.error('❌ Error al procesar datos del PDF:', error);
       // Aún así aplicar lo que se pueda
@@ -211,6 +225,38 @@ const FormularioNuevoExpediente = ({
       setMostrarExtractorPDF(false);
     }
   }, [setFormulario, actualizarCalculosAutomaticos, handleClienteSeleccionado]);
+
+  /**
+   * useEffect para capturar recibos calculados por CalendarioPagos
+   * Este efecto se ejecuta cuando el formulario tiene recibos calculados
+   */
+  useEffect(() => {
+    // Solo capturar si vienen de PDF y los recibos fueron calculados
+    if (datosImportadosDesdePDF && 
+        formulario.recibos && 
+        Array.isArray(formulario.recibos) && 
+        formulario.recibos.length > 0) {
+      
+      // Actualizar snapshot global para incluir los recibos
+      if (window.__datosOriginalesPDF) {
+        window.__datosOriginalesPDF = {
+          ...window.__datosOriginalesPDF,
+          recibos: formulario.recibos
+        };
+        
+        console.log('📸 Snapshot actualizado con recibos:', formulario.recibos.length, 'recibos');
+      }
+    }
+  }, [datosImportadosDesdePDF, formulario.recibos]);
+
+  /**
+   * Wrapper para setFormulario simplificado
+   */
+  const setFormularioConDeteccion = useCallback((updater) => {
+    setFormulario(prev => {
+      return typeof updater === 'function' ? updater(prev) : updater;
+    });
+  }, [setFormulario]);
 
   // Banner superior: Confirmación de importación desde PDF
   const bannerSuperior = datosImportadosDesdePDF && infoImportacion && (
@@ -381,9 +427,16 @@ const FormularioNuevoExpediente = ({
           textoBotónGuardar="Guardar Expediente"
           setVistaActual={setVistaActual}
           formulario={formulario}
-          setFormulario={setFormulario}
+          setFormulario={setFormularioConDeteccion}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
-          guardarExpediente={guardarExpediente}
+          guardarExpediente={() => {
+            // VALIDACIÓN DE CONTACTO usando función utilitaria
+            if (!validarContactoCliente(formulario, clienteSeleccionado, toast)) {
+              return Promise.resolve(); // No guardar si falla validación
+            }
+            
+            return guardarExpediente();
+          }}
           companias={companias}
           productos={productos}
           aseguradoras={aseguradoras}

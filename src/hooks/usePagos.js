@@ -12,11 +12,12 @@
 import { useState, useCallback } from 'react';
 import { toast } from 'react-hot-toast';
 import * as pagosService from '../services/pagosService';
+import * as historialService from '../services/historialExpedienteService';
 import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado }) {
+export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado, cambiarEstadoExpediente }) {
   // Estados del modal de pagos
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
   const [expedienteParaPago, setExpedienteParaPago] = useState(null);
@@ -115,7 +116,10 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
 
       console.log('✅ Pago aplicado correctamente');
 
-      // 3. Actualizar estatus del recibo específico en la tabla recibos_pago
+      // 3. El registro de evento y cambio de etapa ya se hace en pagosService.js
+      // No duplicar logs aquí
+
+      // 4. Actualizar estatus del recibo específico en la tabla recibos_pago
       try {
         console.log(`📝 Actualizando recibo ${numeroReciboPago} en base de datos...`);
         const reciboResponse = await fetch(
@@ -144,14 +148,14 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
         toast.error('Pago aplicado pero error al actualizar recibo en BD');
       }
 
-      // 4. Cerrar modal y mostrar éxito
+      // 5. Cerrar modal y mostrar éxito
       toast.success('✅ Pago aplicado correctamente');
       setMostrarModalPago(false);
       setExpedienteParaPago(null);
       setComprobantePago(null);
       setNumeroReciboPago(1);
 
-      // 5. Recargar expedientes desde BD para obtener el estatus correcto calculado por el backend
+      // 6. Recargar expedientes desde BD para obtener el estatus correcto calculado por el backend
       if (cargarExpedientes) {
         await cargarExpedientes();
       }
