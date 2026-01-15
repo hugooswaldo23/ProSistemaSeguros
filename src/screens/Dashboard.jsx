@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 const API_URL = import.meta.env.VITE_API_URL;
 import { 
-  Plus, FileText, DollarSign, AlertCircle, 
+  Plus, FileText, AlertCircle, 
   RefreshCw, Send, CheckCircle, Clock, Edit,
   CreditCard, Calendar, TrendingUp, AlertTriangle,
   ArrowRight, Activity, Award, X, User, Shield, 
@@ -17,6 +17,8 @@ const DashboardComponent = () => {
   const [cargando, setCargando] = useState(false);
   const [modalDesglose, setModalDesglose] = useState(null);
   const [modalDetalle, setModalDetalle] = useState(null);
+  const [paginaModal, setPaginaModal] = useState(1);
+  const POLIZAS_POR_PAGINA = 20;
 
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
   // Prioridad: total > prima_pagada > prima > monto
@@ -325,11 +327,13 @@ const DashboardComponent = () => {
       return acc;
     }, {});
 
+    setPaginaModal(1); // Resetear página al abrir
     setModalDesglose({
       tipo,
       titulo,
       color,
       porProducto,
+      todasLasPolizas: polizasFiltradas, // Guardar todas para paginación
       totalGeneral: polizasFiltradas.reduce((sum, p) => sum + resolverMonto(p), 0),
       cantidadTotal: polizasFiltradas.length
     });
@@ -1226,10 +1230,7 @@ const DashboardComponent = () => {
               {/* Header del modal */}
               <div className="modal-header" style={{ background: modalDesglose.color, color: 'white' }}>
                 <div>
-                  <h5 className="modal-title fw-bold mb-1">{modalDesglose.titulo}</h5>
-                  <small style={{ opacity: 0.9 }}>
-                    {modalDesglose.cantidadTotal} pólizas • ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                  </small>
+                  <h5 className="modal-title fw-bold mb-0">{modalDesglose.titulo}</h5>
                 </div>
                 <button 
                   type="button" 
@@ -1246,27 +1247,27 @@ const DashboardComponent = () => {
                     <h6 className="text-muted">No hay pólizas en esta categoría</h6>
                   </div>
                 ) : (
-                  Object.entries(modalDesglose.porProducto).map(([producto, data], idx) => (
+                  (() => {
+                    // Paginación: obtener pólizas de la página actual
+                    const todasLasPolizas = modalDesglose.todasLasPolizas || [];
+                    const totalPolizas = todasLasPolizas.length;
+                    const totalPaginas = Math.ceil(totalPolizas / POLIZAS_POR_PAGINA);
+                    const inicio = (paginaModal - 1) * POLIZAS_POR_PAGINA;
+                    const fin = inicio + POLIZAS_POR_PAGINA;
+                    const polizasPagina = todasLasPolizas.slice(inicio, fin);
+                    
+                    // Reagrupar por producto para mostrar con el formato original
+                    const porProductoPagina = polizasPagina.reduce((acc, poliza) => {
+                      const producto = poliza.producto || 'Sin producto';
+                      if (!acc[producto]) acc[producto] = { polizas: [], total: 0, cantidad: 0 };
+                      acc[producto].polizas.push(poliza);
+                      acc[producto].total += resolverMonto(poliza);
+                      acc[producto].cantidad += 1;
+                      return acc;
+                    }, {});
+                    
+                    return Object.entries(porProductoPagina).map(([producto, data], idx) => (
                     <div key={idx} className="border-bottom">
-                      <div className="p-3" style={{ background: '#F9FAFB' }}>
-                        <div className="d-flex justify-content-between align-items-center">
-                          <div>
-                            <h6 className="mb-1 fw-bold" style={{ color: '#111827' }}>
-                              <Package size={18} className="me-2" style={{ color: modalDesglose.color }} />
-                              {producto}
-                            </h6>
-                            <small className="text-muted">
-                              {data.cantidad} póliza{data.cantidad !== 1 ? 's' : ''}
-                            </small>
-                          </div>
-                          <div className="text-end">
-                            <div className="fw-bold" style={{ color: modalDesglose.color, fontSize: '18px' }}>
-                              ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                            </div>
-                            <small className="text-muted">Total</small>
-                          </div>
-                        </div>
-                      </div>
                       <div className="table-responsive">
                         <table className="table table-hover mb-0 compact-table">
                           <thead>
@@ -1278,9 +1279,13 @@ const DashboardComponent = () => {
                               {producto.toLowerCase().includes('auto') && (
                                 <th>Vehículo</th>
                               )}
-                              <th>Aseguradora</th>
-                              <th>Estado</th>
+                              <th style={{ textAlign: 'center' }}>Aseguradora</th>
+                              <th style={{ textAlign: 'center' }}>
+                                <div>Estatus Pago</div>
+                                <div>y Progreso</div>
+                              </th>
                               <th className="text-end">Importe</th>
+                              <th style={{ textAlign: 'center' }}>Acciones</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1404,116 +1409,220 @@ const DashboardComponent = () => {
                                 </td>
                                 {/* Columna de Vehículo solo para productos de Autos */}
                                 {producto.toLowerCase().includes('auto') && (
-                                  <td>
-                                    <div style={{ fontSize: '12px' }}>
-                                      {poliza.marca || poliza.modelo || poliza.anio ? (
-                                        <>
-                                          <div className="fw-medium">
-                                            {poliza.marca} {poliza.modelo}
-                                          </div>
-                                          <div className="text-muted" style={{ fontSize: '11px' }}>
-                                            {poliza.anio && <span>Año: {poliza.anio}</span>}
-                                            {poliza.anio && poliza.placas && <span> • </span>}
-                                            {poliza.placas && <span>🚗 {poliza.placas}</span>}
-                                          </div>
-                                        </>
-                                      ) : (
-                                        <span className="text-muted">Sin datos</span>
-                                      )}
+                                  <td style={{ maxWidth: '180px' }}>
+                                    <div style={{ fontSize: '11px' }}>
+                                      {(() => {
+                                        // Construir descripción del vehículo
+                                        const descripcion = poliza.descripcion_vehiculo || 
+                                          `${poliza.marca || ''} ${poliza.modelo || ''}`.trim();
+                                        
+                                        if (!descripcion && !poliza.anio && !poliza.placas) {
+                                          return <span className="text-muted">Sin datos</span>;
+                                        }
+                                        
+                                        // Limitar a 35 caracteres la primera línea
+                                        const linea1 = descripcion.substring(0, 35);
+                                        const linea2 = descripcion.length > 35 ? descripcion.substring(35) : '';
+                                        
+                                        return (
+                                          <>
+                                            <div className="fw-medium" style={{ lineHeight: '1.2' }}>
+                                              {linea1}{linea2 ? '' : ''}
+                                            </div>
+                                            {linea2 && (
+                                              <div className="text-muted" style={{ lineHeight: '1.2' }}>
+                                                {linea2.substring(0, 40)}{linea2.length > 40 ? '...' : ''}
+                                              </div>
+                                            )}
+                                            <div className="text-muted" style={{ fontSize: '10px', marginTop: '2px' }}>
+                                              {poliza.anio && <span>Año: {poliza.anio}</span>}
+                                              {poliza.anio && poliza.placas && <span> • </span>}
+                                              {poliza.placas && <span>🚗 {poliza.placas}</span>}
+                                            </div>
+                                          </>
+                                        );
+                                      })()}
                                     </div>
                                   </td>
                                 )}
-                                <td>
-                                  <div>
-                                    <div style={{ fontSize: '13px' }}>
-                                      {poliza.aseguradora || poliza.compania || 'Sin aseguradora'}
-                                    </div>
-                                    {poliza.agente && (
-                                      <small className="text-muted d-block">
-                                        Agente: {poliza.agente}
-                                      </small>
-                                    )}
-                                  </div>
+                                <td style={{ textAlign: 'center', fontSize: '0.75rem', lineHeight: '1.3' }}>
+                                  {/* Aseguradora + Agente + Vendedor */}
+                                  {(() => {
+                                    const textoAgente = poliza.agente || '';
+                                    let claveAgente = '';
+                                    let nombreAgente = '';
+                                    
+                                    const partes = textoAgente.split('-');
+                                    if (partes.length >= 2) {
+                                      claveAgente = partes[0].trim();
+                                      const nombreCompleto = partes.slice(1).join('-').trim();
+                                      const palabras = nombreCompleto.split(/\s+/);
+                                      // Primer nombre + apellido paterno (penúltimo si hay 3+ palabras)
+                                      const primerNombre = palabras[0] || '';
+                                      const apellidoPaterno = palabras.length >= 3 
+                                        ? palabras[palabras.length - 2]  // Penúltimo = apellido paterno
+                                        : (palabras[1] || '');           // Si solo hay 2, el segundo es el apellido
+                                      nombreAgente = `${primerNombre} ${apellidoPaterno}`.trim();
+                                    } else {
+                                      claveAgente = textoAgente;
+                                    }
+                                    
+                                    const vendedor = poliza.vendedor || poliza.subagente || poliza.sub_agente || '';
+                                    let nombreVendedor = '';
+                                    if (vendedor) {
+                                      const palabrasV = vendedor.trim().split(/\s+/);
+                                      // Primer nombre + apellido paterno (penúltimo si hay 3+ palabras)
+                                      const primerNombreV = palabrasV[0] || '';
+                                      const apellidoPaternoV = palabrasV.length >= 3 
+                                        ? palabrasV[palabrasV.length - 2]  // Penúltimo = apellido paterno
+                                        : (palabrasV[1] || '');            // Si solo hay 2, el segundo es el apellido
+                                      nombreVendedor = `${primerNombreV} ${apellidoPaternoV}`.trim();
+                                    }
+                                    
+                                    return (
+                                      <div>
+                                        <div className="fw-semibold">{poliza.aseguradora || poliza.compania || 'Sin aseguradora'}</div>
+                                        <div style={{ fontSize: '0.65rem' }}>
+                                          {claveAgente || '-'}
+                                        </div>
+                                        {nombreAgente && (
+                                          <div style={{ fontSize: '0.65rem' }}>
+                                            {nombreAgente}
+                                          </div>
+                                        )}
+                                        {nombreVendedor && (
+                                          <div style={{ fontSize: '0.65rem', color: '#17a2b8' }}>
+                                            V: {nombreVendedor}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </td>
-                                <td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {/* Columna Estado Pago y Progreso - simplificado */}
                                   <div>
-                                    <span className={`badge ${
-                                      poliza.etapa_activa === 'Emitida' ? 'bg-success' :
-                                      poliza.etapa_activa === 'Cancelada' ? 'bg-secondary' :
-                                      poliza.etapa_activa === 'Cotizada' ? 'bg-info' :
-                                      'bg-primary'
-                                    }`} style={{ fontSize: '10px' }}>
-                                      {poliza.etapa_activa || 'Sin etapa'}
-                                    </span>
-                                    {poliza.estatus_pago && poliza.estatus_pago !== 'Pendiente' && (
-                                      <div className="mt-1">
-                                        <span className={`badge ${
-                                          poliza.estatus_pago === 'Pagado' ? 'bg-success' :
-                                          poliza.estatus_pago === 'Por Vencer' ? 'bg-warning text-dark' :
-                                          poliza.estatus_pago === 'Vencido' ? 'bg-danger' :
-                                          'bg-secondary'
-                                        }`} style={{ fontSize: '9px' }}>
-                                          💰 {poliza.estatus_pago}
-                                        </span>
-                                      </div>
-                                    )}
-                                    {poliza.tipo_movimiento && (
-                                      <div className="mt-1">
-                                        <span className={`badge ${
-                                          poliza.tipo_movimiento === 'nueva' || poliza.tipo_movimiento === 'Nueva' 
-                                            ? 'bg-info' 
-                                            : 'bg-warning text-dark'
-                                        }`} style={{ fontSize: '9px' }}>
-                                          {poliza.tipo_movimiento === 'nueva' || poliza.tipo_movimiento === 'Nueva' 
-                                            ? '🆕 Nueva' 
-                                            : '🔄 Renovación'}
-                                        </span>
-                                      </div>
-                                    )}
+                                    {/* Frecuencia de pago (Trimestral, Mensual, etc.) o Anual */}
+                                    <small className="fw-semibold text-primary">
+                                      {poliza.frecuenciaPago || poliza.frecuencia_pago || poliza.tipo_pago || 'Anual'}
+                                    </small>
+                                    {/* Estatus de pago */}
+                                    {(() => {
+                                      // Determinar estatus basado en recibos si existen
+                                      const recibos = poliza.recibos || [];
+                                      let estatus = poliza.estatus_pago || poliza.estatusPago || '';
+                                      
+                                      if (recibos.length > 0) {
+                                        const tieneVencidos = recibos.some(r => {
+                                          const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                          return est === 'vencido';
+                                        });
+                                        const tienePorVencer = recibos.some(r => {
+                                          const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                          return est === 'por vencer' || est === 'pago por vencer';
+                                        });
+                                        const todosPagados = recibos.every(r => r.fecha_pago_real);
+                                        
+                                        if (tieneVencidos) estatus = 'Vencido';
+                                        else if (tienePorVencer) estatus = 'Por Vencer';
+                                        else if (todosPagados) estatus = 'Pagado';
+                                      }
+                                      
+                                      const colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
+                                                        estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
+                                                        estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
+                                                        'bg-secondary';
+                                      return estatus ? (
+                                        <div className="mt-1">
+                                          <span className={`badge ${colorClass}`} style={{ fontSize: '9px' }}>
+                                            {estatus}
+                                          </span>
+                                        </div>
+                                      ) : null;
+                                    })()}
+                                    {/* Progreso de recibos X/X */}
+                                    {(() => {
+                                      const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
+                                                           (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
+                                      if (!esFraccionado) return null;
+                                      
+                                      const recibos = poliza.recibos || [];
+                                      const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
+                                      const totalRecibos = recibos.length || 
+                                                          (frecuencia.includes('trimestral') ? 4 : 
+                                                           frecuencia.includes('semestral') ? 2 : 
+                                                           frecuencia.includes('mensual') ? 12 : 
+                                                           frecuencia.includes('cuatrimestral') ? 3 : 1);
+                                      
+                                      const recibosPagados = recibos.filter(r => r.fecha_pago_real).length;
+                                      
+                                      return (
+                                        <div className="mt-1" style={{ fontSize: '0.7rem' }}>
+                                          <span className="text-muted">
+                                            {recibosPagados}/{totalRecibos}
+                                          </span>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 </td>
                                 <td className="text-end">
                                   <span className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
                                     ${resolverMonto(poliza).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                                   </span>
-                                  {poliza.tipo_pago && (
-                                    <small className="text-muted d-block" style={{ fontSize: '10px' }}>
-                                      {poliza.tipo_pago}{poliza.frecuenciaPago ? ` - ${poliza.frecuenciaPago}` : ''}
-                                    </small>
-                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {/* Botón Ver Detalles - Abre en nueva pestaña */}
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(`/polizas?id=${poliza.id}&accion=ver`, '_blank');
+                                    }}
+                                    className="btn btn-outline-primary btn-sm"
+                                    style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                    title="Ver detalles"
+                                  >
+                                    <Eye size={12} />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
                           </tbody>
-                          <tfoot style={{ background: '#F9FAFB' }}>
-                            <tr>
-                              <td colSpan={producto.toLowerCase().includes('auto') ? 6 : 5} className="text-end fw-bold">
-                                Subtotal {producto}:
-                              </td>
-                              <td className="text-end fw-bold" style={{ color: modalDesglose.color }}>
-                                ${data.total.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                              </td>
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
                     </div>
                   ))
+                  })()
                 )}
               </div>
               
-              {/* Footer del modal */}
-              <div className="modal-footer" style={{ background: '#F9FAFB' }}>
-                <div className="d-flex justify-content-between w-100 align-items-center">
-                  <div>
-                    <strong style={{ fontSize: '16px', color: '#111827' }}>Total General:</strong>
-                    <span className="ms-2 text-muted">{modalDesglose.cantidadTotal} pólizas</span>
+              {/* Controles de paginación */}
+              {modalDesglose.todasLasPolizas && modalDesglose.todasLasPolizas.length > POLIZAS_POR_PAGINA && (
+                <div className="d-flex justify-content-between align-items-center px-3 py-2 border-top" style={{ background: '#F3F4F6' }}>
+                  <div className="text-muted" style={{ fontSize: '13px' }}>
+                    Mostrando {((paginaModal - 1) * POLIZAS_POR_PAGINA) + 1}-{Math.min(paginaModal * POLIZAS_POR_PAGINA, modalDesglose.todasLasPolizas.length)} de {modalDesglose.todasLasPolizas.length} pólizas
                   </div>
-                  <h4 className="mb-0 fw-bold" style={{ color: modalDesglose.color }}>
-                    ${modalDesglose.totalGeneral.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                  </h4>
+                  <div className="d-flex gap-2 align-items-center">
+                    <button 
+                      className="btn btn-sm btn-outline-secondary"
+                      disabled={paginaModal === 1}
+                      onClick={() => setPaginaModal(p => p - 1)}
+                    >
+                      ← Anterior
+                    </button>
+                    <span style={{ fontSize: '13px', minWidth: '100px', textAlign: 'center' }}>
+                      Página {paginaModal} de {Math.ceil(modalDesglose.todasLasPolizas.length / POLIZAS_POR_PAGINA)}
+                    </span>
+                    <button 
+                      className="btn btn-sm btn-outline-secondary"
+                      disabled={paginaModal >= Math.ceil(modalDesglose.todasLasPolizas.length / POLIZAS_POR_PAGINA)}
+                      onClick={() => setPaginaModal(p => p + 1)}
+                    >
+                      Siguiente →
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>

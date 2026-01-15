@@ -255,25 +255,6 @@ const ModuloNvoExpedientes = () => {
     }
   }, [expedientes]);
 
-  // 🆕 Detectar parámetro ?accion=nueva desde Dashboard u otra pantalla
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('accion') === 'nueva') {
-      console.log('📋 Abriendo formulario de nueva póliza desde navegación');
-      // Guardar origen para saber a dónde regresar después de guardar
-      const origen = params.get('origen');
-      if (origen) {
-        setOrigenNavegacion(origen);
-        console.log('📍 Origen de navegación guardado:', origen);
-      }
-      limpiarFormulario();
-      setModoEdicion(false);
-      setVistaActual('formulario');
-      // Limpiar el parámetro de la URL sin recargar
-      navigate('/polizas', { replace: true });
-    }
-  }, [location.search, navigate]);
-
   // 🔄 RECARGAR CLIENTES cuando se dispara el evento 'clientes-actualizados'
   const recargarClientes = useCallback(async () => {
     try {
@@ -2542,6 +2523,65 @@ const ModuloNvoExpedientes = () => {
       setHistorialExpediente([]);
     }
   }, []);
+
+  // 🆕 Detectar parámetro ?accion=xxx desde Dashboard u otra pantalla
+  // NOTA: Este useEffect debe estar DESPUÉS de las declaraciones de abrirModalCompartir, abrirModalAplicarPago y verDetalles
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const accion = params.get('accion');
+    const id = params.get('id');
+    
+    if (!accion) return;
+    
+    console.log('📋 Acción detectada desde URL:', accion, 'ID:', id);
+    
+    // Guardar origen para saber a dónde regresar después
+    const origen = params.get('origen') || 'dashboard';
+    setOrigenNavegacion(origen);
+    
+    if (accion === 'nueva') {
+      console.log('📋 Abriendo formulario de nueva póliza desde navegación');
+      limpiarFormulario();
+      setModoEdicion(false);
+      setVistaActual('formulario');
+      // Limpiar el parámetro de la URL sin recargar
+      navigate('/polizas', { replace: true });
+    } else if (id) {
+      // Si hay ID, necesitamos esperar a que los expedientes estén cargados
+      if (expedientes.length === 0) {
+        console.log('⏳ Esperando a que carguen los expedientes...');
+        return; // Salir y esperar a que el useEffect se vuelva a ejecutar cuando carguen
+      }
+      
+      // Buscar el expediente por ID
+      const expediente = expedientes.find(e => String(e.id) === String(id));
+      
+      if (expediente) {
+        switch (accion) {
+          case 'compartir':
+            console.log('📤 Abriendo modal de compartir para expediente:', id);
+            abrirModalCompartir(expediente);
+            break;
+          case 'pago':
+            console.log('💰 Abriendo modal de pago para expediente:', id);
+            abrirModalAplicarPago(expediente.id);
+            break;
+          case 'ver':
+            console.log('👁️ Abriendo vista de detalles para expediente:', id);
+            verDetalles(expediente);
+            break;
+          default:
+            console.warn('⚠️ Acción no reconocida:', accion);
+        }
+        // Limpiar el parámetro de la URL DESPUÉS de ejecutar la acción
+        navigate('/polizas', { replace: true });
+      } else {
+        console.warn('⚠️ Expediente no encontrado con ID:', id);
+        toast.error('Póliza no encontrada');
+        navigate('/polizas', { replace: true });
+      }
+    }
+  }, [location.search, navigate, expedientes, abrirModalCompartir, abrirModalAplicarPago, verDetalles, limpiarFormulario]);
 
   const handleClienteSeleccionado = useCallback(async (cliente) => {
     if (!cliente) {
