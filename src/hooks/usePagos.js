@@ -33,10 +33,8 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
     const expedienteActual = expedientes.find(exp => exp.id === expedienteId);
     if (!expedienteActual) return;
     
-    // Calcular fecha límite del pago pendiente
-    const fechaLimite = expedienteActual.fecha_vencimiento_pago || 
-                        expedienteActual.proximo_pago || 
-                        new Date().toISOString().split('T')[0];
+    // Usar fecha de HOY como valor por defecto (es cuando se aplica el pago)
+    const hoy = new Date().toISOString().split('T')[0];
     
     // Calcular el próximo recibo pendiente
     let proximoReciboPendiente = 1;
@@ -52,7 +50,7 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
     
     setExpedienteParaPago(expedienteActual);
     setComprobantePago(null);
-    setFechaUltimoPago(fechaLimite);
+    setFechaUltimoPago(hoy); // 🔥 Usar fecha de hoy por defecto
     setNumeroReciboPago(proximoReciboPendiente);
     setMostrarModalPago(true);
   }, [expedientes]);

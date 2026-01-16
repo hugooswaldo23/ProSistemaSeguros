@@ -255,25 +255,6 @@ const ModuloNvoExpedientes = () => {
     }
   }, [expedientes]);
 
-  // 🆕 Detectar parámetro ?accion=nueva desde Dashboard u otra pantalla
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get('accion') === 'nueva') {
-      console.log('📋 Abriendo formulario de nueva póliza desde navegación');
-      // Guardar origen para saber a dónde regresar después de guardar
-      const origen = params.get('origen');
-      if (origen) {
-        setOrigenNavegacion(origen);
-        console.log('📍 Origen de navegación guardado:', origen);
-      }
-      limpiarFormulario();
-      setModoEdicion(false);
-      setVistaActual('formulario');
-      // Limpiar el parámetro de la URL sin recargar
-      navigate('/polizas', { replace: true });
-    }
-  }, [location.search, navigate]);
-
   // 🔄 RECARGAR CLIENTES cuando se dispara el evento 'clientes-actualizados'
   const recargarClientes = useCallback(async () => {
     try {
@@ -374,6 +355,42 @@ const ModuloNvoExpedientes = () => {
       if (nuevoEstado === 'Cancelada') {
         datosActualizacion.fecha_cancelacion = new Date().toISOString().split('T')[0];
         datosActualizacion.estatus_pago = 'Cancelado';
+        
+        // 🔥 IMPORTANTE: Cancelar todos los recibos PENDIENTES (no pagados)
+        // Los recibos ya pagados conservan su estatus "Pagado"
+        try {
+          // Obtener recibos del expediente
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          if (resRecibos.ok) {
+            const dataRecibos = await resRecibos.json();
+            const recibos = Array.isArray(dataRecibos) ? dataRecibos : (dataRecibos?.data || []);
+            
+            // Filtrar solo recibos NO pagados
+            const recibosPendientes = recibos.filter(r => {
+              const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+              return estatus !== 'pagado' && estatus !== 'pagada';
+            });
+            
+            // Cancelar cada recibo pendiente
+            for (const recibo of recibosPendientes) {
+              await fetch(`${API_URL}/api/recibos/${expedienteId}/${recibo.numero_recibo}/pago`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  estatus: 'Cancelado',
+                  fecha_pago_real: null,
+                  comprobante_url: null,
+                  comprobante_nombre: null
+                })
+              });
+            }
+            
+            console.log(`✅ ${recibosPendientes.length} recibos cancelados para expediente ${expedienteId}`);
+          }
+        } catch (errorRecibos) {
+          console.error('⚠️ Error al cancelar recibos:', errorRecibos);
+          // No fallar la cancelación de la póliza si falla la cancelación de recibos
+        }
       }
       
       if (motivo) {
@@ -756,7 +773,30 @@ const ModuloNvoExpedientes = () => {
     }
   }, [pagoParaEliminar, expedienteParaEliminarPago, motivoEliminacion]);
 
-  // �📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
+  // ❌ Iniciar proceso de cancelación de póliza (con confirmación)
+  const iniciarCancelacion = useCallback((expediente) => {
+    const nombreCliente = expediente.nombre 
+      ? `${expediente.nombre} ${expediente.apellido_paterno || ''}`.trim()
+      : 'este expediente';
+    const numeroPoliza = expediente.numero_poliza || 'Sin número';
+    
+    const confirmado = window.confirm(
+      `⚠️ ¿Está seguro de CANCELAR la póliza?\n\n` +
+      `📋 Póliza: ${numeroPoliza}\n` +
+      `👤 Cliente: ${nombreCliente}\n\n` +
+      `Esta acción:\n` +
+      `• Cambiará el estado del expediente a "Cancelada"\n` +
+      `• Cancelará todos los recibos PENDIENTES\n` +
+      `• Los recibos YA PAGADOS se mantendrán\n\n` +
+      `¿Desea continuar?`
+    );
+    
+    if (confirmado) {
+      cambiarEstadoExpediente(expediente.id, 'Cancelada', 'Cancelación manual desde listado');
+    }
+  }, [cambiarEstadoExpediente]);
+
+  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
   // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
   // tipoEnvioInicial: 'poliza' (default) o 'pago' para preseleccionar
   const abrirModalCompartir = useCallback(async (expediente, tipoEnvioInicial = 'poliza') => {
@@ -2543,6 +2583,65 @@ const ModuloNvoExpedientes = () => {
     }
   }, []);
 
+  // 🆕 Detectar parámetro ?accion=xxx desde Dashboard u otra pantalla
+  // NOTA: Este useEffect debe estar DESPUÉS de las declaraciones de abrirModalCompartir, abrirModalAplicarPago y verDetalles
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const accion = params.get('accion');
+    const id = params.get('id');
+    
+    if (!accion) return;
+    
+    console.log('📋 Acción detectada desde URL:', accion, 'ID:', id);
+    
+    // Guardar origen para saber a dónde regresar después
+    const origen = params.get('origen') || 'dashboard';
+    setOrigenNavegacion(origen);
+    
+    if (accion === 'nueva') {
+      console.log('📋 Abriendo formulario de nueva póliza desde navegación');
+      limpiarFormulario();
+      setModoEdicion(false);
+      setVistaActual('formulario');
+      // Limpiar el parámetro de la URL sin recargar
+      navigate('/polizas', { replace: true });
+    } else if (id) {
+      // Si hay ID, necesitamos esperar a que los expedientes estén cargados
+      if (expedientes.length === 0) {
+        console.log('⏳ Esperando a que carguen los expedientes...');
+        return; // Salir y esperar a que el useEffect se vuelva a ejecutar cuando carguen
+      }
+      
+      // Buscar el expediente por ID
+      const expediente = expedientes.find(e => String(e.id) === String(id));
+      
+      if (expediente) {
+        switch (accion) {
+          case 'compartir':
+            console.log('📤 Abriendo modal de compartir para expediente:', id);
+            abrirModalCompartir(expediente);
+            break;
+          case 'pago':
+            console.log('💰 Abriendo modal de pago para expediente:', id);
+            abrirModalAplicarPago(expediente.id);
+            break;
+          case 'ver':
+            console.log('👁️ Abriendo vista de detalles para expediente:', id);
+            verDetalles(expediente);
+            break;
+          default:
+            console.warn('⚠️ Acción no reconocida:', accion);
+        }
+        // Limpiar el parámetro de la URL DESPUÉS de ejecutar la acción
+        navigate('/polizas', { replace: true });
+      } else {
+        console.warn('⚠️ Expediente no encontrado con ID:', id);
+        toast.error('Póliza no encontrada');
+        navigate('/polizas', { replace: true });
+      }
+    }
+  }, [location.search, navigate, expedientes, abrirModalCompartir, abrirModalAplicarPago, verDetalles, limpiarFormulario]);
+
   const handleClienteSeleccionado = useCallback(async (cliente) => {
     if (!cliente) {
       setClienteSeleccionado(null);
@@ -2792,6 +2891,8 @@ const ModuloNvoExpedientes = () => {
           setVistaActual={setVistaActual}
           setModoEdicion={setModoEdicion}
           calcularProximoPago={calcularProximoPago}
+          // ❌ Función de cancelación
+          iniciarCancelacion={iniciarCancelacion}
           // 🔄 Funciones de renovación
           iniciarCotizacionRenovacion={iniciarCotizacionRenovacion}
           marcarRenovacionAutorizada={marcarRenovacionAutorizada}
