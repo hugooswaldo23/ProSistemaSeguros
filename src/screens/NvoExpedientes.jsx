@@ -355,6 +355,42 @@ const ModuloNvoExpedientes = () => {
       if (nuevoEstado === 'Cancelada') {
         datosActualizacion.fecha_cancelacion = new Date().toISOString().split('T')[0];
         datosActualizacion.estatus_pago = 'Cancelado';
+        
+        // 🔥 IMPORTANTE: Cancelar todos los recibos PENDIENTES (no pagados)
+        // Los recibos ya pagados conservan su estatus "Pagado"
+        try {
+          // Obtener recibos del expediente
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          if (resRecibos.ok) {
+            const dataRecibos = await resRecibos.json();
+            const recibos = Array.isArray(dataRecibos) ? dataRecibos : (dataRecibos?.data || []);
+            
+            // Filtrar solo recibos NO pagados
+            const recibosPendientes = recibos.filter(r => {
+              const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+              return estatus !== 'pagado' && estatus !== 'pagada';
+            });
+            
+            // Cancelar cada recibo pendiente
+            for (const recibo of recibosPendientes) {
+              await fetch(`${API_URL}/api/recibos/${expedienteId}/${recibo.numero_recibo}/pago`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  estatus: 'Cancelado',
+                  fecha_pago_real: null,
+                  comprobante_url: null,
+                  comprobante_nombre: null
+                })
+              });
+            }
+            
+            console.log(`✅ ${recibosPendientes.length} recibos cancelados para expediente ${expedienteId}`);
+          }
+        } catch (errorRecibos) {
+          console.error('⚠️ Error al cancelar recibos:', errorRecibos);
+          // No fallar la cancelación de la póliza si falla la cancelación de recibos
+        }
       }
       
       if (motivo) {

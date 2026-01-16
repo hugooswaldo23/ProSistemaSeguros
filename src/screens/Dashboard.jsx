@@ -18,6 +18,7 @@ const DashboardComponent = () => {
   const [modalDesglose, setModalDesglose] = useState(null);
   const [modalDetalle, setModalDetalle] = useState(null);
   const [paginaModal, setPaginaModal] = useState(1);
+  const [modalActualParams, setModalActualParams] = useState(null); // Para recordar qué modal está abierto
   const POLIZAS_POR_PAGINA = 20;
 
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
@@ -108,7 +109,8 @@ const DashboardComponent = () => {
         const recibosArray = Array.isArray(recibosData) ? recibosData : (recibosData?.data || []);
         
         recibosArray.forEach(recibo => {
-          const expId = recibo.expediente_id;
+          // Convertir a string para asegurar match con exp.id
+          const expId = String(recibo.expediente_id);
           if (!recibosPorExpediente.has(expId)) {
             recibosPorExpediente.set(expId, []);
           }
@@ -132,7 +134,7 @@ const DashboardComponent = () => {
         
         // Enriquecer cada expediente con datos del cliente Y sus recibos
         expedientesEnriquecidos = expedientesArray.map(exp => {
-          const recibos = recibosPorExpediente.get(exp.id) || [];
+          const recibos = recibosPorExpediente.get(String(exp.id)) || [];
           
           if (exp.cliente_id && clientesMap.has(exp.cliente_id)) {
             const cliente = clientesMap.get(exp.cliente_id);
@@ -158,7 +160,7 @@ const DashboardComponent = () => {
         // Sin clientes, solo agregar recibos
         expedientesEnriquecidos = expedientesArray.map(exp => ({
           ...exp,
-          recibos: recibosPorExpediente.get(exp.id) || []
+          recibos: recibosPorExpediente.get(String(exp.id)) || []
         }));
       }
       
@@ -176,6 +178,28 @@ const DashboardComponent = () => {
   useEffect(() => {
     cargarDatos();
   }, []);
+
+  // 🔄 Recargar datos cuando la ventana recupera el foco (ej: al regresar de otra pestaña)
+  useEffect(() => {
+    const handleFocus = async () => {
+      console.log('🔄 Dashboard: Ventana recuperó foco, recargando datos...');
+      await cargarDatos();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  // 🔄 Refrescar modal cuando cambien los expedientes (si hay uno abierto)
+  useEffect(() => {
+    if (modalActualParams && expedientes.length > 0) {
+      console.log('🔄 Dashboard: Expedientes actualizados, refrescando modal...');
+      abrirDesglose(modalActualParams.tipo, modalActualParams.periodo);
+    }
+  }, [expedientes]); // Se ejecuta cuando cambian los expedientes
 
   const abrirDesglose = (tipo, periodo = 'ambos') => {
     const hoy = new Date();
@@ -226,115 +250,254 @@ const DashboardComponent = () => {
         color = '#3B82F6';
         break;
       case 'pagadas':
-        polizasFiltradas = expedientes.filter(p => {
-          const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase().trim();
-          const pagado = estatus === 'pagado' || estatus === 'pagada';
-          if (!pagado || p.etapa_activa === 'Cancelada') return false;
-          
-          if (periodo === 'mesActual') return estaEnRango(p.fecha_pago, inicioMesActual, finMesActual);
-          if (periodo === 'mesAnterior') return estaEnRango(p.fecha_pago, inicioMesAnterior, finMesAnterior);
-          return estaEnRango(p.fecha_pago, inicioMesAnterior, finMesActual);
-        });
-        titulo = `Pólizas Pagadas - ${periodoTexto}`;
+        // 🔥 NUEVA LÓGICA: Mostrar recibos con fecha_pago_real en el periodo
+        {
+          const recibosPagados = expedientes.flatMap(p => {
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: verificar si tiene fecha_pago
+              if (p.fecha_pago) {
+                let incluir = false;
+                if (periodo === 'mesActual') {
+                  incluir = estaEnRango(p.fecha_pago, inicioMesActual, finMesActual);
+                } else if (periodo === 'mesAnterior') {
+                  incluir = estaEnRango(p.fecha_pago, inicioMesAnterior, finMesAnterior);
+                } else {
+                  incluir = estaEnRango(p.fecha_pago, inicioMesAnterior, finMesActual);
+                }
+                if (incluir) {
+                  return [{
+                    ...p,
+                    _esRecibo: true,
+                    monto: resolverMonto(p)
+                  }];
+                }
+              }
+              return [];
+            }
+            // Filtrar recibos con fecha_pago_real en el periodo
+            return p.recibos
+              .filter(r => {
+                if (!r.fecha_pago_real) return false;
+                
+                if (periodo === 'mesActual') {
+                  return estaEnRango(r.fecha_pago_real, inicioMesActual, finMesActual);
+                } else if (periodo === 'mesAnterior') {
+                  return estaEnRango(r.fecha_pago_real, inicioMesAnterior, finMesAnterior);
+                }
+                return estaEnRango(r.fecha_pago_real, inicioMesAnterior, finMesActual);
+              })
+              .map(r => ({
+                ...p,
+                _esRecibo: true,
+                _reciboNumero: r.numero_recibo,
+                monto: Number(r.monto || r.importe || 0),
+                fecha_pago: r.fecha_pago_real
+              }));
+          });
+          polizasFiltradas = recibosPagados;
+        }
+        titulo = `Recibos Pagados - ${periodoTexto}`;
         color = '#10B981';
         break;
       case 'porVencer':
-        polizasFiltradas = expedientes.filter(p => {
-          if (p.etapa_activa === 'Cancelada') return false;
+        // 🔥 NUEVA LÓGICA: Mostrar TODOS los recibos con estatus "Por Vencer" sin importar fecha
+        {
+          const hoyPV = new Date();
+          hoyPV.setHours(0, 0, 0, 0);
+          const en15Dias = new Date(hoyPV);
+          en15Dias.setDate(en15Dias.getDate() + 15);
           
-          const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-          if (!ref) return false;
-          
-          const fechaVenc = new Date(ref.split('T')[0]);
-          fechaVenc.setHours(0, 0, 0, 0);
-          
-          // Debe estar en el mes actual Y ser futura (no vencida)
-          const esFutura = fechaVenc >= hoy;
-          if (!esFutura) return false;
-          
-          return estaEnRango(ref, inicioMesActual, finMesActual);
-        });
-        titulo = 'Primas Por Vencer - Mes Actual';
+          const recibosPorVencer = expedientes.flatMap(p => {
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: verificar estatus de la póliza
+              const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase();
+              if (estatus === 'por vencer' || estatus === 'pago por vencer') {
+                return [{
+                  ...p,
+                  _esRecibo: true,
+                  monto: resolverMonto(p)
+                }];
+              }
+              return [];
+            }
+            // Filtrar recibos por vencer
+            // Criterio: estatus = 'Por vencer' O (no pagado, no vencido, y vence en los próximos 15 días)
+            return p.recibos
+              .filter(r => {
+                // Si ya está pagado, no cuenta
+                if (r.fecha_pago_real) return false;
+                
+                const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+                if (estatus === 'por vencer' || estatus === 'pago por vencer') return true;
+                
+                // Fallback: calcular por fecha si no tiene estatus
+                if (r.fecha_vencimiento) {
+                  const fechaVenc = new Date(r.fecha_vencimiento);
+                  fechaVenc.setHours(0, 0, 0, 0);
+                  // No está vencido (fecha >= hoy) y vence pronto (fecha <= hoy+15)
+                  return fechaVenc >= hoyPV && fechaVenc <= en15Dias;
+                }
+                return false;
+              })
+              .map(r => ({
+                ...p,
+                _esRecibo: true,
+                _reciboNumero: r.numero_recibo,
+                monto: Number(r.monto || r.importe || 0),
+                fecha_vencimiento_pago: r.fecha_vencimiento
+              }));
+          });
+          polizasFiltradas = recibosPorVencer;
+        }
+        titulo = 'Recibos Por Vencer';
         color = '#F59E0B';
         break;
       case 'vencidas':
-        polizasFiltradas = expedientes.filter(p => {
-          const ref = p.fecha_vencimiento_pago || p.proximo_pago;
-          if (!ref) return false;
-          if (p.etapa_activa === 'Cancelada') return false;
+        // 🔥 NUEVA LÓGICA: Mostrar TODOS los recibos con estatus "Vencido" sin importar fecha
+        // Cuando se paguen o cancelen, dejarán de aparecer aquí
+        {
+          const hoyLocal = new Date();
+          hoyLocal.setHours(0, 0, 0, 0);
           
-          // Simple: si la fecha ya pasó, está vencida
-          const venc = new Date(ref);
-          venc.setHours(0, 0, 0, 0);
-          const estaVencida = hoy > venc;
-          if (!estaVencida) return false;
+          console.log('🔍 DEBUG VENCIDAS - Expedientes con recibos:', 
+            expedientes.filter(p => p.recibos?.length > 0).map(p => ({
+              poliza: p.numero_poliza,
+              recibos: p.recibos?.map(r => ({
+                num: r.numero_recibo,
+                estatus: r.estatus_pago || r.estatus,
+                vencimiento: r.fecha_vencimiento,
+                pagado: r.fecha_pago_real
+              }))
+            }))
+          );
           
-          // Filtrar por mes de vencimiento
-          if (periodo === 'mesActual') return estaEnRango(ref, inicioMesActual, finMesActual);
-          if (periodo === 'mesAnterior') {
-            // Meses anteriores: todas las que vencieron ANTES del mes actual
-            const fechaVenc = new Date(ref);
-            fechaVenc.setHours(0, 0, 0, 0);
-            return fechaVenc < inicioMesActual;
-          }
-          // Si no se especifica periodo, mostrar todas las vencidas
-          return true;
-        });
-        titulo = periodo === 'mesActual' 
-          ? 'Primas Vencidas - Mes Actual'
-          : periodo === 'mesAnterior' 
-            ? 'Primas Vencidas - Meses Anteriores'
-            : 'Primas Vencidas - Acumulado';
+          const recibosVencidos = expedientes.flatMap(p => {
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: verificar estatus de la póliza
+              const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase();
+              if (estatus === 'vencido') {
+                return [{
+                  ...p,
+                  _esRecibo: true,
+                  monto: resolverMonto(p)
+                }];
+              }
+              return [];
+            }
+            // Filtrar recibos vencidos
+            // Criterio: estatus = 'Vencido' O (no está pagado Y fecha_vencimiento < hoy)
+            return p.recibos
+              .filter(r => {
+                // Si ya está pagado, no está vencido
+                if (r.fecha_pago_real) return false;
+                
+                const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+                if (estatus === 'vencido') return true;
+                
+                // Fallback: calcular por fecha si no tiene estatus o estatus no es claro
+                if (r.fecha_vencimiento) {
+                  const fechaVenc = new Date(r.fecha_vencimiento);
+                  fechaVenc.setHours(0, 0, 0, 0);
+                  return fechaVenc < hoyLocal;
+                }
+                return false;
+              })
+              .map(r => ({
+                ...p,
+                _esRecibo: true,
+                _reciboNumero: r.numero_recibo,
+                monto: Number(r.monto || r.importe || 0),
+                fecha_vencimiento_pago: r.fecha_vencimiento
+              }));
+          });
+          console.log('🔍 DEBUG - Recibos vencidos encontrados:', recibosVencidos.length, recibosVencidos);
+          polizasFiltradas = recibosVencidos;
+        }
+        titulo = 'Recibos Vencidos';
         color = '#EF4444';
         break;
       case 'canceladas':
-        polizasFiltradas = expedientes.filter(exp => {
-          if (exp.etapa_activa !== 'Cancelada') return false;
-          
-          // ⚠️ IMPORTANTE: Si NO tiene fecha_cancelacion, considerar que es del mes actual
-          if (!exp.fecha_cancelacion) {
-            console.warn('⚠️ Póliza cancelada sin fecha_cancelacion:', exp.numero_poliza, '- Asumiendo mes actual');
-            return periodo === 'mesActual' || periodo === 'ambos';
-          }
-          
-          // Si tiene fecha_cancelacion, usarla para filtrar por periodo
-          if (periodo === 'mesActual') {
-            return estaEnRango(exp.fecha_cancelacion, inicioMesActual, finMesActual);
-          }
-          
-          if (periodo === 'mesAnterior') {
-            // Meses anteriores del año: desde enero hasta fin del mes anterior
-            return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesAnterior);
-          }
-          
-          // Si no se especifica periodo (ambos), mostrar todas
-          return estaEnRango(exp.fecha_cancelacion, inicioAnioActual, finMesActual);
-        });
-        
-        titulo = `Primas Canceladas - ${periodoTexto}`;
+        // 🔥 NUEVA LÓGICA: Mostrar recibos con estatus "Cancelado" filtrados por fecha
+        {
+          const recibosCancelados = expedientes.flatMap(p => {
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: verificar si la póliza está cancelada
+              if (p.etapa_activa === 'Cancelada') {
+                const fechaCancelacion = p.fecha_cancelacion || p.updated_at;
+                let incluir = false;
+                
+                if (periodo === 'mesActual') {
+                  incluir = !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
+                } else if (periodo === 'mesAnterior') {
+                  incluir = fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+                } else {
+                  incluir = true;
+                }
+                
+                if (incluir) {
+                  return [{
+                    ...p,
+                    _esRecibo: true,
+                    monto: resolverMonto(p)
+                  }];
+                }
+              }
+              return [];
+            }
+            // Filtrar recibos con estatus Cancelado
+            return p.recibos
+              .filter(r => {
+                const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+                const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
+                if (!estaCancelado) return false;
+                
+                const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
+                
+                if (periodo === 'mesActual') {
+                  return !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
+                } else if (periodo === 'mesAnterior') {
+                  return fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+                }
+                return true;
+              })
+              .map(r => ({
+                ...p,
+                _esRecibo: true,
+                _reciboNumero: r.numero_recibo,
+                monto: Number(r.monto || r.importe || 0),
+                fecha_cancelacion: r.fecha_cancelacion || r.updated_at
+              }));
+          });
+          polizasFiltradas = recibosCancelados;
+        }
+        titulo = `Recibos Cancelados - ${periodoTexto}`;
         color = '#6B7280';
         break;
       default:
         break;
     }
 
+    // Helper para obtener monto: si es recibo usa monto directo, si no usa resolverMonto
+    const obtenerMonto = (item) => item._esRecibo ? (item.monto || 0) : resolverMonto(item);
+
     const porProducto = polizasFiltradas.reduce((acc, poliza) => {
       const producto = poliza.producto || 'Sin producto';
       if (!acc[producto]) acc[producto] = { polizas: [], total: 0, cantidad: 0 };
       acc[producto].polizas.push(poliza);
-      acc[producto].total += resolverMonto(poliza);
+      acc[producto].total += obtenerMonto(poliza);
       acc[producto].cantidad += 1;
       return acc;
     }, {});
 
     setPaginaModal(1); // Resetear página al abrir
+    setModalActualParams({ tipo, periodo }); // Guardar parámetros para refrescar después
     setModalDesglose({
       tipo,
       titulo,
       color,
       porProducto,
       todasLasPolizas: polizasFiltradas, // Guardar todas para paginación
-      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + resolverMonto(p), 0),
+      totalGeneral: polizasFiltradas.reduce((sum, p) => sum + obtenerMonto(p), 0),
       cantidadTotal: polizasFiltradas.length
     });
   };
@@ -421,17 +584,21 @@ const DashboardComponent = () => {
     const primasEmitidasTotal = primasEmitidasMesActual + primasEmitidasMesAnterior;
 
     // ==================== TARJETA 2: PÓLIZAS PAGADAS ====================
-    // Recibos con estatus "Pagado" filtrados por fecha_pago_real
+    // Recibos pagados: tiene fecha_pago_real O estatus = 'Pagado'
+    // Filtrados por fecha_pago_real en el rango del mes
     const recibosPagadosMesActual = todosLosRecibos.filter(r => {
-      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      const estaPagado = estatus === 'pagado' || estatus === 'pagada';
-      return estaPagado && estaEnRango(r.fecha_pago_real, inicioMesActual, finMesActual);
+      // Criterio principal: tiene fecha_pago_real
+      if (r.fecha_pago_real && estaEnRango(r.fecha_pago_real, inicioMesActual, finMesActual)) {
+        return true;
+      }
+      return false;
     });
     
     const recibosPagadosMesAnterior = todosLosRecibos.filter(r => {
-      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      const estaPagado = estatus === 'pagado' || estatus === 'pagada';
-      return estaPagado && estaEnRango(r.fecha_pago_real, inicioMesAnterior, finMesAnterior);
+      if (r.fecha_pago_real && estaEnRango(r.fecha_pago_real, inicioMesAnterior, finMesAnterior)) {
+        return true;
+      }
+      return false;
     });
     
     const primasPagadasMesActual = recibosPagadosMesActual.reduce((sum, r) => {
@@ -447,10 +614,26 @@ const DashboardComponent = () => {
     const primasPagadasTotal = primasPagadasMesActual + primasPagadasMesAnterior;
 
     // ==================== TARJETA 3: POR VENCER ====================
-    // TODOS los recibos con estatus "Por Vencer" (sin filtro de mes)
+    // Recibos por vencer: estatus = 'Por Vencer' O (no pagado Y vence en 15 días)
+    const hoyStats = new Date();
+    hoyStats.setHours(0, 0, 0, 0);
+    const en15DiasStats = new Date(hoyStats);
+    en15DiasStats.setDate(en15DiasStats.getDate() + 15);
+    
     const recibosPorVencer = todosLosRecibos.filter(r => {
+      // Si ya está pagado, no cuenta
+      if (r.fecha_pago_real) return false;
+      
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      return estatus === 'por vencer' || estatus === 'pago por vencer';
+      if (estatus === 'por vencer' || estatus === 'pago por vencer') return true;
+      
+      // Fallback: calcular por fecha
+      if (r.fecha_vencimiento) {
+        const fechaVenc = new Date(String(r.fecha_vencimiento).split('T')[0]);
+        fechaVenc.setHours(0, 0, 0, 0);
+        return fechaVenc >= hoyStats && fechaVenc <= en15DiasStats;
+      }
+      return false;
     });
     
     const primasPorVencer = recibosPorVencer.reduce((sum, r) => {
@@ -459,61 +642,64 @@ const DashboardComponent = () => {
     }, 0);
 
     // ==================== TARJETA 4: VENCIDOS ====================
-    // Recibos con estatus "Vencido", separados por fecha_vencimiento
-    const recibosVencidosTodos = todosLosRecibos.filter(r => {
+    // Recibos vencidos: estatus = 'Vencido' O (no pagado Y fecha_vencimiento < hoy)
+    const recibosVencidos = todosLosRecibos.filter(r => {
+      // Si ya está pagado, no cuenta
+      if (r.fecha_pago_real) return false;
+      
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      return estatus === 'vencido';
+      if (estatus === 'vencido') return true;
+      
+      // Fallback: calcular por fecha
+      if (r.fecha_vencimiento) {
+        const fechaVenc = new Date(String(r.fecha_vencimiento).split('T')[0]);
+        fechaVenc.setHours(0, 0, 0, 0);
+        return fechaVenc < hoyStats;
+      }
+      return false;
     });
     
-    // Vencidos en el mes actual
-    const recibosVencidosMesActual = recibosVencidosTodos.filter(r => 
-      estaEnRango(r.fecha_vencimiento, inicioMesActual, finMesActual)
-    );
-    
-    // Vencidos en MESES anteriores (acumulado histórico)
-    const recibosVencidosAnteriores = recibosVencidosTodos.filter(r => {
-      if (!r.fecha_vencimiento) return false;
-      const fechaStr = String(r.fecha_vencimiento).split('T')[0];
-      const [year, month, day] = fechaStr.split('-').map(Number);
-      if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
-      const f = new Date(year, month - 1, day);
-      f.setHours(0, 0, 0, 0);
-      return f < inicioMesActual; // Todo lo anterior al mes actual
-    });
-    
-    const primasVencidasMesActual = recibosVencidosMesActual.reduce((sum, r) => {
+    const primasVencidas = recibosVencidos.reduce((sum, r) => {
       const monto = Number(r.monto || r.importe || 0);
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
-    
-    const primasVencidasAnteriores = recibosVencidosAnteriores.reduce((sum, r) => {
-      const monto = Number(r.monto || r.importe || 0);
-      return sum + (isNaN(monto) ? 0 : monto);
-    }, 0);
-    
-    const primasVencidasTotal = primasVencidasMesActual + primasVencidasAnteriores;
 
-    // Filtrar canceladas del mes actual
-    // ⚠️ IMPORTANTE: Si no tienen fecha_cancelacion, asumimos que se cancelaron HOY (mes actual)
-    const canceladasMesActual = expedientes.filter(p => {
-      if (p.etapa_activa !== 'Cancelada') return false;
+    // ==================== TARJETA 5: CANCELADOS ====================
+    // Recibos con estatus "Cancelado", separados por fecha de cancelación
+    // Esto permite ver solo los recibos que realmente se cancelaron (no los ya pagados)
+    const recibosCanceladosMesActual = todosLosRecibos.filter(r => {
+      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+      const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
+      if (!estaCancelado) return false;
       
-      // Si NO tiene fecha_cancelacion, considerar que es del mes actual
-      if (!p.fecha_cancelacion) return true;
+      // Usar fecha_cancelacion del recibo, o updated_at como fallback
+      const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
+      if (!fechaCancelacion) return true; // Sin fecha, asumir mes actual
       
-      // Si tiene fecha, verificar que esté en rango del mes actual
-      return estaEnRango(p.fecha_cancelacion, inicioMesActual, finMesActual);
+      return estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
     });
     
-    // Filtrar canceladas del mes anterior
-    const canceladasMesAnterior = expedientes.filter(p => 
-      p.etapa_activa === 'Cancelada' && 
-      p.fecha_cancelacion && 
-      estaEnRango(p.fecha_cancelacion, inicioMesAnterior, finMesAnterior)
-    );
+    const recibosCanceladosMesAnterior = todosLosRecibos.filter(r => {
+      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+      const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
+      if (!estaCancelado) return false;
+      
+      const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
+      if (!fechaCancelacion) return false; // Sin fecha, no cuenta para mes anterior
+      
+      return estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+    });
     
-    const primasCanceladasMesActual = canceladasMesActual.reduce((sum, p) => sum + resolverMonto(p), 0);
-    const primasCanceladasMesAnterior = canceladasMesAnterior.reduce((sum, p) => sum + resolverMonto(p), 0);
+    const primasCanceladasMesActual = recibosCanceladosMesActual.reduce((sum, r) => {
+      const monto = Number(r.monto || r.importe || 0);
+      return sum + (isNaN(monto) ? 0 : monto);
+    }, 0);
+    
+    const primasCanceladasMesAnterior = recibosCanceladosMesAnterior.reduce((sum, r) => {
+      const monto = Number(r.monto || r.importe || 0);
+      return sum + (isNaN(monto) ? 0 : monto);
+    }, 0);
+    
     const primasCanceladasTotal = primasCanceladasMesActual + primasCanceladasMesAnterior;
 
     
@@ -548,27 +734,19 @@ const DashboardComponent = () => {
         cantidad: recibosPorVencer.length // Cantidad de RECIBOS por vencer (sin desglose por mes)
       },
       primasVencidas: {
-        monto: primasVencidasTotal,
-        cantidad: recibosVencidosMesActual.length + recibosVencidosAnteriores.length, // Cantidad de RECIBOS vencidos
-        mesActual: {
-          monto: primasVencidasMesActual,
-          cantidad: recibosVencidosMesActual.length
-        },
-        anteriores: {
-          monto: primasVencidasAnteriores,
-          cantidad: recibosVencidosAnteriores.length
-        }
+        monto: primasVencidas,
+        cantidad: recibosVencidos.length // Cantidad de RECIBOS vencidos (sin desglose por mes)
       },
       primasCanceladas: {
         monto: primasCanceladasTotal,
-        cantidad: canceladasMesActual.length + canceladasMesAnterior.length,
+        cantidad: recibosCanceladosMesActual.length + recibosCanceladosMesAnterior.length,
         mesActual: {
           monto: primasCanceladasMesActual,
-          cantidad: canceladasMesActual.length
+          cantidad: recibosCanceladosMesActual.length
         },
         mesAnterior: {
           monto: primasCanceladasMesAnterior,
-          cantidad: canceladasMesAnterior.length
+          cantidad: recibosCanceladosMesAnterior.length
         }
       }
     };
@@ -982,7 +1160,7 @@ const DashboardComponent = () => {
                 <div 
                   className="d-flex align-items-center justify-content-between mb-3"
                   style={{ cursor: 'pointer', transition: 'transform 0.2s' }}
-                  onClick={() => abrirDesglose('vencidas', 'mesActual')}
+                  onClick={() => abrirDesglose('vencidas', 'todos')}
                   onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
                   onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
                 >
@@ -1002,31 +1180,15 @@ const DashboardComponent = () => {
                       Vencidas
                     </div>
                     <h3 className="mb-0 fw-bold" style={{ fontSize: '24px', color: '#EF4444' }}>
-                      ${estadisticasFinancieras.primasVencidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                      ${estadisticasFinancieras.primasVencidas.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasVencidas.mesActual.cantidad} recibo{estadisticasFinancieras.primasVencidas.mesActual.cantidad !== 1 ? 's' : ''} • Mes actual
+                      {estadisticasFinancieras.primasVencidas.cantidad} recibo{estadisticasFinancieras.primasVencidas.cantidad !== 1 ? 's' : ''}
                     </small>
                   </div>
                 </div>
-                <div className="pt-2 border-top">
-                  <div 
-                    className="d-flex justify-content-between p-2 rounded" 
-                    style={{ cursor: 'pointer', transition: 'background 0.2s' }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      abrirDesglose('vencidas', 'mesAnterior');
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#F3F4F6'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      Meses anteriores: {estadisticasFinancieras.primasVencidas.anteriores.cantidad}
-                    </span>
-                    <span style={{ fontSize: '11px', color: '#9CA3AF' }}>
-                      ${estadisticasFinancieras.primasVencidas.anteriores.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
-                    </span>
-                  </div>
+                {/* Espacio para mantener altura uniforme con otras tarjetas */}
+                <div className="pt-2 border-top" style={{ minHeight: '44px' }}>
                 </div>
               </div>
             </div>
@@ -1060,7 +1222,7 @@ const DashboardComponent = () => {
                       ${estadisticasFinancieras.primasCanceladas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasCanceladas.mesActual.cantidad} pólizas • Mes actual
+                      {estadisticasFinancieras.primasCanceladas.mesActual.cantidad} recibo{estadisticasFinancieras.primasCanceladas.mesActual.cantidad !== 1 ? 's' : ''} • Mes actual
                     </small>
                   </div>
                 </div>
@@ -1224,7 +1386,7 @@ const DashboardComponent = () => {
 
       {/* MODAL DE DESGLOSE - Por Producto */}
       {modalDesglose && (
-        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setModalDesglose(null)}>
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalDesglose(null); setModalActualParams(null); }}>
           <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable" style={{ maxWidth: '95%', width: '1400px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
               {/* Header del modal */}
@@ -1235,7 +1397,7 @@ const DashboardComponent = () => {
                 <button 
                   type="button" 
                   className="btn-close btn-close-white"
-                  onClick={() => setModalDesglose(null)}>
+                  onClick={() => { setModalDesglose(null); setModalActualParams(null); }}>
                 </button>
               </div>
               
@@ -1540,8 +1702,19 @@ const DashboardComponent = () => {
                                         </div>
                                       ) : null;
                                     })()}
-                                    {/* Progreso de recibos X/X */}
+                                    {/* Progreso de recibos X/X o Número de recibo si es desglose de recibos */}
                                     {(() => {
+                                      // Si es un recibo individual (vencidos, porVencer, canceladas)
+                                      if (poliza._esRecibo && poliza._reciboNumero) {
+                                        return (
+                                          <div className="mt-1" style={{ fontSize: '0.75rem' }}>
+                                            <span className="badge bg-secondary">
+                                              Recibo {poliza._reciboNumero}
+                                            </span>
+                                          </div>
+                                        );
+                                      }
+                                      
                                       const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
                                                            (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
                                       if (!esFraccionado) return null;
@@ -1568,7 +1741,7 @@ const DashboardComponent = () => {
                                 </td>
                                 <td className="text-end">
                                   <span className="fw-bold" style={{ color: modalDesglose.color, fontSize: '14px' }}>
-                                    ${resolverMonto(poliza).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
+                                    ${(poliza._esRecibo ? poliza.monto : resolverMonto(poliza)).toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                                   </span>
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
