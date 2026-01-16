@@ -620,11 +620,24 @@ const DashboardComponent = () => {
     const en15DiasStats = new Date(hoyStats);
     en15DiasStats.setDate(en15DiasStats.getDate() + 15);
     
+    // IDs de expedientes cancelados (para excluirlos de Por Vencer y Vencidos)
+    const idsExpedientesCancelados = new Set(
+      expedientes
+        .filter(exp => exp.etapa_activa === 'Cancelada' || exp.etapaActiva === 'Cancelada')
+        .map(exp => String(exp.id))
+    );
+    
     const recibosPorVencer = todosLosRecibos.filter(r => {
       // Si ya está pagado, no cuenta
       if (r.fecha_pago_real) return false;
       
+      // Excluir recibos de expedientes cancelados
+      if (idsExpedientesCancelados.has(String(r.expediente_id))) return false;
+      
+      // Excluir recibos con estatus cancelado
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+      if (estatus === 'cancelado' || estatus === 'cancelada') return false;
+      
       if (estatus === 'por vencer' || estatus === 'pago por vencer') return true;
       
       // Fallback: calcular por fecha
@@ -643,11 +656,18 @@ const DashboardComponent = () => {
 
     // ==================== TARJETA 4: VENCIDOS ====================
     // Recibos vencidos: estatus = 'Vencido' O (no pagado Y fecha_vencimiento < hoy)
+    // EXCLUYE recibos de expedientes cancelados
     const recibosVencidos = todosLosRecibos.filter(r => {
       // Si ya está pagado, no cuenta
       if (r.fecha_pago_real) return false;
       
+      // Excluir recibos de expedientes cancelados
+      if (idsExpedientesCancelados.has(String(r.expediente_id))) return false;
+      
+      // Excluir recibos con estatus cancelado
       const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+      if (estatus === 'cancelado' || estatus === 'cancelada') return false;
+      
       if (estatus === 'vencido') return true;
       
       // Fallback: calcular por fecha
@@ -665,29 +685,44 @@ const DashboardComponent = () => {
     }, 0);
 
     // ==================== TARJETA 5: CANCELADOS ====================
-    // Recibos con estatus "Cancelado", separados por fecha de cancelación
-    // Esto permite ver solo los recibos que realmente se cancelaron (no los ya pagados)
-    const recibosCanceladosMesActual = todosLosRecibos.filter(r => {
-      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
+    // Lógica simplificada: 
+    // - Expedientes con etapa_activa = "Cancelada" del mes actual
+    // - Sumar recibos NO pagados de esos expedientes (son los cancelados)
+    
+    // 1. Obtener expedientes cancelados del mes actual
+    const expedientesCanceladosMesActual = expedientes.filter(exp => {
+      const estaCancelado = exp.etapa_activa === 'Cancelada' || exp.etapaActiva === 'Cancelada';
       if (!estaCancelado) return false;
       
-      // Usar fecha_cancelacion del recibo, o updated_at como fallback
-      const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
+      const fechaCancelacion = exp.fecha_cancelacion || exp.updated_at;
       if (!fechaCancelacion) return true; // Sin fecha, asumir mes actual
-      
       return estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
     });
     
-    const recibosCanceladosMesAnterior = todosLosRecibos.filter(r => {
-      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-      const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
+    const expedientesCanceladosMesAnterior = expedientes.filter(exp => {
+      const estaCancelado = exp.etapa_activa === 'Cancelada' || exp.etapaActiva === 'Cancelada';
       if (!estaCancelado) return false;
       
-      const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
-      if (!fechaCancelacion) return false; // Sin fecha, no cuenta para mes anterior
-      
+      const fechaCancelacion = exp.fecha_cancelacion || exp.updated_at;
+      if (!fechaCancelacion) return false;
       return estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+    });
+    
+    const idsCanceladosMesActual = new Set(expedientesCanceladosMesActual.map(exp => String(exp.id)));
+    const idsCanceladosMesAnterior = new Set(expedientesCanceladosMesAnterior.map(exp => String(exp.id)));
+    
+    // 2. Recibos cancelados = recibos NO pagados de expedientes cancelados
+    const recibosCanceladosMesActual = todosLosRecibos.filter(r => {
+      if (!idsCanceladosMesActual.has(String(r.expediente_id))) return false;
+      // Excluir recibos que ya fueron pagados
+      if (r.fecha_pago_real) return false;
+      return true;
+    });
+    
+    const recibosCanceladosMesAnterior = todosLosRecibos.filter(r => {
+      if (!idsCanceladosMesAnterior.has(String(r.expediente_id))) return false;
+      if (r.fecha_pago_real) return false;
+      return true;
     });
     
     const primasCanceladasMesActual = recibosCanceladosMesActual.reduce((sum, r) => {
@@ -701,6 +736,8 @@ const DashboardComponent = () => {
     }, 0);
     
     const primasCanceladasTotal = primasCanceladasMesActual + primasCanceladasMesAnterior;
+    
+    console.log(`📊 Dashboard Cancelados: ${expedientesCanceladosMesActual.length} expedientes cancelados mes actual, ${recibosCanceladosMesActual.length} recibos cancelados mes actual`);
 
     
     // ==================== CONSTRUIR OBJETO DE ESTADÍSTICAS ====================

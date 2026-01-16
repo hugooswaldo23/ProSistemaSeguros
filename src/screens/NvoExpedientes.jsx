@@ -773,7 +773,30 @@ const ModuloNvoExpedientes = () => {
     }
   }, [pagoParaEliminar, expedienteParaEliminarPago, motivoEliminacion]);
 
-  // �📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
+  // ❌ Iniciar proceso de cancelación de póliza (con confirmación)
+  const iniciarCancelacion = useCallback((expediente) => {
+    const nombreCliente = expediente.nombre 
+      ? `${expediente.nombre} ${expediente.apellido_paterno || ''}`.trim()
+      : 'este expediente';
+    const numeroPoliza = expediente.numero_poliza || 'Sin número';
+    
+    const confirmado = window.confirm(
+      `⚠️ ¿Está seguro de CANCELAR la póliza?\n\n` +
+      `📋 Póliza: ${numeroPoliza}\n` +
+      `👤 Cliente: ${nombreCliente}\n\n` +
+      `Esta acción:\n` +
+      `• Cambiará el estado del expediente a "Cancelada"\n` +
+      `• Cancelará todos los recibos PENDIENTES\n` +
+      `• Los recibos YA PAGADOS se mantendrán\n\n` +
+      `¿Desea continuar?`
+    );
+    
+    if (confirmado) {
+      cambiarEstadoExpediente(expediente.id, 'Cancelada', 'Cancelación manual desde listado');
+    }
+  }, [cambiarEstadoExpediente]);
+
+  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
   // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
   // tipoEnvioInicial: 'poliza' (default) o 'pago' para preseleccionar
   const abrirModalCompartir = useCallback(async (expediente, tipoEnvioInicial = 'poliza') => {
@@ -2868,6 +2891,8 @@ const ModuloNvoExpedientes = () => {
           setVistaActual={setVistaActual}
           setModoEdicion={setModoEdicion}
           calcularProximoPago={calcularProximoPago}
+          // ❌ Función de cancelación
+          iniciarCancelacion={iniciarCancelacion}
           // 🔄 Funciones de renovación
           iniciarCotizacionRenovacion={iniciarCotizacionRenovacion}
           marcarRenovacionAutorizada={marcarRenovacionAutorizada}
