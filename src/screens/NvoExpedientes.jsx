@@ -1043,42 +1043,114 @@ const ModuloNvoExpedientes = () => {
       const fechaAviso = new Date(terminoVigencia);
       fechaAviso.setDate(fechaAviso.getDate() - 30);
       
-      // Actualizar expediente con nuevos datos
-      const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
+      // 🆕 CREAR NUEVO EXPEDIENTE para la renovación (en lugar de actualizar el anterior)
+      // Copiar datos del expediente anterior + nuevos datos de renovación
+      const nuevoExpediente = {
+        // Datos del cliente y bien asegurado (copiados)
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        compania: expedienteParaRenovacion.compania,
+        producto: expedienteParaRenovacion.producto,
+        plan: expedienteParaRenovacion.plan,
+        tipo_pago: expedienteParaRenovacion.tipo_pago,
+        frecuencia_pago: expedienteParaRenovacion.frecuencia_pago,
+        moneda: expedienteParaRenovacion.moneda,
+        forma_pago: expedienteParaRenovacion.forma_pago,
+        agente_id: expedienteParaRenovacion.agente_id,
+        clave_agente: expedienteParaRenovacion.clave_agente,
+        vendedor_id: expedienteParaRenovacion.vendedor_id,
+        // Datos del vehículo/bien asegurado
+        numero_serie: expedienteParaRenovacion.numero_serie,
+        placas: expedienteParaRenovacion.placas,
+        marca: expedienteParaRenovacion.marca,
+        submarca: expedienteParaRenovacion.submarca,
+        modelo: expedienteParaRenovacion.modelo,
+        version: expedienteParaRenovacion.version,
+        color: expedienteParaRenovacion.color,
+        uso: expedienteParaRenovacion.uso,
+        servicio: expedienteParaRenovacion.servicio,
+        // Coberturas
+        suma_asegurada: expedienteParaRenovacion.suma_asegurada,
+        deducible: expedienteParaRenovacion.deducible,
+        coberturas: expedienteParaRenovacion.coberturas,
+        
+        // 🆕 NUEVOS datos de la renovación
+        numero_poliza: datosRenovacion.numeroPolizaNueva,
+        endoso: '000', // Renovación inicia con endoso 000
+        prima_neta: parseFloat(datosRenovacion.primaNueva) || 0,
+        total: parseFloat(datosRenovacion.totalNuevo) || 0,
+        fecha_emision: datosRenovacion.fechaEmisionNueva,
+        inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
+        termino_vigencia: datosRenovacion.terminoVigenciaNueva,
+        fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
+        etapa_activa: 'Emitida', // Inicia ciclo nuevo
+        estatus_pago: 'Pendiente',
+        tipo_movimiento: 'RENOVACION',
+        
+        // 🔗 VÍNCULO con póliza anterior
+        renovacion_de: expedienteParaRenovacion.id,
+        observaciones: datosRenovacion.observaciones ? 
+          `Renovación de póliza ${expedienteParaRenovacion.numero_poliza}. ${datosRenovacion.observaciones}` :
+          `Renovación de póliza ${expedienteParaRenovacion.numero_poliza}`
+      };
+      
+      // 1️⃣ CREAR el nuevo expediente
+      const responseNuevo = await fetch(`${API_URL}/api/expedientes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nuevoExpediente)
+      });
+      
+      if (!responseNuevo.ok) {
+        const errorData = await responseNuevo.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al crear expediente de renovación');
+      }
+      
+      const nuevoExpedienteCreado = await responseNuevo.json();
+      console.log('✅ Nuevo expediente de renovación creado:', nuevoExpedienteCreado.id);
+      
+      // 2️⃣ ACTUALIZAR el expediente anterior a "Renovada"
+      const responseAnterior = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          numero_poliza: datosRenovacion.numeroPolizaNueva,
-          prima_pagada: parseFloat(datosRenovacion.primaNueva) || 0,
-          total: parseFloat(datosRenovacion.totalNuevo) || 0,
-          fecha_emision: datosRenovacion.fechaEmisionNueva,
-          inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
-          termino_vigencia: datosRenovacion.terminoVigenciaNueva,
-          fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
-          etapa_activa: 'Renovación Emitida',
-          tipo_movimiento: 'renovacion' // Marcar como renovación
+          etapa_activa: 'Renovada',
+          renovada_por: nuevoExpedienteCreado.id // Referencia bidireccional
         })
       });
       
-      if (!response.ok) throw new Error('Error al actualizar expediente');
+      if (!responseAnterior.ok) {
+        console.warn('⚠️ No se pudo actualizar etapa de póliza anterior');
+      }
       
-      // Registrar evento
+      // 3️⃣ Registrar evento en el expediente ANTERIOR
       await historialService.registrarEvento({
         expediente_id: expedienteParaRenovacion.id,
         cliente_id: expedienteParaRenovacion.cliente_id,
         tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_EMITIDA,
         usuario_nombre: 'Sistema',
-        descripcion: `Póliza renovada emitida - Nueva vigencia: ${datosRenovacion.inicioVigenciaNueva} a ${datosRenovacion.terminoVigenciaNueva}`,
+        descripcion: `Póliza renovada - Nueva póliza #${datosRenovacion.numeroPolizaNueva} creada`,
         datos_adicionales: {
-          numero_poliza: datosRenovacion.numeroPolizaNueva,
-          compania: expedienteParaRenovacion.compania,
-          prima_nueva: datosRenovacion.primaNueva,
-          total_nuevo: datosRenovacion.totalNuevo,
-          observaciones: datosRenovacion.observaciones
+          numero_poliza_anterior: expedienteParaRenovacion.numero_poliza,
+          numero_poliza_nueva: datosRenovacion.numeroPolizaNueva,
+          nuevo_expediente_id: nuevoExpedienteCreado.id
         }
       });
       
-      toast.success('Póliza renovada registrada exitosamente');
+      // 4️⃣ Registrar evento en el expediente NUEVO
+      await historialService.registrarEvento({
+        expediente_id: nuevoExpedienteCreado.id,
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.EXPEDIENTE_CREADO,
+        usuario_nombre: 'Sistema',
+        descripcion: `Póliza de renovación creada - Renueva póliza #${expedienteParaRenovacion.numero_poliza}`,
+        datos_adicionales: {
+          compania: expedienteParaRenovacion.compania,
+          renovacion_de: expedienteParaRenovacion.id,
+          vigencia: `${datosRenovacion.inicioVigenciaNueva} a ${datosRenovacion.terminoVigenciaNueva}`
+        }
+      });
+      
+      toast.success(`✅ Póliza renovada creada exitosamente - #${datosRenovacion.numeroPolizaNueva}`);
       await recargarExpedientes();
       
       // Cerrar modal
@@ -1095,7 +1167,7 @@ const ModuloNvoExpedientes = () => {
       });
     } catch (error) {
       console.error('Error al guardar póliza renovada:', error);
-      toast.error('Error al registrar póliza renovada');
+      toast.error('Error al registrar póliza renovada: ' + error.message);
     }
   }, [expedienteParaRenovacion, datosRenovacion]);
 
