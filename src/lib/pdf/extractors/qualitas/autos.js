@@ -74,14 +74,33 @@ export async function extraer(ctx) {
   let apellido_materno = '';
   let razonSocial = '';
   
-  const nombreMatch = textoQualitas.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
-  if (nombreMatch) {
-    const nombreCompleto = nombreMatch[1].trim();
+  // Para PERSONA MORAL: El regex debe capturar razones sociales con caracteres especiales
+  // como puntos, comas, ampersand (S.A., S. DE R.L., etc.)
+  // Para PERSONA FÍSICA: Solo capturar nombres (letras y espacios)
+  let nombreMatch = null;
+  
+  if (tipoPersona === 'Moral') {
+    // Regex para personas morales - captura todo hasta "Domicilio" incluyendo caracteres especiales
+    // Ejemplo: "JF MEDICAL DISTRIBUIDORA, S. DE R.L. DE C.V."
+    nombreMatch = textoQualitas.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s,\.&\-()]+?)(?=\s*Domicilio|\s*\n\s*Domicilio)/i);
     
-    if (tipoPersona === 'Moral') {
-      razonSocial = nombreCompleto;
+    if (nombreMatch) {
+      razonSocial = nombreMatch[1].trim();
       console.log('🏢 Razón Social (Persona Moral):', razonSocial);
     } else {
+      // Fallback: intentar capturar sin el lookahead estricto
+      const fallbackMatch = textoQualitas.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+(.+?)(?=\s+Domicilio|\s+R\.?F\.?C\.?)/i);
+      if (fallbackMatch) {
+        razonSocial = fallbackMatch[1].trim();
+        console.log('🏢 Razón Social (Persona Moral - fallback):', razonSocial);
+      }
+    }
+  } else {
+    // Regex para personas físicas - solo letras y espacios
+    nombreMatch = textoQualitas.match(/INFORMACI[OÓ]N\s+DEL\s+ASEGURADO\s+([A-ZÁÉÍÓÚÑ]+(?:\s+[A-ZÁÉÍÓÚÑ]+){1,10})(?=\s*Domicilio|\s*\n)/i);
+    
+    if (nombreMatch) {
+      const nombreCompleto = nombreMatch[1].trim();
       const palabras = nombreCompleto.split(/\s+/);
       
       if (palabras.length === 4) {
