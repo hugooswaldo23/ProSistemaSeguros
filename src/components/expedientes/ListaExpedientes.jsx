@@ -615,10 +615,16 @@ const ListaExpedientes = React.memo(({
                              (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
                              expediente.inicio_vigencia && (
                               (() => {
+                                // 🔢 Calcular el total CORRECTO según la frecuencia (no usar recibos.length que puede ser incorrecto)
+                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+                                const numeroPagosSegunFrecuencia = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                
                                 // 🎯 PRIORIDAD: Consultar directamente los recibos si están disponibles
                                 if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-                                  const recibosTotal = expediente.recibos.length;
-                                  const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
+                                  // Usar el número correcto de pagos según frecuencia, no recibos.length
+                                  const recibosTotal = numeroPagosSegunFrecuencia || expediente.recibos.length;
+                                  // Solo contar recibos pagados que sean válidos (dentro del rango de la frecuencia)
+                                  const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real && r.numero_recibo <= recibosTotal).length;
                                   
                                   let estatusDisplay = 'Pagado';
                                   let colorClass = 'text-success fw-bold';
@@ -626,9 +632,9 @@ const ListaExpedientes = React.memo(({
                                   
                                   // Si no todos están pagados, encontrar el primer recibo pendiente
                                   if (recibosPagados < recibosTotal) {
-                                    // Buscar el primer recibo sin pago (ordenados por número)
+                                    // Buscar el primer recibo sin pago (ordenados por número) - solo recibos válidos
                                     const primerReciboPendiente = expediente.recibos
-                                      .filter(r => !r.fecha_pago_real)
+                                      .filter(r => !r.fecha_pago_real && r.numero_recibo <= recibosTotal)
                                       .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
                                     
                                     if (primerReciboPendiente) {
@@ -665,8 +671,8 @@ const ListaExpedientes = React.memo(({
                                 }
                                 
                                 // FALLBACK: Usar campos del expediente si no hay recibos
-                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-                                const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
+                                // Nota: frecuencia y numeroPagosSegunFrecuencia ya están definidos arriba
+                                const numeroPagos = numeroPagosSegunFrecuencia || 0;
                                 const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
                                 const estatusPago = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase();
                                 
