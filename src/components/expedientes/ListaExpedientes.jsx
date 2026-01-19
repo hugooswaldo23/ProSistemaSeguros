@@ -108,18 +108,32 @@ const ListaExpedientes = React.memo(({
         // TODO: Implementar reglas para Renovadas
         return expedientes.filter(exp => exp.etapa_activa === 'Renovada');
       
-      case 'por_renovar':
-        // 🔄 Pólizas próximas a vencer (30 días antes del término de vigencia)
-        // O que ya tienen fecha_aviso_renovacion y esa fecha ya pasó
+      case 'en_proceso_renovacion':
+        // 🔄 Pólizas con proceso de renovación YA iniciado
+        // Etapas: "En Cotización - Renovación", "Renovación Enviada", "Pendiente de Emisión - Renovación"
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
           
-          // Si ya tiene etapa "Por Renovar" o similar, incluirla
-          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-              exp.etapa_activa?.toLowerCase().includes('renovación')) {
-            return true;
-          }
+          const etapa = (exp.etapa_activa || '').toLowerCase();
+          // Incluir si tiene etapa de proceso de renovación activo
+          return etapa.includes('cotización') && etapa.includes('renovación') ||
+                 etapa.includes('renovación enviada') ||
+                 etapa.includes('pendiente') && etapa.includes('renovación');
+        });
+      
+      case 'por_renovar':
+        // 🔄 Pólizas próximas a vencer que AÚN NO han iniciado proceso de renovación
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Renovada') return false;
+          
+          const etapa = (exp.etapa_activa || '').toLowerCase();
+          
+          // EXCLUIR si ya está en proceso de renovación (cotización, enviada, pendiente emisión)
+          if (etapa.includes('cotización') && etapa.includes('renovación')) return false;
+          if (etapa.includes('renovación enviada')) return false;
+          if (etapa.includes('pendiente') && etapa.includes('renovación')) return false;
           
           // Verificar por fecha_aviso_renovacion
           if (exp.fecha_aviso_renovacion) {
@@ -140,6 +154,9 @@ const ListaExpedientes = React.memo(({
             // Mostrar si faltan 30 días o menos Y la vigencia no ha terminado
             if (diasRestantes <= 30 && diasRestantes >= 0) return true;
           }
+          
+          // También incluir si tiene etapa "Por Renovar" explícita
+          if (etapa === 'por renovar') return true;
           
           return false;
         });
@@ -215,16 +232,28 @@ const ListaExpedientes = React.memo(({
       
       renovadas: expedientes.filter(exp => exp.etapa_activa === 'Renovada').length,
       
-      // 🔄 Pólizas próximas a vencer (30 días antes) o con aviso de renovación
+      // 🔄 Pólizas con proceso de renovación YA iniciado
+      en_proceso_renovacion: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        
+        const etapa = (exp.etapa_activa || '').toLowerCase();
+        return etapa.includes('cotización') && etapa.includes('renovación') ||
+               etapa.includes('renovación enviada') ||
+               etapa.includes('pendiente') && etapa.includes('renovación');
+      }).length,
+      
+      // 🔄 Pólizas próximas a vencer que AÚN NO han iniciado proceso
       por_renovar: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
         
-        // Si ya tiene etapa "Por Renovar" o similar
-        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-            exp.etapa_activa?.toLowerCase().includes('renovación')) {
-          return true;
-        }
+        const etapa = (exp.etapa_activa || '').toLowerCase();
+        
+        // EXCLUIR si ya está en proceso de renovación
+        if (etapa.includes('cotización') && etapa.includes('renovación')) return false;
+        if (etapa.includes('renovación enviada')) return false;
+        if (etapa.includes('pendiente') && etapa.includes('renovación')) return false;
         
         // Verificar por fecha_aviso_renovacion
         if (exp.fecha_aviso_renovacion) {
@@ -389,6 +418,18 @@ const ListaExpedientes = React.memo(({
             <div className="d-flex justify-content-between align-items-center">
               <span>⏰ Por Renovar</span>
               <span className={`badge ${carpetaSeleccionada === 'por_renovar' ? 'bg-white text-warning' : 'bg-warning text-white'}`}>{contadores.por_renovar}</span>
+            </div>
+          </button>
+        </div>
+        <div className="col-6 col-md-4 col-lg-3">
+          <button
+            className={`btn btn-sm w-100 ${carpetaSeleccionada === 'en_proceso_renovacion' ? 'btn-orange text-white' : 'btn-outline-warning'}`}
+            onClick={() => setCarpetaSeleccionada('en_proceso_renovacion')}
+            style={carpetaSeleccionada === 'en_proceso_renovacion' ? { backgroundColor: '#fd7e14', borderColor: '#fd7e14' } : { borderColor: '#fd7e14', color: '#fd7e14' }}
+          >
+            <div className="d-flex justify-content-between align-items-center">
+              <span>📋 En Proceso Renov.</span>
+              <span className={`badge ${carpetaSeleccionada === 'en_proceso_renovacion' ? 'bg-white text-dark' : 'text-white'}`} style={carpetaSeleccionada !== 'en_proceso_renovacion' ? { backgroundColor: '#fd7e14' } : {}}>{contadores.en_proceso_renovacion}</span>
             </div>
           </button>
         </div>
