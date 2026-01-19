@@ -65,13 +65,43 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'vigentes':
-        // Pólizas pagadas (total o parcialmente)
+        // Pólizas pagadas que NO están próximas a vencer (más de 30 días)
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Renovada') return false;
+          
+          // Si ya tiene etapa de renovación, no mostrar en vigentes
+          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+              exp.etapa_activa?.toLowerCase().includes('renovación')) {
+            return false;
+          }
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          const estaPagado = estatusPago === 'pagado' || estatusPago === 'pagada';
           
-          return estatusPago === 'pagado' || estatusPago === 'pagada';
+          if (!estaPagado) return false;
+          
+          // Verificar que NO esté próxima a vencer (más de 30 días restantes)
+          if (exp.termino_vigencia) {
+            const fechaTermino = new Date(exp.termino_vigencia);
+            const hoy = new Date();
+            fechaTermino.setHours(0, 0, 0, 0);
+            hoy.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.ceil((fechaTermino - hoy) / (1000 * 60 * 60 * 24));
+            // Solo mostrar si faltan MÁS de 30 días
+            if (diasRestantes <= 30) return false;
+          }
+          
+          // Verificar por fecha_aviso_renovacion
+          if (exp.fecha_aviso_renovacion) {
+            const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+            const hoy = new Date();
+            fechaAviso.setHours(0, 0, 0, 0);
+            hoy.setHours(0, 0, 0, 0);
+            if (fechaAviso <= hoy) return false;
+          }
+          
+          return true;
         });
       
       case 'renovadas':
@@ -79,8 +109,40 @@ const ListaExpedientes = React.memo(({
         return expedientes.filter(exp => exp.etapa_activa === 'Renovada');
       
       case 'por_renovar':
-        // TODO: Implementar reglas para Por Renovar
-        return expedientes.filter(exp => exp.etapa_activa !== 'Cancelada');
+        // 🔄 Pólizas próximas a vencer (30 días antes del término de vigencia)
+        // O que ya tienen fecha_aviso_renovacion y esa fecha ya pasó
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          if (exp.etapa_activa === 'Renovada') return false;
+          
+          // Si ya tiene etapa "Por Renovar" o similar, incluirla
+          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+              exp.etapa_activa?.toLowerCase().includes('renovación')) {
+            return true;
+          }
+          
+          // Verificar por fecha_aviso_renovacion
+          if (exp.fecha_aviso_renovacion) {
+            const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+            const hoy = new Date();
+            fechaAviso.setHours(0, 0, 0, 0);
+            hoy.setHours(0, 0, 0, 0);
+            if (fechaAviso <= hoy) return true;
+          }
+          
+          // Verificar por término de vigencia (30 días antes)
+          if (exp.termino_vigencia) {
+            const fechaTermino = new Date(exp.termino_vigencia);
+            const hoy = new Date();
+            fechaTermino.setHours(0, 0, 0, 0);
+            hoy.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.ceil((fechaTermino - hoy) / (1000 * 60 * 60 * 24));
+            // Mostrar si faltan 30 días o menos Y la vigencia no ha terminado
+            if (diasRestantes <= 30 && diasRestantes >= 0) return true;
+          }
+          
+          return false;
+        });
       
       case 'vencidas':
         // Pólizas con estatus "Vencido"
@@ -113,15 +175,78 @@ const ListaExpedientes = React.memo(({
         return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
       }).length,
       
-      // Pólizas pagadas (total o parcialmente)
+      // Pólizas pagadas que NO están próximas a vencer (más de 30 días)
       vigentes: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        
+        // Si ya tiene etapa de renovación, no contar en vigentes
+        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+            exp.etapa_activa?.toLowerCase().includes('renovación')) {
+          return false;
+        }
+        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        return estatusPago === 'pagado' || estatusPago === 'pagada';
+        const estaPagado = estatusPago === 'pagado' || estatusPago === 'pagada';
+        
+        if (!estaPagado) return false;
+        
+        // Verificar que NO esté próxima a vencer (más de 30 días restantes)
+        if (exp.termino_vigencia) {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          const hoy = new Date();
+          fechaTermino.setHours(0, 0, 0, 0);
+          hoy.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.ceil((fechaTermino - hoy) / (1000 * 60 * 60 * 24));
+          if (diasRestantes <= 30) return false;
+        }
+        
+        // Verificar por fecha_aviso_renovacion
+        if (exp.fecha_aviso_renovacion) {
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          const hoy = new Date();
+          fechaAviso.setHours(0, 0, 0, 0);
+          hoy.setHours(0, 0, 0, 0);
+          if (fechaAviso <= hoy) return false;
+        }
+        
+        return true;
       }).length,
       
       renovadas: expedientes.filter(exp => exp.etapa_activa === 'Renovada').length,
-      por_renovar: 0, // TODO: Implementar contador
+      
+      // 🔄 Pólizas próximas a vencer (30 días antes) o con aviso de renovación
+      por_renovar: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        if (exp.etapa_activa === 'Renovada') return false;
+        
+        // Si ya tiene etapa "Por Renovar" o similar
+        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+            exp.etapa_activa?.toLowerCase().includes('renovación')) {
+          return true;
+        }
+        
+        // Verificar por fecha_aviso_renovacion
+        if (exp.fecha_aviso_renovacion) {
+          const fechaAviso = new Date(exp.fecha_aviso_renovacion);
+          const hoy = new Date();
+          fechaAviso.setHours(0, 0, 0, 0);
+          hoy.setHours(0, 0, 0, 0);
+          if (fechaAviso <= hoy) return true;
+        }
+        
+        // Verificar por término de vigencia (30 días antes)
+        if (exp.termino_vigencia) {
+          const fechaTermino = new Date(exp.termino_vigencia);
+          const hoy = new Date();
+          fechaTermino.setHours(0, 0, 0, 0);
+          hoy.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.ceil((fechaTermino - hoy) / (1000 * 60 * 60 * 24));
+          if (diasRestantes <= 30 && diasRestantes >= 0) return true;
+        }
+        
+        return false;
+      }).length,
       
       // Pólizas con estatus "Vencido"
       vencidas: expedientes.filter(exp => {
