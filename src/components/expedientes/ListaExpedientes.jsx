@@ -43,10 +43,12 @@ const ListaExpedientes = React.memo(({
   calcularProximoPago,
   clientesMap,
   abrirModalCompartir,
-  // 🔄 Funciones de renovación
-  iniciarCotizacionRenovacion,
-  marcarRenovacionAutorizada,
-  abrirModalPolizaRenovada
+  // 🔄 Funciones de renovación (Flujo 1: Cotización)
+  iniciarRenovacion,           // Abre modal con opciones (Cotización o Póliza)
+  cargarCotizacion,            // 🆕 Cargar archivo de cotización
+  enviarCotizacionCliente,     // Cotización Lista → Cotización Enviada
+  marcarRenovacionAutorizada,  // Cotización Enviada → Por Emitir
+  abrirModalPolizaRenovada     // Por Emitir → Crear nuevo expediente
 }) => {
   // Estado para carpeta/categoría seleccionada
   const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
@@ -110,16 +112,17 @@ const ListaExpedientes = React.memo(({
       
       case 'en_proceso_renovacion':
         // 🔄 Pólizas con proceso de renovación YA iniciado
-        // Etapas: "En Cotización - Renovación", "Renovación Enviada", "Pendiente de Emisión - Renovación"
+        // FLUJO: En Cotización → Cotización Lista → Cotización Enviada → Por Emitir
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
           
-          const etapa = (exp.etapa_activa || '').toLowerCase();
+          const etapa = exp.etapa_activa || '';
           // Incluir si tiene etapa de proceso de renovación activo
-          return etapa.includes('cotización') && etapa.includes('renovación') ||
-                 etapa.includes('renovación enviada') ||
-                 etapa.includes('pendiente') && etapa.includes('renovación');
+          return etapa === 'En Cotización - Renovación' ||
+                 etapa === 'Cotización Lista' ||
+                 etapa === 'Cotización Enviada' ||
+                 etapa === 'Por Emitir - Renovación';
         });
       
       case 'por_renovar':
@@ -128,12 +131,13 @@ const ListaExpedientes = React.memo(({
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
           
-          const etapa = (exp.etapa_activa || '').toLowerCase();
+          const etapa = exp.etapa_activa || '';
           
-          // EXCLUIR si ya está en proceso de renovación (cotización, enviada, pendiente emisión)
-          if (etapa.includes('cotización') && etapa.includes('renovación')) return false;
-          if (etapa.includes('renovación enviada')) return false;
-          if (etapa.includes('pendiente') && etapa.includes('renovación')) return false;
+          // EXCLUIR si ya está en proceso de renovación (FLUJO 1)
+          if (etapa === 'En Cotización - Renovación') return false;
+          if (etapa === 'Cotización Lista') return false;
+          if (etapa === 'Cotización Enviada') return false;
+          if (etapa === 'Por Emitir - Renovación') return false;
           
           // Verificar por fecha_aviso_renovacion
           if (exp.fecha_aviso_renovacion) {
@@ -156,7 +160,7 @@ const ListaExpedientes = React.memo(({
           }
           
           // También incluir si tiene etapa "Por Renovar" explícita
-          if (etapa === 'por renovar') return true;
+          if (etapa === 'Por Renovar') return true;
           
           return false;
         });
@@ -232,15 +236,16 @@ const ListaExpedientes = React.memo(({
       
       renovadas: expedientes.filter(exp => exp.etapa_activa === 'Renovada').length,
       
-      // 🔄 Pólizas con proceso de renovación YA iniciado
+      // 🔄 Pólizas con proceso de renovación YA iniciado (FLUJO 1)
       en_proceso_renovacion: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
         
-        const etapa = (exp.etapa_activa || '').toLowerCase();
-        return etapa.includes('cotización') && etapa.includes('renovación') ||
-               etapa.includes('renovación enviada') ||
-               etapa.includes('pendiente') && etapa.includes('renovación');
+        const etapa = exp.etapa_activa || '';
+        return etapa === 'En Cotización - Renovación' ||
+               etapa === 'Cotización Lista' ||
+               etapa === 'Cotización Enviada' ||
+               etapa === 'Por Emitir - Renovación';
       }).length,
       
       // 🔄 Pólizas próximas a vencer que AÚN NO han iniciado proceso
@@ -248,12 +253,13 @@ const ListaExpedientes = React.memo(({
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
         
-        const etapa = (exp.etapa_activa || '').toLowerCase();
+        const etapa = exp.etapa_activa || '';
         
-        // EXCLUIR si ya está en proceso de renovación
-        if (etapa.includes('cotización') && etapa.includes('renovación')) return false;
-        if (etapa.includes('renovación enviada')) return false;
-        if (etapa.includes('pendiente') && etapa.includes('renovación')) return false;
+        // EXCLUIR si ya está en proceso de renovación (FLUJO 1)
+        if (etapa === 'En Cotización - Renovación') return false;
+        if (etapa === 'Cotización Lista') return false;
+        if (etapa === 'Cotización Enviada') return false;
+        if (etapa === 'Por Emitir - Renovación') return false;
         
         // Verificar por fecha_aviso_renovacion
         if (exp.fecha_aviso_renovacion) {
@@ -273,6 +279,9 @@ const ListaExpedientes = React.memo(({
           const diasRestantes = Math.ceil((fechaTermino - hoy) / (1000 * 60 * 60 * 24));
           if (diasRestantes <= 30 && diasRestantes >= 0) return true;
         }
+        
+        // También incluir si tiene etapa "Por Renovar" explícita
+        if (etapa === 'Por Renovar') return true;
         
         return false;
       }).length,
@@ -924,73 +933,119 @@ const ListaExpedientes = React.memo(({
                         </td>
                         <td>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', maxWidth: '120px' }}>
-                            {/* === BOTONES DE RENOVACIÓN === */}
+                            {/* === BOTÓN INICIAR RENOVACIÓN (carpeta Por Renovar) === */}
                             {(() => {
-                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
+                              // Solo mostrar en carpeta "por_renovar"
+                              if (carpetaSeleccionada !== 'por_renovar') return null;
                               
-                              if (!estaPorRenovar) return null;
+                              const etapaActual = (expediente.etapa_activa || '').toLowerCase();
+                              
+                              // No mostrar si ya inició proceso de renovación
+                              if (etapaActual.includes('cotización') || 
+                                  etapaActual.includes('enviada') || 
+                                  etapaActual.includes('pendiente de emisión')) {
+                                return null;
+                              }
+                              
+                              return (
+                                <button
+                                  onClick={() => iniciarRenovacion(expediente)}
+                                  className="btn btn-warning btn-sm"
+                                  style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                  title="Iniciar Renovación"
+                                >
+                                  <RefreshCw size={12} />
+                                </button>
+                              );
+                            })()}
+                            
+                            {/* === BOTONES FLUJO DE RENOVACIÓN (carpeta En Proceso Renovación) === */}
+                            {(() => {
+                              // Solo mostrar en carpeta "en_proceso_renovacion"
+                              if (carpetaSeleccionada !== 'en_proceso_renovacion') return null;
                               
                               const etapaActual = expediente.etapa_activa || '';
                               
-                              // Puede iniciar cotización si está en Por Renovar o Vencida y NO está en ninguna etapa del flujo de renovación
-                              const puedeIniciarCotizacion = (etapaActual === 'Por Renovar' || etapaActual === 'Vencida') &&
-                                                              !etapaActual.includes('Cotización') && 
-                                                              !etapaActual.includes('Enviada') &&
-                                                              !etapaActual.includes('Pendiente de Emisión');
+                              // FLUJO: En Cotización → Cotización Lista → Cotización Enviada → Por Emitir → Cargar Póliza
+                              // NOTA: Puede cargar N cotizaciones y compartir N veces durante el proceso
                               
-                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
-                                                             etapaActual === 'Renovación Enviada';
+                              // 1. Botón CARGAR COTIZACIÓN: Disponible en todas las etapas del proceso (puede cargar N cotizaciones)
+                              const puedeCargarCotizacion = ['En Cotización - Renovación', 'Cotización Lista', 'Cotización Enviada'].includes(etapaActual);
                               
-                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
+                              // 2. Botón COMPARTIR: Disponible en "Cotización Lista" y "Cotización Enviada"
+                              //    - En "Cotización Lista": cambia etapa a "Cotización Enviada"
+                              //    - En "Cotización Enviada": puede compartir N veces sin cambiar etapa
+                              const puedeCompartir = etapaActual === 'Cotización Lista' || etapaActual === 'Cotización Enviada';
+                              
+                              // 3. Botón AUTORIZAR: "Cotización Enviada" → "Por Emitir - Renovación"
+                              const puedeAutorizar = etapaActual === 'Cotización Enviada';
+                              
+                              // 4. Botón CARGAR PÓLIZA: "Por Emitir - Renovación" → Crear nuevo expediente
+                              const puedeCargarPoliza = etapaActual === 'Por Emitir - Renovación';
                               
                               return (
                                 <>
-                                  {puedeIniciarCotizacion && (
+                                  {puedeCargarCotizacion && (
                                     <button
-                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
+                                      onClick={() => cargarCotizacion(expediente)}
                                       className="btn btn-primary btn-sm"
                                       style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Cotizar Renovación"
+                                      title="Cargar Cotización"
                                     >
                                       <FileText size={12} />
                                     </button>
                                   )}
                                   
-                                  {puedeMarcarAutorizado && (
+                                  {puedeCompartir && (
+                                    <button
+                                      onClick={() => enviarCotizacionCliente(expediente)}
+                                      className="btn btn-info btn-sm"
+                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                      title="Compartir Cotización (WhatsApp/Email)"
+                                    >
+                                      <Share2 size={12} />
+                                    </button>
+                                  )}
+                                  
+                                  {puedeAutorizar && (
                                     <button
                                       onClick={() => marcarRenovacionAutorizada(expediente)}
                                       className="btn btn-success btn-sm"
                                       style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Marcar como Autorizado"
+                                      title="Cliente Autoriza"
                                     >
                                       <CheckCircle size={12} />
                                     </button>
                                   )}
                                   
-                                  {puedeAgregarRenovada && (
+                                  {puedeCargarPoliza && (
                                     <button
                                       onClick={() => abrirModalPolizaRenovada(expediente)}
-                                      className="btn btn-info btn-sm"
+                                      className="btn btn-warning btn-sm"
                                       style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Agregar Póliza Renovada"
+                                      title="Cargar Póliza Renovada"
                                     >
-                                      <RefreshCw size={12} />
+                                      <Upload size={12} />
                                     </button>
                                   )}
                                 </>
                               );
                             })()}
 
-                            <button
-                              onClick={() => abrirModalCompartir(expediente)}
-                              className="btn btn-success btn-sm"
-                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                              title="Compartir"
-                            >
-                              <Share2 size={12} />
-                            </button>
+                            {/* Botón Compartir - Ocultar en Por Renovar y En Proceso Renovación */}
+                            {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (
+                              <button
+                                onClick={() => abrirModalCompartir(expediente)}
+                                className="btn btn-success btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Compartir"
+                              >
+                                <Share2 size={12} />
+                              </button>
+                            )}
 
-                            {(() => {
+                            {/* Botón Pago - Ocultar en Por Renovar y En Proceso Renovación */}
+                            {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (() => {
                               // ✅ El botón de pago debe estar disponible independientemente de la etapa
                               // Solo se oculta si ya está pagado o si la póliza está cancelada
                               const etapaValida = expediente.etapa_activa !== 'Cancelada';
@@ -1030,67 +1085,9 @@ const ListaExpedientes = React.memo(({
                                 </button>
                               ) : null;
                             })()}
-
-                            {/* === BOTONES DE RENOVACIÓN === */}
-                            {/* Mostrar botones solo en carpetas Por Renovar o Vencidas */}
-                            {(() => {
-                              const estaPorRenovar = carpetaSeleccionada === 'por_renovar' || carpetaSeleccionada === 'vencidas';
-                              
-                              if (!estaPorRenovar) return null;
-                              
-                              const etapaActual = expediente.etapa_activa || '';
-                              
-                              // 1. Botón COTIZAR - Solo si está en etapa inicial (no ha iniciado proceso)
-                              const puedeIniciarCotizacion = !etapaActual.includes('Cotización') && 
-                                                              !etapaActual.includes('Renovación') &&
-                                                              !etapaActual.includes('Pendiente de Emisión');
-                              
-                              // 2. Botón AUTORIZAR - Solo si está en "En Cotización" o "Renovación Enviada"
-                              const puedeMarcarAutorizado = etapaActual === 'En Cotización - Renovación' || 
-                                                             etapaActual === 'Renovación Enviada';
-                              
-                              // 3. Botón AGREGAR RENOVADA - Solo si está en "Pendiente de Emisión"
-                              const puedeAgregarRenovada = etapaActual === 'Pendiente de Emisión - Renovación';
-                              
-                              return (
-                                <>
-                                  {puedeIniciarCotizacion && (
-                                    <button
-                                      onClick={() => iniciarCotizacionRenovacion(expediente)}
-                                      className="btn btn-warning btn-sm me-1"
-                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Cotizar Renovación"
-                                    >
-                                      <FileText size={12} />
-                                    </button>
-                                  )}
-                                  
-                                  {puedeMarcarAutorizado && (
-                                    <button
-                                      onClick={() => marcarRenovacionAutorizada(expediente)}
-                                      className="btn btn-success btn-sm me-1"
-                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Marcar como Autorizado"
-                                    >
-                                      ✓
-                                    </button>
-                                  )}
-                                  
-                                  {puedeAgregarRenovada && (
-                                    <button
-                                      onClick={() => abrirModalPolizaRenovada(expediente)}
-                                      className="btn btn-info btn-sm me-1"
-                                      style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                                      title="Agregar Póliza Renovada"
-                                    >
-                                      <RefreshCw size={12} />
-                                    </button>
-                                  )}
-                                </>
-                              );
-                            })()}
                             
-                            {expediente.etapa_activa !== 'Cancelada' && (
+                            {/* Botón Cancelar - Ocultar en Por Renovar y En Proceso Renovación */}
+                            {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && expediente.etapa_activa !== 'Cancelada' && (
                               <button
                                 onClick={() => iniciarCancelacion(expediente)}
                                 className="btn btn-danger btn-sm"
@@ -1110,15 +1107,19 @@ const ListaExpedientes = React.memo(({
                               <Eye size={12} />
                             </button>
                             
-                            <button
-                              onClick={() => editarExpediente(expediente)}
-                              className="btn btn-outline-secondary btn-sm"
-                              style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
-                              title="Editar"
-                            >
-                              <Edit size={12} />
-                            </button>
+                            {/* Botón Editar - Ocultar en Por Renovar y En Proceso Renovación */}
+                            {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (
+                              <button
+                                onClick={() => editarExpediente(expediente)}
+                                className="btn btn-outline-secondary btn-sm"
+                                style={{ padding: '0.15rem 0.4rem', fontSize: '0.75rem' }}
+                                title="Editar"
+                              >
+                                <Edit size={12} />
+                              </button>
+                            )}
                             
+                            {/* Botón Eliminar - Siempre visible para pruebas */}
                             <button
                               onClick={() => eliminarExpediente(expediente.id)}
                               className="btn btn-outline-danger btn-sm"

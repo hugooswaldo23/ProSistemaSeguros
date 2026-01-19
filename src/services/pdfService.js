@@ -164,3 +164,123 @@ export function formatearTamañoArchivo(bytes) {
 
   return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
 }
+
+/**
+ * Subir PDF de cotización al servidor (S3)
+ * @param {number} expedienteId - ID del expediente
+ * @param {File} file - Archivo PDF a subir
+ * @returns {Promise<Object>} Datos del PDF subido { url, filename, uploadedAt }
+ */
+export async function subirCotizacionPDF(expedienteId, file) {
+  try {
+    console.log('📤 Iniciando subida de cotización...', {
+      expedienteId,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
+    // Validar que sea un PDF
+    if (file.type !== 'application/pdf') {
+      throw new Error('El archivo debe ser un PDF');
+    }
+
+    // Validar tamaño (10MB máximo)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new Error('El archivo no debe superar los 10MB');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('tipo', 'cotizacion');
+
+    const url = `${API_URL}/api/expedientes/${expedienteId}/documentos`;
+    console.log('📍 URL del endpoint:', url);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData
+    });
+
+    console.log('📨 Respuesta del servidor:', {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Error del servidor:', errorText);
+      let errorMessage = 'Error al subir la cotización';
+      
+      try {
+        const error = JSON.parse(errorText);
+        errorMessage = error.message || errorMessage;
+      } catch (e) {
+        errorMessage = errorText || errorMessage;
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log('✅ Cotización subida exitosamente:', data);
+    return data.data;
+  } catch (error) {
+    console.error('❌ Error en subirCotizacionPDF:', error);
+    throw error;
+  }
+}
+
+/**
+ * Obtener cotizaciones de un expediente
+ * @param {number} expedienteId - ID del expediente
+ * @returns {Promise<Array>} Lista de cotizaciones [{ id, url, filename, uploadedAt }]
+ */
+export async function obtenerCotizaciones(expedienteId) {
+  try {
+    const response = await fetch(
+      `${API_URL}/api/expedientes/${expedienteId}/documentos?tipo=cotizacion`,
+      { method: 'GET' }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener cotizaciones');
+    }
+
+    const data = await response.json();
+    return data.data || [];
+  } catch (error) {
+    console.error('Error en obtenerCotizaciones:', error);
+    return [];
+  }
+}
+
+/**
+ * Obtener URL firmada de una cotización
+ * @param {number} expedienteId - ID del expediente
+ * @param {number} documentoId - ID del documento de cotización
+ * @param {number} expiration - Tiempo de expiración en segundos (default: 3600)
+ * @returns {Promise<Object>} URL firmada { url, expiresAt }
+ */
+export async function obtenerURLCotizacion(expedienteId, documentoId, expiration = 3600) {
+  try {
+    const response = await fetch(
+      `${API_URL}/api/expedientes/${expedienteId}/documentos/${documentoId}/url?expiration=${expiration}`,
+      { method: 'GET' }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener URL de cotización');
+    }
+
+    const data = await response.json();
+    return data.data;
+  } catch (error) {
+    console.error('Error en obtenerURLCotizacion:', error);
+    throw error;
+  }
+}

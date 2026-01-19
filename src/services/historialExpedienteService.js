@@ -289,7 +289,12 @@ export const registrarEvento = async (datos) => {
 export const obtenerUsuarioActual = () => {
   try {
     const raw = localStorage.getItem('usuarioActual');
-    if (!raw) return { id: null, nombre: 'Sistema' };
+    if (!raw) {
+      // Fallback a usuario_nombre si existe
+      const nombreSimple = localStorage.getItem('usuario_nombre');
+      if (nombreSimple) return { id: null, nombre: nombreSimple };
+      return { id: null, nombre: 'Sistema' };
+    }
     const parsed = JSON.parse(raw);
     return {
       id: parsed.id || null,
@@ -298,6 +303,189 @@ export const obtenerUsuarioActual = () => {
   } catch (_) {
     return { id: null, nombre: 'Sistema' };
   }
+};
+
+/**
+ * ====================================================================
+ * HELPERS PARA DESCRIPCIONES ENRIQUECIDAS DE RENOVACIÓN
+ * ====================================================================
+ */
+
+/**
+ * Formatear fecha a formato legible en español
+ */
+const formatearFecha = (fecha) => {
+  if (!fecha) return null;
+  try {
+    return new Date(fecha).toLocaleDateString('es-MX', {
+      day: '2-digit',
+      month: '2-digit', 
+      year: 'numeric'
+    });
+  } catch (_) {
+    return fecha;
+  }
+};
+
+/**
+ * Obtener texto de vigencia formateada
+ */
+const obtenerVigenciaTexto = (inicioVigencia, terminoVigencia) => {
+  const inicio = formatearFecha(inicioVigencia);
+  const termino = formatearFecha(terminoVigencia);
+  if (inicio && termino) {
+    return `${inicio} al ${termino}`;
+  }
+  return 'No especificada';
+};
+
+/**
+ * Registrar evento de Cotización de Renovación Iniciada (enriquecido)
+ */
+export const registrarCotizacionRenovacionIniciada = async (expediente) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Iniciado proceso de cotización para renovación`,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      compania: expediente.compania,
+      vigencia_anterior: vigencia,
+      cliente_nombre: expediente.nombre || expediente.razon_social || null
+    }
+  });
+};
+
+/**
+ * Registrar evento de Cotización Cargada (enriquecido)
+ * @param {Object} expediente - Expediente
+ * @param {string} nombreArchivo - Nombre del archivo
+ * @param {string|null} urlCotizacion - URL de la cotización en S3 (opcional)
+ */
+export const registrarCotizacionCargada = async (expediente, nombreArchivo, urlCotizacion = null) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: 'COTIZACION_CARGADA',
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Cotización cargada para renovación de póliza ${expediente.numero_poliza || 'S/N'} de ${expediente.compania || 'Sin aseguradora'}. Archivo: ${nombreArchivo}`,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      compania: expediente.compania,
+      archivo: nombreArchivo,
+      url_cotizacion: urlCotizacion,
+      vigencia_anterior: vigencia
+    }
+  });
+};
+
+/**
+ * Registrar evento de Cotización Enviada al Cliente (enriquecido)
+ */
+export const registrarCotizacionEnviadaCliente = async (expediente) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: TIPOS_EVENTO.COTIZACION_ENVIADA,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Cotización de renovación enviada al cliente para póliza ${expediente.numero_poliza || 'S/N'} de ${expediente.compania || 'Sin aseguradora'}. Vigencia actual: ${vigencia}`,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      compania: expediente.compania,
+      vigencia_anterior: vigencia,
+      cliente_nombre: expediente.nombre || expediente.razon_social || 'Sin nombre'
+    }
+  });
+};
+
+/**
+ * Registrar evento de Renovación Autorizada por Cliente (enriquecido)
+ */
+export const registrarRenovacionAutorizada = async (expediente) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Cliente autorizó renovación de póliza ${expediente.numero_poliza || 'S/N'} de ${expediente.compania || 'Sin aseguradora'}. Vigencia a renovar: ${vigencia}. Pendiente emisión de nueva póliza.`,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      compania: expediente.compania,
+      vigencia_anterior: vigencia,
+      cliente_nombre: expediente.nombre || expediente.razon_social || 'Sin nombre'
+    }
+  });
+};
+
+/**
+ * Registrar evento de Renovación Emitida en expediente anterior (enriquecido)
+ */
+export const registrarRenovacionEmitidaAnterior = async (expedienteAnterior, datosNuevos, nuevoExpedienteId) => {
+  const vigenciaAnterior = obtenerVigenciaTexto(expedienteAnterior.inicio_vigencia, expedienteAnterior.termino_vigencia);
+  const vigenciaNueva = obtenerVigenciaTexto(datosNuevos.inicioVigenciaNueva, datosNuevos.terminoVigenciaNueva);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: expedienteAnterior.id,
+    cliente_id: expedienteAnterior.cliente_id,
+    tipo_evento: TIPOS_EVENTO.RENOVACION_EMITIDA,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Póliza renovada exitosamente. Póliza anterior: ${expedienteAnterior.numero_poliza || 'S/N'} (vigencia: ${vigenciaAnterior}). Nueva póliza: #${datosNuevos.numeroPolizaNueva} de ${expedienteAnterior.compania || 'Sin aseguradora'} (vigencia: ${vigenciaNueva}).`,
+    datos_adicionales: {
+      numero_poliza_anterior: expedienteAnterior.numero_poliza,
+      numero_poliza_nueva: datosNuevos.numeroPolizaNueva,
+      compania: expedienteAnterior.compania,
+      vigencia_anterior: vigenciaAnterior,
+      vigencia_nueva: vigenciaNueva,
+      nuevo_expediente_id: nuevoExpedienteId
+    }
+  });
+};
+
+/**
+ * Registrar evento de Nuevo Expediente Creado por Renovación (enriquecido)
+ */
+export const registrarExpedienteRenovacionCreado = async (expedienteAnterior, datosNuevos, nuevoExpedienteId) => {
+  const vigenciaAnterior = obtenerVigenciaTexto(expedienteAnterior.inicio_vigencia, expedienteAnterior.termino_vigencia);
+  const vigenciaNueva = obtenerVigenciaTexto(datosNuevos.inicioVigenciaNueva, datosNuevos.terminoVigenciaNueva);
+  const usuario = obtenerUsuarioActual();
+  
+  return registrarEvento({
+    expediente_id: nuevoExpedienteId,
+    cliente_id: expedienteAnterior.cliente_id,
+    tipo_evento: TIPOS_EVENTO.EXPEDIENTE_CREADO || 'expediente_creado',
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: `Póliza de renovación #${datosNuevos.numeroPolizaNueva} creada para ${expedienteAnterior.compania || 'Sin aseguradora'}. Renueva póliza anterior #${expedienteAnterior.numero_poliza || 'S/N'}. Nueva vigencia: ${vigenciaNueva}.`,
+    datos_adicionales: {
+      compania: expedienteAnterior.compania,
+      numero_poliza_nueva: datosNuevos.numeroPolizaNueva,
+      numero_poliza_anterior: expedienteAnterior.numero_poliza,
+      renovacion_de: expedienteAnterior.id,
+      vigencia_anterior: vigenciaAnterior,
+      vigencia_nueva: vigenciaNueva,
+      cliente_nombre: expedienteAnterior.nombre || expedienteAnterior.razon_social || 'Sin nombre'
+    }
+  });
 };
 
 /**
