@@ -19,6 +19,8 @@ const DashboardComponent = () => {
   const [modalDetalle, setModalDetalle] = useState(null);
   const [paginaModal, setPaginaModal] = useState(1);
   const [modalActualParams, setModalActualParams] = useState(null); // Para recordar qué modal está abierto
+  const [modalTramites, setModalTramites] = useState(null); // Modal para mostrar trámites filtrados
+  const [tramiteSeleccionado, setTramiteSeleccionado] = useState(null); // Panel detalle de trámite
   const POLIZAS_POR_PAGINA = 20;
 
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
@@ -86,11 +88,12 @@ const DashboardComponent = () => {
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      // 🔥 OPTIMIZACIÓN: Cargar expedientes, clientes y TODOS los recibos en paralelo (3 consultas)
-      const [resExpedientes, resClientes, resRecibos] = await Promise.all([
+      // 🔥 OPTIMIZACIÓN: Cargar expedientes, clientes, recibos y trámites en paralelo
+      const [resExpedientes, resClientes, resRecibos, resTramites] = await Promise.all([
         fetch(`${API_URL}/api/expedientes?t=${Date.now()}`),
         fetch(`${API_URL}/api/clientes?t=${Date.now()}`),
-        fetch(`${API_URL}/api/recibos?t=${Date.now()}`) // Todos los recibos en una sola consulta
+        fetch(`${API_URL}/api/recibos?t=${Date.now()}`),
+        fetch(`${API_URL}/api/tramites?t=${Date.now()}`) // Cargar trámites
       ]);
       
       if (!resExpedientes.ok) {
@@ -165,9 +168,43 @@ const DashboardComponent = () => {
       }
       
       setExpedientes(expedientesEnriquecidos);
+      
+      // 📋 Cargar trámites
+      if (resTramites.ok) {
+        const tramitesData = await resTramites.json();
+        const tramitesArray = Array.isArray(tramitesData) ? tramitesData : (tramitesData?.data || []);
+        
+        // Transformar campos de snake_case a camelCase si es necesario
+        const tramitesFormateados = tramitesArray.map(t => ({
+          id: t.id,
+          codigo: t.codigo,
+          tipoTramite: t.tipoTramite || t.tipo_tramite,
+          descripcion: t.descripcion,
+          cliente: t.cliente,
+          cliente_id: t.cliente_id,  // ✅ Agregar cliente_id
+          expediente: t.expediente,
+          expediente_id: t.expediente_id,  // ✅ Agregar expediente_id
+          estatus: t.estatus,
+          prioridad: t.prioridad,
+          fechaInicio: t.fechaInicio || t.fecha_inicio,
+          fechaLimite: t.fechaLimite || t.fecha_limite,
+          responsable: t.responsable || t.ejecutivo_asignado,  // ✅ También ejecutivo_asignado
+          ejecutivoAsignado: t.ejecutivo_asignado || t.responsable,
+          departamento: t.departamento,
+          observaciones: t.observaciones,
+          fechaCreacion: t.fechaCreacion || t.created_at
+        }));
+        
+        setTramites(tramitesFormateados);
+        console.log(`📋 Dashboard: ${tramitesFormateados.length} trámites cargados`);
+      } else {
+        console.warn('No se pudieron cargar los trámites');
+        setTramites([]);
+      }
     } catch (e) {
       console.error('Fallo de red al cargar datos:', e);
       setExpedientes([]);
+      setTramites([]);
     } finally {
       setCargando(false);
     }
@@ -886,6 +923,121 @@ const DashboardComponent = () => {
     catch (_) { window.location.href = '/tramites'; }
   };
 
+  // Función para abrir modal de trámites filtrados
+  const abrirModalTramites = (tipo, titulo, color) => {
+    const hoy = new Date();
+    const esVencido = (t) => {
+      const f = t.fechaLimite ? new Date(t.fechaLimite) : null;
+      if (!f) return false;
+      return f < hoy && !['Completado', 'Cancelado', 'Rechazado'].includes(t.estatus);
+    };
+
+    let tramitesFiltrados = [];
+    switch (tipo) {
+      case 'pendientes':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Pendiente');
+        break;
+      case 'enProceso':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'En proceso');
+        break;
+      case 'vencidos':
+        tramitesFiltrados = tramites.filter(esVencido);
+        break;
+      case 'completados':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Completado');
+        break;
+      default:
+        tramitesFiltrados = tramites;
+    }
+
+    // Enriquecer trámites con datos del expediente
+    const tramitesEnriquecidos = tramitesFiltrados.map(t => {
+      // Buscar expediente por número de póliza (el campo 'expediente' del trámite contiene el numero_poliza)
+      const expedienteRelacionado = expedientes.find(e => {
+        // Match por numero_poliza (puede venir con o sin espacios/guiones)
+        const polizaTramite = (t.expediente || '').replace(/[-\s]/g, '').toLowerCase();
+        const polizaExp = (e.numero_poliza || '').replace(/[-\s]/g, '').toLowerCase();
+        
+        return (
+          // Match exacto por expediente_id si existe
+          (t.expediente_id && String(e.id) === String(t.expediente_id)) ||
+          // Match exacto por número de póliza
+          (polizaTramite && polizaExp && polizaTramite === polizaExp) ||
+          // Match si uno contiene al otro
+          (polizaTramite && polizaExp && (polizaTramite.includes(polizaExp) || polizaExp.includes(polizaTramite)))
+        );
+      });
+      
+      // Calcular días restantes o vencidos
+      const diasRestantes = t.fechaLimite ? Math.ceil((new Date(t.fechaLimite) - hoy) / (1000 * 60 * 60 * 24)) : null;
+      
+      if (expedienteRelacionado) {
+        // Construir nombre del cliente (persona física o moral)
+        const nombreCliente = expedienteRelacionado.razon_social || 
+                              expedienteRelacionado.razonSocial ||
+                              expedienteRelacionado.nombre_cliente || 
+                              `${expedienteRelacionado.nombre || ''} ${expedienteRelacionado.apellido_paterno || expedienteRelacionado.apellidoPaterno || ''}`.trim() || 
+                              t.cliente || '-';
+        
+        // Construir info del vehículo
+        const tieneVehiculo = expedienteRelacionado.marca || expedienteRelacionado.modelo;
+        const vehiculoInfo = tieneVehiculo 
+          ? `${expedienteRelacionado.marca || ''} ${expedienteRelacionado.modelo || ''} ${expedienteRelacionado.anio || ''}`.trim()
+          : null;
+        
+        return {
+          ...t,
+          // Datos del expediente (todos los campos que tiene la póliza)
+          aseguradora: expedienteRelacionado.compania || '-',
+          tipoSeguro: expedienteRelacionado.producto || '-',
+          clienteNombre: nombreCliente,
+          numeroPoliza: expedienteRelacionado.numero_poliza || t.expediente || '-',
+          vigencia: expedienteRelacionado.inicio_vigencia && expedienteRelacionado.termino_vigencia 
+            ? `${new Date(expedienteRelacionado.inicio_vigencia).toLocaleDateString('es-MX')} - ${new Date(expedienteRelacionado.termino_vigencia).toLocaleDateString('es-MX')}`
+            : '-',
+          estatusPago: expedienteRelacionado.estatusPago || expedienteRelacionado.estatus_pago || '-',
+          vehiculo: vehiculoInfo,
+          placas: expedienteRelacionado.placas || null,
+          numeroSerie: expedienteRelacionado.numero_serie || null,
+          agente: expedienteRelacionado.agente || '-',
+          subAgente: expedienteRelacionado.sub_agente || null,
+          etapaActiva: expedienteRelacionado.etapa_activa || expedienteRelacionado.etapaActiva || null,
+          tipoPago: expedienteRelacionado.tipo_pago || expedienteRelacionado.tipoPago || null,
+          total: expedienteRelacionado.total || null,
+          primaNeta: expedienteRelacionado.prima_neta || null,
+          // Contacto del cliente
+          emailCliente: expedienteRelacionado.email || null,
+          telefonoCliente: expedienteRelacionado.telefonoMovil || expedienteRelacionado.telefono_movil || null,
+          diasRestantes,
+          expedienteEncontrado: true
+        };
+      }
+      
+      return {
+        ...t,
+        aseguradora: '-',
+        tipoSeguro: '-',
+        clienteNombre: t.cliente || '-',
+        numeroPoliza: t.expediente || '-',
+        vigencia: '-',
+        estatusPago: '-',
+        vehiculo: null,
+        placas: null,
+        agente: null,
+        vendedor: null,
+        diasRestantes,
+        expedienteEncontrado: false
+      };
+    });
+
+    setModalTramites({
+      titulo,
+      color,
+      tipo,
+      tramites: tramitesEnriquecidos
+    });
+  };
+
   return (
     <div style={{ backgroundColor: '#f5f5f5', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <link 
@@ -1313,7 +1465,13 @@ const DashboardComponent = () => {
           </div>
           <div className="row g-3 mb-3">
             <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('pendientes', 'Trámites Pendientes', '#F59E0B')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Pendientes</div>
                   <Clock size={18} style={{ color: '#F59E0B' }} />
@@ -1323,7 +1481,13 @@ const DashboardComponent = () => {
               </div>
             </div>
             <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('enProceso', 'Trámites En Proceso', '#3B82F6')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>En Proceso</div>
                   <Activity size={18} style={{ color: '#3B82F6' }} />
@@ -1333,7 +1497,13 @@ const DashboardComponent = () => {
               </div>
             </div>
             <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('vencidos', 'Trámites Vencidos', '#EF4444')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Vencidos</div>
                   <AlertTriangle size={18} style={{ color: '#EF4444' }} />
@@ -1343,7 +1513,13 @@ const DashboardComponent = () => {
               </div>
             </div>
             <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('completados', 'Trámites Completados', '#10B981')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Completados</div>
                   <CheckCircle2 size={18} style={{ color: '#10B981' }} />
@@ -2071,6 +2247,405 @@ const DashboardComponent = () => {
                   onClick={() => setModalDetalle(null)}>
                   <CheckCircle2 size={14} className="me-1" />
                   Autorizar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE TRÁMITES - VISTA SIMPLIFICADA */}
+      {modalTramites && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+          <div 
+            className="modal-dialog modal-dialog-centered modal-dialog-scrollable" 
+            style={{ maxWidth: tramiteSeleccionado ? '95%' : '900px', transition: 'max-width 0.3s ease' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-content" style={{ height: '80vh' }}>
+              {/* Header del modal */}
+              <div className="modal-header py-2" style={{ background: modalTramites.color, color: 'white' }}>
+                <h5 className="modal-title fw-bold mb-0" style={{ fontSize: '16px' }}>
+                  {modalTramites.titulo}
+                  <span className="badge bg-light text-dark ms-2" style={{ fontSize: '11px' }}>
+                    {modalTramites.tramites.length}
+                  </span>
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+                </button>
+              </div>
+              
+              {/* Body del modal - Layout con tabla y panel */}
+              <div className="modal-body p-0 d-flex" style={{ overflow: 'hidden' }}>
+                {/* Tabla de trámites (lado izquierdo) */}
+                <div className={`${tramiteSeleccionado ? 'border-end' : ''}`} style={{ 
+                  width: tramiteSeleccionado ? '55%' : '100%', 
+                  overflow: 'auto',
+                  transition: 'width 0.3s ease'
+                }}>
+                  {modalTramites.tramites.length === 0 ? (
+                    <div className="text-center py-5">
+                      <FileText size={48} className="text-muted mb-3" />
+                      <h6 className="text-muted">No hay trámites en esta categoría</h6>
+                    </div>
+                  ) : (
+                    <table className="table table-hover mb-0" style={{ fontSize: '12px' }}>
+                      <thead className="table-light sticky-top">
+                        <tr>
+                          <th style={{ fontSize: '10px', fontWeight: 600 }}>TRÁMITE</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600 }}>CLIENTE / PÓLIZA</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>PRIORIDAD</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>VENCE</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>ESTATUS</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center', width: '50px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modalTramites.tramites.map((t, idx) => {
+                          const fechaLimite = t.fechaLimite ? new Date(t.fechaLimite) : null;
+                          const hoy = new Date();
+                          const esVencido = fechaLimite && fechaLimite < hoy && !['Completado', 'Cancelado', 'Rechazado'].includes(t.estatus);
+                          const diasRestantes = t.diasRestantes;
+                          const estaSeleccionado = tramiteSeleccionado?.id === t.id;
+                          
+                          return (
+                            <tr 
+                              key={t.id || idx} 
+                              style={{ 
+                                cursor: 'pointer',
+                                backgroundColor: estaSeleccionado ? '#E3F2FD' : 'transparent'
+                              }}
+                              onClick={() => setTramiteSeleccionado(t)}
+                            >
+                              {/* Trámite */}
+                              <td>
+                                <div className="fw-semibold" style={{ color: modalTramites.color, fontSize: '11px' }}>
+                                  {t.codigo || '-'}
+                                </div>
+                                <div className="fw-medium">{t.tipoTramite || '-'}</div>
+                              </td>
+                              
+                              {/* Cliente / Póliza */}
+                              <td>
+                                <div className="fw-medium">{t.clienteNombre || t.cliente || '-'}</div>
+                                <div style={{ fontSize: '11px', color: '#2563EB' }}>
+                                  {t.numeroPoliza || t.expediente || '-'}
+                                </div>
+                              </td>
+                              
+                              {/* Prioridad */}
+                              <td className="text-center">
+                                <span className={`badge ${
+                                  t.prioridad === 'Alta' ? 'bg-danger' :
+                                  t.prioridad === 'Media' ? 'bg-warning text-dark' : 'bg-success'
+                                }`} style={{ fontSize: '9px' }}>
+                                  {t.prioridad || 'Normal'}
+                                </span>
+                              </td>
+                              
+                              {/* Vence en */}
+                              <td className="text-center">
+                                {diasRestantes !== null ? (
+                                  <span className={`badge ${
+                                    diasRestantes < 0 ? 'bg-danger' : 
+                                    diasRestantes === 0 ? 'bg-danger' :
+                                    diasRestantes <= 3 ? 'bg-warning text-dark' : 'bg-light text-dark'
+                                  }`} style={{ fontSize: '10px' }}>
+                                    {diasRestantes < 0 ? `⚠️ ${Math.abs(diasRestantes)}d` : 
+                                     diasRestantes === 0 ? '⚠️ HOY' : `${diasRestantes}d`}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted">-</span>
+                                )}
+                              </td>
+                              
+                              {/* Estatus */}
+                              <td className="text-center">
+                                <span className={`badge ${
+                                  t.estatus === 'Completado' ? 'bg-success' :
+                                  t.estatus === 'En proceso' ? 'bg-primary' :
+                                  t.estatus === 'Pendiente' ? 'bg-warning text-dark' :
+                                  t.estatus === 'Cancelado' ? 'bg-secondary' :
+                                  t.estatus === 'Rechazado' ? 'bg-dark' : 'bg-info'
+                                }`} style={{ fontSize: '9px' }}>
+                                  {t.estatus}
+                                </span>
+                              </td>
+                              
+                              {/* Botón Ver */}
+                              <td className="text-center">
+                                <button 
+                                  className="btn btn-sm btn-outline-primary py-0 px-2"
+                                  style={{ fontSize: '10px' }}
+                                  onClick={(e) => { e.stopPropagation(); setTramiteSeleccionado(t); }}
+                                >
+                                  <Eye size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                
+                {/* Panel de Detalle (lado derecho) */}
+                {tramiteSeleccionado && (
+                  <div style={{ width: '45%', overflow: 'auto', backgroundColor: '#F8FAFC' }}>
+                    <div className="p-3">
+                      {/* Header del panel */}
+                      <div className="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                          <h6 className="fw-bold mb-1" style={{ color: modalTramites.color }}>
+                            {tramiteSeleccionado.codigo}
+                          </h6>
+                          <span className={`badge ${
+                            tramiteSeleccionado.estatus === 'Completado' ? 'bg-success' :
+                            tramiteSeleccionado.estatus === 'En proceso' ? 'bg-primary' :
+                            tramiteSeleccionado.estatus === 'Pendiente' ? 'bg-warning text-dark' : 'bg-secondary'
+                          }`}>
+                            {tramiteSeleccionado.estatus}
+                          </span>
+                        </div>
+                        <button 
+                          className="btn btn-sm btn-light"
+                          onClick={() => setTramiteSeleccionado(null)}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      
+                      {/* Sección: Trámite */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">📋 DATOS DEL TRÁMITE</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Tipo</label>
+                              <div className="fw-medium">{tramiteSeleccionado.tipoTramite || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Prioridad</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.prioridad === 'Alta' ? 'bg-danger' :
+                                  tramiteSeleccionado.prioridad === 'Media' ? 'bg-warning text-dark' : 'bg-success'
+                                }`}>
+                                  {tramiteSeleccionado.prioridad || 'Normal'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Descripción</label>
+                              <div>{tramiteSeleccionado.descripcion || 'Sin descripción'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Fecha Solicitud</label>
+                              <div>{tramiteSeleccionado.fechaCreacion ? new Date(tramiteSeleccionado.fechaCreacion).toLocaleDateString('es-MX') : '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Fecha Límite</label>
+                              <div className={tramiteSeleccionado.diasRestantes < 0 ? 'text-danger fw-bold' : ''}>
+                                {tramiteSeleccionado.fechaLimite ? new Date(tramiteSeleccionado.fechaLimite).toLocaleDateString('es-MX') : '-'}
+                                {tramiteSeleccionado.diasRestantes !== null && (
+                                  <span className={`ms-1 badge ${
+                                    tramiteSeleccionado.diasRestantes < 0 ? 'bg-danger' : 
+                                    tramiteSeleccionado.diasRestantes <= 3 ? 'bg-warning text-dark' : 'bg-light text-dark'
+                                  }`} style={{ fontSize: '9px' }}>
+                                    {tramiteSeleccionado.diasRestantes < 0 ? `${Math.abs(tramiteSeleccionado.diasRestantes)}d vencido` : 
+                                     tramiteSeleccionado.diasRestantes === 0 ? 'HOY' : `${tramiteSeleccionado.diasRestantes}d restantes`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Sección: Póliza */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">📄 DATOS DE LA PÓLIZA</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Número de Póliza</label>
+                              <div className="fw-bold" style={{ color: '#2563EB' }}>{tramiteSeleccionado.numeroPoliza || tramiteSeleccionado.expediente || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Aseguradora</label>
+                              <div className="fw-medium">🏢 {tramiteSeleccionado.aseguradora || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Producto</label>
+                              <div>{tramiteSeleccionado.tipoSeguro || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Etapa</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.etapaActiva === 'Emitida' ? 'bg-success' :
+                                  tramiteSeleccionado.etapaActiva === 'Captura' ? 'bg-info' :
+                                  tramiteSeleccionado.etapaActiva === 'Cotización' ? 'bg-secondary' : 'bg-light text-dark'
+                                }`} style={{ fontSize: '10px' }}>
+                                  {tramiteSeleccionado.etapaActiva || '-'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Vigencia</label>
+                              <div>📅 {tramiteSeleccionado.vigencia || '-'}</div>
+                            </div>
+                            {tramiteSeleccionado.vehiculo && (
+                              <>
+                                <div className="col-12" style={{ borderTop: '1px dashed #dee2e6', paddingTop: '8px', marginTop: '4px' }}>
+                                  <label className="text-muted" style={{ fontSize: '10px' }}>Vehículo Asegurado</label>
+                                  <div className="fw-medium">🚗 {tramiteSeleccionado.vehiculo}</div>
+                                </div>
+                                <div className="col-6">
+                                  <label className="text-muted" style={{ fontSize: '10px' }}>Placas</label>
+                                  <div>{tramiteSeleccionado.placas || '-'}</div>
+                                </div>
+                                {tramiteSeleccionado.numeroSerie && (
+                                  <div className="col-6">
+                                    <label className="text-muted" style={{ fontSize: '10px' }}>No. Serie</label>
+                                    <div style={{ fontSize: '10px' }}>{tramiteSeleccionado.numeroSerie}</div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Tipo de Pago</label>
+                              <div>{tramiteSeleccionado.tipoPago || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Estatus Pago</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.estatusPago === 'Pagado' || tramiteSeleccionado.estatusPago === 'Pagada' ? 'bg-success' :
+                                  tramiteSeleccionado.estatusPago === 'Pendiente' ? 'bg-warning text-dark' : 'bg-secondary'
+                                }`} style={{ fontSize: '10px' }}>
+                                  {tramiteSeleccionado.estatusPago || '-'}
+                                </span>
+                              </div>
+                            </div>
+                            {tramiteSeleccionado.total && (
+                              <div className="col-12">
+                                <label className="text-muted" style={{ fontSize: '10px' }}>Prima Total</label>
+                                <div className="fw-bold text-success">
+                                  ${Number(tramiteSeleccionado.total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Sección: Personas */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">👥 PERSONAS INVOLUCRADAS</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Cliente</label>
+                              <div className="fw-medium"><User size={12} className="me-1" />{tramiteSeleccionado.clienteNombre || tramiteSeleccionado.cliente || '-'}</div>
+                            </div>
+                            {(tramiteSeleccionado.emailCliente || tramiteSeleccionado.telefonoCliente) && (
+                              <div className="col-12">
+                                <label className="text-muted" style={{ fontSize: '10px' }}>Contacto</label>
+                                <div style={{ fontSize: '11px' }}>
+                                  {tramiteSeleccionado.emailCliente && (
+                                    <span className="me-2">📧 {tramiteSeleccionado.emailCliente}</span>
+                                  )}
+                                  {tramiteSeleccionado.telefonoCliente && (
+                                    <span>📱 {tramiteSeleccionado.telefonoCliente}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Agente/Vendedor</label>
+                              <div><Briefcase size={12} className="me-1" />{tramiteSeleccionado.agente || '-'}</div>
+                              {tramiteSeleccionado.subAgente && (
+                                <div className="text-muted" style={{ fontSize: '10px' }}>Sub: {tramiteSeleccionado.subAgente}</div>
+                              )}
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Ejecutivo Asignado</label>
+                              <div><UserCheck size={12} className="me-1" />{tramiteSeleccionado.responsable || tramiteSeleccionado.ejecutivoAsignado || '-'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Observaciones */}
+                      {tramiteSeleccionado.observaciones && (
+                        <div className="card mb-3 shadow-sm">
+                          <div className="card-header py-2 bg-white">
+                            <small className="fw-bold text-muted">💬 OBSERVACIONES</small>
+                          </div>
+                          <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                            {tramiteSeleccionado.observaciones}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Acciones rápidas */}
+                      <div className="card shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">⚡ ACCIONES RÁPIDAS</small>
+                        </div>
+                        <div className="card-body py-2">
+                          <div className="d-flex flex-wrap gap-2">
+                            <button 
+                              className="btn btn-sm btn-outline-primary"
+                              onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}
+                            >
+                              <Edit size={12} className="me-1" />Editar Trámite
+                            </button>
+                            <button className="btn btn-sm btn-outline-success">
+                              <CheckCircle size={12} className="me-1" />Completar
+                            </button>
+                            <button className="btn btn-sm btn-outline-warning">
+                              <Clock size={12} className="me-1" />Posponer
+                            </button>
+                            <button className="btn btn-sm btn-outline-info">
+                              <MessageSquare size={12} className="me-1" />Agregar Nota
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Footer del modal */}
+              <div className="modal-footer py-2">
+                <span className="text-muted me-auto" style={{ fontSize: '11px' }}>
+                  💡 Clic en una fila o en 👁️ para ver detalle
+                </span>
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+                  Cerrar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary btn-sm"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}>
+                  <FileCheck size={14} className="me-1" />
+                  Ir a Gestión de Trámites
                 </button>
               </div>
             </div>
