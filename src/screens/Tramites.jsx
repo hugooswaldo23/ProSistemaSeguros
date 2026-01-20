@@ -525,6 +525,7 @@ const FormularioTramite = ({
                       }
                     }}
                     clienteSeleccionado={clienteSeleccionado}
+                    conteoPolizasPorCliente={conteoPolizasPorCliente}
                   />
                   {clienteSeleccionado && (
                     <small className="text-success">Cliente seleccionado: {formularioTramite.cliente}</small>
@@ -948,9 +949,37 @@ export const Tramites = () => {
   const [expedientesCliente, setExpedientesCliente] = useState([]);
   const [cargandoExpedientesCliente, setCargandoExpedientesCliente] = useState(false);
   const [ejecutivoAsignado, setEjecutivoAsignado] = useState('');
+  
+  // 🆕 Estado para el conteo de pólizas por cliente
+  const [todosExpedientes, setTodosExpedientes] = useState([]);
+  const conteoPolizasPorCliente = useMemo(() => {
+    const conteo = {};
+    todosExpedientes.forEach(exp => {
+      const clienteId = exp.cliente_id;
+      if (clienteId) {
+        conteo[clienteId] = (conteo[clienteId] || 0) + 1;
+      }
+    });
+    return conteo;
+  }, [todosExpedientes]);
+  
   // Equipo de trabajo para listar ejecutivos
   const { equipoDeTrabajo } = useEquipoDeTrabajo();
   const ejecutivos = useMemo(() => (equipoDeTrabajo || []).filter(m => (m.perfil || '').toLowerCase().includes('ejecut')) , [equipoDeTrabajo]);
+
+  // 🆕 Cargar todos los expedientes al montar (para el conteo)
+  useEffect(() => {
+    const cargarTodosExpedientes = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/expedientes`);
+        const data = await res.json();
+        setTodosExpedientes(data);
+      } catch (e) {
+        console.error('Error cargando expedientes:', e);
+      }
+    };
+    cargarTodosExpedientes();
+  }, []);
 
   // Cargar expedientes del cliente seleccionado
   useEffect(() => {
@@ -961,9 +990,8 @@ export const Tramites = () => {
       }
       setCargandoExpedientesCliente(true);
       try {
-        const res = await fetch(`${API_URL}/api/expedientes`);
-        const data = await res.json();
-        const filtrados = data.filter(exp => String(exp.cliente_id) === String(clienteSeleccionado.id));
+        // Usar los expedientes ya cargados en lugar de hacer otra petición
+        const filtrados = todosExpedientes.filter(exp => String(exp.cliente_id) === String(clienteSeleccionado.id));
         setExpedientesCliente(filtrados);
       } catch (e) {
         console.error('Error cargando expedientes del cliente:', e);
@@ -973,7 +1001,7 @@ export const Tramites = () => {
       }
     };
     cargarExpedientesCliente();
-  }, [clienteSeleccionado]);
+  }, [clienteSeleccionado, todosExpedientes]);
 
   // Cargar trámites desde el backend al montar el componente
   useEffect(() => {
