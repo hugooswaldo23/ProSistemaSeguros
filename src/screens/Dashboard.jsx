@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 const API_URL = import.meta.env.VITE_API_URL;
 import { 
   Plus, FileText, AlertCircle, 
@@ -21,6 +22,7 @@ const DashboardComponent = () => {
   const [modalActualParams, setModalActualParams] = useState(null); // Para recordar qué modal está abierto
   const [modalTramites, setModalTramites] = useState(null); // Modal para mostrar trámites filtrados
   const [tramiteSeleccionado, setTramiteSeleccionado] = useState(null); // Panel detalle de trámite
+  const [modalEnviarEjecutivo, setModalEnviarEjecutivo] = useState(null); // Modal para enviar a ejecutivo
   const POLIZAS_POR_PAGINA = 20;
 
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
@@ -893,6 +895,7 @@ const DashboardComponent = () => {
     };
 
     const pendientes = tramites.filter(t => t.estatus === 'Pendiente');
+    const solicitados = tramites.filter(t => t.estatus === 'Solicitado');
     const enProceso = tramites.filter(t => t.estatus === 'En proceso');
     const completados = tramites.filter(t => t.estatus === 'Completado');
     const cancelados = tramites.filter(t => t.estatus === 'Cancelado');
@@ -907,6 +910,7 @@ const DashboardComponent = () => {
     return {
       totales: {
         pendientes: pendientes.length,
+        solicitados: solicitados.length,
         enProceso: enProceso.length,
         completados: completados.length,
         cancelados: cancelados.length,
@@ -923,6 +927,189 @@ const DashboardComponent = () => {
     catch (_) { window.location.href = '/tramites'; }
   };
 
+  // Función para cambiar el estatus de un trámite
+  const cambiarEstatusTramite = async (tramite, nuevoEstatus) => {
+    try {
+      const payload = {
+        estatus: nuevoEstatus
+      };
+      
+      const res = await fetch(`${API_URL}/api/tramites/${tramite.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Error al actualizar trámite');
+      }
+      
+      // Actualizar el trámite en el estado local
+      setTramites(prev => prev.map(t => 
+        t.id === tramite.id ? { ...t, estatus: nuevoEstatus } : t
+      ));
+      
+      // Actualizar en el modal también
+      if (modalTramites) {
+        setModalTramites(prev => ({
+          ...prev,
+          tramites: prev.tramites.map(t => 
+            t.id === tramite.id ? { ...t, estatus: nuevoEstatus } : t
+          ).filter(t => {
+            // Si estamos en pendientes y cambió a otro estatus, removerlo de la lista
+            if (prev.tipo === 'pendientes' && nuevoEstatus !== 'Pendiente') return t.id !== tramite.id;
+            if (prev.tipo === 'enProceso' && nuevoEstatus !== 'En proceso') return t.id !== tramite.id;
+            return true;
+          })
+        }));
+      }
+      
+      // Limpiar selección
+      setTramiteSeleccionado(null);
+      
+      // Mostrar notificación
+      toast.success(`Trámite ${tramite.codigo} actualizado a "${nuevoEstatus}"`);
+      
+      return true;
+    } catch (error) {
+      console.error('Error al cambiar estatus:', error);
+      toast.error('Error al actualizar el trámite');
+      return false;
+    }
+  };
+
+  // Función para abrir modal de envío a ejecutivo
+  const abrirModalEnviarEjecutivo = (tramite) => {
+    setModalEnviarEjecutivo(tramite);
+  };
+
+  // Función para enviar trámite a ejecutivo
+  const enviarTramiteAEjecutivo = async (tramite, metodo) => {
+    // Obtener datos del ejecutivo asignado
+    let ejecutivoData = null;
+    const ejecutivoNombre = tramite.responsable || tramite.ejecutivoAsignado;
+    
+    if (ejecutivoNombre) {
+      try {
+        // Buscar el ejecutivo en equipo de trabajo por nombre
+        const resEquipo = await fetch(`${API_URL}/api/equipoDeTrabajo`);
+        if (resEquipo.ok) {
+          const equipoData = await resEquipo.json();
+          const equipoArray = Array.isArray(equipoData) ? equipoData : [];
+          
+          // Buscar por nombre (puede ser "nombre" o "nombre apellido")
+          ejecutivoData = equipoArray.find(e => {
+            const nombreCompleto = `${e.nombre || ''} ${e.apellido_paterno || ''}`.trim().toLowerCase();
+            const nombreBuscado = ejecutivoNombre.toLowerCase();
+            return nombreCompleto.includes(nombreBuscado) || 
+                   nombreBuscado.includes(e.nombre?.toLowerCase() || '') ||
+                   e.nombre?.toLowerCase() === nombreBuscado;
+          });
+          
+          if (ejecutivoData) {
+            console.log('✅ Ejecutivo encontrado:', ejecutivoData);
+          }
+        }
+      } catch (error) {
+        console.warn('No se pudo obtener datos del ejecutivo:', error);
+      }
+    }
+    
+    // Construir mensaje
+    const fechaLimite = tramite.fechaLimite 
+      ? new Date(tramite.fechaLimite).toLocaleDateString('es-MX') 
+      : 'Sin fecha límite';
+    
+    const ejecutivo = ejecutivoData 
+      ? `${ejecutivoData.nombre || ''} ${ejecutivoData.apellido_paterno || ''}`.trim()
+      : (ejecutivoNombre || 'Por asignar');
+    
+    // Obtener agente y solicitante
+    const agenteInfo = tramite.agente || '-';
+    const solicitante = 'Administración'; // Usuario actual del sistema
+    
+    // Mensaje para WhatsApp (con formato)
+    const mensajeWhatsApp = `🔔 *SOLICITUD DE TRÁMITE*
+
+📋 *Código:* ${tramite.codigo || '-'}
+📝 *Tipo:* ${tramite.tipoTramite || '-'}
+⚡ *Prioridad:* ${tramite.prioridad || 'Normal'}
+📅 *Fecha Límite:* ${fechaLimite}
+
+👤 *Cliente:* ${tramite.clienteNombre || tramite.cliente || '-'}
+📄 *Póliza:* ${tramite.numeroPoliza || tramite.expediente || '-'}
+🏢 *Aseguradora:* ${tramite.aseguradora || '-'}
+📦 *Producto:* ${tramite.tipoSeguro || '-'}
+🧑‍💼 *Agente:* ${agenteInfo}
+
+📝 *Descripción:*
+${tramite.descripcion || 'Sin descripción'}
+${tramite.observaciones ? `\n💬 *Observaciones:*\n${tramite.observaciones}` : ''}
+
+👷 *Ejecutivo Asignado:* ${ejecutivo}
+📤 *Solicitado por:* ${solicitante}
+
+Por favor, atender este trámite a la brevedad.
+
+Saludos cordiales,
+*DCPRO Administración* 🏢`;
+
+    // Mensaje para Email (sin asteriscos)
+    const mensajeEmail = `SOLICITUD DE TRÁMITE
+
+Código: ${tramite.codigo || '-'}
+Tipo: ${tramite.tipoTramite || '-'}
+Prioridad: ${tramite.prioridad || 'Normal'}
+Fecha Límite: ${fechaLimite}
+
+Cliente: ${tramite.clienteNombre || tramite.cliente || '-'}
+Póliza: ${tramite.numeroPoliza || tramite.expediente || '-'}
+Aseguradora: ${tramite.aseguradora || '-'}
+Producto: ${tramite.tipoSeguro || '-'}
+Agente: ${agenteInfo}
+
+Descripción:
+${tramite.descripcion || 'Sin descripción'}
+${tramite.observaciones ? `\nObservaciones:\n${tramite.observaciones}` : ''}
+
+Ejecutivo Asignado: ${ejecutivo}
+Solicitado por: ${solicitante}
+
+Por favor, atender este trámite a la brevedad.
+
+Saludos cordiales,
+DCPRO Administración`;
+
+    if (metodo === 'whatsapp') {
+      // Si tenemos teléfono del ejecutivo, enviarlo directo
+      if (ejecutivoData?.telefono) {
+        const telefonoLimpio = ejecutivoData.telefono.replace(/\D/g, '');
+        const telefonoConCodigo = telefonoLimpio.startsWith('52') ? telefonoLimpio : `52${telefonoLimpio}`;
+        const url = `https://wa.me/${telefonoConCodigo}?text=${encodeURIComponent(mensajeWhatsApp)}`;
+        window.open(url, '_blank');
+      } else {
+        // Sin teléfono, abrir para seleccionar contacto
+        const url = `https://wa.me/?text=${encodeURIComponent(mensajeWhatsApp)}`;
+        window.open(url, '_blank');
+        toast('Selecciona el contacto del ejecutivo en WhatsApp', { icon: 'ℹ️' });
+      }
+    } else if (metodo === 'email') {
+      const asunto = `Solicitud de Trámite ${tramite.codigo} - ${tramite.tipoTramite}`;
+      // Si tenemos email del ejecutivo, incluirlo
+      const emailDestino = ejecutivoData?.email || '';
+      const mailtoUrl = `mailto:${emailDestino}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensajeEmail)}`;
+      window.location.href = mailtoUrl;
+    }
+
+    // Cambiar estatus a "Solicitado"
+    await cambiarEstatusTramite(tramite, 'Solicitado');
+    
+    // Cerrar modales
+    setModalEnviarEjecutivo(null);
+    toast.success(`Trámite ${tramite.codigo} enviado a ${ejecutivo}`);
+  };
+
   // Función para abrir modal de trámites filtrados
   const abrirModalTramites = (tipo, titulo, color) => {
     const hoy = new Date();
@@ -936,6 +1123,9 @@ const DashboardComponent = () => {
     switch (tipo) {
       case 'pendientes':
         tramitesFiltrados = tramites.filter(t => t.estatus === 'Pendiente');
+        break;
+      case 'solicitados':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Solicitado');
         break;
       case 'enProceso':
         tramitesFiltrados = tramites.filter(t => t.estatus === 'En proceso');
@@ -1464,7 +1654,7 @@ const DashboardComponent = () => {
             </button>
           </div>
           <div className="row g-3 mb-3">
-            <div className="col-6 col-md-3">
+            <div className="col-6 col-lg">
               <div 
                 className="executive-card p-3" 
                 style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
@@ -1477,10 +1667,26 @@ const DashboardComponent = () => {
                   <Clock size={18} style={{ color: '#F59E0B' }} />
                 </div>
                 <h3 className="mb-0 fw-bold" style={{ color: '#F59E0B' }}>{estadisticasTramites.totales.pendientes}</h3>
-                <small className="text-muted">en espera de atención</small>
+                <small className="text-muted">en espera</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('solicitados', 'Trámites Solicitados', '#8B5CF6')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Solicitados</div>
+                  <Send size={18} style={{ color: '#8B5CF6' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#8B5CF6' }}>{estadisticasTramites.totales.solicitados}</h3>
+                <small className="text-muted">enviados a ejecutivo</small>
+              </div>
+            </div>
+            <div className="col-6 col-lg">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
@@ -1496,7 +1702,7 @@ const DashboardComponent = () => {
                 <small className="text-muted">gestión activa</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
+            <div className="col-6 col-lg">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
@@ -1509,10 +1715,10 @@ const DashboardComponent = () => {
                   <AlertTriangle size={18} style={{ color: '#EF4444' }} />
                 </div>
                 <h3 className="mb-0 fw-bold" style={{ color: '#EF4444' }}>{estadisticasTramites.totales.vencidos}</h3>
-                <small className="text-muted">superaron fecha límite</small>
+                <small className="text-muted">fecha límite</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
+            <div className="col-6 col-lg">
               <div 
                 className="executive-card p-3"
                 style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
@@ -1528,70 +1734,6 @@ const DashboardComponent = () => {
                 <small className="text-muted">finalizados</small>
               </div>
             </div>
-          </div>
-
-          {/* Tabla compacta de trámites recientes */}
-          <div className="executive-card p-3">
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <div className="text-muted" style={{ fontSize: '12px' }}>Trámites recientes</div>
-              <small className="text-muted">Total: {estadisticasTramites.totales.total}</small>
-            </div>
-            {tramites.length === 0 ? (
-              <div className="text-center text-muted py-4">
-                <FileText size={24} className="mb-2" />
-                No hay trámites registrados
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-hover mb-0 compact-table">
-                  <thead>
-                    <tr>
-                      <th>Código</th>
-                      <th>Tipo</th>
-                      <th>Cliente</th>
-                      <th>Póliza</th>
-                      <th>Estatus</th>
-                      <th>Prioridad</th>
-                      <th>Fecha Límite</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {estadisticasTramites.recientes.map((t, idx) => (
-                      <tr key={idx}>
-                        <td className="fw-semibold" style={{ color: '#111827' }}>{t.codigo}</td>
-                        <td>{t.tipoTramite}</td>
-                        <td>{t.cliente || '-'}</td>
-                        <td><small className="text-muted">{t.expediente || '-'}</small></td>
-                        <td>
-                          <span className={`badge ${
-                            t.estatus === 'Completado' ? 'bg-success' :
-                            t.estatus === 'En proceso' ? 'bg-primary' :
-                            t.estatus === 'Pendiente' ? 'bg-warning' :
-                            t.estatus === 'Cancelado' ? 'bg-secondary' :
-                            t.estatus === 'Rechazado' ? 'bg-dark' : 'bg-info'
-                          }`} style={{ fontSize: '10px' }}>
-                            {t.estatus}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`badge ${
-                            t.prioridad === 'Alta' ? 'bg-danger' :
-                            t.prioridad === 'Media' ? 'bg-warning' : 'bg-success'
-                          }`} style={{ fontSize: '10px' }}>
-                            {t.prioridad}
-                          </span>
-                        </td>
-                        <td>
-                          <small className={`${t.fechaLimite && new Date(t.fechaLimite) < new Date() && !['Completado','Cancelado','Rechazado'].includes(t.estatus) ? 'text-danger' : ''}`}>
-                            {t.fechaLimite ? new Date(t.fechaLimite).toLocaleDateString('es-MX') : '-'}
-                          </small>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -2606,20 +2748,44 @@ const DashboardComponent = () => {
                         </div>
                         <div className="card-body py-2">
                           <div className="d-flex flex-wrap gap-2">
+                            {/* Botón Enviar a Ejecutivo - solo si está Pendiente */}
+                            {tramiteSeleccionado.estatus === 'Pendiente' && (
+                              <button 
+                                className="btn btn-sm btn-warning"
+                                onClick={() => abrirModalEnviarEjecutivo(tramiteSeleccionado)}
+                              >
+                                <Send size={12} className="me-1" />Enviar a Ejecutivo
+                              </button>
+                            )}
+                            
+                            {/* Botón Atender - solo si está Pendiente o Solicitado */}
+                            {(tramiteSeleccionado.estatus === 'Pendiente' || tramiteSeleccionado.estatus === 'Solicitado') && (
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                onClick={() => cambiarEstatusTramite(tramiteSeleccionado, 'En proceso')}
+                              >
+                                <Activity size={12} className="me-1" />Atender
+                              </button>
+                            )}
+                            
+                            {/* Botón Completar - solo si está En proceso */}
+                            {tramiteSeleccionado.estatus === 'En proceso' && (
+                              <button 
+                                className="btn btn-sm btn-success"
+                                onClick={() => cambiarEstatusTramite(tramiteSeleccionado, 'Completado')}
+                              >
+                                <CheckCircle size={12} className="me-1" />Completar
+                              </button>
+                            )}
+                            
                             <button 
                               className="btn btn-sm btn-outline-primary"
                               onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}
                             >
                               <Edit size={12} className="me-1" />Editar Trámite
                             </button>
-                            <button className="btn btn-sm btn-outline-success">
-                              <CheckCircle size={12} className="me-1" />Completar
-                            </button>
-                            <button className="btn btn-sm btn-outline-warning">
+                            <button className="btn btn-sm btn-outline-secondary">
                               <Clock size={12} className="me-1" />Posponer
-                            </button>
-                            <button className="btn btn-sm btn-outline-info">
-                              <MessageSquare size={12} className="me-1" />Agregar Nota
                             </button>
                           </div>
                         </div>
@@ -2646,6 +2812,105 @@ const DashboardComponent = () => {
                   onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}>
                   <FileCheck size={14} className="me-1" />
                   Ir a Gestión de Trámites
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ENVIAR A EJECUTIVO */}
+      {modalEnviarEjecutivo && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1060 }} onClick={() => setModalEnviarEjecutivo(null)}>
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              <div className="modal-header bg-warning text-dark py-3">
+                <h5 className="modal-title fw-bold mb-0">
+                  <Send size={18} className="me-2" />
+                  Enviar Trámite a Ejecutivo
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close"
+                  onClick={() => setModalEnviarEjecutivo(null)}>
+                </button>
+              </div>
+              
+              <div className="modal-body">
+                {/* Resumen del trámite */}
+                <div className="bg-light rounded p-3 mb-4">
+                  <div className="row g-2" style={{ fontSize: '13px' }}>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Código</small>
+                      <span className="fw-bold">{modalEnviarEjecutivo.codigo}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Tipo</small>
+                      <span>{modalEnviarEjecutivo.tipoTramite}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Cliente</small>
+                      <span>{modalEnviarEjecutivo.clienteNombre || modalEnviarEjecutivo.cliente}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Ejecutivo</small>
+                      <span className="fw-medium">{modalEnviarEjecutivo.responsable || modalEnviarEjecutivo.ejecutivoAsignado || 'Por asignar'}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Opciones de envío */}
+                <p className="text-muted text-center mb-3" style={{ fontSize: '13px' }}>
+                  Selecciona cómo deseas enviar la solicitud:
+                </p>
+                
+                <div className="d-flex gap-3 justify-content-center">
+                  {/* Botón WhatsApp */}
+                  <button
+                    className="btn btn-lg d-flex flex-column align-items-center p-3"
+                    style={{ 
+                      backgroundColor: '#25D366', 
+                      color: 'white',
+                      borderRadius: '12px',
+                      minWidth: '140px'
+                    }}
+                    onClick={() => enviarTramiteAEjecutivo(modalEnviarEjecutivo, 'whatsapp')}
+                  >
+                    <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+                    </svg>
+                    <span className="mt-2 fw-medium">WhatsApp</span>
+                  </button>
+                  
+                  {/* Botón Email */}
+                  <button
+                    className="btn btn-lg d-flex flex-column align-items-center p-3"
+                    style={{ 
+                      backgroundColor: '#EA4335', 
+                      color: 'white',
+                      borderRadius: '12px',
+                      minWidth: '140px'
+                    }}
+                    onClick={() => enviarTramiteAEjecutivo(modalEnviarEjecutivo, 'email')}
+                  >
+                    <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4Zm2-1a1 1 0 0 0-1 1v.217l7 4.2 7-4.2V4a1 1 0 0 0-1-1H2Zm13 2.383-4.708 2.825L15 11.105V5.383Zm-.034 6.876-5.64-3.471L8 9.583l-1.326-.795-5.64 3.47A1 1 0 0 0 2 13h12a1 1 0 0 0 .966-.741ZM1 11.105l4.708-2.897L1 5.383v5.722Z"/>
+                    </svg>
+                    <span className="mt-2 fw-medium">Email</span>
+                  </button>
+                </div>
+                
+                <p className="text-center text-muted mt-4 mb-0" style={{ fontSize: '11px' }}>
+                  ℹ️ El trámite cambiará a estado "Solicitado" al enviar
+                </p>
+              </div>
+              
+              <div className="modal-footer py-2">
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => setModalEnviarEjecutivo(null)}>
+                  Cancelar
                 </button>
               </div>
             </div>
