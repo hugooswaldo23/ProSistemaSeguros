@@ -421,55 +421,46 @@ const DashboardComponent = () => {
         color = '#EF4444';
         break;
       case 'canceladas':
-        // 🔥 NUEVA LÓGICA: Mostrar recibos con estatus "Cancelado" filtrados por fecha
+        // 🔥 LÓGICA: Recibos NO pagados de pólizas canceladas
         {
           const recibosCancelados = expedientes.flatMap(p => {
-            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
-              // Póliza sin recibos: verificar si la póliza está cancelada
-              if (p.etapa_activa === 'Cancelada') {
-                const fechaCancelacion = p.fecha_cancelacion || p.updated_at;
-                let incluir = false;
-                
-                if (periodo === 'mesActual') {
-                  incluir = !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
-                } else if (periodo === 'mesAnterior') {
-                  incluir = fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
-                } else {
-                  incluir = true;
-                }
-                
-                if (incluir) {
-                  return [{
-                    ...p,
-                    _esRecibo: true,
-                    monto: resolverMonto(p)
-                  }];
-                }
-              }
-              return [];
+            // Solo considerar pólizas canceladas
+            const estaCancelado = p.etapa_activa === 'Cancelada' || p.etapaActiva === 'Cancelada';
+            if (!estaCancelado) return [];
+            
+            // Verificar fecha de cancelación según el periodo
+            const fechaCancelacion = p.fecha_cancelacion || p.updated_at;
+            let incluidoEnPeriodo = false;
+            
+            if (periodo === 'mesActual') {
+              incluidoEnPeriodo = !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
+            } else if (periodo === 'mesAnterior') {
+              incluidoEnPeriodo = fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+            } else {
+              incluidoEnPeriodo = true;
             }
-            // Filtrar recibos con estatus Cancelado
+            
+            if (!incluidoEnPeriodo) return [];
+            
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: mostrar la póliza como item
+              return [{
+                ...p,
+                _esRecibo: true,
+                monto: resolverMonto(p)
+              }];
+            }
+            
+            // Filtrar recibos NO pagados (los cancelados)
             return p.recibos
-              .filter(r => {
-                const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-                const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
-                if (!estaCancelado) return false;
-                
-                const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
-                
-                if (periodo === 'mesActual') {
-                  return !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
-                } else if (periodo === 'mesAnterior') {
-                  return fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
-                }
-                return true;
-              })
+              .filter(r => !r.fecha_pago_real) // Solo recibos sin pagar
               .map(r => ({
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
                 monto: Number(r.monto || r.importe || 0),
-                fecha_cancelacion: r.fecha_cancelacion || r.updated_at
+                fecha_cancelacion: p.fecha_cancelacion || p.updated_at
               }));
           });
           polizasFiltradas = recibosCancelados;
