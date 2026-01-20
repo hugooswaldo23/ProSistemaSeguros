@@ -112,7 +112,7 @@ const ModuloNvoExpedientes = () => {
   const [expedienteParaCompartir, setExpedienteParaCompartir] = useState(null);
   const [destinatariosCompartir, setDestinatariosCompartir] = useState([]);
   const [destinatarioCompartirSeleccionado, setDestinatarioCompartirSeleccionado] = useState(null);
-  const [tipoEnvio, setTipoEnvio] = useState('poliza'); // 'poliza' o 'pago'
+  const [tipoEnvio, setTipoEnvio] = useState('poliza'); // 'poliza', 'pago' o 'cotizacion'
   const [pagoSeleccionado, setPagoSeleccionado] = useState(null);
 
   // 📞 Estados para Modal de Captura de Contacto (teléfono/email faltante)
@@ -137,11 +137,25 @@ const ModuloNvoExpedientes = () => {
   const [motivoEliminacion, setMotivoEliminacion] = useState('');
   const [eliminandoPago, setEliminandoPago] = useState(false);
 
-  // �🔄 Estados para flujo de renovación
+  // 🔄 Estados para flujo de renovación
   const [mostrarModalCotizarRenovacion, setMostrarModalCotizarRenovacion] = useState(false);
   const [mostrarModalAutorizarRenovacion, setMostrarModalAutorizarRenovacion] = useState(false);
   const [mostrarModalPolizaRenovada, setMostrarModalPolizaRenovada] = useState(false);
   const [expedienteParaRenovacion, setExpedienteParaRenovacion] = useState(null);
+  
+  // 🆕 Modal unificado de opciones de renovación (Cotización o Póliza)
+  const [mostrarModalOpcionesRenovacion, setMostrarModalOpcionesRenovacion] = useState(false);
+  const [expedienteAnteriorParaRenovacion, setExpedienteAnteriorParaRenovacion] = useState(null);
+  
+  // 🆕 Modal para cargar archivo de cotización
+  const [mostrarModalCargarCotizacion, setMostrarModalCargarCotizacion] = useState(false);
+  const [archivoCotizacion, setArchivoCotizacion] = useState(null);
+  const [cargandoCotizacion, setCargandoCotizacion] = useState(false);
+  
+  // 🆕 Cotizaciones del expediente (para compartir)
+  const [cotizacionesExpediente, setCotizacionesExpediente] = useState([]);
+  const [cotizacionSeleccionada, setCotizacionSeleccionada] = useState(null);
+  const [cargandoCotizaciones, setCargandoCotizaciones] = useState(false);
 
   // Datos para la renovación
   const [datosRenovacion, setDatosRenovacion] = useState({
@@ -796,9 +810,8 @@ const ModuloNvoExpedientes = () => {
     }
   }, [cambiarEstadoExpediente]);
 
-  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
-  // 📤 Abrir Modal de Compartir (Póliza o Aviso de Pago)
-  // tipoEnvioInicial: 'poliza' (default) o 'pago' para preseleccionar
+  // 📤 Abrir Modal de Compartir (Póliza, Aviso de Pago o Cotización)
+  // tipoEnvioInicial: 'poliza' (default), 'pago' o 'cotizacion' para preseleccionar
   const abrirModalCompartir = useCallback(async (expediente, tipoEnvioInicial = 'poliza') => {
     // Preseleccionar tipo de envío
     setTipoEnvio(tipoEnvioInicial);
@@ -807,6 +820,27 @@ const ModuloNvoExpedientes = () => {
     if (!expediente?.cliente_id) {
       toast.error('Esta póliza no tiene un cliente asociado');
       return;
+    }
+    
+    // Si es cotización, cargar las cotizaciones disponibles
+    if (tipoEnvioInicial === 'cotizacion') {
+      setCargandoCotizaciones(true);
+      try {
+        const cotizaciones = await pdfService.obtenerCotizaciones(expediente.id);
+        setCotizacionesExpediente(cotizaciones);
+        // Seleccionar la más reciente por defecto
+        if (cotizaciones.length > 0) {
+          setCotizacionSeleccionada(cotizaciones[cotizaciones.length - 1]);
+        } else {
+          setCotizacionSeleccionada(null);
+        }
+      } catch (error) {
+        console.warn('No se pudieron cargar cotizaciones:', error);
+        setCotizacionesExpediente([]);
+        setCotizacionSeleccionada(null);
+      } finally {
+        setCargandoCotizaciones(false);
+      }
     }
     
     // Obtener datos del cliente para determinar destinatarios
@@ -889,6 +923,71 @@ const ModuloNvoExpedientes = () => {
   // ═══════════════════════════════════════════════════════════════
 
   /**
+   * 🆕 Abrir Modal de Opciones de Renovación
+   * - Muestra 2 opciones: Cargar Cotización o Cargar Póliza Renovada
+   * - Se usa en carpetas "Por Renovar" y "En Proceso Renovación"
+   */
+  const abrirModalOpcionesRenovacion = useCallback((expediente) => {
+    setExpedienteAnteriorParaRenovacion(expediente);
+    setMostrarModalOpcionesRenovacion(true);
+  }, []);
+
+  /**
+   * 🆕 Opción 1: Cargar Cotización desde el modal de opciones
+   * - Cierra modal de opciones
+   * - Mueve directamente a "En Cotización - Renovación"
+   * - El usuario puede subir cotización después en la carpeta "En Proceso Renovación"
+   */
+  const seleccionarCargarCotizacion = useCallback(async () => {
+    try {
+      if (!expedienteAnteriorParaRenovacion) return;
+      
+      // Actualizar expediente con nueva etapa
+      const response = await fetch(`${API_URL}/api/expedientes/${expedienteAnteriorParaRenovacion.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          etapa_activa: 'En Cotización - Renovación'
+        })
+      });
+      
+      if (!response.ok) throw new Error('Error al actualizar expediente');
+      
+      // Registrar evento
+      await historialService.registrarEvento({
+        expediente_id: expedienteAnteriorParaRenovacion.id,
+        cliente_id: expedienteAnteriorParaRenovacion.cliente_id,
+        tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA || 'COTIZACION_RENOVACION_INICIADA',
+        usuario_nombre: 'Sistema',
+        descripcion: 'Iniciado proceso de cotización para renovación de póliza',
+        datos_adicionales: {
+          numero_poliza: expedienteAnteriorParaRenovacion.numero_poliza,
+          compania: expedienteAnteriorParaRenovacion.compania
+        }
+      });
+      
+      toast.success('Movido a En Proceso Renovación - Cotización');
+      setMostrarModalOpcionesRenovacion(false);
+      setExpedienteAnteriorParaRenovacion(null);
+      await recargarExpedientes();
+    } catch (error) {
+      console.error('Error al iniciar cotización:', error);
+      toast.error('Error al mover a cotización');
+    }
+  }, [expedienteAnteriorParaRenovacion]);
+
+  /**
+   * 🆕 Opción 2: Cargar Póliza Renovada desde el modal de opciones
+   * - Cierra modal de opciones
+   * - Abre el extractor PDF con referencia al expediente anterior
+   */
+  const seleccionarCargarPolizaRenovada = useCallback(() => {
+    setMostrarModalOpcionesRenovacion(false);
+    // El extractor se abrirá con expedienteAnteriorParaRenovacion disponible
+    setMostrarExtractorPDF(true);
+  }, []);
+
+  /**
    * 1. Iniciar Cotización de Renovación
    * - Abre modal para capturar detalles de cotización
    * - Cambia estado a "En Cotización - Renovación"
@@ -903,6 +1002,7 @@ const ModuloNvoExpedientes = () => {
       toast.error('Error al iniciar cotización de renovación');
     }
   }, []);
+
 
   const guardarCotizacionRenovacion = useCallback(async () => {
     try {
@@ -919,18 +1019,22 @@ const ModuloNvoExpedientes = () => {
       
       if (!response.ok) throw new Error('Error al actualizar expediente');
       
-      // Registrar evento
-      await historialService.registrarEvento({
-        expediente_id: expedienteParaRenovacion.id,
-        cliente_id: expedienteParaRenovacion.cliente_id,
-        tipo_evento: historialService.TIPOS_EVENTO.COTIZACION_RENOVACION_INICIADA,
-        usuario_nombre: 'Sistema',
-        descripcion: 'Iniciado proceso de cotización para renovación de póliza',
-        datos_adicionales: {
-          numero_poliza: expedienteParaRenovacion.numero_poliza,
-          compania: expedienteParaRenovacion.compania
-        }
+      // Enriquecer expediente con datos del cliente para el log
+      const cliente = clientesMap[expedienteParaRenovacion.cliente_id];
+      const expedienteEnriquecido = {
+        ...expedienteParaRenovacion,
+        nombre: expedienteParaRenovacion.nombre || cliente?.nombre || '',
+        razon_social: expedienteParaRenovacion.razon_social || cliente?.razon_social || ''
+      };
+      
+      console.log('📝 Expediente para renovación:', expedienteEnriquecido);
+      console.log('📅 Vigencias:', {
+        inicio: expedienteEnriquecido.inicio_vigencia,
+        termino: expedienteEnriquecido.termino_vigencia
       });
+      
+      // Registrar evento usando helper del servicio (descripción enriquecida)
+      await historialService.registrarCotizacionRenovacionIniciada(expedienteEnriquecido);
       
       toast.success('Cotización de renovación iniciada');
       await recargarExpedientes();
@@ -942,10 +1046,226 @@ const ModuloNvoExpedientes = () => {
       console.error('Error al guardar cotización:', error);
       toast.error('Error al iniciar cotización');
     }
-  }, [expedienteParaRenovacion]);
+  }, [expedienteParaRenovacion, clientesMap]);
 
   /**
-   * 2. Marcar Renovación como Autorizada
+   * 🆕 2. Abrir Modal para Cargar Cotización
+   * - Abre modal para subir archivo PDF de cotización
+   */
+  const abrirModalCargarCotizacion = useCallback((expediente) => {
+    setExpedienteParaRenovacion(expediente);
+    setArchivoCotizacion(null);
+    setMostrarModalCargarCotizacion(true);
+  }, []);
+
+  /**
+   * 🆕 3. Guardar Cotización (subir archivo a S3)
+   * - Sube el archivo de cotización a S3
+   * - Si etapa es "En Cotización - Renovación", cambia a "Cotización Lista"
+   * - Si ya está en etapa posterior, solo registra el archivo sin cambiar etapa
+   */
+  const guardarCotizacionArchivo = useCallback(async () => {
+    try {
+      if (!expedienteParaRenovacion || !archivoCotizacion) {
+        toast.error('Selecciona un archivo de cotización');
+        return;
+      }
+      
+      setCargandoCotizacion(true);
+      
+      // Subir archivo a S3
+      let cotizacionUrl = null;
+      try {
+        const resultado = await pdfService.subirCotizacionPDF(expedienteParaRenovacion.id, archivoCotizacion);
+        cotizacionUrl = resultado?.url || null;
+        console.log('✅ Cotización subida a S3:', cotizacionUrl);
+      } catch (uploadError) {
+        console.warn('⚠️ No se pudo subir cotización a S3, continuando sin URL:', uploadError);
+        // Continuar sin URL si falla la subida
+      }
+      
+      // Solo cambiar etapa si está en "En Cotización - Renovación"
+      const etapaActual = expedienteParaRenovacion.etapa_activa || '';
+      if (etapaActual === 'En Cotización - Renovación') {
+        const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            etapa_activa: 'Cotización Lista'
+          })
+        });
+        
+        if (!response.ok) throw new Error('Error al actualizar expediente');
+      }
+      
+      // Registrar evento usando helper del servicio (descripción enriquecida)
+      await historialService.registrarCotizacionCargada(expedienteParaRenovacion, archivoCotizacion.name, cotizacionUrl);
+      
+      toast.success('Cotización cargada correctamente');
+      setMostrarModalCargarCotizacion(false);
+      setExpedienteParaRenovacion(null);
+      setArchivoCotizacion(null);
+      await recargarExpedientes();
+    } catch (error) {
+      console.error('Error al cargar cotización:', error);
+      toast.error('Error al cargar cotización');
+    } finally {
+      setCargandoCotizacion(false);
+    }
+  }, [expedienteParaRenovacion, archivoCotizacion]);
+
+  /**
+   * 4. Enviar Cotización al Cliente (Abrir Modal)
+   * - Abre modal de compartir con tipo 'cotizacion' preseleccionado
+   * - NO cambia etapa, solo comparte
+   */
+  const enviarCotizacionCliente = useCallback(async (expediente) => {
+    // Abrir modal de compartir con tipo cotización preseleccionado
+    await abrirModalCompartir(expediente, 'cotizacion');
+  }, [abrirModalCompartir]);
+
+  /**
+   * 4b. Compartir Cotización por WhatsApp
+   * - Si etapa es "Cotización Lista", cambia a "Cotización Enviada"
+   * - Si ya está en "Cotización Enviada", puede compartir N veces sin cambiar etapa
+   * - Incluye link de descarga si hay cotización seleccionada
+   * - Registra evento COTIZACION_ENVIADA
+   */
+  const compartirCotizacionWhatsApp = useCallback(async (expediente) => {
+    try {
+      // Obtener datos del destinatario
+      const destinatario = destinatarioCompartirSeleccionado;
+      if (!destinatario?.telefono) {
+        toast.error('El destinatario no tiene número de teléfono');
+        return;
+      }
+      
+      // Obtener nombre del cliente
+      const cliente = clientesMap[expediente.cliente_id];
+      const nombreCliente = destinatario.nombre || cliente?.nombre || cliente?.razon_social || 'Cliente';
+      const primerNombre = nombreCliente.split(' ')[0]; // Solo primer nombre para ser más personal
+      
+      // Obtener nombre del usuario que envía
+      const usuarioActual = historialService.obtenerUsuarioActual();
+      const firmaUsuario = usuarioActual.nombre !== 'Sistema' ? usuarioActual.nombre : '';
+      
+      // Obtener URL de la cotización seleccionada (si existe)
+      let linkCotizacion = '';
+      if (cotizacionSeleccionada?.url) {
+        linkCotizacion = `\n\n📄 Descarga tu cotización aquí:\n${cotizacionSeleccionada.url}`;
+      } else if (cotizacionSeleccionada?.id) {
+        // Intentar obtener URL firmada
+        try {
+          const urlData = await pdfService.obtenerURLCotizacion(expediente.id, cotizacionSeleccionada.id);
+          if (urlData?.url) {
+            linkCotizacion = `\n\n📄 Descarga tu cotización aquí:\n${urlData.url}`;
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener URL firmada:', e);
+        }
+      }
+      
+      // Construir mensaje de cotización más amigable
+      const mensaje = `¡Hola ${primerNombre}! 👋\n\nTu póliza ${expediente.numero_poliza || ''} de ${expediente.compania || 'tu aseguradora'} está próxima a vencer.\n\nTe compartimos por este medio algunas opciones para su renovación y que continúes protegido. 🛡️${linkCotizacion}\n\nQuedamos atentos a tus comentarios.${firmaUsuario ? `\n\n${firmaUsuario}` : ''}`;
+      
+      // Abrir WhatsApp
+      const telefono = destinatario.telefono.replace(/\D/g, '');
+      const telefonoCompleto = telefono.startsWith('52') ? telefono : `52${telefono}`;
+      const urlWhatsApp = `https://wa.me/${telefonoCompleto}?text=${encodeURIComponent(mensaje)}`;
+      window.open(urlWhatsApp, '_blank');
+      
+      // Si está en "Cotización Lista", cambiar a "Cotización Enviada"
+      const etapaActual = expediente.etapa_activa || '';
+      if (etapaActual === 'Cotización Lista') {
+        await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ etapa_activa: 'Cotización Enviada' })
+        });
+        await recargarExpedientes();
+      }
+      
+      // Registrar evento
+      await historialService.registrarCotizacionEnviadaCliente(expediente);
+      
+      toast.success(`Cotización enviada por WhatsApp a ${nombreCliente}`);
+    } catch (error) {
+      console.error('Error al enviar cotización por WhatsApp:', error);
+      toast.error('Error al enviar cotización');
+    }
+  }, [clientesMap, destinatarioCompartirSeleccionado, cotizacionSeleccionada, recargarExpedientes]);
+
+  /**
+   * 4c. Compartir Cotización por Email
+   * - Si etapa es "Cotización Lista", cambia a "Cotización Enviada"
+   * - Si ya está en "Cotización Enviada", puede compartir N veces sin cambiar etapa
+   * - Incluye link de descarga si hay cotización seleccionada
+   * - Registra evento COTIZACION_ENVIADA
+   */
+  const compartirCotizacionEmail = useCallback(async (expediente) => {
+    try {
+      // Obtener datos del destinatario
+      const destinatario = destinatarioCompartirSeleccionado;
+      if (!destinatario?.email) {
+        toast.error('El destinatario no tiene email');
+        return;
+      }
+      
+      // Obtener nombre del cliente
+      const cliente = clientesMap[expediente.cliente_id];
+      const nombreCliente = destinatario.nombre || cliente?.nombre || cliente?.razon_social || 'Cliente';
+      const primerNombre = nombreCliente.split(' ')[0]; // Solo primer nombre para ser más personal
+      
+      // Obtener nombre del usuario que envía
+      const usuarioActual = historialService.obtenerUsuarioActual();
+      const firmaUsuario = usuarioActual.nombre !== 'Sistema' ? usuarioActual.nombre : '';
+      
+      // Obtener URL de la cotización seleccionada (si existe)
+      let linkCotizacion = '';
+      if (cotizacionSeleccionada?.url) {
+        linkCotizacion = `\n\nDescarga tu cotización aquí:\n${cotizacionSeleccionada.url}`;
+      } else if (cotizacionSeleccionada?.id) {
+        // Intentar obtener URL firmada
+        try {
+          const urlData = await pdfService.obtenerURLCotizacion(expediente.id, cotizacionSeleccionada.id);
+          if (urlData?.url) {
+            linkCotizacion = `\n\nDescarga tu cotización aquí:\n${urlData.url}`;
+          }
+        } catch (e) {
+          console.warn('No se pudo obtener URL firmada:', e);
+        }
+      }
+      
+      // Construir email más amigable
+      const asunto = `Opciones de Renovación - Póliza ${expediente.numero_poliza || ''} - ${expediente.compania || ''}`;
+      const cuerpo = `¡Hola ${primerNombre}!\n\nTu póliza ${expediente.numero_poliza || ''} de ${expediente.compania || 'tu aseguradora'} está próxima a vencer.\n\nTe compartimos por este medio algunas opciones para su renovación y que continúes protegido.${linkCotizacion}\n\nQuedamos atentos a tus comentarios.\n\nSaludos cordiales.${firmaUsuario ? `\n\n${firmaUsuario}` : ''}`;
+      
+      const urlEmail = `mailto:${destinatario.email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      window.open(urlEmail, '_blank');
+      
+      // Si está en "Cotización Lista", cambiar a "Cotización Enviada"
+      const etapaActual = expediente.etapa_activa || '';
+      if (etapaActual === 'Cotización Lista') {
+        await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ etapa_activa: 'Cotización Enviada' })
+        });
+        await recargarExpedientes();
+      }
+      
+      // Registrar evento
+      await historialService.registrarCotizacionEnviadaCliente(expediente);
+      
+      toast.success(`Cotización enviada por Email a ${nombreCliente}`);
+    } catch (error) {
+      console.error('Error al enviar cotización por Email:', error);
+      toast.error('Error al enviar cotización');
+    }
+  }, [clientesMap, destinatarioCompartirSeleccionado, cotizacionSeleccionada, recargarExpedientes]);
+
+  /**
+   * 3. Marcar Renovación como Autorizada (Cliente Autoriza)
    * - Cliente autorizó la renovación después de recibir cotización
    * - Cambia estado a "Pendiente de Emisión - Renovación"
    * - Registra evento RENOVACION_PENDIENTE_EMISION
@@ -969,26 +1289,16 @@ const ModuloNvoExpedientes = () => {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          etapa_activa: 'Pendiente de Emisión - Renovación'
+          etapa_activa: 'Por Emitir - Renovación'
         })
       });
       
       if (!response.ok) throw new Error('Error al actualizar expediente');
       
-      // Registrar evento
-      await historialService.registrarEvento({
-        expediente_id: expedienteParaRenovacion.id,
-        cliente_id: expedienteParaRenovacion.cliente_id,
-        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION,
-        usuario_nombre: 'Sistema',
-        descripcion: 'Cliente autorizó la renovación - Pendiente de emisión',
-        datos_adicionales: {
-          numero_poliza: expedienteParaRenovacion.numero_poliza,
-          compania: expedienteParaRenovacion.compania
-        }
-      });
+      // Registrar evento usando helper del servicio (descripción enriquecida)
+      await historialService.registrarRenovacionAutorizada(expedienteParaRenovacion);
       
-      toast.success('Renovación marcada como autorizada');
+      toast.success('Renovación autorizada - Por emitir');
       await recargarExpedientes();
       
       // Cerrar modal
@@ -1009,27 +1319,17 @@ const ModuloNvoExpedientes = () => {
    */
   const abrirModalPolizaRenovada = useCallback(async (expediente) => {
     try {
-      setExpedienteParaRenovacion(expediente);
+      // Guardar referencia del expediente anterior para vinculación
+      setExpedienteAnteriorParaRenovacion(expediente);
       
-      // Pre-llenar formulario con datos inteligentes
-      const hoy = new Date();
-      const inicioVigencia = new Date(expediente.termino_vigencia);
-      const terminoVigencia = new Date(inicioVigencia);
-      terminoVigencia.setFullYear(terminoVigencia.getFullYear() + 1);
+      // Abrir en modo agregar nueva póliza (el formulario se limpiará automáticamente)
+      setModoEdicion(false);
+      setVistaActual('formulario');
       
-      setDatosRenovacion({
-        numeroPolizaNueva: expediente.numero_poliza || '', // Puede ser el mismo o nuevo
-        primaNueva: expediente.prima_pagada || '',
-        totalNuevo: expediente.total || '',
-        fechaEmisionNueva: hoy.toISOString().split('T')[0],
-        inicioVigenciaNueva: inicioVigencia.toISOString().split('T')[0],
-        terminoVigenciaNueva: terminoVigencia.toISOString().split('T')[0],
-        observaciones: ''
-      });
-      
-      setMostrarModalPolizaRenovada(true);
+      // Toast informativo
+      toast.success(`Capturando renovación de póliza ${expediente.numero_poliza}`);
     } catch (error) {
-      console.error('Error al abrir modal de póliza renovada:', error);
+      console.error('Error al abrir formulario de póliza renovada:', error);
       toast.error('Error al abrir formulario de renovación');
     }
   }, []);
@@ -1043,42 +1343,100 @@ const ModuloNvoExpedientes = () => {
       const fechaAviso = new Date(terminoVigencia);
       fechaAviso.setDate(fechaAviso.getDate() - 30);
       
-      // Actualizar expediente con nuevos datos
-      const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
+      // 🆕 CREAR NUEVO EXPEDIENTE para la renovación (en lugar de actualizar el anterior)
+      // Copiar datos del expediente anterior + nuevos datos de renovación
+      const nuevoExpediente = {
+        // Datos del cliente y bien asegurado (copiados)
+        cliente_id: expedienteParaRenovacion.cliente_id,
+        compania: expedienteParaRenovacion.compania,
+        producto: expedienteParaRenovacion.producto,
+        plan: expedienteParaRenovacion.plan,
+        tipo_pago: expedienteParaRenovacion.tipo_pago,
+        frecuencia_pago: expedienteParaRenovacion.frecuencia_pago,
+        moneda: expedienteParaRenovacion.moneda,
+        forma_pago: expedienteParaRenovacion.forma_pago,
+        agente_id: expedienteParaRenovacion.agente_id,
+        clave_agente: expedienteParaRenovacion.clave_agente,
+        vendedor_id: expedienteParaRenovacion.vendedor_id,
+        // Datos del vehículo/bien asegurado
+        numero_serie: expedienteParaRenovacion.numero_serie,
+        placas: expedienteParaRenovacion.placas,
+        marca: expedienteParaRenovacion.marca,
+        submarca: expedienteParaRenovacion.submarca,
+        modelo: expedienteParaRenovacion.modelo,
+        version: expedienteParaRenovacion.version,
+        color: expedienteParaRenovacion.color,
+        uso: expedienteParaRenovacion.uso,
+        servicio: expedienteParaRenovacion.servicio,
+        // Coberturas
+        suma_asegurada: expedienteParaRenovacion.suma_asegurada,
+        deducible: expedienteParaRenovacion.deducible,
+        coberturas: expedienteParaRenovacion.coberturas,
+        
+        // 🆕 NUEVOS datos de la renovación
+        numero_poliza: datosRenovacion.numeroPolizaNueva,
+        endoso: '000', // Renovación inicia con endoso 000
+        prima_neta: parseFloat(datosRenovacion.primaNueva) || 0,
+        total: parseFloat(datosRenovacion.totalNuevo) || 0,
+        fecha_emision: datosRenovacion.fechaEmisionNueva,
+        inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
+        termino_vigencia: datosRenovacion.terminoVigenciaNueva,
+        fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
+        etapa_activa: 'Emitida', // Inicia ciclo nuevo
+        estatus_pago: 'Pendiente',
+        tipo_movimiento: 'RENOVACION',
+        
+        // 🔗 VÍNCULO con póliza anterior
+        renovacion_de: expedienteParaRenovacion.id,
+        observaciones: datosRenovacion.observaciones ? 
+          `Renovación de póliza ${expedienteParaRenovacion.numero_poliza}. ${datosRenovacion.observaciones}` :
+          `Renovación de póliza ${expedienteParaRenovacion.numero_poliza}`
+      };
+      
+      // 1️⃣ CREAR el nuevo expediente
+      const responseNuevo = await fetch(`${API_URL}/api/expedientes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nuevoExpediente)
+      });
+      
+      if (!responseNuevo.ok) {
+        const errorData = await responseNuevo.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Error al crear expediente de renovación');
+      }
+      
+      const nuevoExpedienteCreado = await responseNuevo.json();
+      console.log('✅ Nuevo expediente de renovación creado:', nuevoExpedienteCreado.id);
+      
+      // 2️⃣ ACTUALIZAR el expediente anterior a "Renovada"
+      const responseAnterior = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          numero_poliza: datosRenovacion.numeroPolizaNueva,
-          prima_pagada: parseFloat(datosRenovacion.primaNueva) || 0,
-          total: parseFloat(datosRenovacion.totalNuevo) || 0,
-          fecha_emision: datosRenovacion.fechaEmisionNueva,
-          inicio_vigencia: datosRenovacion.inicioVigenciaNueva,
-          termino_vigencia: datosRenovacion.terminoVigenciaNueva,
-          fecha_aviso_renovacion: fechaAviso.toISOString().split('T')[0],
-          etapa_activa: 'Renovación Emitida',
-          tipo_movimiento: 'renovacion' // Marcar como renovación
+          etapa_activa: 'Renovada',
+          renovada_por: nuevoExpedienteCreado.id // Referencia bidireccional
         })
       });
       
-      if (!response.ok) throw new Error('Error al actualizar expediente');
+      if (!responseAnterior.ok) {
+        console.warn('⚠️ No se pudo actualizar etapa de póliza anterior');
+      }
       
-      // Registrar evento
-      await historialService.registrarEvento({
-        expediente_id: expedienteParaRenovacion.id,
-        cliente_id: expedienteParaRenovacion.cliente_id,
-        tipo_evento: historialService.TIPOS_EVENTO.RENOVACION_EMITIDA,
-        usuario_nombre: 'Sistema',
-        descripcion: `Póliza renovada emitida - Nueva vigencia: ${datosRenovacion.inicioVigenciaNueva} a ${datosRenovacion.terminoVigenciaNueva}`,
-        datos_adicionales: {
-          numero_poliza: datosRenovacion.numeroPolizaNueva,
-          compania: expedienteParaRenovacion.compania,
-          prima_nueva: datosRenovacion.primaNueva,
-          total_nuevo: datosRenovacion.totalNuevo,
-          observaciones: datosRenovacion.observaciones
-        }
-      });
+      // 3️⃣ Registrar evento en el expediente ANTERIOR usando helper del servicio
+      await historialService.registrarRenovacionEmitidaAnterior(
+        expedienteParaRenovacion, 
+        datosRenovacion, 
+        nuevoExpedienteCreado.id
+      );
       
-      toast.success('Póliza renovada registrada exitosamente');
+      // 4️⃣ Registrar evento en el expediente NUEVO usando helper del servicio
+      await historialService.registrarExpedienteRenovacionCreado(
+        expedienteParaRenovacion, 
+        datosRenovacion, 
+        nuevoExpedienteCreado.id
+      );
+      
+      toast.success(`✅ Póliza renovada creada exitosamente - #${datosRenovacion.numeroPolizaNueva}`);
       await recargarExpedientes();
       
       // Cerrar modal
@@ -1095,7 +1453,7 @@ const ModuloNvoExpedientes = () => {
       });
     } catch (error) {
       console.error('Error al guardar póliza renovada:', error);
-      toast.error('Error al registrar póliza renovada');
+      toast.error('Error al registrar póliza renovada: ' + error.message);
     }
   }, [expedienteParaRenovacion, datosRenovacion]);
 
@@ -1801,6 +2159,13 @@ const ModuloNvoExpedientes = () => {
         });
       } else {
         datos.fecha_creacion = new Date().toISOString().split('T')[0];
+        
+        // 🆕 Si hay expediente anterior (renovación), vincular
+        if (expedienteAnteriorParaRenovacion) {
+          datos.renovacion_de = expedienteAnteriorParaRenovacion.id;
+          console.log('🔗 Vinculando renovación - expediente anterior:', expedienteAnteriorParaRenovacion.id);
+        }
+        
         response = await fetch(`${API_URL}/api/expedientes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2301,6 +2666,47 @@ const ModuloNvoExpedientes = () => {
       // ✅ Limpiar cambios pendientes del cliente si los había
       if (cambiosClienteDetectados) {
         setCambiosClientePendientes(null); // Limpiar
+      }
+      
+      // 🆕 Si fue renovación, actualizar expediente anterior a "Renovada"
+      if (expedienteAnteriorParaRenovacion && !modoEdicion) {
+        try {
+          console.log('🔄 Actualizando expediente anterior a Renovada:', expedienteAnteriorParaRenovacion.id);
+          
+          // Actualizar etapa del expediente anterior
+          await fetch(`${API_URL}/api/expedientes/${expedienteAnteriorParaRenovacion.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              etapa_activa: 'Renovada',
+              renovada_por: resultado.data?.id || resultado.id
+            })
+          });
+          
+          // Registrar evento en historial del expediente anterior
+          await historialService.registrarEvento({
+            expediente_id: expedienteAnteriorParaRenovacion.id,
+            cliente_id: expedienteAnteriorParaRenovacion.cliente_id,
+            tipo_evento: 'POLIZA_RENOVADA',
+            usuario_nombre: 'Sistema',
+            descripcion: `Póliza renovada - Nueva póliza: ${datos.numero_poliza || 'N/A'}`,
+            datos_adicionales: {
+              poliza_anterior: expedienteAnteriorParaRenovacion.numero_poliza,
+              aseguradora_anterior: expedienteAnteriorParaRenovacion.compania,
+              poliza_nueva: datos.numero_poliza,
+              aseguradora_nueva: datos.compania,
+              expediente_nuevo_id: resultado.data?.id || resultado.id
+            }
+          });
+          
+          // Limpiar estado de expediente anterior
+          setExpedienteAnteriorParaRenovacion(null);
+          
+          toast.success('✅ Renovación completada - Expediente anterior marcado como Renovada');
+        } catch (errorRenovacion) {
+          console.error('⚠️ Error al actualizar expediente anterior:', errorRenovacion);
+          toast.error('Expediente creado pero hubo error al marcar anterior como renovada');
+        }
       }
       
       // Recargar lista de expedientes desde backend para asegurar sincronización
@@ -2893,8 +3299,10 @@ const ModuloNvoExpedientes = () => {
           calcularProximoPago={calcularProximoPago}
           // ❌ Función de cancelación
           iniciarCancelacion={iniciarCancelacion}
-          // 🔄 Funciones de renovación
-          iniciarCotizacionRenovacion={iniciarCotizacionRenovacion}
+          // 🔄 Funciones de renovación (Flujo 1: Cotización)
+          iniciarRenovacion={abrirModalOpcionesRenovacion}
+          cargarCotizacion={abrirModalCargarCotizacion}
+          enviarCotizacionCliente={enviarCotizacionCliente}
           marcarRenovacionAutorizada={marcarRenovacionAutorizada}
           abrirModalPolizaRenovada={abrirModalPolizaRenovada}
         />
@@ -2908,6 +3316,9 @@ const ModuloNvoExpedientes = () => {
           setFormulario={setFormulario}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
           guardarExpediente={guardarExpediente}
+          // 🆕 Expediente anterior para renovación (si aplica)
+          expedienteAnterior={expedienteAnteriorParaRenovacion}
+          limpiarExpedienteAnterior={() => setExpedienteAnteriorParaRenovacion(null)}
           companias={['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
@@ -3373,6 +3784,18 @@ const ModuloNvoExpedientes = () => {
                         <label className="btn btn-outline-success" htmlFor="radioPago">
                           💰 Aviso de Pago
                         </label>
+
+                        <input
+                          type="radio"
+                          className="btn-check"
+                          name="tipoEnvio"
+                          id="radioCotizacion"
+                          checked={tipoEnvio === 'cotizacion'}
+                          onChange={() => setTipoEnvio('cotizacion')}
+                        />
+                        <label className="btn btn-outline-warning" htmlFor="radioCotizacion">
+                          📝 Cotización
+                        </label>
                       </div>
                     </div>
 
@@ -3438,6 +3861,47 @@ const ModuloNvoExpedientes = () => {
                         </small>
                       </div>
                     )}
+
+                    {/* Selector de cotización (solo si tipo es 'cotizacion') */}
+                    {tipoEnvio === 'cotizacion' && (
+                      <div className="mb-3">
+                        <label className="form-label mb-1"><strong>Seleccionar Cotización:</strong></label>
+                        {cargandoCotizaciones ? (
+                          <div className="text-center py-2">
+                            <div className="spinner-border spinner-border-sm text-warning" role="status">
+                              <span className="visually-hidden">Cargando...</span>
+                            </div>
+                            <small className="ms-2 text-muted">Cargando cotizaciones...</small>
+                          </div>
+                        ) : cotizacionesExpediente.length > 0 ? (
+                          <>
+                            <select
+                              className="form-select form-select-sm"
+                              value={cotizacionSeleccionada?.id || ''}
+                              onChange={(e) => {
+                                const cot = cotizacionesExpediente.find(c => c.id === e.target.value || c.id === parseInt(e.target.value));
+                                setCotizacionSeleccionada(cot);
+                              }}
+                            >
+                              {cotizacionesExpediente.map((cot, idx) => (
+                                <option key={cot.id || idx} value={cot.id}>
+                                  📄 {cot.filename || cot.nombre || `Cotización ${idx + 1}`} 
+                                  {cot.uploadedAt ? ` - ${new Date(cot.uploadedAt).toLocaleDateString('es-MX')}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <small className="text-muted d-block mt-1">
+                              Se enviará el link de descarga en el mensaje
+                            </small>
+                          </>
+                        ) : (
+                          <div className="alert alert-warning py-2 px-3 mb-0" style={{ fontSize: '0.8rem' }}>
+                            <strong>⚠️ Sin cotizaciones</strong>
+                            <p className="mb-0 mt-1">No hay cotizaciones cargadas. Puedes enviar el mensaje sin link de descarga o cargar una cotización primero.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     
                     {/* Mostrar select si hay múltiples destinatarios, o solo el nombre si hay uno */}
                     {destinatariosCompartir.length > 1 ? (
@@ -3499,6 +3963,9 @@ const ModuloNvoExpedientes = () => {
                           totalPagos: expedienteParaCompartir.recibos?.length || null
                         };
                         await enviarAvisoPagoWhatsApp(pagoTransformado, expedienteParaCompartir);
+                      } else if (tipoEnvio === 'cotizacion') {
+                        // Compartir cotización de renovación
+                        await compartirCotizacionWhatsApp(expedienteParaCompartir);
                       } else {
                         await compartirPorWhatsApp(expedienteParaCompartir);
                       }
@@ -3520,6 +3987,9 @@ const ModuloNvoExpedientes = () => {
                           totalPagos: expedienteParaCompartir.recibos?.length || null
                         };
                         await enviarAvisoPagoEmail(pagoTransformado, expedienteParaCompartir);
+                      } else if (tipoEnvio === 'cotizacion') {
+                        // Compartir cotización de renovación por Email
+                        await compartirCotizacionEmail(expedienteParaCompartir);
                       } else {
                         await compartirPorEmail(expedienteParaCompartir);
                       }
@@ -3542,6 +4012,178 @@ const ModuloNvoExpedientes = () => {
       {/* ═══════════════════════════════════════════════════════════════
           MODALES DE RENOVACIÓN
           ═══════════════════════════════════════════════════════════════ */}
+
+      {/* 🆕 Modal: Cargar Archivo de Cotización */}
+      {mostrarModalCargarCotizacion && expedienteParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-primary text-white">
+                <h5 className="modal-title">
+                  <FileText size={20} className="me-2" />
+                  Cargar Cotización
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white" 
+                  onClick={() => {
+                    setMostrarModalCargarCotizacion(false);
+                    setExpedienteParaRenovacion(null);
+                    setArchivoCotizacion(null);
+                  }}
+                  disabled={cargandoCotizacion}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <p className="mb-1"><strong>Póliza:</strong> {expedienteParaRenovacion.numero_poliza}</p>
+                  <p className="mb-0"><strong>Compañía:</strong> {expedienteParaRenovacion.compania || 'N/A'}</p>
+                </div>
+                
+                <div className="mb-3">
+                  <label className="form-label">Archivo de cotización (PDF)</label>
+                  <input
+                    type="file"
+                    className="form-control"
+                    accept=".pdf,.PDF"
+                    onChange={(e) => setArchivoCotizacion(e.target.files[0])}
+                    disabled={cargandoCotizacion}
+                  />
+                  {archivoCotizacion && (
+                    <small className="text-success mt-1 d-block">
+                      ✓ {archivoCotizacion.name}
+                    </small>
+                  )}
+                </div>
+                
+                <p className="text-muted small">
+                  Al cargar la cotización, el expediente cambiará a etapa <strong>"Cotización Lista"</strong>.
+                  Después podrás enviarla al cliente.
+                </p>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalCargarCotizacion(false);
+                    setExpedienteParaRenovacion(null);
+                    setArchivoCotizacion(null);
+                  }}
+                  disabled={cargandoCotizacion}
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary"
+                  onClick={guardarCotizacionArchivo}
+                  disabled={!archivoCotizacion || cargandoCotizacion}
+                >
+                  {cargandoCotizacion ? (
+                    <>
+                      <Loader size={16} className="me-2 spinner-border spinner-border-sm" />
+                      Cargando...
+                    </>
+                  ) : (
+                    <>
+                      <Upload size={16} className="me-2" />
+                      Cargar Cotización
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🆕 Modal 0: Opciones de Renovación (Iniciar Renovación) */}
+      {mostrarModalOpcionesRenovacion && expedienteAnteriorParaRenovacion && (
+        <div className="modal d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header bg-warning text-dark">
+                <h5 className="modal-title">
+                  <RefreshCw size={20} className="me-2" />
+                  Iniciar Renovación
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close" 
+                  onClick={() => {
+                    setMostrarModalOpcionesRenovacion(false);
+                    setExpedienteAnteriorParaRenovacion(null);
+                  }}
+                ></button>
+              </div>
+              
+              <div className="modal-body">
+                <div className="alert alert-info mb-3">
+                  <p className="mb-1"><strong>Póliza:</strong> {expedienteAnteriorParaRenovacion.numero_poliza}</p>
+                  <p className="mb-1"><strong>Compañía:</strong> {expedienteAnteriorParaRenovacion.compania || 'N/A'}</p>
+                  <p className="mb-0"><strong>Vigencia termina:</strong> {expedienteAnteriorParaRenovacion.termino_vigencia ? new Date(expedienteAnteriorParaRenovacion.termino_vigencia).toLocaleDateString('es-MX') : 'N/A'}</p>
+                </div>
+                
+                <p className="text-muted mb-3">
+                  Selecciona cómo deseas iniciar el proceso de renovación:
+                </p>
+                
+                <div className="d-grid gap-3">
+                  {/* Opción 1: Iniciar Cotización */}
+                  <button
+                    type="button"
+                    className="btn btn-outline-primary btn-lg text-start p-3"
+                    onClick={seleccionarCargarCotizacion}
+                  >
+                    <div className="d-flex align-items-center">
+                      <FileText size={32} className="me-3 text-primary" />
+                      <div>
+                        <strong>Iniciar Cotización</strong>
+                        <p className="mb-0 small text-muted">
+                          Mueve a "En Proceso Renovación" para gestionar cotización
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                  
+                  {/* Opción 2: Cargar Póliza Renovada Directamente */}
+                  <button
+                    type="button"
+                    className="btn btn-outline-success btn-lg text-start p-3"
+                    onClick={seleccionarCargarPolizaRenovada}
+                  >
+                    <div className="d-flex align-items-center">
+                      <Upload size={32} className="me-3 text-success" />
+                      <div>
+                        <strong>Cargar Póliza Renovada</strong>
+                        <p className="mb-0 small text-muted">
+                          Ya tienes la póliza emitida, crea nuevo expediente para gestión de pagos
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setMostrarModalOpcionesRenovacion(false);
+                    setExpedienteAnteriorParaRenovacion(null);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal 1: Iniciar Cotización de Renovación */}
       {mostrarModalCotizarRenovacion && expedienteParaRenovacion && (

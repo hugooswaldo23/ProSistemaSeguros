@@ -1224,6 +1224,96 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                             </div>
                           </div>
                         </div>
+                      ) : (evento.tipo_evento === 'cotizacion_renovacion_iniciada' ||
+                           evento.tipo_evento === 'COTIZACION_CARGADA' ||
+                           evento.tipo_evento === 'cotizacion_enviada' ||
+                           evento.tipo_evento === 'renovacion_pendiente_emision' ||
+                           evento.tipo_evento === 'renovacion_emitida' ||
+                           evento.tipo_evento === 'expediente_creado') ? (
+                        /* Vista vertical para eventos de renovación */
+                        <div className="mb-1">
+                          <div className="d-flex flex-column gap-0" style={{ fontSize: '0.8rem', lineHeight: '1.6' }}>
+                            {/* Número de póliza */}
+                            {evento.datos_adicionales?.numero_poliza && (
+                              <div className="text-muted">
+                                📋 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Póliza anterior (para renovaciones) */}
+                            {evento.datos_adicionales?.numero_poliza_anterior && (
+                              <div className="text-muted">
+                                📋 Póliza anterior: <strong className="text-dark">{evento.datos_adicionales.numero_poliza_anterior}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Nueva póliza (para renovaciones) */}
+                            {evento.datos_adicionales?.numero_poliza_nueva && (
+                              <div className="text-muted">
+                                📄 Nueva póliza: <strong className="text-success">{evento.datos_adicionales.numero_poliza_nueva}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Aseguradora */}
+                            {evento.datos_adicionales?.compania && (
+                              <div className="text-muted">
+                                🏢 Aseguradora: <strong className="text-primary">{evento.datos_adicionales.compania}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Vigencia anterior (texto directo o calculado desde fechas) */}
+                            {(evento.datos_adicionales?.vigencia_anterior || (evento.datos_adicionales?.inicio_vigencia && evento.datos_adicionales?.termino_vigencia)) && (
+                              <div className="text-muted">
+                                📅 Vigencia anterior: <strong className="text-dark">
+                                  {evento.datos_adicionales.vigencia_anterior || 
+                                   `${new Date(evento.datos_adicionales.inicio_vigencia).toLocaleDateString('es-MX')} al ${new Date(evento.datos_adicionales.termino_vigencia).toLocaleDateString('es-MX')}`}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* Vigencia nueva */}
+                            {evento.datos_adicionales?.vigencia_nueva && (
+                              <div className="text-muted">
+                                📅 Nueva vigencia: <strong className="text-success">{evento.datos_adicionales.vigencia_nueva}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Inicio y término de vigencia (formato alternativo) */}
+                            {evento.datos_adicionales?.inicio_vigencia && evento.datos_adicionales?.termino_vigencia && !evento.datos_adicionales?.vigencia_anterior && (
+                              <div className="text-muted">
+                                📅 Vigencia: <strong className="text-dark">
+                                  {new Date(evento.datos_adicionales.inicio_vigencia).toLocaleDateString('es-MX')} al {new Date(evento.datos_adicionales.termino_vigencia).toLocaleDateString('es-MX')}
+                                </strong>
+                              </div>
+                            )}
+                            
+                            {/* Cliente */}
+                            {evento.datos_adicionales?.cliente_nombre && (
+                              <div className="text-muted">
+                                👤 Cliente: <strong className="text-dark">{evento.datos_adicionales.cliente_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Archivo de cotización */}
+                            {evento.datos_adicionales?.archivo && (
+                              <div className="text-muted">
+                                📎 Archivo: <strong className="text-dark">{evento.datos_adicionales.archivo}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Usuario que realizó la acción */}
+                            {evento.usuario_nombre && (
+                              <div className="text-muted">
+                                👤 Usuario: <strong className="text-dark">{evento.usuario_nombre}</strong>
+                              </div>
+                            )}
+                            
+                            {/* Fecha y hora */}
+                            <div className="text-muted">
+                              🕐 Fecha: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
                         <>
                           {/* Vista estándar para otros eventos */}

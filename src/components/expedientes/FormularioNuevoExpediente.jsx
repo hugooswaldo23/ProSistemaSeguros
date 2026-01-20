@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { CheckCircle, FileText, Upload } from 'lucide-react';
+import { CheckCircle, FileText, Upload, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { validarContactoCliente } from '../../utils/validacionContacto';
 import FormularioExpedienteBase from './FormularioExpedienteBase';
@@ -42,7 +42,10 @@ const FormularioNuevoExpediente = ({
   calcularProximoPago,
   handleClienteSeleccionado,
   clienteSeleccionado,
-  onEliminarPago
+  onEliminarPago,
+  // 🆕 Props para renovación
+  expedienteAnterior = null,
+  limpiarExpedienteAnterior = () => {}
 }) => {
   // Estados específicos para modo agregar
   const [mostrarModalSeleccion, setMostrarModalSeleccion] = useState(true);
@@ -299,6 +302,38 @@ const FormularioNuevoExpediente = ({
 
   return (
     <>
+      {/* 🆕 Banner informativo de Renovación (si hay expediente anterior) */}
+      {expedienteAnterior && (
+        <div className="alert alert-warning mb-3 d-flex align-items-center">
+          <AlertTriangle size={24} className="me-3 flex-shrink-0" />
+          <div className="flex-grow-1">
+            <strong>📋 Renovación de Póliza</strong>
+            <div className="row mt-2">
+              <div className="col-md-6">
+                <small className="d-block"><strong>Póliza anterior:</strong> {expedienteAnterior.numero_poliza || 'N/A'}</small>
+              </div>
+              <div className="col-md-6">
+                <small className="d-block"><strong>Aseguradora anterior:</strong> {expedienteAnterior.compania || 'N/A'}</small>
+              </div>
+            </div>
+            <small className="text-muted d-block mt-1">
+              La nueva póliza quedará vinculada a la anterior. Puede ser de diferente aseguradora.
+            </small>
+          </div>
+          <button 
+            type="button" 
+            className="btn btn-sm btn-outline-secondary ms-2"
+            onClick={() => {
+              limpiarExpedienteAnterior();
+              toast.success('Referencia de renovación eliminada');
+            }}
+            title="Quitar referencia"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Modal de Selección de Método de Captura */}
       {mostrarModalSeleccion && (
         <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
