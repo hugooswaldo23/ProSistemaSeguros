@@ -306,11 +306,11 @@ export const useCompartirExpediente = ({
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
       
-      // Actualizar la etapa según el tipo de mensaje
-      if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
+      // 🔥 Actualizar la etapa: Si está "Emitida", siempre avanzar a "Enviada al Cliente"
+      if (expediente.etapa_activa === 'Emitida') {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
         toast.success(`✅ Póliza enviada por WhatsApp.\n📬 Etapa avanzada a "Enviada al Cliente"`);
-      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION || expediente.etapa_activa === 'Renovación Emitida') {
         await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
         toast.success(`✅ Renovación enviada por WhatsApp.\n📬 Etapa avanzada a "Renovación Enviada"`);
       } else {
@@ -324,6 +324,22 @@ export const useCompartirExpediente = ({
         }));
         console.log('🔄 Recarga automática del historial solicitada (compartir póliza WhatsApp)');
       }, 1500);
+      
+      // 🔄 Agregar listener para recargar cuando el usuario regrese de WhatsApp
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+          console.log('🔄 Usuario regresó a la página, recargando expedientes...');
+          window.dispatchEvent(new CustomEvent('recargarExpedientes'));
+          // Remover el listener después de usarlo una vez
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      
+      // Auto-remover el listener después de 5 minutos para evitar memory leaks
+      setTimeout(() => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }, 300000);
       
     } catch (error) {
       console.error('Error al compartir por WhatsApp:', error);
@@ -444,11 +460,11 @@ export const useCompartirExpediente = ({
         console.error('⚠️ Error al registrar en historial de trazabilidad:', error);
       }
     
-      // Actualizar la etapa según el tipo de mensaje
-      if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.EMISION) {
+      // 🔥 Actualizar la etapa: Si está "Emitida", siempre avanzar a "Enviada al Cliente"
+      if (expediente.etapa_activa === 'Emitida') {
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
         toast.success('✅ Póliza enviada por Email.\n📬 Etapa avanzada a "Enviada al Cliente"');
-      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION) {
+      } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION || expediente.etapa_activa === 'Renovación Emitida') {
         await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
         toast.success('✅ Renovación enviada por Email.\n📬 Etapa avanzada a "Renovación Enviada"');
       } else {

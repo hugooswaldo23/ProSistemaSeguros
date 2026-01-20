@@ -237,14 +237,15 @@ const DashboardComponent = () => {
 
     switch (tipo) {
       case 'emitidas':
+        // Filtrar TODAS las pólizas emitidas (sin excluir canceladas)
         polizasFiltradas = expedientes.filter(p => {
-          if (!['Emitida','Renovada','Enviada al Cliente'].includes(p.etapa_activa)) return false;
-          if (p.etapa_activa === 'Cancelada') return false;
-          if (!p.fecha_emision) return false;
+          // Usar fecha_emision o fecha_captura como fallback
+          const fechaReferencia = p.fecha_emision || p.fecha_captura || p.created_at;
+          if (!fechaReferencia) return false;
           
-          if (periodo === 'mesActual') return estaEnRango(p.fecha_emision, inicioMesActual, finMesActual);
-          if (periodo === 'mesAnterior') return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior);
-          return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesActual);
+          if (periodo === 'mesActual') return estaEnRango(fechaReferencia, inicioMesActual, finMesActual);
+          if (periodo === 'mesAnterior') return estaEnRango(fechaReferencia, inicioMesAnterior, finMesAnterior);
+          return estaEnRango(fechaReferencia, inicioMesAnterior, finMesActual);
         });
         titulo = `Pólizas Emitidas - ${periodoTexto}`;
         color = '#3B82F6';
@@ -290,6 +291,9 @@ const DashboardComponent = () => {
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
+                // Usar el estatus del recibo, o "Pagado" si tiene fecha_pago_real
+                estatus_pago: r.fecha_pago_real ? 'Pagado' : (r.estatus_pago || r.estatus || 'Pendiente'),
                 monto: Number(r.monto || r.importe || 0),
                 fecha_pago: r.fecha_pago_real
               }));
@@ -562,22 +566,26 @@ const DashboardComponent = () => {
     });
 
     // ==================== TARJETA 1: PÓLIZAS EMITIDAS ====================
-    // Todos los recibos filtrados por created_at (fecha de emisión del recibo)
-    const recibosEmitidosMesActual = todosLosRecibos.filter(r => 
-      estaEnRango(r.created_at, inicioMesActual, finMesActual)
-    );
+    // Contar TODAS las PÓLIZAS emitidas (sin importar estado posterior)
+    // Emitidas = Pagadas + Canceladas + Pendientes (el total)
+    const polizasEmitidasMesActual = expedientes.filter(p => {
+      const fechaRef = p.fecha_emision || p.fecha_captura || p.created_at;
+      return fechaRef && estaEnRango(fechaRef, inicioMesActual, finMesActual);
+    });
     
-    const recibosEmitidosMesAnterior = todosLosRecibos.filter(r => 
-      estaEnRango(r.created_at, inicioMesAnterior, finMesAnterior)
-    );
+    const polizasEmitidasMesAnterior = expedientes.filter(p => {
+      const fechaRef = p.fecha_emision || p.fecha_captura || p.created_at;
+      return fechaRef && estaEnRango(fechaRef, inicioMesAnterior, finMesAnterior);
+    });
     
-    const primasEmitidasMesActual = recibosEmitidosMesActual.reduce((sum, r) => {
-      const monto = Number(r.monto || r.importe || 0);
+    // Sumar el importe total de cada póliza emitida
+    const primasEmitidasMesActual = polizasEmitidasMesActual.reduce((sum, p) => {
+      const monto = resolverMonto(p);
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
     
-    const primasEmitidasMesAnterior = recibosEmitidosMesAnterior.reduce((sum, r) => {
-      const monto = Number(r.monto || r.importe || 0);
+    const primasEmitidasMesAnterior = polizasEmitidasMesAnterior.reduce((sum, p) => {
+      const monto = resolverMonto(p);
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
     
@@ -744,14 +752,14 @@ const DashboardComponent = () => {
     const stats = {
       primasEmitidas: {
         monto: primasEmitidasTotal,
-        cantidad: recibosEmitidosMesActual.length + recibosEmitidosMesAnterior.length, // Cantidad de RECIBOS emitidos
+        cantidad: polizasEmitidasMesActual.length + polizasEmitidasMesAnterior.length, // Cantidad de PÓLIZAS emitidas
         mesActual: {
           monto: primasEmitidasMesActual,
-          cantidad: recibosEmitidosMesActual.length
+          cantidad: polizasEmitidasMesActual.length
         },
         mesAnterior: {
           monto: primasEmitidasMesAnterior,
-          cantidad: recibosEmitidosMesAnterior.length
+          cantidad: polizasEmitidasMesAnterior.length
         }
       },
       primasPagadas: {
@@ -1071,7 +1079,7 @@ const DashboardComponent = () => {
                       ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} recibos • Mes actual
+                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} pólizas • Mes actual
                     </small>
                   </div>
                 </div>
@@ -1705,13 +1713,61 @@ const DashboardComponent = () => {
                                     <small className="fw-semibold text-primary">
                                       {poliza.frecuenciaPago || poliza.frecuencia_pago || poliza.tipo_pago || 'Anual'}
                                     </small>
-                                    {/* Estatus de pago */}
+                                    {/* Estatus de pago con progreso unificado */}
                                     {(() => {
-                                      // Determinar estatus basado en recibos si existen
                                       const recibos = poliza.recibos || [];
-                                      let estatus = poliza.estatus_pago || poliza.estatusPago || '';
+                                      const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
+                                                           (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
                                       
-                                      if (recibos.length > 0) {
+                                      // Calcular total de recibos
+                                      const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
+                                      let totalRecibos = 1; // Por defecto Anual = 1
+                                      if (esFraccionado) {
+                                        totalRecibos = recibos.length || 
+                                                      (frecuencia.includes('trimestral') ? 4 : 
+                                                       frecuencia.includes('semestral') ? 2 : 
+                                                       frecuencia.includes('mensual') ? 12 : 
+                                                       frecuencia.includes('cuatrimestral') ? 3 : 1);
+                                      }
+                                      
+                                      // Contar recibos pagados
+                                      const recibosPagados = recibos.filter(r => {
+                                        if (r.fecha_pago_real) return true;
+                                        const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                        return est === 'pagado' || est === 'pagada';
+                                      }).length;
+                                      
+                                      // Determinar estatus y color
+                                      let estatus = '';
+                                      let colorClass = 'bg-secondary';
+                                      let numeroMostrar = recibosPagados || 1;
+                                      
+                                      // 🔥 PRIORIDAD 1: Si es un recibo individual, usar su número específico
+                                      if (poliza._esRecibo) {
+                                        estatus = poliza.fecha_pago_real ? 'Pagado' : 
+                                                 (poliza.estatus_pago || poliza.estatus || 'Pendiente');
+                                        numeroMostrar = poliza._reciboNumero || 1;
+                                        totalRecibos = poliza._totalRecibos || totalRecibos;
+                                        
+                                        // Si la póliza está cancelada, mostrar badge "Cancelado" pero mantener número de recibo
+                                        if (poliza.etapa_activa === 'Cancelada') {
+                                          estatus = 'Cancelado';
+                                          colorClass = 'bg-dark';
+                                        } else {
+                                          colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
+                                                      estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
+                                                      estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
+                                                      'bg-info';
+                                        }
+                                      }
+                                      // 🔥 Si la póliza está cancelada (y NO es recibo individual)
+                                      else if (poliza.etapa_activa === 'Cancelada') {
+                                        estatus = 'Cancelado';
+                                        colorClass = 'bg-dark';
+                                        numeroMostrar = recibosPagados; // Mostrar el último pagado
+                                      }
+                                      // Para pólizas completas
+                                      else if (recibos.length > 0) {
                                         const tieneVencidos = recibos.some(r => {
                                           const est = (r.estatus_pago || r.estatus || '').toLowerCase();
                                           return est === 'vencido';
@@ -1722,55 +1778,52 @@ const DashboardComponent = () => {
                                         });
                                         const todosPagados = recibos.every(r => r.fecha_pago_real);
                                         
-                                        if (tieneVencidos) estatus = 'Vencido';
-                                        else if (tienePorVencer) estatus = 'Por Vencer';
-                                        else if (todosPagados) estatus = 'Pagado';
+                                        if (todosPagados) {
+                                          estatus = 'Pagado';
+                                          colorClass = 'bg-success';
+                                          numeroMostrar = totalRecibos;
+                                        } else if (tieneVencidos) {
+                                          estatus = 'Vencido';
+                                          colorClass = 'bg-danger';
+                                          // Buscar primer recibo vencido
+                                          const primerVencido = recibos.find(r => (r.estatus_pago || r.estatus || '').toLowerCase() === 'vencido');
+                                          numeroMostrar = primerVencido?.numero_recibo || (recibosPagados + 1);
+                                        } else if (tienePorVencer) {
+                                          estatus = 'Por Vencer';
+                                          colorClass = 'bg-warning text-dark';
+                                          // Buscar primer recibo por vencer
+                                          const primerPorVencer = recibos.find(r => {
+                                            const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                            return est === 'por vencer' || est === 'pago por vencer';
+                                          });
+                                          numeroMostrar = primerPorVencer?.numero_recibo || (recibosPagados + 1);
+                                        } else {
+                                          estatus = 'Pendiente';
+                                          colorClass = 'bg-info';
+                                          numeroMostrar = recibosPagados + 1;
+                                        }
+                                      } else {
+                                        // Póliza sin recibos (anual)
+                                        estatus = poliza.estatus_pago || poliza.estatusPago || 'Pendiente';
+                                        colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
+                                                    estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
+                                                    estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
+                                                    'bg-info';
+                                        numeroMostrar = estatus.toLowerCase() === 'pagado' ? 1 : 1;
                                       }
                                       
-                                      const colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
-                                                        estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
-                                                        estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
-                                                        'bg-secondary';
-                                      return estatus ? (
+                                      return (
                                         <div className="mt-1">
                                           <span className={`badge ${colorClass}`} style={{ fontSize: '9px' }}>
                                             {estatus}
                                           </span>
-                                        </div>
-                                      ) : null;
-                                    })()}
-                                    {/* Progreso de recibos X/X o Número de recibo si es desglose de recibos */}
-                                    {(() => {
-                                      // Si es un recibo individual (vencidos, porVencer, canceladas)
-                                      if (poliza._esRecibo && poliza._reciboNumero) {
-                                        return (
-                                          <div className="mt-1" style={{ fontSize: '0.75rem' }}>
-                                            <span className="badge bg-secondary">
-                                              Recibo {poliza._reciboNumero}
+                                          <div style={{ fontSize: '0.7rem', marginTop: '2px' }}>
+                                            <span className={estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' || estatus.toLowerCase() === 'cancelado' ? 'text-success fw-bold' : 
+                                                            estatus.toLowerCase() === 'vencido' ? 'text-danger fw-bold' :
+                                                            estatus.toLowerCase().includes('vencer') ? 'text-warning fw-bold' : 'text-muted'}>
+                                              {numeroMostrar}/{totalRecibos} {estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' || estatus.toLowerCase() === 'cancelado' ? 'Pagado' : estatus}
                                             </span>
                                           </div>
-                                        );
-                                      }
-                                      
-                                      const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
-                                                           (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
-                                      if (!esFraccionado) return null;
-                                      
-                                      const recibos = poliza.recibos || [];
-                                      const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
-                                      const totalRecibos = recibos.length || 
-                                                          (frecuencia.includes('trimestral') ? 4 : 
-                                                           frecuencia.includes('semestral') ? 2 : 
-                                                           frecuencia.includes('mensual') ? 12 : 
-                                                           frecuencia.includes('cuatrimestral') ? 3 : 1);
-                                      
-                                      const recibosPagados = recibos.filter(r => r.fecha_pago_real).length;
-                                      
-                                      return (
-                                        <div className="mt-1" style={{ fontSize: '0.7rem' }}>
-                                          <span className="text-muted">
-                                            {recibosPagados}/{totalRecibos}
-                                          </span>
                                         </div>
                                       );
                                     })()}

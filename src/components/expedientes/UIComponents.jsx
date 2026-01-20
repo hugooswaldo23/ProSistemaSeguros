@@ -17,9 +17,11 @@ import utils from '../../utils/expedientesUtils';
  */
 export const Badge = React.memo(({ tipo, valor, className = '' }) => {
   const badgeClass = utils.getBadgeClass(tipo, valor);
+  // 🔥 Mostrar ⚠️ si el valor contiene "Vencido" (incluye formatos como "1/1 Vencido")
+  const esVencido = tipo === 'pago' && valor && valor.includes('Vencido');
   return (
     <span className={`badge ${badgeClass} ${className}`}>
-      {tipo === 'pago' && valor === 'Vencido' && '⚠️ '}
+      {esVencido && '⚠️ '}
       {valor}
     </span>
   );
@@ -159,6 +161,11 @@ InfoCliente.displayName = 'InfoCliente';
  * @returns {string} Estatus de pago calculado
  */
 export const obtenerEstatusPagoDesdeBackend = (expediente) => {
+  // 🔥 Si la póliza está cancelada, mostrar "Cancelado" como estatus de pago
+  if (expediente.etapa_activa === 'Cancelada') {
+    return 'Cancelado';
+  }
+  
   // NUEVA LÓGICA: Si tiene recibos, usar la misma lógica que en ListaExpedientes
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
     const recibosTotal = expediente.recibos.length;
@@ -185,7 +192,7 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
       if (diasRestantes < 0) {
         estatus = 'Vencido';
       } else if (diasRestantes <= 5) {
-        estatus = 'Por vencer';
+        estatus = 'Por Vencer';
       } else {
         estatus = 'Pendiente';
       }
@@ -272,21 +279,80 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
 
 /**
  * EstadoPago - Muestra el tipo de pago y su estado
+ * Línea 1: Tipo de pago (Anual, Trimestral, etc.) - texto azul
+ * Línea 2: Badge de estatus (Cancelado, Por Vencer, Vencido, Pagado) - badge con color
+ * Línea 3: Progreso X/X Estatus - texto con color (NO badge)
+ *          X = número del recibo que determina el estatus actual
+ *          - Si Pagado: último recibo pagado
+ *          - Si Cancelado: último recibo pagado (X/X Pagado)
+ *          - Si Por Vencer/Vencido/Pendiente: próximo recibo pendiente
  * @param {object} expediente - Datos del expediente
  */
 export const EstadoPago = React.memo(({ expediente }) => {
   // 🔥 Leer estatus directamente del backend (NO calcular)
   const estatusDesdeBackend = obtenerEstatusPagoDesdeBackend(expediente);
   
+  // 📊 Calcular número del recibo según el estatus
+  let progresoTexto = '';
+  let numeroReciboMostrar = 1;
+  let totalRecibos = 0;
+  let recibosPagados = 0;
+  let estatusProgreso = estatusDesdeBackend; // El estatus que se muestra en el progreso
+  
+  if (expediente.recibos && expediente.recibos.length > 0) {
+    totalRecibos = expediente.recibos.length;
+    recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
+    
+    // 🔥 Determinar qué número de recibo mostrar según el estatus
+    if (estatusDesdeBackend === 'Pagado') {
+      // Si está pagado, mostrar el último recibo pagado
+      numeroReciboMostrar = recibosPagados > 0 ? recibosPagados : 1;
+    } else if (estatusDesdeBackend === 'Cancelado') {
+      // 🔥 Si está cancelado, mostrar el último recibo PAGADO y texto "Pagado"
+      numeroReciboMostrar = recibosPagados > 0 ? recibosPagados : 0;
+      estatusProgreso = recibosPagados > 0 ? 'Pagado' : 'Sin pagos';
+    } else {
+      // Si está Pendiente/Por Vencer/Vencido, mostrar el próximo recibo pendiente
+      numeroReciboMostrar = recibosPagados + 1;
+    }
+    
+    // Asegurar que no exceda el total
+    if (numeroReciboMostrar > totalRecibos) {
+      numeroReciboMostrar = totalRecibos;
+    }
+    
+    progresoTexto = `${numeroReciboMostrar}/${totalRecibos}`;
+  }
+  
+  // 🎨 Color para el texto de progreso según estatus
+  const getColorProgreso = (estatus) => {
+    switch (estatus) {
+      case 'Pagado': return 'text-success';
+      case 'Vencido': return 'text-danger';
+      case 'Por Vencer': 
+      case 'Por vencer':
+      case 'Por Pagar': return 'text-warning';
+      case 'Cancelado': return 'text-dark';
+      case 'Pendiente': return 'text-info';
+      case 'Sin pagos': return 'text-muted';
+      default: return 'text-muted';
+    }
+  };
+  
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+      {/* Línea 1: Tipo de pago */}
       <small className="fw-semibold text-primary">{expediente.tipo_pago || 'Sin definir'}</small>
-      {expediente.frecuenciaPago && (
-        <div><small className="text-muted">{expediente.frecuenciaPago}</small></div>
+      
+      {/* Línea 2: Badge de estatus */}
+      <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
+      
+      {/* Línea 3: Texto de progreso X/X Estatus (NO badge) */}
+      {progresoTexto && (
+        <small className={`fw-semibold ${getColorProgreso(estatusProgreso)}`}>
+          {progresoTexto} {estatusProgreso}
+        </small>
       )}
-      <div className="mt-1">
-        <Badge tipo="pago" valor={estatusDesdeBackend} className="badge-sm" />
-      </div>
     </div>
   );
 });

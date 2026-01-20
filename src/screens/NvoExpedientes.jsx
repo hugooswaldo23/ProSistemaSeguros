@@ -292,6 +292,16 @@ const ModuloNvoExpedientes = () => {
     return () => window.removeEventListener('clientes-actualizados', handler);
   }, [recargarClientes]);
 
+  // 🔄 Listener para recargar expedientes cuando el usuario regresa de WhatsApp/Email
+  useEffect(() => {
+    const handleRecargarExpedientes = () => {
+      console.log('🔄 Evento recargarExpedientes recibido, recargando lista...');
+      recargarExpedientes();
+    };
+    window.addEventListener('recargarExpedientes', handleRecargarExpedientes);
+    return () => window.removeEventListener('recargarExpedientes', handleRecargarExpedientes);
+  }, []);
+
   const recargarExpedientes = async () => {
     try {
       const response = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);

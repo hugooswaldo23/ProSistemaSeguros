@@ -1048,23 +1048,16 @@ export const Tramites = () => {
     }
     const codigoTramite = formularioTramite.codigo || generarCodigoTramite();
     
-    // Payload compatible con API (snake_case) - campos que la tabla tramites SÍ tiene
+    // Payload compatible con API (snake_case SOLO) - campos que la tabla tramites tiene
     const payloadAPI = {
       codigo: codigoTramite,
       tipo_tramite: formularioTramite.tipoTramite,
-      tipoTramite: formularioTramite.tipoTramite, // Ambos formatos por compatibilidad
       descripcion: formularioTramite.descripcion,
       estatus: formularioTramite.estatus || 'Pendiente',
       prioridad: formularioTramite.prioridad || 'Media',
       fecha_inicio: formularioTramite.fechaInicio,
-      fechaInicio: formularioTramite.fechaInicio,
       fecha_limite: formularioTramite.fechaLimite,
-      fechaLimite: formularioTramite.fechaLimite,
-      // Nota: removemos fecha_creacion/fechaCreacion del payload porque el backend genera created_at automáticamente
-      // y actualmente la API responde error "Unknown column 'fecha_creacion'" al intentar insertar ese campo.
       ejecutivo_asignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
-      ejecutivoAsignado: formularioTramite.ejecutivoAsignado || ejecutivoAsignado || '',
-      // Guardar referencias como strings en campos cliente y expediente
       cliente: clienteSeleccionado.codigo || clienteSeleccionado.id || '',
       expediente: formularioTramite.expediente || '',
       observaciones: formularioTramite.observaciones || ''
