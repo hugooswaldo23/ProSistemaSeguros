@@ -386,6 +386,8 @@ const DashboardComponent = () => {
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
+                estatus_pago: 'Por Vencer', // 🔥 Forzar estatus correcto para el modal
                 monto: Number(r.monto || r.importe || 0),
                 fecha_vencimiento_pago: r.fecha_vencimiento
               }));

@@ -191,7 +191,7 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
       let estatus;
       if (diasRestantes < 0) {
         estatus = 'Vencido';
-      } else if (diasRestantes <= 5) {
+      } else if (diasRestantes <= 14) {
         estatus = 'Por Vencer';
       } else {
         estatus = 'Pendiente';
