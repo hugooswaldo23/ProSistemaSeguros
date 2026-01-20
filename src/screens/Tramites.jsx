@@ -4,6 +4,8 @@ import { Plus, Edit, Trash2, Eye, FileText, X, Save, ChevronLeft, ChevronRight, 
 // Nuevos imports para habilitar selección de cliente y ejecutivo
 import BuscadorCliente from '../components/BuscadorCliente';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
+import { useAseguradoras } from '../hooks/useAseguradoras';  // 🆕 Hook para aseguradoras
+import { obtenerTiposTramitesActivos } from '../services/tiposTramitesService';  // 🆕 Servicio para tipos de trámite
 
 // Hook personalizado para paginación
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -355,9 +357,112 @@ const FormularioTramite = ({
   cargandoExpedientesCliente,
   ejecutivoAsignado,
   setEjecutivoAsignado,
-  ejecutivos
+  ejecutivos,
+  conteoPolizasPorCliente,  // 🆕 Prop para conteo de pólizas
+  equipoDeTrabajo,          // 🆕 Equipo completo para buscar agentes
+  aseguradoras,             // 🆕 Lista de aseguradoras con productos
+  tiposTramiteDisponibles   // 🆕 Tipos de trámite desde el backend
 }) => {
   const siguienteCodigo = !modoEdicionTramite ? generarCodigoTramite() : formularioTramite.codigo;
+  
+  // 🆕 Función para buscar ejecutivo asignado basándose en la póliza seleccionada
+  const buscarEjecutivoAsignado = useCallback(async (expediente) => {
+    console.log('🔍 Buscando ejecutivo para expediente:', expediente);
+    if (!expediente) return null;
+    
+    try {
+      // 1. Obtener la clave del agente de la póliza (puede ser clave ante aseguradora)
+      const claveAgente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
+      console.log('1. Clave agente:', claveAgente);
+      if (!claveAgente) {
+        console.log('❌ No hay clave de agente');
+        return null;
+      }
+      
+      // 2. Obtener datos de la póliza
+      const compania = (expediente.compania || expediente.aseguradora || '').toLowerCase().trim();
+      const producto = (expediente.producto || expediente.plan || '').toLowerCase().trim();
+      console.log('2. Compañía:', compania, '| Producto:', producto);
+      
+      // 3. Buscar la aseguradora
+      const aseguradoraEncontrada = aseguradoras?.find(a => 
+        (a.nombre || '').toLowerCase().includes(compania) ||
+        compania.includes((a.nombre || '').toLowerCase())
+      );
+      console.log('3. Aseguradora encontrada:', aseguradoraEncontrada?.nombre, '| ID:', aseguradoraEncontrada?.id);
+      
+      // 4. Buscar en TODOS los agentes del equipo de trabajo
+      const { obtenerEjecutivosPorProducto } = await import('../services/equipoDeTrabajoService');
+      
+      // Filtrar solo agentes del equipo
+      const agentes = equipoDeTrabajo?.filter(m => 
+        m.perfil === 'Agente' || m.perfil?.toLowerCase().includes('agente')
+      ) || [];
+      console.log('4. Agentes en equipo:', agentes.length);
+      
+      let ejecutivoEncontrado = null;
+      
+      for (const agente of agentes) {
+        console.log('4. Revisando agente:', agente.nombre, '| ID:', agente.id);
+        
+        const resultado = await obtenerEjecutivosPorProducto(agente.id);
+        if (!resultado.success || !resultado.data || resultado.data.length === 0) continue;
+        
+        console.log('4. Asignaciones del agente:', resultado.data);
+        
+        // Buscar asignación que coincida con:
+        // - La clave del agente ante aseguradora (campo clave)
+        // - O la aseguradora y producto
+        for (const asignacion of resultado.data) {
+          const claveCoincide = asignacion.clave && String(asignacion.clave) === String(claveAgente);
+          const aseguradoraCoincide = aseguradoraEncontrada && 
+            String(asignacion.aseguradoraId) === String(aseguradoraEncontrada.id);
+          
+          console.log('5. Evaluando asignación:', {
+            clave: asignacion.clave,
+            claveCoincide,
+            aseguradoraId: asignacion.aseguradoraId,
+            aseguradoraCoincide,
+            ejecutivoId: asignacion.ejecutivoId
+          });
+          
+          // Si la clave del agente coincide Y hay ejecutivo asignado
+          if (claveCoincide && asignacion.ejecutivoId) {
+            // Verificar que también coincida la aseguradora si está disponible
+            if (!aseguradoraEncontrada || aseguradoraCoincide) {
+              ejecutivoEncontrado = asignacion.ejecutivoId;
+              console.log('✅ Match por clave de agente:', claveAgente);
+              break;
+            }
+          }
+        }
+        
+        if (ejecutivoEncontrado) break;
+      }
+      
+      if (!ejecutivoEncontrado) {
+        console.log('❌ No se encontró ejecutivo asignado');
+        return null;
+      }
+      
+      // 6. Buscar el ejecutivo en el equipo de trabajo
+      const ejecutivo = equipoDeTrabajo?.find(m => 
+        String(m.id) === String(ejecutivoEncontrado)
+      );
+      console.log('6. Ejecutivo encontrado:', ejecutivo);
+      
+      if (ejecutivo) {
+        const nombreCompleto = `${ejecutivo.nombre} ${ejecutivo.apellidoPaterno || ''}`.trim();
+        console.log('✅ Ejecutivo asignado:', nombreCompleto);
+        return nombreCompleto;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('❌ Error buscando ejecutivo asignado:', error);
+      return null;
+    }
+  }, [equipoDeTrabajo, aseguradoras]);
   
   // Helper para etiquetar pólizas con detalles del vehículo
   const etiquetaPoliza = useCallback((exp) => {
@@ -382,26 +487,44 @@ const FormularioTramite = ({
     return partes.join(' • ');
   }, []);
   
-  // Obtener tipos de trámite del localStorage (catálogo de configuración)
-  const tiposTramiteGuardados = JSON.parse(localStorage.getItem('sistemaseguros_tiposTramite') || '[]');
-  
-  // Debug: Mostrar en consola lo que se está leyendo
-  console.log('Tipos de trámite guardados:', tiposTramiteGuardados);
-  
-  const tiposTramite = tiposTramiteGuardados.length > 0 
-    ? tiposTramiteGuardados.filter(tipo => tipo.activo !== false).map(tipo => tipo.nombre)
+  // 🆕 Usar tipos de trámite desde el backend (prop) - ahora son objetos con nombre y tiempoEstimado
+  const tiposTramiteObjetos = tiposTramiteDisponibles && tiposTramiteDisponibles.length > 0 
+    ? tiposTramiteDisponibles
     : [
-        'Emisión de póliza',
-        'Renovación',
-        'Cancelación',
-        'Endoso',
-        'Reclamación',
-        'Inspección',
-        'Documentación',
-        'Pago de prima',
-        'Reembolso',
-        'Otro'
+        { nombre: 'Emisión de póliza', tiempoEstimado: 24 },
+        { nombre: 'Renovación', tiempoEstimado: 48 },
+        { nombre: 'Cancelación', tiempoEstimado: 48 },
+        { nombre: 'Endoso', tiempoEstimado: 24 },
+        { nombre: 'Reclamación', tiempoEstimado: 72 },
+        { nombre: 'Inspección', tiempoEstimado: 48 },
+        { nombre: 'Documentación', tiempoEstimado: 24 },
+        { nombre: 'Pago de prima', tiempoEstimado: 12 },
+        { nombre: 'Reembolso', tiempoEstimado: 72 },
+        { nombre: 'Otro', tiempoEstimado: 24 }
       ];
+  
+  // Para compatibilidad, extraer solo nombres
+  const tiposTramite = tiposTramiteObjetos.map(t => typeof t === 'string' ? t : t.nombre);
+  
+  // 🆕 Función para calcular fecha límite basada en tiempo estimado
+  const calcularFechaLimite = useCallback((fechaInicio, tipoTramiteNombre) => {
+    if (!fechaInicio || !tipoTramiteNombre) return '';
+    
+    const tipoObj = tiposTramiteObjetos.find(t => 
+      (typeof t === 'string' ? t : t.nombre) === tipoTramiteNombre
+    );
+    const horasEstimadas = tipoObj?.tiempoEstimado || 24; // Default 24 horas
+    
+    // Convertir horas a días (redondeando hacia arriba, mínimo 1 día)
+    // 12 hrs = 1 día, 24 hrs = 1 día, 48 hrs = 2 días, 72 hrs = 3 días
+    const diasAdicionales = Math.max(1, Math.ceil(horasEstimadas / 24));
+    
+    const fecha = new Date(fechaInicio);
+    fecha.setDate(fecha.getDate() + diasAdicionales);
+    
+    // Formatear como YYYY-MM-DD para el input date
+    return fecha.toISOString().split('T')[0];
+  }, [tiposTramiteObjetos]);
 
   const estatusTramite = [
     'Pendiente',
@@ -455,22 +578,36 @@ const FormularioTramite = ({
                   <select
                     className="form-select"
                     value={formularioTramite.tipoTramite}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, tipoTramite: e.target.value})}
+                    onChange={(e) => {
+                      const tipoSeleccionado = e.target.value;
+                      const fechaInicio = formularioTramite.fechaInicio || new Date().toISOString().split('T')[0];
+                      const fechaLimite = calcularFechaLimite(fechaInicio, tipoSeleccionado);
+                      
+                      setFormularioTramite({
+                        ...formularioTramite, 
+                        tipoTramite: tipoSeleccionado,
+                        fechaLimite: fechaLimite
+                      });
+                    }}
                     required
                   >
                     <option value="">Seleccionar tipo</option>
-                    {tiposTramite.map(tipo => (
-                      <option key={tipo} value={tipo}>{tipo}</option>
-                    ))}
+                    {tiposTramiteObjetos.map(tipo => {
+                      const nombre = typeof tipo === 'string' ? tipo : tipo.nombre;
+                      const horas = typeof tipo === 'string' ? 24 : (tipo.tiempoEstimado || 24);
+                      return (
+                        <option key={nombre} value={nombre}>{nombre} ({horas} hrs)</option>
+                      );
+                    })}
                   </select>
-                  {tiposTramiteGuardados.length === 0 && (
+                  {tiposTramiteDisponibles.length === 0 && (
                     <small className="form-text text-info">
                       💡 Puedes configurar tipos personalizados en "Configuración de Tablas"
                     </small>
                   )}
-                  {tiposTramiteGuardados.length > 0 && (
+                  {tiposTramiteDisponibles.length > 0 && (
                     <small className="form-text text-success">
-                      ✅ Usando catálogo personalizado ({tiposTramite.length} tipos disponibles de {tiposTramiteGuardados.length} totales)
+                      ✅ Usando catálogo personalizado ({tiposTramite.length} tipos disponibles)
                     </small>
                   )}
                 </div>
@@ -536,10 +673,11 @@ const FormularioTramite = ({
                   <select
                     className="form-select"
                     value={formularioTramite.expediente_id || ''}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const valor = e.target.value;
                       if (!valor) {
                         setFormularioTramite(prev => ({ ...prev, expediente: '', expediente_id: null }));
+                        setEjecutivoAsignado('');
                         return;
                       }
                       const exp = expedientesCliente.find(ex => String(ex.id) === valor);
@@ -548,6 +686,15 @@ const FormularioTramite = ({
                         expediente: exp ? (exp.numero_poliza || `EXP-${exp.id}`) : '',
                         expediente_id: exp ? exp.id : null
                       }));
+                      
+                      // 🆕 Buscar y asignar ejecutivo automáticamente
+                      if (exp) {
+                        const ejecutivoEncontrado = await buscarEjecutivoAsignado(exp);
+                        if (ejecutivoEncontrado) {
+                          setEjecutivoAsignado(ejecutivoEncontrado);
+                          setFormularioTramite(prev => ({ ...prev, ejecutivoAsignado: ejecutivoEncontrado }));
+                        }
+                      }
                     }}
                     disabled={!clienteSeleccionado || cargandoExpedientesCliente}
                   >
@@ -596,7 +743,7 @@ const FormularioTramite = ({
               <h5 className="card-title border-bottom pb-2">Asignación</h5>
               <div className="row g-3">
                 <div className="col-md-6">
-                  <label className="form-label">Ejecutivo Asignado</label>
+                  <label className="form-label">Ejecutivo Asignado <span className="text-danger">*</span></label>
                   <select
                     className="form-select"
                     value={ejecutivoAsignado || ''}
@@ -605,18 +752,25 @@ const FormularioTramite = ({
                       setEjecutivoAsignado(val);
                       setFormularioTramite(prev => ({ ...prev, ejecutivoAsignado: val }));
                     }}
+                    required
                   >
                     <option value="">Seleccionar ejecutivo</option>
-                    {ejecutivos.map(ej => (
-                      <option key={ej.id} value={ej.nombre}>{ej.nombre} {ej.apellidoPaterno || ''}</option>
-                    ))}
+                    {ejecutivos.map(ej => {
+                      const nombreCompleto = `${ej.nombre} ${ej.apellidoPaterno || ''}`.trim();
+                      return (
+                        <option key={ej.id} value={nombreCompleto}>{nombreCompleto}</option>
+                      );
+                    })}
                   </select>
                   {ejecutivos.length === 0 && (
                     <small className="text-muted">No hay ejecutivos registrados en el equipo de trabajo.</small>
                   )}
+                  {formularioTramite.expediente_id && ejecutivoAsignado && (
+                    <small className="form-text text-success">✅ Asignado automáticamente según configuración</small>
+                  )}
                 </div>
                 <div className="col-md-6">
-                  <label className="form-label">Prioridad</label>
+                  <label className="form-label">Prioridad <span className="text-danger">*</span></label>
                   <select
                     className="form-select"
                     value={formularioTramite.prioridad}
@@ -630,41 +784,46 @@ const FormularioTramite = ({
               </div>
             </div>
 
-            {/* Fechas y Prioridad */}
+            {/* Fechas */}
             <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Fechas y Prioridad</h5>
+              <h5 className="card-title border-bottom pb-2">Fechas</h5>
               <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label">Fecha de Inicio</label>
+                <div className="col-md-6">
+                  <label className="form-label">Fecha de Inicio <span className="text-danger">*</span></label>
                   <input
                     type="date"
                     className="form-control"
                     value={formularioTramite.fechaInicio}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, fechaInicio: e.target.value})}
+                    onChange={(e) => {
+                      const nuevaFechaInicio = e.target.value;
+                      // Recalcular fecha límite si hay tipo de trámite seleccionado
+                      const fechaLimite = formularioTramite.tipoTramite 
+                        ? calcularFechaLimite(nuevaFechaInicio, formularioTramite.tipoTramite)
+                        : formularioTramite.fechaLimite;
+                      setFormularioTramite({
+                        ...formularioTramite, 
+                        fechaInicio: nuevaFechaInicio,
+                        fechaLimite: fechaLimite
+                      });
+                    }}
+                    required
                   />
                 </div>
                 
-                <div className="col-md-4">
-                  <label className="form-label">Fecha Límite</label>
+                <div className="col-md-6">
+                  <label className="form-label">Fecha Límite <span className="text-danger">*</span></label>
                   <input
                     type="date"
                     className="form-control"
                     value={formularioTramite.fechaLimite}
                     onChange={(e) => setFormularioTramite({...formularioTramite, fechaLimite: e.target.value})}
+                    required
                   />
-                </div>
-                
-                <div className="col-md-4">
-                  <label className="form-label">Prioridad</label>
-                  <select
-                    className="form-select"
-                    value={formularioTramite.prioridad}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, prioridad: e.target.value})}
-                  >
-                    {prioridades.map(prioridad => (
-                      <option key={prioridad} value={prioridad}>{prioridad}</option>
-                    ))}
-                  </select>
+                  {formularioTramite.tipoTramite && (
+                    <small className="form-text text-info">
+                      ⏱️ Calculada automáticamente según tiempo meta del trámite
+                    </small>
+                  )}
                 </div>
               </div>
             </div>
@@ -967,6 +1126,28 @@ export const Tramites = () => {
   const { equipoDeTrabajo } = useEquipoDeTrabajo();
   const ejecutivos = useMemo(() => (equipoDeTrabajo || []).filter(m => (m.perfil || '').toLowerCase().includes('ejecut')) , [equipoDeTrabajo]);
 
+  // 🆕 Aseguradoras para buscar ejecutivos por producto
+  const { aseguradoras } = useAseguradoras();
+
+  // 🆕 Estado para tipos de trámite desde el backend (objetos completos con tiempoEstimado)
+  const [tiposTramiteDisponibles, setTiposTramiteDisponibles] = useState([]);
+  
+  // 🆕 Cargar tipos de trámite al montar
+  useEffect(() => {
+    const cargarTiposTramite = async () => {
+      try {
+        const resultado = await obtenerTiposTramitesActivos();
+        if (resultado.success && resultado.data) {
+          // Guardar objetos completos (incluye tiempoEstimado)
+          setTiposTramiteDisponibles(resultado.data);
+        }
+      } catch (e) {
+        console.error('Error cargando tipos de trámite:', e);
+      }
+    };
+    cargarTiposTramite();
+  }, []);
+
   // 🆕 Cargar todos los expedientes al montar (para el conteo)
   useEffect(() => {
     const cargarTodosExpedientes = async () => {
@@ -1062,16 +1243,20 @@ export const Tramites = () => {
 
   // Crear o actualizar trámite en el backend
   const guardarTramite = useCallback(() => {
-    if (!formularioTramite.tipoTramite || !formularioTramite.descripcion) {
-      alert('Por favor complete los campos obligatorios: Tipo de Trámite y Descripción');
-      return;
-    }
-    if (!clienteSeleccionado) {
-      alert('Seleccione un cliente para el trámite.');
-      return;
-    }
-    if (!formularioTramite.expediente) {
-      alert('Seleccione la póliza (expediente) del cliente para asociar el trámite.');
+    // Validar campos obligatorios
+    const camposFaltantes = [];
+    
+    if (!formularioTramite.tipoTramite) camposFaltantes.push('Tipo de Trámite');
+    if (!formularioTramite.descripcion) camposFaltantes.push('Descripción');
+    if (!clienteSeleccionado) camposFaltantes.push('Cliente');
+    if (!formularioTramite.expediente) camposFaltantes.push('Póliza');
+    if (!ejecutivoAsignado && !formularioTramite.ejecutivoAsignado) camposFaltantes.push('Ejecutivo Asignado');
+    if (!formularioTramite.fechaInicio) camposFaltantes.push('Fecha de Inicio');
+    if (!formularioTramite.fechaLimite) camposFaltantes.push('Fecha Límite');
+    if (!formularioTramite.prioridad) camposFaltantes.push('Prioridad');
+    
+    if (camposFaltantes.length > 0) {
+      alert(`Por favor complete los campos obligatorios:\n• ${camposFaltantes.join('\n• ')}`);
       return;
     }
     const codigoTramite = formularioTramite.codigo || generarCodigoTramite();
@@ -1188,6 +1373,10 @@ export const Tramites = () => {
           ejecutivoAsignado={ejecutivoAsignado}
           setEjecutivoAsignado={setEjecutivoAsignado}
           ejecutivos={ejecutivos}
+          conteoPolizasPorCliente={conteoPolizasPorCliente}
+          equipoDeTrabajo={equipoDeTrabajo}
+          aseguradoras={aseguradoras}
+          tiposTramiteDisponibles={tiposTramiteDisponibles}
         />
       )}
       {vistaActual === 'detalles-tramite' && tramiteSeleccionado && (
