@@ -769,7 +769,13 @@ const ListaExpedientes = React.memo(({
           <div className="col-12 col-md-8">
             <BarraBusqueda 
               busqueda={paginacion.busqueda}
-              setBusqueda={paginacion.setBusqueda}
+              setBusqueda={(valor) => {
+                // Si el usuario empieza a buscar, cambiar a "Todas" para buscar en toda la cartera
+                if (valor && valor.trim() !== '' && carpetaSeleccionada !== 'todas') {
+                  setCarpetaSeleccionada('todas');
+                }
+                paginacion.setBusqueda(valor);
+              }}
               placeholder="Buscar pólizas..."
             />
           </div>
@@ -1472,16 +1478,20 @@ const ListaExpedientes = React.memo(({
                           );
                         })()}
 
-                        <button
-                          onClick={() => abrirModalCompartir(expediente)}
-                          className="btn btn-success btn-sm"
-                          title="Compartir"
-                        >
-                          <Share2 size={14} className="me-1" />
-                          Compartir
-                        </button>
+                        {/* Botón Compartir - Ocultar en Por Renovar y En Proceso Renovación (igual que Desktop) */}
+                        {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (
+                          <button
+                            onClick={() => abrirModalCompartir(expediente)}
+                            className="btn btn-success btn-sm"
+                            title="Compartir"
+                          >
+                            <Share2 size={14} className="me-1" />
+                            Compartir
+                          </button>
+                        )}
 
-                        {(() => {
+                        {/* Botón Pago - Ocultar en Por Renovar y En Proceso Renovación (igual que Desktop) */}
+                        {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (() => {
                           const etapaValida = expediente.etapa_activa !== 'Cancelada';
                           const estatusPagoDB = (expediente.estatus_pago || '').toLowerCase().trim();
                           const estatusPagoNorm = (expediente.estatusPago || '').toLowerCase().trim();
@@ -1493,26 +1503,7 @@ const ListaExpedientes = React.memo(({
                           if (esFraccionado && (expediente.frecuenciaPago || expediente.frecuencia_pago)) {
                             const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
                             const numeroPagos = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-                            const fechaUltimoPago = expediente.fechaUltimoPago || expediente.fecha_ultimo_pago;
-                            
-                            let pagosRealizados = 0;
-                            if (fechaUltimoPago && expediente.inicio_vigencia) {
-                              const fechaUltimo = new Date(fechaUltimoPago);
-                              const fechaInicio = new Date(expediente.inicio_vigencia);
-                              
-                              const mesesPorFrecuencia = {
-                                'Mensual': 1,
-                                'Trimestral': 3,
-                                'Semestral': 6
-                              };
-                              
-                              const mesesPorPago = mesesPorFrecuencia[frecuencia] || 1;
-                              const mesesTranscurridos = (fechaUltimo.getFullYear() - fechaInicio.getFullYear()) * 12 + 
-                                                          (fechaUltimo.getMonth() - fechaInicio.getMonth());
-                              
-                              pagosRealizados = Math.floor(mesesTranscurridos / mesesPorPago) + 1;
-                              pagosRealizados = Math.min(pagosRealizados, numeroPagos);
-                            }
+                            const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
                             
                             // Si no ha completado todos los pagos, tiene pendientes
                             tienePagosPendientes = pagosRealizados < numeroPagos;
@@ -1545,16 +1536,20 @@ const ListaExpedientes = React.memo(({
                           Ver
                         </button>
                         
-                        <button
-                          onClick={() => editarExpediente(expediente)}
-                          className="btn btn-outline-secondary btn-sm"
-                          title="Editar"
-                        >
-                          <Edit size={14} className="me-1" />
-                          Editar
-                        </button>
+                        {/* Botón Editar - Ocultar en Por Renovar y En Proceso Renovación (igual que Desktop) */}
+                        {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && (
+                          <button
+                            onClick={() => editarExpediente(expediente)}
+                            className="btn btn-outline-secondary btn-sm"
+                            title="Editar"
+                          >
+                            <Edit size={14} className="me-1" />
+                            Editar
+                          </button>
+                        )}
 
-                        {expediente.etapa_activa !== 'Cancelada' && (
+                        {/* Botón Cancelar - Ocultar en Por Renovar y En Proceso Renovación (igual que Desktop) */}
+                        {carpetaSeleccionada !== 'por_renovar' && carpetaSeleccionada !== 'en_proceso_renovacion' && expediente.etapa_activa !== 'Cancelada' && (
                           <button
                             onClick={() => iniciarCancelacion(expediente)}
                             className="btn btn-danger btn-sm"
