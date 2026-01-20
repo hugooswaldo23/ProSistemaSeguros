@@ -271,7 +271,8 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
       '',
       '◆ Cualquier duda, estamos para servirte.',
       '',
-      'Saludos cordiales.'
+      'Saludos cordiales,',
+      '*DCPRO Administración* 🏢'
     ].filter(Boolean).join('\n');
     
     return { tipoMensaje, mensaje };
@@ -404,7 +405,7 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
     mensaje += `\n\n📄 *Descarga tu póliza aquí:*\n${pdfUrl}\n\n_(Haz clic en el enlace para descargar)_`;
   }
 
-  mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales.`;
+  mensaje += `\n\n📌 Cualquier duda, estamos para servirte.\n\nSaludos cordiales,\n*DCPRO Administración* 🏢`;
 
   return {
     tipoMensaje,
@@ -478,7 +479,8 @@ ${pdfUrl}` : ''}
 
 Cualquier duda, estamos a sus órdenes.
 
-Saludos cordiales.`;
+Saludos cordiales,
+DCPRO Administración`;
     
     return { tipoMensaje, asunto, cuerpo };
   }
@@ -584,7 +586,7 @@ Vigencia: ${inicioVig} al ${finVig}`;
     cuerpo += `\n\nDescargue su póliza aquí:\n${pdfUrl}`;
   }
 
-  cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales.`;
+  cuerpo += `\n\nCualquier duda estamos para servirle.\n\nSaludos cordiales,\nDCPRO Administración`;
 
   return {
     tipoMensaje,

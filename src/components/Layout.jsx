@@ -66,6 +66,32 @@ const Layout = ({ children, onLogout }) => {
           width: esMobile ? '100%' : 'auto'
         }}
       >
+        {/* Header con logo cuando sidebar está colapsado */}
+        {sidebarColapsado && !esMobile && (
+          <div 
+            style={{ 
+              position: 'fixed',
+              top: 0,
+              left: '80px',
+              right: 0,
+              height: '100px',
+              backgroundColor: 'white',
+              borderBottom: '1px solid #E5E7EB',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+            }}
+          >
+            <img 
+              src="/assets/branding/logo-dcpro.png" 
+              alt="DCPRO Administración" 
+              style={{ height: '80px', width: 'auto' }}
+            />
+          </div>
+        )}
+        
         {/* Botón hamburguesa para móvil */}
         {esMobile && (
           <button
@@ -87,7 +113,10 @@ const Layout = ({ children, onLogout }) => {
           </button>
         )}
         
-        {children}
+        {/* Contenido con padding-top cuando hay header fijo */}
+        <div style={{ paddingTop: sidebarColapsado && !esMobile ? '100px' : '0' }}>
+          {children}
+        </div>
       </main>
     </div>
   );

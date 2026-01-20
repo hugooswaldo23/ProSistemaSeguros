@@ -50,17 +50,33 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
                 boxShadow: esMobile && abierto ? '2px 0 8px rgba(0,0,0,0.3)' : 'none'
             }}
         >
-            <div className="py-3 px-4 border-bottom border-secondary">
+            <div style={{ 
+                backgroundColor: '#ffffff',
+                margin: '10px',
+                marginBottom: '0',
+                borderRadius: '12px',
+                padding: colapsado && !esMobile ? '12px 8px' : '16px 12px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            }}>
                 {colapsado && !esMobile ? (
                     <div className="text-center">
-                        <Shield size={24} />
+                        <img 
+                            src="/assets/branding/logo-dcpro.png" 
+                            alt="DCPRO" 
+                            style={{ width: '55px', height: 'auto' }}
+                        />
                     </div>
                 ) : (
-                    <h5 className="mb-0 text-center">
-                        <Shield className="me-2" size={24} />
-                        Sistema Seguros
-                    </h5>
+                    <div className="text-center">
+                        <img 
+                            src="/assets/branding/logo-dcpro.png" 
+                            alt="DCPRO Administración" 
+                            style={{ width: '100%', maxWidth: '160px', height: 'auto' }}
+                        />
+                    </div>
                 )}
+            </div>
+            <div className="py-2">
                 {!esMobile && (
                     <button
                         onClick={onToggleColapsar}
