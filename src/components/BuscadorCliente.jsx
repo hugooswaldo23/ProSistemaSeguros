@@ -6,7 +6,8 @@ const BuscadorCliente = ({
   onClienteSeleccionado, 
   clienteSeleccionado = null,
   datosIniciales = {},
-  mostrarBotonNuevo = false 
+  mostrarBotonNuevo = false,
+  conteoPolizasPorCliente = {}  // 🆕 Mapa de cliente_id → cantidad de pólizas
 }) => {
   const [clientes, setClientes] = useState([]);
   const [terminoBusqueda, setTerminoBusqueda] = useState('');
@@ -181,7 +182,10 @@ const BuscadorCliente = ({
                   {terminoBusqueda ? 'No se encontraron clientes' : 'No hay clientes registrados'}
                 </div>
               ) : (
-                clientesFiltrados.slice(0, 50).map(cliente => (
+                clientesFiltrados.slice(0, 50).map(cliente => {
+                  const cantidadPolizas = conteoPolizasPorCliente[cliente.id] || 0;
+                  
+                  return (
                   <button
                     key={cliente.id}
                     type="button"
@@ -210,18 +214,25 @@ const BuscadorCliente = ({
                             </span>
                           )}
                         </small>
-                        {cliente.codigo && (
-                          <div>
+                        <div className="d-flex align-items-center gap-2 mt-1">
+                          {cliente.codigo && (
                             <span className="badge bg-secondary">{cliente.codigo}</span>
-                          </div>
-                        )}
+                          )}
+                          {/* 🆕 Mostrar cantidad de pólizas */}
+                          {cantidadPolizas > 0 && (
+                            <span className="badge bg-success" title={`${cantidadPolizas} póliza(s) registrada(s)`}>
+                              📋 {cantidadPolizas} póliza{cantidadPolizas !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span className={`badge ${cliente.tipoPersona === 'Persona Moral' ? 'bg-info' : 'bg-primary'}`}>
                         {cliente.tipoPersona === 'Persona Moral' ? '🏢 Empresa' : '👤 Física'}
                       </span>
                     </div>
                   </button>
-                ))
+                  );
+                })
               )}
               
               {mostrarBotonNuevo && (
