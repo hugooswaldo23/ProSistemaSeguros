@@ -53,31 +53,184 @@ const ListaExpedientes = React.memo(({
   // Estado para carpeta/categoría seleccionada
   const [carpetaSeleccionada, setCarpetaSeleccionada] = React.useState('en_proceso');
   
-  // � FILTROS DE PÓLIZAS POR CARPETA
+  // 📂 HELPER: Obtener próximo recibo pendiente y días para vencer
+  const obtenerProximoReciboPendiente = (exp) => {
+    if (!exp.recibos || !Array.isArray(exp.recibos) || exp.recibos.length === 0) {
+      return null;
+    }
+    
+    // Ordenar recibos por número
+    const recibosOrdenados = [...exp.recibos].sort((a, b) => 
+      (a.numero_recibo || 0) - (b.numero_recibo || 0)
+    );
+    
+    // Encontrar el primer recibo pendiente (sin fecha_pago_real Y no cancelado)
+    const proximoPendiente = recibosOrdenados.find(r => {
+      if (r.fecha_pago_real) return false; // Ya pagado
+      const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+      if (estatus === 'cancelado' || estatus === 'cancelada') return false; // Cancelado
+      return true;
+    });
+    
+    if (!proximoPendiente) return null;
+    
+    // Calcular días restantes para que venza este recibo
+    const fechaVencimiento = proximoPendiente.fecha_limite_pago || proximoPendiente.fecha_vencimiento;
+    if (!fechaVencimiento) return { recibo: proximoPendiente, diasRestantes: 999 };
+    
+    const fechaVenc = new Date(fechaVencimiento);
+    const hoy = new Date();
+    fechaVenc.setHours(0, 0, 0, 0);
+    hoy.setHours(0, 0, 0, 0);
+    const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+    
+    return { recibo: proximoPendiente, diasRestantes };
+  };
+  
+  // 📂 HELPER: Calcular etapa real del flujo de negocio
+  // ETAPA ACTIVA = Flujo de la póliza: Emitida → Enviada → En Vigencia → Cancelada/Renovada
+  // ESTATUS PAGO = Estado del recibo: Pendiente → Por Vencer → Vencido → Pagado (esto se maneja aparte)
+  const calcularEtapaReal = (exp) => {
+    // Etapas que NO deben modificarse (proceso de renovación)
+    const etapasRenovacion = [
+      'Renovada', 'En Cotización - Renovación', 
+      'Cotización Lista', 'Cotización Enviada', 'Por Emitir - Renovación',
+      'Por Renovar'
+    ];
+    
+    if (etapasRenovacion.includes(exp.etapa_activa)) {
+      return exp.etapa_activa;
+    }
+    
+    // 🔥 Póliza cancelada: mostrar "Vigente / Cancelada" si aún tiene vigencia
+    if (exp.etapa_activa === 'Cancelada') {
+      // Verificar si aún tiene vigencia activa
+      if (exp.recibos && exp.recibos.length > 0) {
+        const recibosPagados = exp.recibos
+          .filter(r => r.fecha_pago_real)
+          .sort((a, b) => (b.numero_recibo || 0) - (a.numero_recibo || 0));
+        
+        if (recibosPagados.length > 0) {
+          const ultimoPagado = recibosPagados[0];
+          const fechaVencUltimoPagado = ultimoPagado.fecha_limite_pago || ultimoPagado.fecha_vencimiento;
+          if (fechaVencUltimoPagado) {
+            const fechaVenc = new Date(fechaVencUltimoPagado);
+            const hoy = new Date();
+            fechaVenc.setHours(23, 59, 59, 999);
+            hoy.setHours(0, 0, 0, 0);
+            if (fechaVenc >= hoy) {
+              return 'Vigente / Cancelada';
+            }
+          }
+        }
+      }
+      return 'Cancelada';
+    }
+    
+    // 🔥 Para pólizas normales: la etapa depende del flujo, NO del estatus de pago
+    // - Si tiene algún recibo pagado → "En Vigencia"
+    // - Si fue enviada al cliente → "Enviada al Cliente"  
+    // - Si no → "Emitida"
+    
+    if (exp.recibos && exp.recibos.length > 0) {
+      const tieneAlgunPago = exp.recibos.some(r => r.fecha_pago_real);
+      if (tieneAlgunPago) {
+        return 'En Vigencia';
+      }
+    }
+    
+    // Mantener etapa guardada en BD (Emitida, Enviada al Cliente, etc.)
+    return exp.etapa_activa || 'Emitida';
+  };
+  
+  // 📂 HELPER: Verificar si la póliza aún tiene vigencia activa
+  const tieneVigenciaActiva = (exp) => {
+    // Si tiene término de vigencia, verificar que no haya pasado
+    if (exp.termino_vigencia) {
+      const fechaTermino = new Date(exp.termino_vigencia);
+      const hoy = new Date();
+      fechaTermino.setHours(23, 59, 59, 999);
+      hoy.setHours(0, 0, 0, 0);
+      return fechaTermino >= hoy;
+    }
+    
+    // Si tiene recibos pagados, calcular vigencia basada en el último recibo pagado
+    if (exp.recibos && exp.recibos.length > 0) {
+      const recibosPagados = exp.recibos
+        .filter(r => r.fecha_pago_real)
+        .sort((a, b) => (b.numero_recibo || 0) - (a.numero_recibo || 0));
+      
+      if (recibosPagados.length > 0) {
+        const ultimoPagado = recibosPagados[0];
+        const fechaVencUltimoPagado = ultimoPagado.fecha_limite_pago || ultimoPagado.fecha_vencimiento;
+        if (fechaVencUltimoPagado) {
+          const fechaVenc = new Date(fechaVencUltimoPagado);
+          const hoy = new Date();
+          fechaVenc.setHours(23, 59, 59, 999);
+          hoy.setHours(0, 0, 0, 0);
+          return fechaVenc >= hoy;
+        }
+      }
+    }
+    
+    // Sin información de vigencia, asumir activa
+    return true;
+  };
+  
+  // 📂 FILTROS DE PÓLIZAS POR CARPETA
   const expedientesFiltrados = React.useMemo(() => {
     switch (carpetaSeleccionada) {
       case 'en_proceso':
-        // Pólizas con estatus "Pendiente" o "Por vencer"
-        return expedientes.filter(exp => {
-          if (exp.etapa_activa === 'Cancelada') return false;
-          
-          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          
-          return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
-        });
-      
-      case 'vigentes':
-        // Pólizas pagadas que NO están próximas a vencer (más de 30 días)
+        // Pólizas con próximo recibo pendiente a 15 días o menos de vencer
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
           
-          // Si ya tiene etapa de renovación, no mostrar en vigentes
+          // Si ya tiene etapa de renovación, no mostrar aquí
           if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-              exp.etapa_activa?.toLowerCase().includes('renovación')) {
+              exp.etapa_activa?.toLowerCase().includes('renovación') ||
+              exp.etapa_activa?.toLowerCase().includes('cotización')) {
             return false;
           }
           
+          const proximoRecibo = obtenerProximoReciboPendiente(exp);
+          
+          // Si no hay recibos, usar lógica anterior de estatus
+          if (!proximoRecibo) {
+            const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+            return estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
+          }
+          
+          // Próximo recibo pendiente a 15 días o menos de vencer (pero no vencido aún)
+          return proximoRecibo.diasRestantes <= 15 && proximoRecibo.diasRestantes >= 0;
+        });
+      
+      case 'vigentes':
+        // Pólizas con próximo recibo pendiente a MÁS de 15 días de vencer
+        // O pólizas canceladas pero con vigencia aún activa
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Renovada') return false;
+          
+          // 🔥 Póliza cancelada pero con vigencia activa → mostrar en vigentes
+          if (exp.etapa_activa === 'Cancelada') {
+            return tieneVigenciaActiva(exp);
+          }
+          
+          // Si ya tiene etapa de renovación, no mostrar en vigentes
+          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+              exp.etapa_activa?.toLowerCase().includes('renovación') ||
+              exp.etapa_activa?.toLowerCase().includes('cotización')) {
+            return false;
+          }
+          
+          const proximoRecibo = obtenerProximoReciboPendiente(exp);
+          
+          // Si tiene recibos, verificar que el próximo pendiente esté a más de 15 días
+          if (proximoRecibo) {
+            return proximoRecibo.diasRestantes > 15;
+          }
+          
+          // Si no hay recibos pendientes, verificar si está pagada y no próxima a vencer
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           const estaPagado = estatusPago === 'pagado' || estatusPago === 'pagada';
           
@@ -166,9 +319,15 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'vencidas':
-        // Pólizas con estatus "Vencido"
+        // Pólizas con estatus "Vencido" o con recibo vencido
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
+          
+          // Verificar si tiene recibo vencido
+          const proximoRecibo = obtenerProximoReciboPendiente(exp);
+          if (proximoRecibo && proximoRecibo.diasRestantes < 0) {
+            return true;
+          }
           
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
           
@@ -176,7 +335,13 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'canceladas':
-        return expedientes.filter(exp => exp.etapa_activa === 'Cancelada');
+        // Pólizas canceladas SOLO cuando su vigencia ya terminó
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa !== 'Cancelada') return false;
+          
+          // Solo mostrar en canceladas si la vigencia ya terminó
+          return !tieneVigenciaActiva(exp);
+        });
       
       case 'todas':
       default:
@@ -184,27 +349,53 @@ const ListaExpedientes = React.memo(({
     }
   }, [expedientes, carpetaSeleccionada]);
   
-  // � CONTADORES DE PÓLIZAS POR CARPETA
+  // 📂 CONTADORES DE PÓLIZAS POR CARPETA
   const contadores = React.useMemo(() => {
     return {
       todas: expedientes.length,
       
-      // Pólizas con estatus "Pendiente" o "Por vencer"
+      // Pólizas con próximo recibo pendiente a 15 días o menos de vencer
       en_proceso: expedientes.filter(exp => {
-        if (exp.etapa_activa === 'Cancelada') return false;
-        const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-        return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
-      }).length,
-      
-      // Pólizas pagadas que NO están próximas a vencer (más de 30 días)
-      vigentes: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
         
+        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
+            exp.etapa_activa?.toLowerCase().includes('renovación') ||
+            exp.etapa_activa?.toLowerCase().includes('cotización')) {
+          return false;
+        }
+        
+        const proximoRecibo = obtenerProximoReciboPendiente(exp);
+        
+        if (!proximoRecibo) {
+          const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
+          return estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
+        }
+        
+        return proximoRecibo.diasRestantes <= 15 && proximoRecibo.diasRestantes >= 0;
+      }).length,
+      
+      // Pólizas con próximo recibo pendiente a MÁS de 15 días de vencer
+      // O pólizas canceladas pero con vigencia aún activa
+      vigentes: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Renovada') return false;
+        
+        // 🔥 Póliza cancelada pero con vigencia activa → contar en vigentes
+        if (exp.etapa_activa === 'Cancelada') {
+          return tieneVigenciaActiva(exp);
+        }
+        
         // Si ya tiene etapa de renovación, no contar en vigentes
         if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-            exp.etapa_activa?.toLowerCase().includes('renovación')) {
+            exp.etapa_activa?.toLowerCase().includes('renovación') ||
+            exp.etapa_activa?.toLowerCase().includes('cotización')) {
           return false;
+        }
+        
+        const proximoRecibo = obtenerProximoReciboPendiente(exp);
+        
+        if (proximoRecibo) {
+          return proximoRecibo.diasRestantes > 15;
         }
         
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
@@ -286,14 +477,25 @@ const ListaExpedientes = React.memo(({
         return false;
       }).length,
       
-      // Pólizas con estatus "Vencido"
+      // Pólizas con estatus "Vencido" o con recibo vencido
       vencidas: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
+        
+        // Verificar si tiene recibo vencido
+        const proximoRecibo = obtenerProximoReciboPendiente(exp);
+        if (proximoRecibo && proximoRecibo.diasRestantes < 0) {
+          return true;
+        }
+        
         const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
         return estatusPago === 'vencido' || estatusPago === 'vencida';
       }).length,
       
-      canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
+      // Pólizas canceladas SOLO cuando su vigencia ya terminó
+      canceladas: expedientes.filter(exp => {
+        if (exp.etapa_activa !== 'Cancelada') return false;
+        return !tieneVigenciaActiva(exp);
+      }).length
     };
   }, [expedientes]);
   
@@ -708,7 +910,7 @@ const ListaExpedientes = React.memo(({
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontSize: '0.7rem' }}>
-                          <Badge tipo="etapa" valor={expediente.etapa_activa} />
+                          <Badge tipo="etapa" valor={calcularEtapaReal(expediente)} />
                           {expediente.motivoCancelacion && (
                             <div><small className="text-muted">Motivo: {expediente.motivoCancelacion}</small></div>
                           )}
@@ -782,122 +984,8 @@ const ListaExpedientes = React.memo(({
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div>
-                            {/* Tipo y Estatus de Pago */}
+                            {/* Tipo y Estatus de Pago - Ya incluye progreso X/X */}
                             <EstadoPago expediente={expediente} />
-                            
-                            {/* Estado del próximo recibo pendiente (solo para fraccionado) */}
-                            {((expediente.tipo_pago === 'Fraccionado') || (expediente.forma_pago?.toUpperCase() === 'FRACCIONADO')) && 
-                             (expediente.frecuenciaPago || expediente.frecuencia_pago) && 
-                             expediente.inicio_vigencia && (
-                              (() => {
-                                // 🔢 Calcular el total CORRECTO según la frecuencia (no usar recibos.length que puede ser incorrecto)
-                                const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
-                                const numeroPagosSegunFrecuencia = CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0;
-                                
-                                // 🎯 PRIORIDAD: Consultar directamente los recibos si están disponibles
-                                if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-                                  // Usar el número correcto de pagos según frecuencia, no recibos.length
-                                  const recibosTotal = numeroPagosSegunFrecuencia || expediente.recibos.length;
-                                  // Solo contar recibos pagados que sean válidos (dentro del rango de la frecuencia)
-                                  const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real && r.numero_recibo <= recibosTotal).length;
-                                  
-                                  let estatusDisplay = 'Pagado';
-                                  let colorClass = 'text-success fw-bold';
-                                  let numeroReciboActual = recibosTotal; // Por defecto, si todos están pagados
-                                  
-                                  // Si no todos están pagados, encontrar el primer recibo pendiente
-                                  if (recibosPagados < recibosTotal) {
-                                    // Buscar el primer recibo sin pago (ordenados por número) - solo recibos válidos
-                                    const primerReciboPendiente = expediente.recibos
-                                      .filter(r => !r.fecha_pago_real && r.numero_recibo <= recibosTotal)
-                                      .sort((a, b) => a.numero_recibo - b.numero_recibo)[0];
-                                    
-                                    if (primerReciboPendiente) {
-                                      numeroReciboActual = primerReciboPendiente.numero_recibo;
-                                      estatusDisplay = 'Pendiente';
-                                      colorClass = 'text-info';
-                                      
-                                      // Determinar estatus del primer recibo pendiente
-                                      if (primerReciboPendiente.fecha_vencimiento) {
-                                        const fechaVencimiento = new Date(primerReciboPendiente.fecha_vencimiento);
-                                        const hoy = new Date();
-                                        fechaVencimiento.setHours(0, 0, 0, 0);
-                                        hoy.setHours(0, 0, 0, 0);
-                                        const diasRestantes = Math.ceil((fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
-                                        
-                                        if (diasRestantes < 0) {
-                                          estatusDisplay = 'Vencido';
-                                          colorClass = 'text-danger fw-bold';
-                                        } else if (diasRestantes <= 5) {
-                                          estatusDisplay = 'Por vencer';
-                                          colorClass = 'text-warning fw-bold';
-                                        }
-                                      }
-                                    }
-                                  }
-                                  
-                                  return (
-                                    <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
-                                      <span className={colorClass}>
-                                        {numeroReciboActual}/{recibosTotal} {estatusDisplay}
-                                      </span>
-                                    </div>
-                                  );
-                                }
-                                
-                                // FALLBACK: Usar campos del expediente si no hay recibos
-                                // Nota: frecuencia y numeroPagosSegunFrecuencia ya están definidos arriba
-                                const numeroPagos = numeroPagosSegunFrecuencia || 0;
-                                const pagosRealizados = expediente.ultimo_recibo_pagado || 0;
-                                const estatusPago = (expediente.estatus_pago || expediente.estatusPago || '').toLowerCase();
-                                
-                                // Determinar estatus basándose en fecha de vencimiento
-                                let colorClass = 'text-info';
-                                let estatusDisplay = 'Pendiente';
-                                
-                                if (estatusPago === 'pagado' || pagosRealizados >= numeroPagos) {
-                                  colorClass = 'text-success fw-bold';
-                                  estatusDisplay = 'Pagado';
-                                } else {
-                                  // Evaluar fecha de vencimiento para determinar si está vencido
-                                  const fechaVencimiento = expediente.fecha_vencimiento_pago || expediente.fecha_pago;
-                                  if (fechaVencimiento) {
-                                    const fechaVenc = new Date(fechaVencimiento);
-                                    const hoy = new Date();
-                                    fechaVenc.setHours(0, 0, 0, 0);
-                                    hoy.setHours(0, 0, 0, 0);
-                                    const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-                                    
-                                    if (diasRestantes < 0) {
-                                      colorClass = 'text-danger fw-bold';
-                                      estatusDisplay = 'Vencido';
-                                    } else if (diasRestantes <= 5) {
-                                      colorClass = 'text-warning fw-bold';
-                                      estatusDisplay = 'Por vencer';
-                                    } else {
-                                      estatusDisplay = 'Pendiente';
-                                    }
-                                  } else if (estatusPago === 'vencido') {
-                                    colorClass = 'text-danger fw-bold';
-                                    estatusDisplay = 'Vencido';
-                                  } else if (estatusPago.includes('vencer') || estatusPago === 'por vencer') {
-                                    colorClass = 'text-warning fw-bold';
-                                    estatusDisplay = 'Por vencer';
-                                  }
-                                }
-                                
-                                // Mostrar progreso y estatus - CORREGIDO: mostrar el recibo actual, no los pagados
-                                const reciboActual = pagosRealizados + 1; // El siguiente recibo a pagar
-                                
-                                return (
-                                  <div className="mt-1" style={{ fontSize: '0.7rem', textAlign: 'center' }}>
-                                    <span className={colorClass}>
-                                      {pagosRealizados >= numeroPagos ? numeroPagos : reciboActual}/{numeroPagos} {estatusDisplay}
-                                    </span>
-                                  </div>
-                                );
-                              })()
-                            )}
                           </div>
                         </td>
                         <td style={{ fontSize: '0.7rem', lineHeight: '1.4', textAlign: 'center' }}>
@@ -1165,7 +1253,7 @@ const ListaExpedientes = React.memo(({
                             </small>
                           )}
                         </div>
-                        <Badge tipo="etapa" valor={expediente.etapa_activa} />
+                        <Badge tipo="etapa" valor={calcularEtapaReal(expediente)} />
                       </div>
 
                       {/* Alertas de duplicados */}

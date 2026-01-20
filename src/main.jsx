@@ -7,30 +7,28 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />
     <Toaster
-      position="top-center"
-      gutter={10}
-      // Centrar completamente (horizontal y vertical)
+      position="top-right"
+      gutter={8}
       containerStyle={{
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)'
+        top: 20,
+        right: 20
       }}
       toastOptions={{
-        // Duración por defecto más visible (+1s)
-        duration: 6000,
-        // Estilos base más grandes y centrados visualmente
+        // Duración corta para no estorbar
+        duration: 2500,
         style: {
-          fontSize: '1rem',
-          padding: '12px 14px',
-          borderRadius: '10px',
-          boxShadow: '0 10px 20px rgba(0,0,0,0.15)'
+          fontSize: '0.9rem',
+          padding: '10px 14px',
+          borderRadius: '8px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          maxWidth: '350px'
         },
         success: {
-          duration: 5500,
+          duration: 2000,
           iconTheme: { primary: '#198754', secondary: '#fff' }
         },
         error: {
-          duration: 7000,
+          duration: 4000,
           iconTheme: { primary: '#dc3545', secondary: '#fff' }
         }
       }}

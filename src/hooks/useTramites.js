@@ -138,6 +138,56 @@ export const useTramites = () => {
     return resultado.success ? resultado.data : [];
   }, []);
 
+  // Enviar trámite a ejecutivo (WhatsApp o Email)
+  const enviarAEjecutivo = useCallback((tramite, metodo = 'whatsapp') => {
+    // Construir mensaje
+    const mensaje = construirMensajeEjecutivo(tramite);
+    
+    if (metodo === 'whatsapp') {
+      // Abrir WhatsApp Web con el mensaje
+      const url = `https://web.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+      window.open(url, '_blank');
+    } else if (metodo === 'email') {
+      // Abrir cliente de email
+      const asunto = `Solicitud de Trámite ${tramite.codigo} - ${tramite.tipoTramite}`;
+      const url = `mailto:?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensaje)}`;
+      window.open(url, '_blank');
+    }
+    
+    return { success: true };
+  }, []);
+
+  // Construir mensaje para enviar al ejecutivo
+  const construirMensajeEjecutivo = (tramite) => {
+    const fechaLimite = tramite.fechaLimite 
+      ? new Date(tramite.fechaLimite).toLocaleDateString('es-MX') 
+      : 'Sin fecha límite';
+    
+    const mensaje = `🔔 *SOLICITUD DE TRÁMITE*
+
+📋 *Código:* ${tramite.codigo || '-'}
+📝 *Tipo:* ${tramite.tipoTramite || '-'}
+⚡ *Prioridad:* ${tramite.prioridad || 'Normal'}
+📅 *Fecha Límite:* ${fechaLimite}
+
+👤 *Cliente:* ${tramite.clienteNombre || tramite.cliente || '-'}
+📄 *Póliza:* ${tramite.numeroPoliza || tramite.expediente || '-'}
+🏢 *Aseguradora:* ${tramite.aseguradora || '-'}
+📦 *Producto:* ${tramite.tipoSeguro || '-'}
+
+📝 *Descripción:*
+${tramite.descripcion || 'Sin descripción'}
+
+${tramite.observaciones ? `💬 *Observaciones:*\n${tramite.observaciones}` : ''}
+
+Por favor, atender este trámite a la brevedad.
+
+Saludos cordiales,
+*DCPRO Administración* 🏢`;
+
+    return mensaje;
+  };
+
   // Cargar datos al montar el componente
   useEffect(() => {
     cargarTramites();
@@ -155,6 +205,8 @@ export const useTramites = () => {
     obtenerEstadisticas,
     filtrarPorEstatus,
     filtrarPorPrioridad,
-    obtenerVencidos
+    obtenerVencidos,
+    enviarAEjecutivo,
+    construirMensajeEjecutivo
   };
 };

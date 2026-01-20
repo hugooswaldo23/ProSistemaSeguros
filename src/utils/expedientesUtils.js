@@ -48,7 +48,7 @@ export const formatearMoneda = (monto) => {
 /**
  * Obtiene la clase CSS del badge según el tipo y valor
  * @param {string} tipo - 'etapa', 'pago', 'tipo_pago'
- * @param {string} valor - Valor del estado
+ * @param {string} valor - Valor del estado (puede incluir prefijo "X/X")
  * @returns {string} Clase CSS de Bootstrap
  */
 export const getBadgeClass = (tipo, valor) => {
@@ -56,12 +56,15 @@ export const getBadgeClass = (tipo, valor) => {
     etapa: {
       'Pagado': 'bg-success',
       'Cancelado': 'bg-danger',
+      'Cancelada': 'bg-danger',
       'Emitida': 'bg-info',
       'Autorizado': 'bg-primary',
       'Cotización enviada': 'bg-warning',
       'En proceso emisión': 'bg-info',
       'Pendiente de pago': 'bg-warning',
       'En Vigencia': 'bg-success',
+      'Vigente / Cancelada': 'bg-warning text-dark',
+      'Por Vencer': 'bg-warning text-dark',
       'Vencida': 'bg-danger'
     },
     pago: {
@@ -78,7 +81,17 @@ export const getBadgeClass = (tipo, valor) => {
       'Anual': 'bg-primary'
     }
   };
-  return mapas[tipo]?.[valor] || 'bg-secondary';
+  
+  // 🔥 Extraer estatus del valor compuesto "X/X Estatus"
+  let valorParaBuscar = valor;
+  if (valor && typeof valor === 'string') {
+    const match = valor.match(/^\d+\/\d+\s+(.+)$/);
+    if (match) {
+      valorParaBuscar = match[1]; // Extraer solo el estatus (ej: "Pagado" de "1/1 Pagado")
+    }
+  }
+  
+  return mapas[tipo]?.[valorParaBuscar] || 'bg-secondary';
 };
 
 /**

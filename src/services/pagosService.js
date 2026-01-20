@@ -49,7 +49,7 @@ export async function aplicarPago(expediente, datosPago) {
     let proximoPago = null;
     let nuevoEstatusPago = 'Pendiente';
     let nuevaFechaVencimiento = expediente.fecha_vencimiento_pago;
-    let etapaFinal = expediente.etapa_activa;
+    let etapaFinal = 'En Vigencia'; // Siempre "En Vigencia" al pagar un recibo
     let estatusReciboActual = 'Pagado';
 
     // Calcular total de recibos
@@ -66,11 +66,10 @@ export async function aplicarPago(expediente, datosPago) {
       nuevoEstatusPago = 'Pagado';
       proximoPago = null;
       nuevaFechaVencimiento = null;
-      etapaFinal = 'En Vigencia';
       estatusReciboActual = 'Pagado (Póliza Completa)';
     } else {
-      // Hay más pagos pendientes
-      nuevoEstatusPago = 'Pago por vencer';
+      // Hay más pagos pendientes - pero póliza está al corriente
+      nuevoEstatusPago = 'Pendiente'; // El próximo recibo está pendiente
       
       // Calcular fecha del próximo vencimiento
       try {
@@ -82,6 +81,23 @@ export async function aplicarPago(expediente, datosPago) {
           const dataProximoPago = await responseProximoPago.json();
           proximoPago = dataProximoPago.fecha_vencimiento || null;
           nuevaFechaVencimiento = proximoPago;
+          
+          // Verificar si el próximo recibo ya está por vencer (15 días o menos)
+          if (proximoPago) {
+            const fechaProximoVenc = new Date(proximoPago);
+            const hoy = new Date();
+            fechaProximoVenc.setHours(0, 0, 0, 0);
+            hoy.setHours(0, 0, 0, 0);
+            const diasRestantes = Math.ceil((fechaProximoVenc - hoy) / (1000 * 60 * 60 * 24));
+            
+            if (diasRestantes <= 15 && diasRestantes >= 0) {
+              nuevoEstatusPago = 'Por vencer';
+              etapaFinal = 'Por Vencer';
+            } else if (diasRestantes < 0) {
+              nuevoEstatusPago = 'Vencido';
+              etapaFinal = 'Vencida';
+            }
+          }
         }
       } catch (error) {
         console.error('❌ Error al calcular próximo pago:', error);

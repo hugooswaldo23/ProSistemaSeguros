@@ -48,6 +48,18 @@ const Login = ({ onLogin }) => {
   return (
     <div className="ss-login-outer">
       <form className="ss-login-form" onSubmit={handleSubmit}>
+        <div style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center',
+          marginBottom: '1.5rem'
+        }}>
+          <img 
+            src="/assets/branding/logo-dcpro.png" 
+            alt="DCPRO Administración" 
+            style={{ width: '340px', height: 'auto' }}
+          />
+        </div>
         <h2>Iniciar Sesión</h2>
         <div className="ss-login-input-group">
           <label htmlFor="username">Usuario</label>

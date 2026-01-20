@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 const API_URL = import.meta.env.VITE_API_URL;
 import { 
   Plus, FileText, AlertCircle, 
@@ -19,6 +20,9 @@ const DashboardComponent = () => {
   const [modalDetalle, setModalDetalle] = useState(null);
   const [paginaModal, setPaginaModal] = useState(1);
   const [modalActualParams, setModalActualParams] = useState(null); // Para recordar qué modal está abierto
+  const [modalTramites, setModalTramites] = useState(null); // Modal para mostrar trámites filtrados
+  const [tramiteSeleccionado, setTramiteSeleccionado] = useState(null); // Panel detalle de trámite
+  const [modalEnviarEjecutivo, setModalEnviarEjecutivo] = useState(null); // Modal para enviar a ejecutivo
   const POLIZAS_POR_PAGINA = 20;
 
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
@@ -86,11 +90,12 @@ const DashboardComponent = () => {
   const cargarDatos = async () => {
     setCargando(true);
     try {
-      // 🔥 OPTIMIZACIÓN: Cargar expedientes, clientes y TODOS los recibos en paralelo (3 consultas)
-      const [resExpedientes, resClientes, resRecibos] = await Promise.all([
+      // 🔥 OPTIMIZACIÓN: Cargar expedientes, clientes, recibos y trámites en paralelo
+      const [resExpedientes, resClientes, resRecibos, resTramites] = await Promise.all([
         fetch(`${API_URL}/api/expedientes?t=${Date.now()}`),
         fetch(`${API_URL}/api/clientes?t=${Date.now()}`),
-        fetch(`${API_URL}/api/recibos?t=${Date.now()}`) // Todos los recibos en una sola consulta
+        fetch(`${API_URL}/api/recibos?t=${Date.now()}`),
+        fetch(`${API_URL}/api/tramites?t=${Date.now()}`) // Cargar trámites
       ]);
       
       if (!resExpedientes.ok) {
@@ -165,9 +170,43 @@ const DashboardComponent = () => {
       }
       
       setExpedientes(expedientesEnriquecidos);
+      
+      // 📋 Cargar trámites
+      if (resTramites.ok) {
+        const tramitesData = await resTramites.json();
+        const tramitesArray = Array.isArray(tramitesData) ? tramitesData : (tramitesData?.data || []);
+        
+        // Transformar campos de snake_case a camelCase si es necesario
+        const tramitesFormateados = tramitesArray.map(t => ({
+          id: t.id,
+          codigo: t.codigo,
+          tipoTramite: t.tipoTramite || t.tipo_tramite,
+          descripcion: t.descripcion,
+          cliente: t.cliente,
+          cliente_id: t.cliente_id,  // ✅ Agregar cliente_id
+          expediente: t.expediente,
+          expediente_id: t.expediente_id,  // ✅ Agregar expediente_id
+          estatus: t.estatus,
+          prioridad: t.prioridad,
+          fechaInicio: t.fechaInicio || t.fecha_inicio,
+          fechaLimite: t.fechaLimite || t.fecha_limite,
+          responsable: t.responsable || t.ejecutivo_asignado,  // ✅ También ejecutivo_asignado
+          ejecutivoAsignado: t.ejecutivo_asignado || t.responsable,
+          departamento: t.departamento,
+          observaciones: t.observaciones,
+          fechaCreacion: t.fechaCreacion || t.created_at
+        }));
+        
+        setTramites(tramitesFormateados);
+        console.log(`📋 Dashboard: ${tramitesFormateados.length} trámites cargados`);
+      } else {
+        console.warn('No se pudieron cargar los trámites');
+        setTramites([]);
+      }
     } catch (e) {
       console.error('Fallo de red al cargar datos:', e);
       setExpedientes([]);
+      setTramites([]);
     } finally {
       setCargando(false);
     }
@@ -237,14 +276,15 @@ const DashboardComponent = () => {
 
     switch (tipo) {
       case 'emitidas':
+        // Filtrar TODAS las pólizas emitidas (sin excluir canceladas)
         polizasFiltradas = expedientes.filter(p => {
-          if (!['Emitida','Renovada','Enviada al Cliente'].includes(p.etapa_activa)) return false;
-          if (p.etapa_activa === 'Cancelada') return false;
-          if (!p.fecha_emision) return false;
+          // Usar fecha_emision o fecha_captura como fallback
+          const fechaReferencia = p.fecha_emision || p.fecha_captura || p.created_at;
+          if (!fechaReferencia) return false;
           
-          if (periodo === 'mesActual') return estaEnRango(p.fecha_emision, inicioMesActual, finMesActual);
-          if (periodo === 'mesAnterior') return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesAnterior);
-          return estaEnRango(p.fecha_emision, inicioMesAnterior, finMesActual);
+          if (periodo === 'mesActual') return estaEnRango(fechaReferencia, inicioMesActual, finMesActual);
+          if (periodo === 'mesAnterior') return estaEnRango(fechaReferencia, inicioMesAnterior, finMesAnterior);
+          return estaEnRango(fechaReferencia, inicioMesAnterior, finMesActual);
         });
         titulo = `Pólizas Emitidas - ${periodoTexto}`;
         color = '#3B82F6';
@@ -290,6 +330,9 @@ const DashboardComponent = () => {
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
+                // Usar el estatus del recibo, o "Pagado" si tiene fecha_pago_real
+                estatus_pago: r.fecha_pago_real ? 'Pagado' : (r.estatus_pago || r.estatus || 'Pendiente'),
                 monto: Number(r.monto || r.importe || 0),
                 fecha_pago: r.fecha_pago_real
               }));
@@ -343,6 +386,8 @@ const DashboardComponent = () => {
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
+                estatus_pago: 'Por Vencer', // 🔥 Forzar estatus correcto para el modal
                 monto: Number(r.monto || r.importe || 0),
                 fecha_vencimiento_pago: r.fecha_vencimiento
               }));
@@ -417,55 +462,46 @@ const DashboardComponent = () => {
         color = '#EF4444';
         break;
       case 'canceladas':
-        // 🔥 NUEVA LÓGICA: Mostrar recibos con estatus "Cancelado" filtrados por fecha
+        // 🔥 LÓGICA: Recibos NO pagados de pólizas canceladas
         {
           const recibosCancelados = expedientes.flatMap(p => {
-            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
-              // Póliza sin recibos: verificar si la póliza está cancelada
-              if (p.etapa_activa === 'Cancelada') {
-                const fechaCancelacion = p.fecha_cancelacion || p.updated_at;
-                let incluir = false;
-                
-                if (periodo === 'mesActual') {
-                  incluir = !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
-                } else if (periodo === 'mesAnterior') {
-                  incluir = fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
-                } else {
-                  incluir = true;
-                }
-                
-                if (incluir) {
-                  return [{
-                    ...p,
-                    _esRecibo: true,
-                    monto: resolverMonto(p)
-                  }];
-                }
-              }
-              return [];
+            // Solo considerar pólizas canceladas
+            const estaCancelado = p.etapa_activa === 'Cancelada' || p.etapaActiva === 'Cancelada';
+            if (!estaCancelado) return [];
+            
+            // Verificar fecha de cancelación según el periodo
+            const fechaCancelacion = p.fecha_cancelacion || p.updated_at;
+            let incluidoEnPeriodo = false;
+            
+            if (periodo === 'mesActual') {
+              incluidoEnPeriodo = !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
+            } else if (periodo === 'mesAnterior') {
+              incluidoEnPeriodo = fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
+            } else {
+              incluidoEnPeriodo = true;
             }
-            // Filtrar recibos con estatus Cancelado
+            
+            if (!incluidoEnPeriodo) return [];
+            
+            if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
+              // Póliza sin recibos: mostrar la póliza como item
+              return [{
+                ...p,
+                _esRecibo: true,
+                monto: resolverMonto(p)
+              }];
+            }
+            
+            // Filtrar recibos NO pagados (los cancelados)
             return p.recibos
-              .filter(r => {
-                const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
-                const estaCancelado = estatus === 'cancelado' || estatus === 'cancelada';
-                if (!estaCancelado) return false;
-                
-                const fechaCancelacion = r.fecha_cancelacion || r.updated_at;
-                
-                if (periodo === 'mesActual') {
-                  return !fechaCancelacion || estaEnRango(fechaCancelacion, inicioMesActual, finMesActual);
-                } else if (periodo === 'mesAnterior') {
-                  return fechaCancelacion && estaEnRango(fechaCancelacion, inicioMesAnterior, finMesAnterior);
-                }
-                return true;
-              })
+              .filter(r => !r.fecha_pago_real) // Solo recibos sin pagar
               .map(r => ({
                 ...p,
                 _esRecibo: true,
                 _reciboNumero: r.numero_recibo,
+                _totalRecibos: p.recibos?.length || 1,
                 monto: Number(r.monto || r.importe || 0),
-                fecha_cancelacion: r.fecha_cancelacion || r.updated_at
+                fecha_cancelacion: p.fecha_cancelacion || p.updated_at
               }));
           });
           polizasFiltradas = recibosCancelados;
@@ -562,22 +598,26 @@ const DashboardComponent = () => {
     });
 
     // ==================== TARJETA 1: PÓLIZAS EMITIDAS ====================
-    // Todos los recibos filtrados por created_at (fecha de emisión del recibo)
-    const recibosEmitidosMesActual = todosLosRecibos.filter(r => 
-      estaEnRango(r.created_at, inicioMesActual, finMesActual)
-    );
+    // Contar TODAS las PÓLIZAS emitidas (sin importar estado posterior)
+    // Emitidas = Pagadas + Canceladas + Pendientes (el total)
+    const polizasEmitidasMesActual = expedientes.filter(p => {
+      const fechaRef = p.fecha_emision || p.fecha_captura || p.created_at;
+      return fechaRef && estaEnRango(fechaRef, inicioMesActual, finMesActual);
+    });
     
-    const recibosEmitidosMesAnterior = todosLosRecibos.filter(r => 
-      estaEnRango(r.created_at, inicioMesAnterior, finMesAnterior)
-    );
+    const polizasEmitidasMesAnterior = expedientes.filter(p => {
+      const fechaRef = p.fecha_emision || p.fecha_captura || p.created_at;
+      return fechaRef && estaEnRango(fechaRef, inicioMesAnterior, finMesAnterior);
+    });
     
-    const primasEmitidasMesActual = recibosEmitidosMesActual.reduce((sum, r) => {
-      const monto = Number(r.monto || r.importe || 0);
+    // Sumar el importe total de cada póliza emitida
+    const primasEmitidasMesActual = polizasEmitidasMesActual.reduce((sum, p) => {
+      const monto = resolverMonto(p);
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
     
-    const primasEmitidasMesAnterior = recibosEmitidosMesAnterior.reduce((sum, r) => {
-      const monto = Number(r.monto || r.importe || 0);
+    const primasEmitidasMesAnterior = polizasEmitidasMesAnterior.reduce((sum, p) => {
+      const monto = resolverMonto(p);
       return sum + (isNaN(monto) ? 0 : monto);
     }, 0);
     
@@ -744,14 +784,14 @@ const DashboardComponent = () => {
     const stats = {
       primasEmitidas: {
         monto: primasEmitidasTotal,
-        cantidad: recibosEmitidosMesActual.length + recibosEmitidosMesAnterior.length, // Cantidad de RECIBOS emitidos
+        cantidad: polizasEmitidasMesActual.length + polizasEmitidasMesAnterior.length, // Cantidad de PÓLIZAS emitidas
         mesActual: {
           monto: primasEmitidasMesActual,
-          cantidad: recibosEmitidosMesActual.length
+          cantidad: polizasEmitidasMesActual.length
         },
         mesAnterior: {
           monto: primasEmitidasMesAnterior,
-          cantidad: recibosEmitidosMesAnterior.length
+          cantidad: polizasEmitidasMesAnterior.length
         }
       },
       primasPagadas: {
@@ -857,6 +897,7 @@ const DashboardComponent = () => {
     };
 
     const pendientes = tramites.filter(t => t.estatus === 'Pendiente');
+    const solicitados = tramites.filter(t => t.estatus === 'Solicitado');
     const enProceso = tramites.filter(t => t.estatus === 'En proceso');
     const completados = tramites.filter(t => t.estatus === 'Completado');
     const cancelados = tramites.filter(t => t.estatus === 'Cancelado');
@@ -871,6 +912,7 @@ const DashboardComponent = () => {
     return {
       totales: {
         pendientes: pendientes.length,
+        solicitados: solicitados.length,
         enProceso: enProceso.length,
         completados: completados.length,
         cancelados: cancelados.length,
@@ -885,6 +927,307 @@ const DashboardComponent = () => {
   const irATramites = () => {
     try { window.history.pushState({}, '', '/tramites'); window.dispatchEvent(new PopStateEvent('popstate')); }
     catch (_) { window.location.href = '/tramites'; }
+  };
+
+  // Función para cambiar el estatus de un trámite
+  const cambiarEstatusTramite = async (tramite, nuevoEstatus) => {
+    try {
+      const payload = {
+        estatus: nuevoEstatus
+      };
+      
+      const res = await fetch(`${API_URL}/api/tramites/${tramite.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || 'Error al actualizar trámite');
+      }
+      
+      // Actualizar el trámite en el estado local
+      setTramites(prev => prev.map(t => 
+        t.id === tramite.id ? { ...t, estatus: nuevoEstatus } : t
+      ));
+      
+      // Actualizar en el modal también
+      if (modalTramites) {
+        setModalTramites(prev => ({
+          ...prev,
+          tramites: prev.tramites.map(t => 
+            t.id === tramite.id ? { ...t, estatus: nuevoEstatus } : t
+          ).filter(t => {
+            // Si estamos en pendientes y cambió a otro estatus, removerlo de la lista
+            if (prev.tipo === 'pendientes' && nuevoEstatus !== 'Pendiente') return t.id !== tramite.id;
+            if (prev.tipo === 'enProceso' && nuevoEstatus !== 'En proceso') return t.id !== tramite.id;
+            return true;
+          })
+        }));
+      }
+      
+      // Limpiar selección
+      setTramiteSeleccionado(null);
+      
+      // Mostrar notificación
+      toast.success(`Trámite ${tramite.codigo} actualizado a "${nuevoEstatus}"`);
+      
+      return true;
+    } catch (error) {
+      console.error('Error al cambiar estatus:', error);
+      toast.error('Error al actualizar el trámite');
+      return false;
+    }
+  };
+
+  // Función para abrir modal de envío a ejecutivo
+  const abrirModalEnviarEjecutivo = (tramite) => {
+    setModalEnviarEjecutivo(tramite);
+  };
+
+  // Función para enviar trámite a ejecutivo
+  const enviarTramiteAEjecutivo = async (tramite, metodo) => {
+    // Obtener datos del ejecutivo asignado
+    let ejecutivoData = null;
+    const ejecutivoNombre = tramite.responsable || tramite.ejecutivoAsignado;
+    
+    if (ejecutivoNombre) {
+      try {
+        // Buscar el ejecutivo en equipo de trabajo por nombre
+        const resEquipo = await fetch(`${API_URL}/api/equipoDeTrabajo`);
+        if (resEquipo.ok) {
+          const equipoData = await resEquipo.json();
+          const equipoArray = Array.isArray(equipoData) ? equipoData : [];
+          
+          // Buscar por nombre (puede ser "nombre" o "nombre apellido")
+          ejecutivoData = equipoArray.find(e => {
+            const nombreCompleto = `${e.nombre || ''} ${e.apellido_paterno || ''}`.trim().toLowerCase();
+            const nombreBuscado = ejecutivoNombre.toLowerCase();
+            return nombreCompleto.includes(nombreBuscado) || 
+                   nombreBuscado.includes(e.nombre?.toLowerCase() || '') ||
+                   e.nombre?.toLowerCase() === nombreBuscado;
+          });
+          
+          if (ejecutivoData) {
+            console.log('✅ Ejecutivo encontrado:', ejecutivoData);
+          }
+        }
+      } catch (error) {
+        console.warn('No se pudo obtener datos del ejecutivo:', error);
+      }
+    }
+    
+    // Construir mensaje
+    const fechaLimite = tramite.fechaLimite 
+      ? new Date(tramite.fechaLimite).toLocaleDateString('es-MX') 
+      : 'Sin fecha límite';
+    
+    const ejecutivo = ejecutivoData 
+      ? `${ejecutivoData.nombre || ''} ${ejecutivoData.apellido_paterno || ''}`.trim()
+      : (ejecutivoNombre || 'Por asignar');
+    
+    // Obtener agente y solicitante
+    const agenteInfo = tramite.agente || '-';
+    const solicitante = 'Administración'; // Usuario actual del sistema
+    
+    // Mensaje para WhatsApp (con formato)
+    const mensajeWhatsApp = `🔔 *SOLICITUD DE TRÁMITE*
+
+📋 *Código:* ${tramite.codigo || '-'}
+📝 *Tipo:* ${tramite.tipoTramite || '-'}
+⚡ *Prioridad:* ${tramite.prioridad || 'Normal'}
+📅 *Fecha Límite:* ${fechaLimite}
+
+👤 *Cliente:* ${tramite.clienteNombre || tramite.cliente || '-'}
+📄 *Póliza:* ${tramite.numeroPoliza || tramite.expediente || '-'}
+🏢 *Aseguradora:* ${tramite.aseguradora || '-'}
+📦 *Producto:* ${tramite.tipoSeguro || '-'}
+🧑‍💼 *Agente:* ${agenteInfo}
+
+📝 *Descripción:*
+${tramite.descripcion || 'Sin descripción'}
+${tramite.observaciones ? `\n💬 *Observaciones:*\n${tramite.observaciones}` : ''}
+
+👷 *Ejecutivo Asignado:* ${ejecutivo}
+📤 *Solicitado por:* ${solicitante}
+
+Por favor, atender este trámite a la brevedad.
+
+Saludos cordiales,
+*DCPRO Administración* 🏢`;
+
+    // Mensaje para Email (sin asteriscos)
+    const mensajeEmail = `SOLICITUD DE TRÁMITE
+
+Código: ${tramite.codigo || '-'}
+Tipo: ${tramite.tipoTramite || '-'}
+Prioridad: ${tramite.prioridad || 'Normal'}
+Fecha Límite: ${fechaLimite}
+
+Cliente: ${tramite.clienteNombre || tramite.cliente || '-'}
+Póliza: ${tramite.numeroPoliza || tramite.expediente || '-'}
+Aseguradora: ${tramite.aseguradora || '-'}
+Producto: ${tramite.tipoSeguro || '-'}
+Agente: ${agenteInfo}
+
+Descripción:
+${tramite.descripcion || 'Sin descripción'}
+${tramite.observaciones ? `\nObservaciones:\n${tramite.observaciones}` : ''}
+
+Ejecutivo Asignado: ${ejecutivo}
+Solicitado por: ${solicitante}
+
+Por favor, atender este trámite a la brevedad.
+
+Saludos cordiales,
+DCPRO Administración`;
+
+    if (metodo === 'whatsapp') {
+      // Si tenemos teléfono del ejecutivo, enviarlo directo
+      if (ejecutivoData?.telefono) {
+        const telefonoLimpio = ejecutivoData.telefono.replace(/\D/g, '');
+        const telefonoConCodigo = telefonoLimpio.startsWith('52') ? telefonoLimpio : `52${telefonoLimpio}`;
+        const url = `https://wa.me/${telefonoConCodigo}?text=${encodeURIComponent(mensajeWhatsApp)}`;
+        window.open(url, '_blank');
+      } else {
+        // Sin teléfono, abrir para seleccionar contacto
+        const url = `https://wa.me/?text=${encodeURIComponent(mensajeWhatsApp)}`;
+        window.open(url, '_blank');
+        toast('Selecciona el contacto del ejecutivo en WhatsApp', { icon: 'ℹ️' });
+      }
+    } else if (metodo === 'email') {
+      const asunto = `Solicitud de Trámite ${tramite.codigo} - ${tramite.tipoTramite}`;
+      // Si tenemos email del ejecutivo, incluirlo
+      const emailDestino = ejecutivoData?.email || '';
+      const mailtoUrl = `mailto:${emailDestino}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensajeEmail)}`;
+      window.location.href = mailtoUrl;
+    }
+
+    // Cambiar estatus a "Solicitado"
+    await cambiarEstatusTramite(tramite, 'Solicitado');
+    
+    // Cerrar modales
+    setModalEnviarEjecutivo(null);
+    toast.success(`Trámite ${tramite.codigo} enviado a ${ejecutivo}`);
+  };
+
+  // Función para abrir modal de trámites filtrados
+  const abrirModalTramites = (tipo, titulo, color) => {
+    const hoy = new Date();
+    const esVencido = (t) => {
+      const f = t.fechaLimite ? new Date(t.fechaLimite) : null;
+      if (!f) return false;
+      return f < hoy && !['Completado', 'Cancelado', 'Rechazado'].includes(t.estatus);
+    };
+
+    let tramitesFiltrados = [];
+    switch (tipo) {
+      case 'pendientes':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Pendiente');
+        break;
+      case 'solicitados':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Solicitado');
+        break;
+      case 'enProceso':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'En proceso');
+        break;
+      case 'vencidos':
+        tramitesFiltrados = tramites.filter(esVencido);
+        break;
+      case 'completados':
+        tramitesFiltrados = tramites.filter(t => t.estatus === 'Completado');
+        break;
+      default:
+        tramitesFiltrados = tramites;
+    }
+
+    // Enriquecer trámites con datos del expediente
+    const tramitesEnriquecidos = tramitesFiltrados.map(t => {
+      // Buscar expediente por número de póliza (el campo 'expediente' del trámite contiene el numero_poliza)
+      const expedienteRelacionado = expedientes.find(e => {
+        // Match por numero_poliza (puede venir con o sin espacios/guiones)
+        const polizaTramite = (t.expediente || '').replace(/[-\s]/g, '').toLowerCase();
+        const polizaExp = (e.numero_poliza || '').replace(/[-\s]/g, '').toLowerCase();
+        
+        return (
+          // Match exacto por expediente_id si existe
+          (t.expediente_id && String(e.id) === String(t.expediente_id)) ||
+          // Match exacto por número de póliza
+          (polizaTramite && polizaExp && polizaTramite === polizaExp) ||
+          // Match si uno contiene al otro
+          (polizaTramite && polizaExp && (polizaTramite.includes(polizaExp) || polizaExp.includes(polizaTramite)))
+        );
+      });
+      
+      // Calcular días restantes o vencidos
+      const diasRestantes = t.fechaLimite ? Math.ceil((new Date(t.fechaLimite) - hoy) / (1000 * 60 * 60 * 24)) : null;
+      
+      if (expedienteRelacionado) {
+        // Construir nombre del cliente (persona física o moral)
+        const nombreCliente = expedienteRelacionado.razon_social || 
+                              expedienteRelacionado.razonSocial ||
+                              expedienteRelacionado.nombre_cliente || 
+                              `${expedienteRelacionado.nombre || ''} ${expedienteRelacionado.apellido_paterno || expedienteRelacionado.apellidoPaterno || ''}`.trim() || 
+                              t.cliente || '-';
+        
+        // Construir info del vehículo
+        const tieneVehiculo = expedienteRelacionado.marca || expedienteRelacionado.modelo;
+        const vehiculoInfo = tieneVehiculo 
+          ? `${expedienteRelacionado.marca || ''} ${expedienteRelacionado.modelo || ''} ${expedienteRelacionado.anio || ''}`.trim()
+          : null;
+        
+        return {
+          ...t,
+          // Datos del expediente (todos los campos que tiene la póliza)
+          aseguradora: expedienteRelacionado.compania || '-',
+          tipoSeguro: expedienteRelacionado.producto || '-',
+          clienteNombre: nombreCliente,
+          numeroPoliza: expedienteRelacionado.numero_poliza || t.expediente || '-',
+          vigencia: expedienteRelacionado.inicio_vigencia && expedienteRelacionado.termino_vigencia 
+            ? `${new Date(expedienteRelacionado.inicio_vigencia).toLocaleDateString('es-MX')} - ${new Date(expedienteRelacionado.termino_vigencia).toLocaleDateString('es-MX')}`
+            : '-',
+          estatusPago: expedienteRelacionado.estatusPago || expedienteRelacionado.estatus_pago || '-',
+          vehiculo: vehiculoInfo,
+          placas: expedienteRelacionado.placas || null,
+          numeroSerie: expedienteRelacionado.numero_serie || null,
+          agente: expedienteRelacionado.agente || '-',
+          subAgente: expedienteRelacionado.sub_agente || null,
+          etapaActiva: expedienteRelacionado.etapa_activa || expedienteRelacionado.etapaActiva || null,
+          tipoPago: expedienteRelacionado.tipo_pago || expedienteRelacionado.tipoPago || null,
+          total: expedienteRelacionado.total || null,
+          primaNeta: expedienteRelacionado.prima_neta || null,
+          // Contacto del cliente
+          emailCliente: expedienteRelacionado.email || null,
+          telefonoCliente: expedienteRelacionado.telefonoMovil || expedienteRelacionado.telefono_movil || null,
+          diasRestantes,
+          expedienteEncontrado: true
+        };
+      }
+      
+      return {
+        ...t,
+        aseguradora: '-',
+        tipoSeguro: '-',
+        clienteNombre: t.cliente || '-',
+        numeroPoliza: t.expediente || '-',
+        vigencia: '-',
+        estatusPago: '-',
+        vehiculo: null,
+        placas: null,
+        agente: null,
+        vendedor: null,
+        diasRestantes,
+        expedienteEncontrado: false
+      };
+    });
+
+    setModalTramites({
+      titulo,
+      color,
+      tipo,
+      tramites: tramitesEnriquecidos
+    });
   };
 
   return (
@@ -1071,7 +1414,7 @@ const DashboardComponent = () => {
                       ${estadisticasFinancieras.primasEmitidas.mesActual.monto.toLocaleString('es-MX', { maximumFractionDigits: 0 })}
                     </h3>
                     <small style={{ fontSize: '11px', color: '#6B7280' }}>
-                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} recibos • Mes actual
+                      {estadisticasFinancieras.primasEmitidas.mesActual.cantidad} pólizas • Mes actual
                     </small>
                   </div>
                 </div>
@@ -1313,18 +1656,46 @@ const DashboardComponent = () => {
             </button>
           </div>
           <div className="row g-3 mb-3">
-            <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('pendientes', 'Trámites Pendientes', '#F59E0B')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Pendientes</div>
                   <Clock size={18} style={{ color: '#F59E0B' }} />
                 </div>
                 <h3 className="mb-0 fw-bold" style={{ color: '#F59E0B' }}>{estadisticasTramites.totales.pendientes}</h3>
-                <small className="text-muted">en espera de atención</small>
+                <small className="text-muted">en espera</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3" 
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('solicitados', 'Trámites Solicitados', '#8B5CF6')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
+                <div className="d-flex justify-content-between align-items-center">
+                  <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Solicitados</div>
+                  <Send size={18} style={{ color: '#8B5CF6' }} />
+                </div>
+                <h3 className="mb-0 fw-bold" style={{ color: '#8B5CF6' }}>{estadisticasTramites.totales.solicitados}</h3>
+                <small className="text-muted">enviados a ejecutivo</small>
+              </div>
+            </div>
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('enProceso', 'Trámites En Proceso', '#3B82F6')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>En Proceso</div>
                   <Activity size={18} style={{ color: '#3B82F6' }} />
@@ -1333,18 +1704,30 @@ const DashboardComponent = () => {
                 <small className="text-muted">gestión activa</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('vencidos', 'Trámites Vencidos', '#EF4444')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Vencidos</div>
                   <AlertTriangle size={18} style={{ color: '#EF4444' }} />
                 </div>
                 <h3 className="mb-0 fw-bold" style={{ color: '#EF4444' }}>{estadisticasTramites.totales.vencidos}</h3>
-                <small className="text-muted">superaron fecha límite</small>
+                <small className="text-muted">fecha límite</small>
               </div>
             </div>
-            <div className="col-6 col-md-3">
-              <div className="executive-card p-3">
+            <div className="col-6 col-lg">
+              <div 
+                className="executive-card p-3"
+                style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                onClick={() => abrirModalTramites('completados', 'Trámites Completados', '#10B981')}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = ''; }}
+              >
                 <div className="d-flex justify-content-between align-items-center">
                   <div className="text-muted" style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>Completados</div>
                   <CheckCircle2 size={18} style={{ color: '#10B981' }} />
@@ -1353,70 +1736,6 @@ const DashboardComponent = () => {
                 <small className="text-muted">finalizados</small>
               </div>
             </div>
-          </div>
-
-          {/* Tabla compacta de trámites recientes */}
-          <div className="executive-card p-3">
-            <div className="d-flex justify-content-between align-items-center mb-2">
-              <div className="text-muted" style={{ fontSize: '12px' }}>Trámites recientes</div>
-              <small className="text-muted">Total: {estadisticasTramites.totales.total}</small>
-            </div>
-            {tramites.length === 0 ? (
-              <div className="text-center text-muted py-4">
-                <FileText size={24} className="mb-2" />
-                No hay trámites registrados
-              </div>
-            ) : (
-              <div className="table-responsive">
-                <table className="table table-hover mb-0 compact-table">
-                  <thead>
-                    <tr>
-                      <th>Código</th>
-                      <th>Tipo</th>
-                      <th>Cliente</th>
-                      <th>Póliza</th>
-                      <th>Estatus</th>
-                      <th>Prioridad</th>
-                      <th>Fecha Límite</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {estadisticasTramites.recientes.map((t, idx) => (
-                      <tr key={idx}>
-                        <td className="fw-semibold" style={{ color: '#111827' }}>{t.codigo}</td>
-                        <td>{t.tipoTramite}</td>
-                        <td>{t.cliente || '-'}</td>
-                        <td><small className="text-muted">{t.expediente || '-'}</small></td>
-                        <td>
-                          <span className={`badge ${
-                            t.estatus === 'Completado' ? 'bg-success' :
-                            t.estatus === 'En proceso' ? 'bg-primary' :
-                            t.estatus === 'Pendiente' ? 'bg-warning' :
-                            t.estatus === 'Cancelado' ? 'bg-secondary' :
-                            t.estatus === 'Rechazado' ? 'bg-dark' : 'bg-info'
-                          }`} style={{ fontSize: '10px' }}>
-                            {t.estatus}
-                          </span>
-                        </td>
-                        <td>
-                          <span className={`badge ${
-                            t.prioridad === 'Alta' ? 'bg-danger' :
-                            t.prioridad === 'Media' ? 'bg-warning' : 'bg-success'
-                          }`} style={{ fontSize: '10px' }}>
-                            {t.prioridad}
-                          </span>
-                        </td>
-                        <td>
-                          <small className={`${t.fechaLimite && new Date(t.fechaLimite) < new Date() && !['Completado','Cancelado','Rechazado'].includes(t.estatus) ? 'text-danger' : ''}`}>
-                            {t.fechaLimite ? new Date(t.fechaLimite).toLocaleDateString('es-MX') : '-'}
-                          </small>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -1705,13 +2024,61 @@ const DashboardComponent = () => {
                                     <small className="fw-semibold text-primary">
                                       {poliza.frecuenciaPago || poliza.frecuencia_pago || poliza.tipo_pago || 'Anual'}
                                     </small>
-                                    {/* Estatus de pago */}
+                                    {/* Estatus de pago con progreso unificado */}
                                     {(() => {
-                                      // Determinar estatus basado en recibos si existen
                                       const recibos = poliza.recibos || [];
-                                      let estatus = poliza.estatus_pago || poliza.estatusPago || '';
+                                      const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
+                                                           (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
                                       
-                                      if (recibos.length > 0) {
+                                      // Calcular total de recibos
+                                      const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
+                                      let totalRecibos = 1; // Por defecto Anual = 1
+                                      if (esFraccionado) {
+                                        totalRecibos = recibos.length || 
+                                                      (frecuencia.includes('trimestral') ? 4 : 
+                                                       frecuencia.includes('semestral') ? 2 : 
+                                                       frecuencia.includes('mensual') ? 12 : 
+                                                       frecuencia.includes('cuatrimestral') ? 3 : 1);
+                                      }
+                                      
+                                      // Contar recibos pagados
+                                      const recibosPagados = recibos.filter(r => {
+                                        if (r.fecha_pago_real) return true;
+                                        const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                        return est === 'pagado' || est === 'pagada';
+                                      }).length;
+                                      
+                                      // Determinar estatus y color
+                                      let estatus = '';
+                                      let colorClass = 'bg-secondary';
+                                      let numeroMostrar = recibosPagados || 1;
+                                      
+                                      // 🔥 PRIORIDAD 1: Si es un recibo individual, usar su número específico
+                                      if (poliza._esRecibo) {
+                                        estatus = poliza.fecha_pago_real ? 'Pagado' : 
+                                                 (poliza.estatus_pago || poliza.estatus || 'Pendiente');
+                                        numeroMostrar = poliza._reciboNumero || 1;
+                                        totalRecibos = poliza._totalRecibos || totalRecibos;
+                                        
+                                        // Si la póliza está cancelada, mostrar badge "Cancelado" pero mantener número de recibo
+                                        if (poliza.etapa_activa === 'Cancelada') {
+                                          estatus = 'Cancelado';
+                                          colorClass = 'bg-dark';
+                                        } else {
+                                          colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
+                                                      estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
+                                                      estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
+                                                      'bg-info';
+                                        }
+                                      }
+                                      // 🔥 Si la póliza está cancelada (y NO es recibo individual)
+                                      else if (poliza.etapa_activa === 'Cancelada') {
+                                        estatus = 'Cancelado';
+                                        colorClass = 'bg-dark';
+                                        numeroMostrar = recibosPagados; // Mostrar el último pagado
+                                      }
+                                      // Para pólizas completas
+                                      else if (recibos.length > 0) {
                                         const tieneVencidos = recibos.some(r => {
                                           const est = (r.estatus_pago || r.estatus || '').toLowerCase();
                                           return est === 'vencido';
@@ -1722,55 +2089,52 @@ const DashboardComponent = () => {
                                         });
                                         const todosPagados = recibos.every(r => r.fecha_pago_real);
                                         
-                                        if (tieneVencidos) estatus = 'Vencido';
-                                        else if (tienePorVencer) estatus = 'Por Vencer';
-                                        else if (todosPagados) estatus = 'Pagado';
+                                        if (todosPagados) {
+                                          estatus = 'Pagado';
+                                          colorClass = 'bg-success';
+                                          numeroMostrar = totalRecibos;
+                                        } else if (tieneVencidos) {
+                                          estatus = 'Vencido';
+                                          colorClass = 'bg-danger';
+                                          // Buscar primer recibo vencido
+                                          const primerVencido = recibos.find(r => (r.estatus_pago || r.estatus || '').toLowerCase() === 'vencido');
+                                          numeroMostrar = primerVencido?.numero_recibo || (recibosPagados + 1);
+                                        } else if (tienePorVencer) {
+                                          estatus = 'Por Vencer';
+                                          colorClass = 'bg-warning text-dark';
+                                          // Buscar primer recibo por vencer
+                                          const primerPorVencer = recibos.find(r => {
+                                            const est = (r.estatus_pago || r.estatus || '').toLowerCase();
+                                            return est === 'por vencer' || est === 'pago por vencer';
+                                          });
+                                          numeroMostrar = primerPorVencer?.numero_recibo || (recibosPagados + 1);
+                                        } else {
+                                          estatus = 'Pendiente';
+                                          colorClass = 'bg-info';
+                                          numeroMostrar = recibosPagados + 1;
+                                        }
+                                      } else {
+                                        // Póliza sin recibos (anual)
+                                        estatus = poliza.estatus_pago || poliza.estatusPago || 'Pendiente';
+                                        colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
+                                                    estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
+                                                    estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
+                                                    'bg-info';
+                                        numeroMostrar = estatus.toLowerCase() === 'pagado' ? 1 : 1;
                                       }
                                       
-                                      const colorClass = estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' ? 'bg-success' :
-                                                        estatus.toLowerCase() === 'vencido' ? 'bg-danger' :
-                                                        estatus.toLowerCase().includes('vencer') ? 'bg-warning text-dark' :
-                                                        'bg-secondary';
-                                      return estatus ? (
+                                      return (
                                         <div className="mt-1">
                                           <span className={`badge ${colorClass}`} style={{ fontSize: '9px' }}>
                                             {estatus}
                                           </span>
-                                        </div>
-                                      ) : null;
-                                    })()}
-                                    {/* Progreso de recibos X/X o Número de recibo si es desglose de recibos */}
-                                    {(() => {
-                                      // Si es un recibo individual (vencidos, porVencer, canceladas)
-                                      if (poliza._esRecibo && poliza._reciboNumero) {
-                                        return (
-                                          <div className="mt-1" style={{ fontSize: '0.75rem' }}>
-                                            <span className="badge bg-secondary">
-                                              Recibo {poliza._reciboNumero}
+                                          <div style={{ fontSize: '0.7rem', marginTop: '2px' }}>
+                                            <span className={estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' || estatus.toLowerCase() === 'cancelado' ? 'text-success fw-bold' : 
+                                                            estatus.toLowerCase() === 'vencido' ? 'text-danger fw-bold' :
+                                                            estatus.toLowerCase().includes('vencer') ? 'text-warning fw-bold' : 'text-muted'}>
+                                              {numeroMostrar}/{totalRecibos} {estatus.toLowerCase() === 'pagado' || estatus.toLowerCase() === 'pagada' || estatus.toLowerCase() === 'cancelado' ? 'Pagado' : estatus}
                                             </span>
                                           </div>
-                                        );
-                                      }
-                                      
-                                      const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
-                                                           (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
-                                      if (!esFraccionado) return null;
-                                      
-                                      const recibos = poliza.recibos || [];
-                                      const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
-                                      const totalRecibos = recibos.length || 
-                                                          (frecuencia.includes('trimestral') ? 4 : 
-                                                           frecuencia.includes('semestral') ? 2 : 
-                                                           frecuencia.includes('mensual') ? 12 : 
-                                                           frecuencia.includes('cuatrimestral') ? 3 : 1);
-                                      
-                                      const recibosPagados = recibos.filter(r => r.fecha_pago_real).length;
-                                      
-                                      return (
-                                        <div className="mt-1" style={{ fontSize: '0.7rem' }}>
-                                          <span className="text-muted">
-                                            {recibosPagados}/{totalRecibos}
-                                          </span>
                                         </div>
                                       );
                                     })()}
@@ -2027,6 +2391,528 @@ const DashboardComponent = () => {
                   onClick={() => setModalDetalle(null)}>
                   <CheckCircle2 size={14} className="me-1" />
                   Autorizar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE TRÁMITES - VISTA SIMPLIFICADA */}
+      {modalTramites && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+          <div 
+            className="modal-dialog modal-dialog-centered modal-dialog-scrollable" 
+            style={{ maxWidth: tramiteSeleccionado ? '95%' : '900px', transition: 'max-width 0.3s ease' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-content" style={{ height: '80vh' }}>
+              {/* Header del modal */}
+              <div className="modal-header py-2" style={{ background: modalTramites.color, color: 'white' }}>
+                <h5 className="modal-title fw-bold mb-0" style={{ fontSize: '16px' }}>
+                  {modalTramites.titulo}
+                  <span className="badge bg-light text-dark ms-2" style={{ fontSize: '11px' }}>
+                    {modalTramites.tramites.length}
+                  </span>
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close btn-close-white"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+                </button>
+              </div>
+              
+              {/* Body del modal - Layout con tabla y panel */}
+              <div className="modal-body p-0 d-flex" style={{ overflow: 'hidden' }}>
+                {/* Tabla de trámites (lado izquierdo) */}
+                <div className={`${tramiteSeleccionado ? 'border-end' : ''}`} style={{ 
+                  width: tramiteSeleccionado ? '55%' : '100%', 
+                  overflow: 'auto',
+                  transition: 'width 0.3s ease'
+                }}>
+                  {modalTramites.tramites.length === 0 ? (
+                    <div className="text-center py-5">
+                      <FileText size={48} className="text-muted mb-3" />
+                      <h6 className="text-muted">No hay trámites en esta categoría</h6>
+                    </div>
+                  ) : (
+                    <table className="table table-hover mb-0" style={{ fontSize: '12px' }}>
+                      <thead className="table-light sticky-top">
+                        <tr>
+                          <th style={{ fontSize: '10px', fontWeight: 600 }}>TRÁMITE</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600 }}>CLIENTE / PÓLIZA</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>PRIORIDAD</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>VENCE</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center' }}>ESTATUS</th>
+                          <th style={{ fontSize: '10px', fontWeight: 600, textAlign: 'center', width: '50px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modalTramites.tramites.map((t, idx) => {
+                          const fechaLimite = t.fechaLimite ? new Date(t.fechaLimite) : null;
+                          const hoy = new Date();
+                          const esVencido = fechaLimite && fechaLimite < hoy && !['Completado', 'Cancelado', 'Rechazado'].includes(t.estatus);
+                          const diasRestantes = t.diasRestantes;
+                          const estaSeleccionado = tramiteSeleccionado?.id === t.id;
+                          
+                          return (
+                            <tr 
+                              key={t.id || idx} 
+                              style={{ 
+                                cursor: 'pointer',
+                                backgroundColor: estaSeleccionado ? '#E3F2FD' : 'transparent'
+                              }}
+                              onClick={() => setTramiteSeleccionado(t)}
+                            >
+                              {/* Trámite */}
+                              <td>
+                                <div className="fw-semibold" style={{ color: modalTramites.color, fontSize: '11px' }}>
+                                  {t.codigo || '-'}
+                                </div>
+                                <div className="fw-medium">{t.tipoTramite || '-'}</div>
+                              </td>
+                              
+                              {/* Cliente / Póliza */}
+                              <td>
+                                <div className="fw-medium">{t.clienteNombre || t.cliente || '-'}</div>
+                                <div style={{ fontSize: '11px', color: '#2563EB' }}>
+                                  {t.numeroPoliza || t.expediente || '-'}
+                                </div>
+                              </td>
+                              
+                              {/* Prioridad */}
+                              <td className="text-center">
+                                <span className={`badge ${
+                                  t.prioridad === 'Alta' ? 'bg-danger' :
+                                  t.prioridad === 'Media' ? 'bg-warning text-dark' : 'bg-success'
+                                }`} style={{ fontSize: '9px' }}>
+                                  {t.prioridad || 'Normal'}
+                                </span>
+                              </td>
+                              
+                              {/* Vence en */}
+                              <td className="text-center">
+                                {diasRestantes !== null ? (
+                                  <span className={`badge ${
+                                    diasRestantes < 0 ? 'bg-danger' : 
+                                    diasRestantes === 0 ? 'bg-danger' :
+                                    diasRestantes <= 3 ? 'bg-warning text-dark' : 'bg-light text-dark'
+                                  }`} style={{ fontSize: '10px' }}>
+                                    {diasRestantes < 0 ? `⚠️ ${Math.abs(diasRestantes)}d` : 
+                                     diasRestantes === 0 ? '⚠️ HOY' : `${diasRestantes}d`}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted">-</span>
+                                )}
+                              </td>
+                              
+                              {/* Estatus */}
+                              <td className="text-center">
+                                <span className={`badge ${
+                                  t.estatus === 'Completado' ? 'bg-success' :
+                                  t.estatus === 'En proceso' ? 'bg-primary' :
+                                  t.estatus === 'Pendiente' ? 'bg-warning text-dark' :
+                                  t.estatus === 'Cancelado' ? 'bg-secondary' :
+                                  t.estatus === 'Rechazado' ? 'bg-dark' : 'bg-info'
+                                }`} style={{ fontSize: '9px' }}>
+                                  {t.estatus}
+                                </span>
+                              </td>
+                              
+                              {/* Botón Ver */}
+                              <td className="text-center">
+                                <button 
+                                  className="btn btn-sm btn-outline-primary py-0 px-2"
+                                  style={{ fontSize: '10px' }}
+                                  onClick={(e) => { e.stopPropagation(); setTramiteSeleccionado(t); }}
+                                >
+                                  <Eye size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                
+                {/* Panel de Detalle (lado derecho) */}
+                {tramiteSeleccionado && (
+                  <div style={{ width: '45%', overflow: 'auto', backgroundColor: '#F8FAFC' }}>
+                    <div className="p-3">
+                      {/* Header del panel */}
+                      <div className="d-flex justify-content-between align-items-start mb-3">
+                        <div>
+                          <h6 className="fw-bold mb-1" style={{ color: modalTramites.color }}>
+                            {tramiteSeleccionado.codigo}
+                          </h6>
+                          <span className={`badge ${
+                            tramiteSeleccionado.estatus === 'Completado' ? 'bg-success' :
+                            tramiteSeleccionado.estatus === 'En proceso' ? 'bg-primary' :
+                            tramiteSeleccionado.estatus === 'Pendiente' ? 'bg-warning text-dark' : 'bg-secondary'
+                          }`}>
+                            {tramiteSeleccionado.estatus}
+                          </span>
+                        </div>
+                        <button 
+                          className="btn btn-sm btn-light"
+                          onClick={() => setTramiteSeleccionado(null)}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                      
+                      {/* Sección: Trámite */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">📋 DATOS DEL TRÁMITE</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Tipo</label>
+                              <div className="fw-medium">{tramiteSeleccionado.tipoTramite || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Prioridad</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.prioridad === 'Alta' ? 'bg-danger' :
+                                  tramiteSeleccionado.prioridad === 'Media' ? 'bg-warning text-dark' : 'bg-success'
+                                }`}>
+                                  {tramiteSeleccionado.prioridad || 'Normal'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Descripción</label>
+                              <div>{tramiteSeleccionado.descripcion || 'Sin descripción'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Fecha Solicitud</label>
+                              <div>{tramiteSeleccionado.fechaCreacion ? new Date(tramiteSeleccionado.fechaCreacion).toLocaleDateString('es-MX') : '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Fecha Límite</label>
+                              <div className={tramiteSeleccionado.diasRestantes < 0 ? 'text-danger fw-bold' : ''}>
+                                {tramiteSeleccionado.fechaLimite ? new Date(tramiteSeleccionado.fechaLimite).toLocaleDateString('es-MX') : '-'}
+                                {tramiteSeleccionado.diasRestantes !== null && (
+                                  <span className={`ms-1 badge ${
+                                    tramiteSeleccionado.diasRestantes < 0 ? 'bg-danger' : 
+                                    tramiteSeleccionado.diasRestantes <= 3 ? 'bg-warning text-dark' : 'bg-light text-dark'
+                                  }`} style={{ fontSize: '9px' }}>
+                                    {tramiteSeleccionado.diasRestantes < 0 ? `${Math.abs(tramiteSeleccionado.diasRestantes)}d vencido` : 
+                                     tramiteSeleccionado.diasRestantes === 0 ? 'HOY' : `${tramiteSeleccionado.diasRestantes}d restantes`}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Sección: Póliza */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">📄 DATOS DE LA PÓLIZA</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Número de Póliza</label>
+                              <div className="fw-bold" style={{ color: '#2563EB' }}>{tramiteSeleccionado.numeroPoliza || tramiteSeleccionado.expediente || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Aseguradora</label>
+                              <div className="fw-medium">🏢 {tramiteSeleccionado.aseguradora || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Producto</label>
+                              <div>{tramiteSeleccionado.tipoSeguro || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Etapa</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.etapaActiva === 'Emitida' ? 'bg-success' :
+                                  tramiteSeleccionado.etapaActiva === 'Captura' ? 'bg-info' :
+                                  tramiteSeleccionado.etapaActiva === 'Cotización' ? 'bg-secondary' : 'bg-light text-dark'
+                                }`} style={{ fontSize: '10px' }}>
+                                  {tramiteSeleccionado.etapaActiva || '-'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Vigencia</label>
+                              <div>📅 {tramiteSeleccionado.vigencia || '-'}</div>
+                            </div>
+                            {tramiteSeleccionado.vehiculo && (
+                              <>
+                                <div className="col-12" style={{ borderTop: '1px dashed #dee2e6', paddingTop: '8px', marginTop: '4px' }}>
+                                  <label className="text-muted" style={{ fontSize: '10px' }}>Vehículo Asegurado</label>
+                                  <div className="fw-medium">🚗 {tramiteSeleccionado.vehiculo}</div>
+                                </div>
+                                <div className="col-6">
+                                  <label className="text-muted" style={{ fontSize: '10px' }}>Placas</label>
+                                  <div>{tramiteSeleccionado.placas || '-'}</div>
+                                </div>
+                                {tramiteSeleccionado.numeroSerie && (
+                                  <div className="col-6">
+                                    <label className="text-muted" style={{ fontSize: '10px' }}>No. Serie</label>
+                                    <div style={{ fontSize: '10px' }}>{tramiteSeleccionado.numeroSerie}</div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Tipo de Pago</label>
+                              <div>{tramiteSeleccionado.tipoPago || '-'}</div>
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Estatus Pago</label>
+                              <div>
+                                <span className={`badge ${
+                                  tramiteSeleccionado.estatusPago === 'Pagado' || tramiteSeleccionado.estatusPago === 'Pagada' ? 'bg-success' :
+                                  tramiteSeleccionado.estatusPago === 'Pendiente' ? 'bg-warning text-dark' : 'bg-secondary'
+                                }`} style={{ fontSize: '10px' }}>
+                                  {tramiteSeleccionado.estatusPago || '-'}
+                                </span>
+                              </div>
+                            </div>
+                            {tramiteSeleccionado.total && (
+                              <div className="col-12">
+                                <label className="text-muted" style={{ fontSize: '10px' }}>Prima Total</label>
+                                <div className="fw-bold text-success">
+                                  ${Number(tramiteSeleccionado.total).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Sección: Personas */}
+                      <div className="card mb-3 shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">👥 PERSONAS INVOLUCRADAS</small>
+                        </div>
+                        <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                          <div className="row g-2">
+                            <div className="col-12">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Cliente</label>
+                              <div className="fw-medium"><User size={12} className="me-1" />{tramiteSeleccionado.clienteNombre || tramiteSeleccionado.cliente || '-'}</div>
+                            </div>
+                            {(tramiteSeleccionado.emailCliente || tramiteSeleccionado.telefonoCliente) && (
+                              <div className="col-12">
+                                <label className="text-muted" style={{ fontSize: '10px' }}>Contacto</label>
+                                <div style={{ fontSize: '11px' }}>
+                                  {tramiteSeleccionado.emailCliente && (
+                                    <span className="me-2">📧 {tramiteSeleccionado.emailCliente}</span>
+                                  )}
+                                  {tramiteSeleccionado.telefonoCliente && (
+                                    <span>📱 {tramiteSeleccionado.telefonoCliente}</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Agente/Vendedor</label>
+                              <div><Briefcase size={12} className="me-1" />{tramiteSeleccionado.agente || '-'}</div>
+                              {tramiteSeleccionado.subAgente && (
+                                <div className="text-muted" style={{ fontSize: '10px' }}>Sub: {tramiteSeleccionado.subAgente}</div>
+                              )}
+                            </div>
+                            <div className="col-6">
+                              <label className="text-muted" style={{ fontSize: '10px' }}>Ejecutivo Asignado</label>
+                              <div><UserCheck size={12} className="me-1" />{tramiteSeleccionado.responsable || tramiteSeleccionado.ejecutivoAsignado || '-'}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Observaciones */}
+                      {tramiteSeleccionado.observaciones && (
+                        <div className="card mb-3 shadow-sm">
+                          <div className="card-header py-2 bg-white">
+                            <small className="fw-bold text-muted">💬 OBSERVACIONES</small>
+                          </div>
+                          <div className="card-body py-2" style={{ fontSize: '12px' }}>
+                            {tramiteSeleccionado.observaciones}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Acciones rápidas */}
+                      <div className="card shadow-sm">
+                        <div className="card-header py-2 bg-white">
+                          <small className="fw-bold text-muted">⚡ ACCIONES RÁPIDAS</small>
+                        </div>
+                        <div className="card-body py-2">
+                          <div className="d-flex flex-wrap gap-2">
+                            {/* Botón Enviar a Ejecutivo - solo si está Pendiente */}
+                            {tramiteSeleccionado.estatus === 'Pendiente' && (
+                              <button 
+                                className="btn btn-sm btn-warning"
+                                onClick={() => abrirModalEnviarEjecutivo(tramiteSeleccionado)}
+                              >
+                                <Send size={12} className="me-1" />Enviar a Ejecutivo
+                              </button>
+                            )}
+                            
+                            {/* Botón Atender - solo si está Pendiente o Solicitado */}
+                            {(tramiteSeleccionado.estatus === 'Pendiente' || tramiteSeleccionado.estatus === 'Solicitado') && (
+                              <button 
+                                className="btn btn-sm btn-primary"
+                                onClick={() => cambiarEstatusTramite(tramiteSeleccionado, 'En proceso')}
+                              >
+                                <Activity size={12} className="me-1" />Atender
+                              </button>
+                            )}
+                            
+                            {/* Botón Completar - solo si está En proceso */}
+                            {tramiteSeleccionado.estatus === 'En proceso' && (
+                              <button 
+                                className="btn btn-sm btn-success"
+                                onClick={() => cambiarEstatusTramite(tramiteSeleccionado, 'Completado')}
+                              >
+                                <CheckCircle size={12} className="me-1" />Completar
+                              </button>
+                            )}
+                            
+                            <button 
+                              className="btn btn-sm btn-outline-primary"
+                              onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}
+                            >
+                              <Edit size={12} className="me-1" />Editar Trámite
+                            </button>
+                            <button className="btn btn-sm btn-outline-secondary">
+                              <Clock size={12} className="me-1" />Posponer
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              
+              {/* Footer del modal */}
+              <div className="modal-footer py-2">
+                <span className="text-muted me-auto" style={{ fontSize: '11px' }}>
+                  💡 Clic en una fila o en 👁️ para ver detalle
+                </span>
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); }}>
+                  Cerrar
+                </button>
+                <button 
+                  type="button" 
+                  className="btn btn-primary btn-sm"
+                  onClick={() => { setModalTramites(null); setTramiteSeleccionado(null); navigate('/tramites'); }}>
+                  <FileCheck size={14} className="me-1" />
+                  Ir a Gestión de Trámites
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL ENVIAR A EJECUTIVO */}
+      {modalEnviarEjecutivo && (
+        <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1060 }} onClick={() => setModalEnviarEjecutivo(null)}>
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '450px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              <div className="modal-header bg-warning text-dark py-3">
+                <h5 className="modal-title fw-bold mb-0">
+                  <Send size={18} className="me-2" />
+                  Enviar Trámite a Ejecutivo
+                </h5>
+                <button 
+                  type="button" 
+                  className="btn-close"
+                  onClick={() => setModalEnviarEjecutivo(null)}>
+                </button>
+              </div>
+              
+              <div className="modal-body">
+                {/* Resumen del trámite */}
+                <div className="bg-light rounded p-3 mb-4">
+                  <div className="row g-2" style={{ fontSize: '13px' }}>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Código</small>
+                      <span className="fw-bold">{modalEnviarEjecutivo.codigo}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Tipo</small>
+                      <span>{modalEnviarEjecutivo.tipoTramite}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Cliente</small>
+                      <span>{modalEnviarEjecutivo.clienteNombre || modalEnviarEjecutivo.cliente}</span>
+                    </div>
+                    <div className="col-6">
+                      <small className="text-muted d-block">Ejecutivo</small>
+                      <span className="fw-medium">{modalEnviarEjecutivo.responsable || modalEnviarEjecutivo.ejecutivoAsignado || 'Por asignar'}</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Opciones de envío */}
+                <p className="text-muted text-center mb-3" style={{ fontSize: '13px' }}>
+                  Selecciona cómo deseas enviar la solicitud:
+                </p>
+                
+                <div className="d-flex gap-3 justify-content-center">
+                  {/* Botón WhatsApp */}
+                  <button
+                    className="btn btn-lg d-flex flex-column align-items-center p-3"
+                    style={{ 
+                      backgroundColor: '#25D366', 
+                      color: 'white',
+                      borderRadius: '12px',
+                      minWidth: '140px'
+                    }}
+                    onClick={() => enviarTramiteAEjecutivo(modalEnviarEjecutivo, 'whatsapp')}
+                  >
+                    <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.057 3.965L0 16l4.204-1.102a7.933 7.933 0 0 0 3.79.965h.004c4.368 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 14.521a6.573 6.573 0 0 1-3.356-.92l-.24-.144-2.494.654.666-2.433-.156-.251a6.56 6.56 0 0 1-1.007-3.505c0-3.626 2.957-6.584 6.591-6.584a6.56 6.56 0 0 1 4.66 1.931 6.557 6.557 0 0 1 1.928 4.66c-.004 3.639-2.961 6.592-6.592 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.171-.48 1.338-.943.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+                    </svg>
+                    <span className="mt-2 fw-medium">WhatsApp</span>
+                  </button>
+                  
+                  {/* Botón Email */}
+                  <button
+                    className="btn btn-lg d-flex flex-column align-items-center p-3"
+                    style={{ 
+                      backgroundColor: '#EA4335', 
+                      color: 'white',
+                      borderRadius: '12px',
+                      minWidth: '140px'
+                    }}
+                    onClick={() => enviarTramiteAEjecutivo(modalEnviarEjecutivo, 'email')}
+                  >
+                    <svg width="32" height="32" fill="currentColor" viewBox="0 0 16 16">
+                      <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4Zm2-1a1 1 0 0 0-1 1v.217l7 4.2 7-4.2V4a1 1 0 0 0-1-1H2Zm13 2.383-4.708 2.825L15 11.105V5.383Zm-.034 6.876-5.64-3.471L8 9.583l-1.326-.795-5.64 3.47A1 1 0 0 0 2 13h12a1 1 0 0 0 .966-.741ZM1 11.105l4.708-2.897L1 5.383v5.722Z"/>
+                    </svg>
+                    <span className="mt-2 fw-medium">Email</span>
+                  </button>
+                </div>
+                
+                <p className="text-center text-muted mt-4 mb-0" style={{ fontSize: '11px' }}>
+                  ℹ️ El trámite cambiará a estado "Solicitado" al enviar
+                </p>
+              </div>
+              
+              <div className="modal-footer py-2">
+                <button 
+                  type="button" 
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => setModalEnviarEjecutivo(null)}>
+                  Cancelar
                 </button>
               </div>
             </div>
