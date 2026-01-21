@@ -153,7 +153,8 @@ const ListaTramitesComponent = ({
   setVistaActual, 
   verDetallesTramite, 
   editarTramite, 
-  eliminarTramite 
+  eliminarTramite,
+  todosExpedientes = [] 
 }) => {
   const paginacion = usePaginacion(tramites, 10);
 
@@ -250,51 +251,126 @@ const ListaTramitesComponent = ({
                 <table className="table table-hover mb-0">
                   <thead className="table-light">
                     <tr>
-                      <th>Código</th>
-                      <th>Tipo de Trámite</th>
-                      <th>Cliente/Expediente</th>
+                      <th className="text-center align-middle">Código</th>
+                      <th className="text-center align-middle">Tipo de Trámite</th>
+                      <th>Aseguradora</th>
+                      <th className="text-center">Agente</th>
+                      <th>Ejecutivo</th>
                       <th>Estatus</th>
-                      <th>Prioridad</th>
-                      <th>Fecha Inicio</th>
-                      <th>Fecha Límite</th>
-                      <th width="150">Acciones</th>
+                      <th className="text-center">Fechas</th>
+                      <th width="120">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginacion.itemsPaginados.map((tramite) => (
                       <tr key={tramite.id}>
-                        <td>
+                        <td className="text-center align-middle">
                           <strong className="text-primary">{tramite.codigo}</strong>
                         </td>
-                        <td>
-                          <div>
-                            <div className="fw-semibold">{tramite.tipoTramite}</div>
-                            <small className="text-muted">{tramite.descripcion}</small>
-                          </div>
+                        <td className="text-center align-middle">
+                          <span className="fw-semibold">{tramite.tipoTramite}</span>
                         </td>
                         <td>
-                          <div>
-                            <div>{tramite.cliente || '-'}</div>
-                            <small className="text-muted">Exp: {tramite.expediente || 'N/A'}</small>
-                          </div>
+                          {(() => {
+                            const exp = todosExpedientes.find(e => 
+                              String(e.numero_poliza || e.poliza) === String(tramite.expediente)
+                            );
+                            const aseg = exp?.compania || exp?.aseguradora || '-';
+                            const producto = exp?.producto || exp?.plan || '-';
+                            return (
+                              <div>
+                                <div className="fw-semibold">{aseg}</div>
+                                <small className="text-muted">{producto}</small>
+                                <small className="d-block text-primary">{tramite.expediente || 'N/A'}</small>
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td className="align-middle">
+                          {(() => {
+                            const exp = todosExpedientes.find(e => 
+                              String(e.numero_poliza || e.poliza) === String(tramite.expediente)
+                            );
+                            const clave = exp?.clave_agente || exp?.agente?.split('-')[0]?.trim() || '-';
+                            // Obtener solo el nombre sin la clave
+                            const agenteCompleto = exp?.nombre_agente || exp?.agente || '';
+                            const nombreAgenteRaw = agenteCompleto.includes('-') 
+                              ? agenteCompleto.split('-').slice(1).join('-').trim() 
+                              : (agenteCompleto !== clave ? agenteCompleto : '');
+                            // Extraer primer nombre y apellido paterno del agente
+                            const palabrasAgente = nombreAgenteRaw.trim().split(/\s+/);
+                            const nombreAgente = palabrasAgente.length >= 2 
+                              ? `${palabrasAgente[0]} ${palabrasAgente[palabrasAgente.length > 2 ? palabrasAgente.length - 2 : 1]}` 
+                              : nombreAgenteRaw;
+                            // Buscar vendedor en múltiples campos posibles
+                            const vendedorRaw = exp?.vendedor || exp?.subagente || exp?.sub_agente || exp?.ejecutivo_comercial || '';
+                            // Extraer primer nombre y apellido paterno del vendedor
+                            const palabrasVendedor = vendedorRaw.trim().split(/\s+/);
+                            const vendedor = palabrasVendedor.length >= 2 
+                              ? `${palabrasVendedor[0]} ${palabrasVendedor[palabrasVendedor.length > 2 ? palabrasVendedor.length - 2 : 1]}` 
+                              : vendedorRaw;
+                            return (
+                              <div style={{ fontSize: '0.85rem', textAlign: 'center' }}>
+                                <div><strong>{clave}</strong></div>
+                                {nombreAgente && <div className="text-muted" style={{ fontSize: '0.75rem' }}>{nombreAgente.toUpperCase()}</div>}
+                                {vendedor && <div className="text-warning" style={{ fontSize: '0.75rem' }}>V: {vendedor}</div>}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td>
+                          <small className="fw-semibold">{tramite.ejecutivoAsignado || '-'}</small>
                         </td>
                         <td>
                           <span className={`badge ${getEstatusColor(tramite.estatus)}`}>
                             {tramite.estatus}
                           </span>
                         </td>
-                        <td>
-                          <span className={`fw-bold ${getPrioridadColor(tramite.prioridad)}`}>
-                            {tramite.prioridad}
-                          </span>
-                        </td>
-                        <td>
-                          <small>{tramite.fechaInicio}</small>
-                        </td>
-                        <td>
-                          <small className={tramite.fechaLimite && new Date(tramite.fechaLimite) < new Date() ? 'text-danger' : ''}>
-                            {tramite.fechaLimite || '-'}
-                          </small>
+                        <td className="text-center">
+                          {(() => {
+                            const formatearFecha = (fechaStr) => {
+                              if (!fechaStr) return '-';
+                              try {
+                                // Si la fecha viene en formato YYYY-MM-DD (sin hora), no mostrar hora
+                                const soloFecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaStr);
+                                
+                                // Parsear la fecha correctamente según el formato
+                                let fecha;
+                                if (fechaStr.includes('T')) {
+                                  // Formato ISO o datetime-local: YYYY-MM-DDTHH:MM
+                                  fecha = new Date(fechaStr);
+                                } else if (soloFecha) {
+                                  // Solo fecha: crear en hora local para evitar problemas de timezone
+                                  const [anio, mes, dia] = fechaStr.split('-');
+                                  fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
+                                } else {
+                                  fecha = new Date(fechaStr);
+                                }
+                                
+                                if (isNaN(fecha.getTime())) return '-';
+                                
+                                const dia = fecha.getDate().toString().padStart(2, '0');
+                                const mes = (fecha.getMonth() + 1).toString().padStart(2, '0');
+                                const anio = fecha.getFullYear();
+                                const hora = fecha.getHours().toString().padStart(2, '0');
+                                const min = fecha.getMinutes().toString().padStart(2, '0');
+                                
+                                // Solo mostrar hora si no es 00:00 o si viene con hora explícita
+                                if (soloFecha) {
+                                  return `${dia}/${mes}/${anio}`;
+                                }
+                                return `${dia}/${mes}/${anio} ${hora}:${min}`;
+                              } catch { return '-'; }
+                            };
+                            return (
+                              <div style={{ fontSize: '0.75rem' }}>
+                                <div><span className="text-muted">Inicio:</span> {formatearFecha(tramite.fechaInicio)}</div>
+                                <div className={tramite.fechaLimite && new Date(tramite.fechaLimite) < new Date() ? 'text-danger' : ''}>
+                                  <span className="text-muted">Meta:</span> {formatearFecha(tramite.fechaLimite)}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td>
                           <div className="btn-group btn-group-sm" role="group">
@@ -515,15 +591,17 @@ const FormularioTramite = ({
     );
     const horasEstimadas = tipoObj?.tiempoEstimado || 24; // Default 24 horas
     
-    // Convertir horas a días (redondeando hacia arriba, mínimo 1 día)
-    // 12 hrs = 1 día, 24 hrs = 1 día, 48 hrs = 2 días, 72 hrs = 3 días
-    const diasAdicionales = Math.max(1, Math.ceil(horasEstimadas / 24));
-    
     const fecha = new Date(fechaInicio);
-    fecha.setDate(fecha.getDate() + diasAdicionales);
+    // Sumar las horas estimadas directamente
+    fecha.setTime(fecha.getTime() + (horasEstimadas * 60 * 60 * 1000));
     
-    // Formatear como YYYY-MM-DD para el input date
-    return fecha.toISOString().split('T')[0];
+    // Formatear como YYYY-MM-DDTHH:MM para el input datetime-local
+    const anio = fecha.getFullYear();
+    const mes = String(fecha.getMonth() + 1).padStart(2, '0');
+    const dia = String(fecha.getDate()).padStart(2, '0');
+    const hora = String(fecha.getHours()).padStart(2, '0');
+    const min = String(fecha.getMinutes()).padStart(2, '0');
+    return `${anio}-${mes}-${dia}T${hora}:${min}`;
   }, [tiposTramiteObjetos]);
 
   const estatusTramite = [
@@ -580,7 +658,14 @@ const FormularioTramite = ({
                     value={formularioTramite.tipoTramite}
                     onChange={(e) => {
                       const tipoSeleccionado = e.target.value;
-                      const fechaInicio = formularioTramite.fechaInicio || new Date().toISOString().split('T')[0];
+                      // Obtener fecha inicio actual o generar una nueva con hora
+                      const ahora = new Date();
+                      const fechaHoraLocal = ahora.getFullYear() + '-' + 
+                        String(ahora.getMonth() + 1).padStart(2, '0') + '-' + 
+                        String(ahora.getDate()).padStart(2, '0') + 'T' + 
+                        String(ahora.getHours()).padStart(2, '0') + ':' + 
+                        String(ahora.getMinutes()).padStart(2, '0');
+                      const fechaInicio = formularioTramite.fechaInicio || fechaHoraLocal;
                       const fechaLimite = calcularFechaLimite(fechaInicio, tipoSeleccionado);
                       
                       setFormularioTramite({
@@ -791,7 +876,7 @@ const FormularioTramite = ({
                 <div className="col-md-6">
                   <label className="form-label">Fecha de Inicio <span className="text-danger">*</span></label>
                   <input
-                    type="date"
+                    type="datetime-local"
                     className="form-control"
                     value={formularioTramite.fechaInicio}
                     onChange={(e) => {
@@ -813,7 +898,7 @@ const FormularioTramite = ({
                 <div className="col-md-6">
                   <label className="form-label">Fecha Límite <span className="text-danger">*</span></label>
                   <input
-                    type="date"
+                    type="datetime-local"
                     className="form-control"
                     value={formularioTramite.fechaLimite}
                     onChange={(e) => setFormularioTramite({...formularioTramite, fechaLimite: e.target.value})}
@@ -1184,21 +1269,43 @@ export const Tramites = () => {
     cargarExpedientesCliente();
   }, [clienteSeleccionado, todosExpedientes]);
 
+  // Función para transformar trámites de snake_case a camelCase
+  const transformarTramites = useCallback((data) => {
+    if (!Array.isArray(data)) return [];
+    return data.map(tramite => ({
+      id: tramite.id,
+      codigo: tramite.codigo,
+      tipoTramite: tramite.tipo_tramite || tramite.tipoTramite,
+      descripcion: tramite.descripcion,
+      cliente: tramite.cliente,
+      expediente: tramite.expediente,
+      estatus: tramite.estatus,
+      prioridad: tramite.prioridad,
+      fechaInicio: tramite.fecha_inicio || tramite.fechaInicio,
+      fechaLimite: tramite.fecha_limite || tramite.fechaLimite,
+      responsable: tramite.responsable,
+      ejecutivoAsignado: tramite.ejecutivo_asignado || tramite.ejecutivoAsignado,
+      departamento: tramite.departamento,
+      observaciones: tramite.observaciones,
+      fechaCreacion: tramite.created_at || tramite.fechaCreacion
+    }));
+  }, []);
+
   // Cargar trámites desde el backend al montar el componente
   useEffect(() => {
   fetch(`${API_URL}/api/tramites`)
       .then(res => res.json())
-      .then(data => setTramites(data))
+      .then(data => setTramites(transformarTramites(data)))
       .catch(err => console.error('Error al cargar trámites:', err));
-  }, []);
+  }, [transformarTramites]);
 
   // Refrescar trámites tras operaciones CRUD
   const cargarTramites = useCallback(() => {
   fetch(`${API_URL}/api/tramites`)
       .then(res => res.json())
-      .then(data => setTramites(data))
+      .then(data => setTramites(transformarTramites(data)))
       .catch(err => console.error('Error al cargar trámites:', err));
-  }, []);
+  }, [transformarTramites]);
 
   // Función para generar códigos de trámite
   const generarCodigoTramite = useCallback(() => {
@@ -1218,6 +1325,14 @@ export const Tramites = () => {
 
   // Funciones CRUD para Trámites
   const limpiarFormularioTramite = useCallback(() => {
+    // Obtener fecha y hora actual en formato datetime-local
+    const ahora = new Date();
+    const fechaHoraLocal = ahora.getFullYear() + '-' + 
+      String(ahora.getMonth() + 1).padStart(2, '0') + '-' + 
+      String(ahora.getDate()).padStart(2, '0') + 'T' + 
+      String(ahora.getHours()).padStart(2, '0') + ':' + 
+      String(ahora.getMinutes()).padStart(2, '0');
+    
     setFormularioTramite({
       codigo: '',
       tipoTramite: '',
@@ -1226,12 +1341,12 @@ export const Tramites = () => {
       expediente: '',
       estatus: 'Pendiente',
       prioridad: 'Media',
-      fechaInicio: new Date().toISOString().split('T')[0],
+      fechaInicio: fechaHoraLocal,
       fechaLimite: '',
       responsable: '',
       departamento: '',
       observaciones: '',
-      fechaCreacion: new Date().toISOString().split('T')[0],
+      fechaCreacion: fechaHoraLocal,
       id: null
     });
     setModoEdicionTramite(false);
@@ -1356,6 +1471,7 @@ export const Tramites = () => {
           verDetallesTramite={verDetallesTramite}
           editarTramite={editarTramite}
           eliminarTramite={eliminarTramite}
+          todosExpedientes={todosExpedientes}
         />
       )}
       {vistaActual === 'formulario-tramite' && (
