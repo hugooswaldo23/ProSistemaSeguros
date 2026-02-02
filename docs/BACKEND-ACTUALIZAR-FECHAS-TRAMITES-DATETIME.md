@@ -37,4 +37,4 @@ Los campos `fecha_inicio` y `fecha_limite` deben mostrar tipo `datetime`.
 
 ## Estado
 
-- [ ] Pendiente de aplicar en producción
+- [x] Aplicado en producción (verificado 1 de febrero 2026)
