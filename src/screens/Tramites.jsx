@@ -331,21 +331,8 @@ const ListaTramitesComponent = ({
                             const formatearFecha = (fechaStr) => {
                               if (!fechaStr) return '-';
                               try {
-                                // Si la fecha viene en formato YYYY-MM-DD (sin hora), no mostrar hora
-                                const soloFecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaStr);
-                                
-                                // Parsear la fecha correctamente según el formato
-                                let fecha;
-                                if (fechaStr.includes('T')) {
-                                  // Formato ISO o datetime-local: YYYY-MM-DDTHH:MM
-                                  fecha = new Date(fechaStr);
-                                } else if (soloFecha) {
-                                  // Solo fecha: crear en hora local para evitar problemas de timezone
-                                  const [anio, mes, dia] = fechaStr.split('-');
-                                  fecha = new Date(parseInt(anio), parseInt(mes) - 1, parseInt(dia));
-                                } else {
-                                  fecha = new Date(fechaStr);
-                                }
+                                // Parsear la fecha - new Date() convierte UTC a hora local automáticamente
+                                const fecha = new Date(fechaStr);
                                 
                                 if (isNaN(fecha.getTime())) return '-';
                                 
@@ -355,10 +342,6 @@ const ListaTramitesComponent = ({
                                 const hora = fecha.getHours().toString().padStart(2, '0');
                                 const min = fecha.getMinutes().toString().padStart(2, '0');
                                 
-                                // Solo mostrar hora si no es 00:00 o si viene con hora explícita
-                                if (soloFecha) {
-                                  return `${dia}/${mes}/${anio}`;
-                                }
                                 return `${dia}/${mes}/${anio} ${hora}:${min}`;
                               } catch { return '-'; }
                             };
@@ -582,18 +565,70 @@ const FormularioTramite = ({
   // Para compatibilidad, extraer solo nombres
   const tiposTramite = tiposTramiteObjetos.map(t => typeof t === 'string' ? t : t.nombre);
   
-  // 🆕 Función para calcular fecha límite basada en tiempo estimado
+  // 🆕 Función para calcular fecha límite basada en tiempo estimado (HORAS HÁBILES)
+  // Horario hábil: Lunes a Viernes, 9:00 AM a 6:00 PM (9 horas por día)
   const calcularFechaLimite = useCallback((fechaInicio, tipoTramiteNombre) => {
     if (!fechaInicio || !tipoTramiteNombre) return '';
     
     const tipoObj = tiposTramiteObjetos.find(t => 
       (typeof t === 'string' ? t : t.nombre) === tipoTramiteNombre
     );
-    const horasEstimadas = tipoObj?.tiempoEstimado || 24; // Default 24 horas
+    const horasEstimadas = tipoObj?.tiempoEstimado || 24; // Default 24 horas hábiles
     
     const fecha = new Date(fechaInicio);
-    // Sumar las horas estimadas directamente
-    fecha.setTime(fecha.getTime() + (horasEstimadas * 60 * 60 * 1000));
+    let horasRestantes = horasEstimadas;
+    
+    // Horario hábil: 9:00 AM a 6:00 PM (hora 9 a hora 18)
+    const HORA_INICIO = 9;
+    const HORA_FIN = 18;
+    const HORAS_POR_DIA = HORA_FIN - HORA_INICIO; // 9 horas hábiles por día
+    
+    // Ajustar si la hora inicial está fuera del horario hábil
+    const ajustarAHorarioHabil = (d) => {
+      const dia = d.getDay(); // 0=Domingo, 6=Sábado
+      const hora = d.getHours();
+      
+      // Si es fin de semana, mover al lunes
+      if (dia === 0) d.setDate(d.getDate() + 1); // Domingo -> Lunes
+      else if (dia === 6) d.setDate(d.getDate() + 2); // Sábado -> Lunes
+      
+      // Si es antes de las 9 AM, mover a las 9 AM
+      if (d.getHours() < HORA_INICIO) {
+        d.setHours(HORA_INICIO, 0, 0, 0);
+      }
+      // Si es después de las 6 PM, mover al siguiente día hábil a las 9 AM
+      else if (d.getHours() >= HORA_FIN) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(HORA_INICIO, 0, 0, 0);
+        // Verificar si el nuevo día es fin de semana
+        if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+        else if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+      }
+      return d;
+    };
+    
+    ajustarAHorarioHabil(fecha);
+    
+    while (horasRestantes > 0) {
+      const horaActual = fecha.getHours();
+      const horasHastaFinDia = HORA_FIN - horaActual;
+      
+      if (horasRestantes <= horasHastaFinDia) {
+        // Las horas restantes caben en el día actual
+        fecha.setHours(fecha.getHours() + horasRestantes);
+        horasRestantes = 0;
+      } else {
+        // Consumir el resto del día y pasar al siguiente día hábil
+        horasRestantes -= horasHastaFinDia;
+        fecha.setDate(fecha.getDate() + 1);
+        fecha.setHours(HORA_INICIO, 0, 0, 0);
+        
+        // Saltar fines de semana
+        while (fecha.getDay() === 0 || fecha.getDay() === 6) {
+          fecha.setDate(fecha.getDate() + 1);
+        }
+      }
+    }
     
     // Formatear como YYYY-MM-DDTHH:MM para el input datetime-local
     const anio = fecha.getFullYear();
@@ -711,14 +746,13 @@ const FormularioTramite = ({
                 </div>
                 
                 <div className="col-md-12">
-                  <label className="form-label">Descripción <span className="text-danger">*</span></label>
+                  <label className="form-label">Descripción</label>
                   <textarea
                     className="form-control"
                     rows="3"
                     value={formularioTramite.descripcion}
                     onChange={(e) => setFormularioTramite({...formularioTramite, descripcion: e.target.value})}
                     placeholder="Describe el trámite a realizar..."
-                    required
                   />
                 </div>
               </div>
@@ -909,45 +943,6 @@ const FormularioTramite = ({
                       ⏱️ Calculada automáticamente según tiempo meta del trámite
                     </small>
                   )}
-                </div>
-              </div>
-            </div>
-
-            {/* Responsable y Observaciones */}
-            <div className="mb-4">
-              <h5 className="card-title border-bottom pb-2">Responsable y Observaciones</h5>
-              <div className="row g-3">
-                <div className="col-md-6">
-                  <label className="form-label">Responsable</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formularioTramite.responsable}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, responsable: e.target.value})}
-                    placeholder="Persona responsable del trámite"
-                  />
-                </div>
-                
-                <div className="col-md-6">
-                  <label className="form-label">Departamento</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={formularioTramite.departamento}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, departamento: e.target.value})}
-                    placeholder="Departamento encargado"
-                  />
-                </div>
-                
-                <div className="col-md-12">
-                  <label className="form-label">Observaciones</label>
-                  <textarea
-                    className="form-control"
-                    rows="3"
-                    value={formularioTramite.observaciones}
-                    onChange={(e) => setFormularioTramite({...formularioTramite, observaciones: e.target.value})}
-                    placeholder="Observaciones adicionales..."
-                  />
                 </div>
               </div>
             </div>
@@ -1170,6 +1165,16 @@ export const Tramites = () => {
   const [vistaActual, setVistaActual] = useState('tramites');
   const [modoEdicionTramite, setModoEdicionTramite] = useState(false);
 
+  // Función auxiliar para obtener fecha y hora local en formato datetime-local
+  const obtenerFechaHoraLocal = () => {
+    const ahora = new Date();
+    return ahora.getFullYear() + '-' + 
+      String(ahora.getMonth() + 1).padStart(2, '0') + '-' + 
+      String(ahora.getDate()).padStart(2, '0') + 'T' + 
+      String(ahora.getHours()).padStart(2, '0') + ':' + 
+      String(ahora.getMinutes()).padStart(2, '0');
+  };
+
   // Estado del formulario de trámite
   const [formularioTramite, setFormularioTramite] = useState({
     codigo: '',
@@ -1179,12 +1184,12 @@ export const Tramites = () => {
     expediente: '',
     estatus: 'Pendiente',
     prioridad: 'Media',
-    fechaInicio: new Date().toISOString().split('T')[0],
+    fechaInicio: obtenerFechaHoraLocal(),
     fechaLimite: '',
     responsable: '',
     departamento: '',
     observaciones: '',
-    fechaCreacion: new Date().toISOString().split('T')[0],
+    fechaCreacion: obtenerFechaHoraLocal(),
     id: null
   });
 
@@ -1362,7 +1367,6 @@ export const Tramites = () => {
     const camposFaltantes = [];
     
     if (!formularioTramite.tipoTramite) camposFaltantes.push('Tipo de Trámite');
-    if (!formularioTramite.descripcion) camposFaltantes.push('Descripción');
     if (!clienteSeleccionado) camposFaltantes.push('Cliente');
     if (!formularioTramite.expediente) camposFaltantes.push('Póliza');
     if (!ejecutivoAsignado && !formularioTramite.ejecutivoAsignado) camposFaltantes.push('Ejecutivo Asignado');
@@ -1391,6 +1395,8 @@ export const Tramites = () => {
       observaciones: formularioTramite.observaciones || ''
     };
     console.log('📝 Guardando trámite. Payload:', payloadAPI);
+    console.log('🕐 fecha_inicio enviada:', payloadAPI.fecha_inicio);
+    console.log('🕐 fecha_limite enviada:', payloadAPI.fecha_limite);
     if (modoEdicionTramite) {
       // Actualizar
   fetch(`${API_URL}/api/tramites/${formularioTramite.id}`, {
