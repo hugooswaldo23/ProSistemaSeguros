@@ -162,21 +162,50 @@ Lista todas las nóminas generadas (historial)
 Obtiene el detalle de una nómina específica con todos sus empleados
 
 #### `POST /api/nominas/generar`
-Genera una nueva nómina (borrador)
+Genera/guarda una nueva nómina (borrador)
 
-**Request:**
+**Request (enviado desde el frontend):**
 ```json
 {
   "fecha_inicio": "2026-02-01",
   "fecha_fin": "2026-02-15",
-  "tipo_periodo": "Quincenal"
+  "tipo_periodo": "Quincenal",
+  "detalles": [
+    {
+      "empleado_id": 1,
+      "sueldo": 7500,
+      "comisiones": 2250.50,
+      "descuentos": 0,
+      "motivo_descuento": "",
+      "prestamo_nuevo": 0,
+      "cobro_prestamo": 500,
+      "detalle_comisiones": [
+        {
+          "expediente_id": "abc-123-uuid",
+          "recibo_id": 45,
+          "monto_comision": 2250.50,
+          "porcentaje_aplicado": 15,
+          "es_comision_compartida": false
+        }
+      ]
+    }
+  ]
 }
 ```
 
 **Response:**
-Retorna la nómina generada con el detalle de cada empleado, calculando:
-- Sueldo: `equipo_trabajo.sueldoDiario * días del período`
-- Comisiones: Suma de comisiones de pólizas pagadas en el período (no pagadas anteriormente)
+```json
+{
+  "id": 1,
+  "codigo": "NOM-2026-02-Q1"
+}
+```
+
+**NOTA:** El frontend ya envía todos los datos calculados. El backend solo debe:
+1. Generar el código único (NOM-YYYY-MM-Q1 o Q2)
+2. Guardar en tabla `nominas`
+3. Guardar cada empleado en `nomina_detalles`
+4. Retornar el ID y código generado
 
 #### `PUT /api/nominas/:id`
 Actualiza una nómina en borrador (ajustar descuentos, préstamos, etc.)
@@ -197,10 +226,15 @@ Actualiza una nómina en borrador (ajustar descuentos, préstamos, etc.)
 ```
 
 #### `POST /api/nominas/:id/cerrar`
-Cierra la nómina (ya no se puede editar) y marca las comisiones como pagadas
+Cierra la nómina (ya no se puede editar) y marca las comisiones como pagadas.
+
+**Acciones en backend:**
+1. Cambiar estatus de nómina a "Cerrada"
+2. Registrar en `comisiones_pagadas` todas las comisiones incluidas (usando `detalle_comisiones` enviados en el POST inicial)
+3. Actualizar saldos de préstamos (`cobro_prestamo` resta del saldo, `prestamo_nuevo` crea nuevo préstamo)
 
 #### `POST /api/nominas/:id/pagar`
-Marca la nómina como pagada
+Marca la nómina como pagada (estatus = "Pagada")
 
 ---
 
@@ -208,6 +242,21 @@ Marca la nómina como pagada
 
 #### `GET /api/prestamos`
 Lista todos los préstamos (con filtro por empleado_id y estatus)
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "empleado_id": 5,
+    "monto_original": 5000,
+    "saldo_pendiente": 3000,
+    "fecha_prestamo": "2026-01-15",
+    "motivo": "Préstamo personal",
+    "estatus": "Activo"
+  }
+]
+```
 
 #### `GET /api/prestamos/empleado/:empleado_id`
 Obtiene préstamos activos de un empleado específico
@@ -226,7 +275,9 @@ Crea un nuevo préstamo
 
 ---
 
-### Comisiones Pendientes
+### Comisiones Pendientes (OPCIONAL)
+
+Este endpoint es opcional ya que el frontend calcula las comisiones localmente.
 
 #### `GET /api/comisiones/pendientes`
 Obtiene las comisiones de pólizas pagadas que aún no han sido incluidas en nómina
@@ -306,8 +357,28 @@ Obtiene las comisiones de pólizas pagadas que aún no han sido incluidas en nó
 
 ---
 
-## Estado
+## Estado - Actualizado 9 Feb 2026
 
-- [ ] Crear tablas en BD
-- [ ] Implementar endpoints
-- [ ] Pruebas de integración
+### Frontend ✅ LISTO
+- [x] Generación de nómina (cálculo de sueldos y comisiones)
+- [x] Modal de detalle de comisiones editable
+- [x] Conexión a endpoints (preparada para cuando existan)
+- [x] Función `guardarNomina()` → POST /api/nominas/generar
+- [x] Función `actualizarNominaEnBD()` → PUT /api/nominas/:id
+- [x] Función `cerrarNomina()` → POST /api/nominas/:id/cerrar
+- [x] Función `marcarComoPagada()` → POST /api/nominas/:id/pagar
+- [x] Carga de préstamos → GET /api/prestamos
+- [x] Historial de nóminas → GET /api/nominas
+
+### Backend ❌ PENDIENTE (Hugo)
+- [ ] Crear tabla `nominas`
+- [ ] Crear tabla `nomina_detalles`
+- [ ] Crear tabla `prestamos`
+- [ ] Crear tabla `movimientos_prestamo`
+- [ ] Crear tabla `comisiones_pagadas`
+- [ ] `POST /api/nominas/generar` - Guardar nómina
+- [ ] `PUT /api/nominas/:id` - Actualizar nómina
+- [ ] `POST /api/nominas/:id/cerrar` - Cerrar y registrar comisiones
+- [ ] `POST /api/nominas/:id/pagar` - Marcar como pagada
+- [ ] `GET /api/nominas` - Historial
+- [ ] `GET /api/prestamos` - Lista de préstamos
