@@ -1,12 +1,16 @@
-import React, { useMemo } from 'react';
-import { LogOut, Menu, X } from 'lucide-react';
-import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2, BarChart3 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { LogOut, Menu, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2, BarChart3, Receipt, Banknote } from 'lucide-react';
 import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
 const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = false, onToggleColapsar }) =>  {
     const navigate = useNavigate();
     const location = useLocation();
+    const [subMenuAbierto, setSubMenuAbierto] = useState(() => {
+        // Auto-expandir si estamos en una sub-ruta de reportes
+        return location.pathname.startsWith('/reportes') ? 'reportes' : null;
+    });
 
     const modulos = useMemo(() => [
         { key: '/', nombre: 'Dashboard', icono: Home, activo: true },
@@ -16,7 +20,10 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
         { key: '/equipo-de-trabajo', nombre: 'Equipo de Trabajo', icono: UserCheck, activo: true },
         { key: '/aseguradoras', nombre: 'Aseguradoras', icono: Building2, activo: true },
         { key: '/configuracion-tablas', nombre: 'Configuración de Tablas', icono: Database, activo: true },
-        { key: '/reportes', nombre: 'Reportes', icono: BarChart3, activo: true },
+        { key: '/reportes', nombre: 'Reportes', icono: BarChart3, activo: true, subMenuKey: 'reportes', subItems: [
+            { key: '/reportes/nomina', nombre: 'Nómina', icono: Receipt },
+            { key: '/reportes/prestamos', nombre: 'Préstamos', icono: Banknote }
+        ]},
         { key: '/configuracion', nombre: 'Configuración', icono: Settings, activo: true }
     ], []);
 
@@ -97,30 +104,83 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
             <nav className="flex-grow-1 py-3">
                 {modulos.map(modulo => {
                     const IconoModulo = modulo.icono;
-                    const isActive = location.pathname === modulo.key;
+                    const isActive = modulo.subItems 
+                        ? location.pathname.startsWith(modulo.key)
+                        : location.pathname === modulo.key;
                     const mostrarTexto = esMobile ? true : !colapsado;
+                    const tieneSubItems = modulo.subItems && modulo.subItems.length > 0;
+                    const subMenuExpandido = subMenuAbierto === modulo.subMenuKey;
+
                     return (
-                        <button
-                            key={modulo.key}
-                            onClick={() => navigate(modulo.key)}
-                            className={`btn w-100 text-white d-flex py-2 border-0 ${
-                                isActive ? 'bg-primary' : 'bg-transparent'
-                            } ${!modulo.activo ? 'opacity-50' : ''}`}
-                            style={{ 
-                                borderRadius: '0',
-                                justifyContent: (colapsado && !esMobile) ? 'center' : 'flex-start',
-                                paddingLeft: (colapsado && !esMobile) ? '0' : '1rem',
-                                paddingRight: (colapsado && !esMobile) ? '0' : '1rem',
-                                alignItems: 'flex-start',
-                                paddingTop: '0.6rem',
-                                paddingBottom: '0.6rem'
-                            }}
-                            disabled={!modulo.activo}
-                            title={(colapsado && !esMobile) ? modulo.nombre : ''}
-                        >
-                            <IconoModulo size={18} className={mostrarTexto ? 'me-2' : ''} style={{ marginTop: '2px', flexShrink: 0 }} />
-                            {mostrarTexto && <span style={{ textAlign: 'left', lineHeight: '1.3' }}>{modulo.nombre}</span>}
-                        </button>
+                        <React.Fragment key={modulo.key}>
+                            <button
+                                onClick={() => {
+                                    if (tieneSubItems) {
+                                        setSubMenuAbierto(subMenuExpandido ? null : modulo.subMenuKey);
+                                        // Navegar al primer sub-item cuando se expande
+                                        if (!subMenuExpandido) {
+                                            navigate(modulo.subItems[0].key);
+                                        }
+                                    } else {
+                                        navigate(modulo.key);
+                                    }
+                                }}
+                                className={`btn w-100 text-white d-flex py-2 border-0 ${
+                                    isActive ? 'bg-primary' : 'bg-transparent'
+                                } ${!modulo.activo ? 'opacity-50' : ''}`}
+                                style={{ 
+                                    borderRadius: '0',
+                                    justifyContent: (colapsado && !esMobile) ? 'center' : 'flex-start',
+                                    paddingLeft: (colapsado && !esMobile) ? '0' : '1rem',
+                                    paddingRight: (colapsado && !esMobile) ? '0' : '1rem',
+                                    alignItems: 'flex-start',
+                                    paddingTop: '0.6rem',
+                                    paddingBottom: '0.6rem'
+                                }}
+                                disabled={!modulo.activo}
+                                title={(colapsado && !esMobile) ? modulo.nombre : ''}
+                            >
+                                <IconoModulo size={18} className={mostrarTexto ? 'me-2' : ''} style={{ marginTop: '2px', flexShrink: 0 }} />
+                                {mostrarTexto && (
+                                    <>
+                                        <span style={{ textAlign: 'left', lineHeight: '1.3', flex: 1 }}>{modulo.nombre}</span>
+                                        {tieneSubItems && (
+                                            subMenuExpandido ? <ChevronDown size={16} style={{ marginTop: '3px' }} /> : <ChevronRight size={16} style={{ marginTop: '3px' }} />
+                                        )}
+                                    </>
+                                )}
+                            </button>
+                            {/* Sub-items */}
+                            {tieneSubItems && subMenuExpandido && mostrarTexto && (
+                                <div style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
+                                    {modulo.subItems.map(sub => {
+                                        const IconoSub = sub.icono;
+                                        const isSubActive = location.pathname === sub.key;
+                                        return (
+                                            <button
+                                                key={sub.key}
+                                                onClick={() => navigate(sub.key)}
+                                                className={`btn w-100 text-white d-flex py-2 border-0 ${
+                                                    isSubActive ? 'bg-primary bg-opacity-75' : 'bg-transparent'
+                                                }`}
+                                                style={{ 
+                                                    borderRadius: '0',
+                                                    paddingLeft: '2.2rem',
+                                                    paddingRight: '1rem',
+                                                    alignItems: 'center',
+                                                    paddingTop: '0.4rem',
+                                                    paddingBottom: '0.4rem',
+                                                    fontSize: '0.9em'
+                                                }}
+                                            >
+                                                <IconoSub size={15} className="me-2" style={{ flexShrink: 0 }} />
+                                                <span style={{ textAlign: 'left', lineHeight: '1.3' }}>{sub.nombre}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </React.Fragment>
                     );
                 })}
             </nav>
