@@ -326,7 +326,7 @@ const Nomina = () => {
       nuevos[index] = { ...nuevos[index], [campo]: valor };
       const item = nuevos[index];
       item.subtotal = (item.sueldo || 0) + (item.comisiones || 0);
-      item.total_pagar = item.subtotal - (item.descuentos || 0) - (item.cobro_prestamo || 0);
+      item.total_pagar = item.subtotal - (item.descuentos || 0) - (item.cobro_prestamo || 0) + (item.prestamo_nuevo || 0);
       return nuevos;
     });
   };
@@ -386,7 +386,7 @@ const Nomina = () => {
           comisiones: Math.round(nuevaComision * 100) / 100,
           detalleComisiones: detalleEditado,
           subtotal: Math.round(nuevoSubtotal * 100) / 100,
-          total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo) * 100) / 100
+          total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo + (emp.prestamo_nuevo || 0)) * 100) / 100
         };
       }
       return emp;
