@@ -273,6 +273,83 @@ Crea un nuevo préstamo
 }
 ```
 
+#### `POST /api/prestamos/:id/abono`
+Registra un abono (pago parcial o total) a un préstamo existente.
+Debe actualizar `saldo_pendiente` en la tabla `prestamos`.
+Si el saldo llega a 0, cambiar estatus a `"Liquidado"` automáticamente.
+Debe insertar un registro en `movimientos_prestamo` con tipo `"Cobro"`.
+
+**Request:**
+```json
+{
+  "monto": 500,
+  "observaciones": "Abono quincenal NOM-2026-02-Q1"
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "prestamo": {
+    "id": 1,
+    "saldo_pendiente": 2500,
+    "estatus": "Activo"
+  },
+  "movimiento": {
+    "id": 10,
+    "tipo": "Cobro",
+    "monto": 500,
+    "saldo_anterior": 3000,
+    "saldo_nuevo": 2500
+  }
+}
+```
+
+#### `GET /api/prestamos/:id/movimientos`
+Obtiene el historial de movimientos de un préstamo (préstamo inicial, cobros, ajustes).
+Ordenados por fecha descendente.
+
+**Response (200):**
+```json
+[
+  {
+    "id": 1,
+    "tipo": "Prestamo",
+    "monto": 5000,
+    "saldo_anterior": 0,
+    "saldo_nuevo": 5000,
+    "observaciones": "Préstamo otorgado",
+    "created_at": "2026-01-15T10:00:00"
+  },
+  {
+    "id": 2,
+    "tipo": "Cobro",
+    "monto": 1000,
+    "saldo_anterior": 5000,
+    "saldo_nuevo": 4000,
+    "observaciones": "Cobro nómina NOM-2026-01-Q2",
+    "created_at": "2026-01-31T10:00:00"
+  }
+]
+```
+
+#### `POST /api/prestamos/:id/liquidar`
+Liquida un préstamo completamente (pone saldo en 0 y estatus "Liquidado").
+Es equivalente a hacer un abono por el saldo_pendiente completo.
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "prestamo": {
+    "id": 1,
+    "saldo_pendiente": 0,
+    "estatus": "Liquidado"
+  }
+}
+```
+
 ---
 
 ### Comisiones Pendientes (OPCIONAL)
@@ -489,6 +566,9 @@ VALUES ('egreso', 'nomina', CURDATE(), 'Pago de nómina NOM-2026-02-Q1', 34034.3
 - [ ] `POST /api/nominas/:id/pagar` - Marcar como pagada
 - [ ] `GET /api/nominas` - Historial
 - [ ] `GET /api/prestamos` - Lista de préstamos
+- [ ] `POST /api/prestamos/:id/abono` - Registrar abono a préstamo
+- [ ] `GET /api/prestamos/:id/movimientos` - Historial de movimientos del préstamo
+- [ ] `POST /api/prestamos/:id/liquidar` - Liquidar préstamo completamente
 - [ ] `GET /api/corte-diario` - Listar movimientos financieros
 - [ ] `POST /api/corte-diario` - Crear movimiento
 - [ ] `PUT /api/corte-diario/:id` - Actualizar movimiento
