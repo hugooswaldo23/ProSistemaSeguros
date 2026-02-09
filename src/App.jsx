@@ -15,6 +15,7 @@ import Configuracion from "./screens/Configuracion";
 import Reportes from "./screens/Reportes";
 import Nomina from "./screens/Nomina";
 import Prestamos from "./screens/Prestamos";
+import CorteDiario from "./screens/CorteDiario";
 import {
 	BrowserRouter as Router,
 	Route,
@@ -57,6 +58,7 @@ function App() {
           <Route path="/reportes" element={<Reportes/>}/>
           <Route path="/reportes/nomina" element={<Nomina/>}/>
           <Route path="/reportes/prestamos" element={<Prestamos/>}/>
+          <Route path="/reportes/corte-diario" element={<CorteDiario/>}/>
           <Route path="/configuracion" element={<Configuracion/>}/>
         </Routes>
       </Layout>
