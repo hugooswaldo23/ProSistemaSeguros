@@ -172,11 +172,72 @@ const Prestamos = () => {
     }
   };
   
-  // Ver detalle de un grupo (empleado) - muestra todos sus préstamos
-  const verDetalleGrupo = (grupo) => {
+  // Ver flujo de caja del empleado
+  const verDetalleGrupo = async (grupo) => {
     setPrestamoDetalle(grupo);
-    setMovimientosPrestamo([]);
     setModalDetalle(true);
+    
+    // Construir flujo de caja cronológico con todas los movimientos
+    let flujo = [];
+    
+    for (const prestamo of grupo.prestamos) {
+      // Agregar el préstamo inicial como movimiento
+      flujo.push({
+        id: `p-${prestamo.id}`,
+        fecha: prestamo.fecha_prestamo || prestamo.created_at,
+        tipo: 'Prestamo',
+        prestamo: parseFloat(prestamo.monto_original || prestamo.monto || 0),
+        abono: 0,
+        observaciones: prestamo.motivo || 'Préstamo otorgado',
+      });
+      
+      // Cargar movimientos del préstamo
+      let movs = [];
+      try {
+        const response = await fetch(`${API_URL}/api/prestamos/${prestamo.id}/movimientos`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+        });
+        if (response.ok) {
+          const ct = response.headers.get('content-type');
+          if (ct && ct.includes('application/json')) {
+            movs = await response.json();
+          }
+        }
+      } catch {
+        // usar movimientos locales
+      }
+      
+      // Fallback: movimientos locales del modo desarrollo
+      if (movs.length === 0 && prestamo.movimientos) {
+        movs = prestamo.movimientos;
+      }
+      
+      // Agregar abonos/cobros al flujo (excluir el movimiento "Prestamo" inicial si viene del backend)
+      movs.forEach(mov => {
+        if (mov.tipo === 'Cobro' || mov.tipo === 'Ajuste') {
+          flujo.push({
+            id: `m-${mov.id}`,
+            fecha: mov.fecha || mov.created_at,
+            tipo: mov.tipo,
+            prestamo: 0,
+            abono: parseFloat(mov.monto || 0),
+            observaciones: mov.observaciones || '',
+          });
+        }
+      });
+    }
+    
+    // Ordenar por fecha
+    flujo.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+    
+    // Calcular saldo corrido
+    let saldo = 0;
+    flujo = flujo.map(mov => {
+      saldo = saldo + mov.prestamo - mov.abono;
+      return { ...mov, saldo };
+    });
+    
+    setMovimientosPrestamo(flujo);
   };
 
   // Cargar movimientos de un préstamo específico
@@ -605,105 +666,101 @@ const Prestamos = () => {
         </div>
       )}
 
-      {/* Modal Ver Detalle / Historial - Muestra todos los préstamos del empleado */}
+      {/* Modal Flujo de Caja del Empleado */}
       {modalDetalle && prestamoDetalle && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalDetalle(false); setPrestamoDetalle(null); }}>
           <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
-              <div className="modal-header bg-info text-white">
-                <h5 className="modal-title"><History size={20} className="me-2" />Préstamos - {getNombreEmpleado(prestamoDetalle.empleado_id)}</h5>
+              <div className="modal-header bg-dark text-white">
+                <h5 className="modal-title"><History size={20} className="me-2" />Flujo de Caja - {getNombreEmpleado(prestamoDetalle.empleado_id)}</h5>
                 <button type="button" className="btn-close btn-close-white" onClick={() => { setModalDetalle(false); setPrestamoDetalle(null); }}></button>
               </div>
-              <div className="modal-body">
-                {/* Resumen del empleado */}
-                <div className="row mb-3">
-                  <div className="col-md-4">
-                    <div className="p-2 bg-light rounded text-center">
-                      <small className="text-muted d-block">Préstamos</small>
-                      <strong>{prestamoDetalle.prestamos.length}</strong>
+              <div className="modal-body p-0">
+                {/* Saldo actual destacado */}
+                <div className="p-3 bg-light border-bottom">
+                  <div className="row text-center">
+                    <div className="col-md-4">
+                      <small className="text-muted d-block">Total Prestado</small>
+                      <h5 className="text-primary mb-0">{formatMoney(prestamoDetalle.total_monto_original)}</h5>
                     </div>
-                  </div>
-                  <div className="col-md-4">
-                    <div className="p-2 bg-light rounded text-center">
-                      <small className="text-muted d-block">Monto Total</small>
-                      <strong>{formatMoney(prestamoDetalle.total_monto_original)}</strong>
+                    <div className="col-md-4">
+                      <small className="text-muted d-block">Total Abonado</small>
+                      <h5 className="text-success mb-0">{formatMoney(prestamoDetalle.total_monto_original - prestamoDetalle.total_saldo_pendiente)}</h5>
                     </div>
-                  </div>
-                  <div className="col-md-4">
-                    <div className="p-2 bg-light rounded text-center">
-                      <small className="text-muted d-block">Saldo Pendiente</small>
-                      <strong className="text-danger">{formatMoney(prestamoDetalle.total_saldo_pendiente)}</strong>
+                    <div className="col-md-4">
+                      <small className="text-muted d-block">Saldo Actual</small>
+                      <h4 className={`mb-0 fw-bold ${prestamoDetalle.total_saldo_pendiente > 0 ? 'text-danger' : 'text-success'}`}>
+                        {formatMoney(prestamoDetalle.total_saldo_pendiente)}
+                      </h4>
+                      <small className="text-muted">Este saldo aparece en nómina</small>
                     </div>
                   </div>
                 </div>
 
-                {/* Barra de progreso global */}
-                <div className="mb-4">
-                  <div className="d-flex justify-content-between mb-1">
-                    <small className="text-muted">Progreso total de pago</small>
-                    <small className="text-muted">
-                      {(() => {
-                        const pagado = prestamoDetalle.total_monto_original - prestamoDetalle.total_saldo_pendiente;
-                        const pct = prestamoDetalle.total_monto_original > 0 ? Math.round((pagado / prestamoDetalle.total_monto_original) * 100) : 0;
-                        return `${formatMoney(pagado)} de ${formatMoney(prestamoDetalle.total_monto_original)} (${pct}%)`;
-                      })()}
-                    </small>
-                  </div>
-                  <div className="progress" style={{ height: '20px' }}>
-                    <div className="progress-bar bg-success" style={{
-                      width: `${prestamoDetalle.total_monto_original > 0 ? Math.round(((prestamoDetalle.total_monto_original - prestamoDetalle.total_saldo_pendiente) / prestamoDetalle.total_monto_original) * 100) : 0}%`
-                    }}></div>
-                  </div>
+                {/* Tabla flujo de caja */}
+                <div className="table-responsive">
+                  <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
+                    <thead className="table-secondary">
+                      <tr>
+                        <th style={{ width: '110px' }}>Fecha</th>
+                        <th className="text-end" style={{ width: '120px' }}>Préstamo</th>
+                        <th className="text-end" style={{ width: '120px' }}>Abono</th>
+                        <th className="text-end" style={{ width: '130px' }}>Saldo</th>
+                        <th>Observaciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {movimientosPrestamo.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className="text-center py-4 text-muted">
+                            <span className="spinner-border spinner-border-sm me-2" />
+                            Cargando movimientos...
+                          </td>
+                        </tr>
+                      ) : (
+                        movimientosPrestamo.map((mov, idx) => (
+                          <tr key={mov.id || idx} className={mov.tipo === 'Prestamo' ? 'table-warning' : ''}>
+                            <td>{mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-MX') : '-'}</td>
+                            <td className="text-end">
+                              {mov.prestamo > 0 ? (
+                                <span className="text-primary fw-bold">{formatMoney(mov.prestamo)}</span>
+                              ) : ''}
+                            </td>
+                            <td className="text-end">
+                              {mov.abono > 0 ? (
+                                <span className="text-success fw-bold">{formatMoney(mov.abono)}</span>
+                              ) : ''}
+                            </td>
+                            <td className="text-end">
+                              <span className={`fw-bold ${mov.saldo > 0 ? 'text-danger' : 'text-success'}`}>
+                                {formatMoney(mov.saldo)}
+                              </span>
+                            </td>
+                            <td><small>{mov.observaciones || '-'}</small></td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                    {movimientosPrestamo.length > 0 && (
+                      <tfoot className="table-dark">
+                        <tr>
+                          <th>TOTALES</th>
+                          <th className="text-end">{formatMoney(movimientosPrestamo.reduce((s, m) => s + m.prestamo, 0))}</th>
+                          <th className="text-end">{formatMoney(movimientosPrestamo.reduce((s, m) => s + m.abono, 0))}</th>
+                          <th className="text-end text-danger">{formatMoney(movimientosPrestamo.length > 0 ? movimientosPrestamo[movimientosPrestamo.length - 1].saldo : 0)}</th>
+                          <th></th>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
                 </div>
-
-                {/* Lista de préstamos individuales */}
-                <h6 className="mb-3"><Banknote size={16} className="me-2" />Detalle por Préstamo</h6>
-                {prestamoDetalle.prestamos.map((prestamo, idx) => {
-                  const original = parseFloat(prestamo.monto_original || prestamo.monto || 0);
-                  const pendiente = parseFloat(prestamo.saldo_pendiente || 0);
-                  const pagado = original - pendiente;
-                  const pct = original > 0 ? Math.round((pagado / original) * 100) : 0;
-                  return (
-                    <div key={prestamo.id} className={`card mb-2 ${prestamo.estatus === 'Activo' ? 'border-warning' : 'border-success'}`}>
-                      <div className="card-body py-2 px-3">
-                        <div className="d-flex justify-content-between align-items-center mb-1">
-                          <div>
-                            <strong className="me-2">Préstamo #{idx + 1}</strong>
-                            <span className={`badge ${prestamo.estatus === 'Activo' ? 'bg-warning text-dark' : 'bg-success'}`}>{prestamo.estatus}</span>
-                          </div>
-                          <div className="d-flex gap-1">
-                            {prestamo.estatus === 'Activo' && (
-                              <>
-                                <button className="btn btn-sm btn-success" onClick={() => {
-                                  setModalDetalle(false);
-                                  setPrestamosParaAbonar([prestamo]);
-                                  setPrestamoAbono(prestamo);
-                                  setModalAbono(true);
-                                }}>
-                                  <DollarSign size={12} className="me-1" />Abonar
-                                </button>
-                                <button className="btn btn-sm btn-outline-danger" onClick={() => { setModalDetalle(false); liquidarPrestamo(prestamo.id); }}>
-                                  <Check size={12} className="me-1" />Liquidar
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="row" style={{ fontSize: '0.85rem' }}>
-                          <div className="col-md-3"><span className="text-muted">Fecha:</span> {prestamo.fecha_prestamo ? new Date(prestamo.fecha_prestamo).toLocaleDateString('es-MX') : '-'}</div>
-                          <div className="col-md-3"><span className="text-muted">Monto:</span> {formatMoney(original)}</div>
-                          <div className="col-md-3"><span className="text-muted">Pendiente:</span> <span className={prestamo.estatus === 'Activo' ? 'text-danger fw-bold' : 'text-success'}>{formatMoney(pendiente)}</span></div>
-                          <div className="col-md-3"><span className="text-muted">Motivo:</span> {prestamo.motivo || '-'}</div>
-                        </div>
-                        <div className="progress mt-1" style={{ height: '8px' }}>
-                          <div className="progress-bar bg-success" style={{ width: `${pct}%` }}></div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
               <div className="modal-footer">
+                {prestamoDetalle.total_saldo_pendiente > 0 && (
+                  <button className="btn btn-success" onClick={() => { setModalDetalle(false); abrirAbonoGrupo(prestamoDetalle); }}>
+                    <DollarSign size={16} className="me-1" />Registrar Abono
+                  </button>
+                )}
                 <button type="button" className="btn btn-secondary" onClick={() => { setModalDetalle(false); setPrestamoDetalle(null); }}>Cerrar</button>
               </div>
             </div>
