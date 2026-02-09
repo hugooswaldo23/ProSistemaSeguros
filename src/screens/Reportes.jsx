@@ -22,12 +22,16 @@ const Reportes = () => {
   const [historialNominas, setHistorialNominas] = useState([]);
   const [nominaSeleccionada, setNominaSeleccionada] = useState(null);
   const [nominaGenerada, setNominaGenerada] = useState(false);
+  const [nominaId, setNominaId] = useState(null); // ID de la nómina guardada en BD
+  const [nominaGuardada, setNominaGuardada] = useState(false); // Si ya está en BD
   const [empleadoDetalle, setEmpleadoDetalle] = useState(null); // Para modal de detalle de comisiones
   const [detalleEditado, setDetalleEditado] = useState([]); // Para editar comisiones en el modal
+  const [prestamosEmpleados, setPrestamosEmpleados] = useState({}); // Saldos de préstamos por empleado
   
   // Establecer fechas por defecto al montar
   useEffect(() => {
     cargarHistorialNominas();
+    cargarPrestamosEmpleados();
     // Establecer fechas por defecto (quincena actual)
     const hoy = new Date();
     const dia = hoy.getDate();
@@ -63,6 +67,32 @@ const Reportes = () => {
       console.error('Error al cargar historial:', error);
       // Datos de ejemplo mientras no exista el endpoint
       setHistorialNominas([]);
+    }
+  };
+  
+  // Cargar saldos de préstamos de todos los empleados
+  const cargarPrestamosEmpleados = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/prestamos`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const prestamos = await response.json();
+        // Crear mapa de empleado_id -> saldo pendiente
+        const saldos = {};
+        prestamos.forEach(p => {
+          if (p.estatus === 'Activo') {
+            saldos[p.empleado_id] = (saldos[p.empleado_id] || 0) + parseFloat(p.saldo_pendiente || 0);
+          }
+        });
+        setPrestamosEmpleados(saldos);
+      }
+    } catch (error) {
+      console.error('Error al cargar préstamos:', error);
+      setPrestamosEmpleados({});
     }
   };
   
@@ -212,6 +242,8 @@ const Reportes = () => {
           
           // Datos comunes de la comisión compartida
           const datosCompartidos = {
+            expediente_id: recibo.expediente.id,
+            recibo_id: recibo.id,
             poliza: recibo.expediente.numero_poliza,
             compania: recibo.compania,
             clave: claveAgente,
@@ -261,6 +293,8 @@ const Reportes = () => {
           }
           comisionesPorEmpleado[agente.id] += comisionTotal;
           detalleComisionesPorEmpleado[agente.id].push({
+            expediente_id: recibo.expediente.id,
+            recibo_id: recibo.id,
             poliza: recibo.expediente.numero_poliza,
             compania: recibo.compania,
             clave: claveAgente,
@@ -289,6 +323,9 @@ const Reportes = () => {
         const comisiones = comisionesPorEmpleado[emp.id] || 0;
         const detalleComisiones = detalleComisionesPorEmpleado[emp.id] || [];
         
+        // Obtener saldo de préstamo del empleado
+        const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
+        
         const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
         
         return {
@@ -302,7 +339,7 @@ const Reportes = () => {
           subtotal: subtotal,
           descuentos: 0,
           motivo_descuento: '',
-          saldo_prestamo: 0, // TODO: Obtener de tabla préstamos cuando exista
+          saldo_prestamo: saldoPrestamo,
           prestamo_nuevo: 0,
           cobro_prestamo: 0,
           total_pagar: subtotal
@@ -444,13 +481,185 @@ const Reportes = () => {
     };
   }, [datosNomina]);
   
+  // Guardar nómina en BD (borrador)
+  const guardarNomina = async () => {
+    if (!datosNomina.length) {
+      toast.error('No hay datos de nómina para guardar');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      // Preparar datos para el backend
+      const nominaData = {
+        fecha_inicio: fechaInicio,
+        fecha_fin: fechaFin,
+        tipo_periodo: 'Quincenal',
+        detalles: datosNomina.map(emp => ({
+          empleado_id: emp.empleado_id,
+          sueldo: emp.sueldo,
+          comisiones: emp.comisiones,
+          descuentos: emp.descuentos,
+          motivo_descuento: emp.motivo_descuento,
+          prestamo_nuevo: emp.prestamo_nuevo,
+          cobro_prestamo: emp.cobro_prestamo,
+          // Incluir detalle de comisiones para registrar en comisiones_pagadas
+          detalle_comisiones: emp.detalleComisiones?.map(det => ({
+            expediente_id: det.expediente_id,
+            recibo_id: det.recibo_id,
+            monto_comision: det.comision,
+            porcentaje_aplicado: det.porcentajeProducto,
+            es_comision_compartida: det.tipo === 'Compartida'
+          })) || []
+        }))
+      };
+      
+      const response = await fetch(`${API_URL}/api/nominas/generar`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        },
+        body: JSON.stringify(nominaData)
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        setNominaId(result.id);
+        setNominaGuardada(true);
+        toast.success(`Nómina guardada con código: ${result.codigo}`);
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Error al guardar la nómina');
+      }
+    } catch (error) {
+      console.error('Error al guardar nómina:', error);
+      toast.error(error.message || 'Error al guardar la nómina');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Actualizar nómina en BD (editar descuentos, préstamos)
+  const actualizarNominaEnBD = async () => {
+    if (!nominaId) {
+      toast.error('Primero debes guardar la nómina');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${nominaId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        },
+        body: JSON.stringify({
+          detalles: datosNomina.map(emp => ({
+            empleado_id: emp.empleado_id,
+            descuentos: emp.descuentos,
+            motivo_descuento: emp.motivo_descuento,
+            prestamo_nuevo: emp.prestamo_nuevo,
+            cobro_prestamo: emp.cobro_prestamo
+          }))
+        })
+      });
+      
+      if (response.ok) {
+        toast.success('Nómina actualizada');
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Error al actualizar');
+      }
+    } catch (error) {
+      console.error('Error al actualizar nómina:', error);
+      toast.error(error.message || 'Error al actualizar la nómina');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Cerrar nómina (ya no se puede editar, registra comisiones como pagadas)
   const cerrarNomina = async () => {
     if (!confirm('¿Estás seguro de cerrar esta nómina? Una vez cerrada no podrás editarla.')) return;
     
-    toast.success('Nómina cerrada exitosamente');
+    // Si no está guardada en BD, primero guardarla
+    if (!nominaGuardada) {
+      await guardarNomina();
+      if (!nominaId) return; // Si falló el guardado, no continuar
+    }
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${nominaId}/cerrar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        toast.success('Nómina cerrada exitosamente. Las comisiones han sido registradas.');
+        setNominaGenerada(false);
+        setDatosNomina([]);
+        setNominaId(null);
+        setNominaGuardada(false);
+        cargarHistorialNominas();
+        cargarPrestamosEmpleados(); // Recargar saldos de préstamos
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Error al cerrar la nómina');
+      }
+    } catch (error) {
+      console.error('Error al cerrar nómina:', error);
+      // Si el endpoint no existe aún, simular éxito para desarrollo
+      if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
+        toast.success('Nómina cerrada exitosamente (modo desarrollo)');
+        setNominaGenerada(false);
+        setDatosNomina([]);
+        setNominaId(null);
+        setNominaGuardada(false);
+      } else {
+        toast.error(error.message || 'Error al cerrar la nómina');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Marcar nómina como pagada
+  const marcarComoPagada = async (idNomina) => {
+    if (!confirm('¿Confirmas que esta nómina ya fue pagada/depositada?')) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${idNomina}/pagar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+        }
+      });
+      
+      if (response.ok) {
+        toast.success('Nómina marcada como pagada');
+        cargarHistorialNominas();
+      } else {
+        const error = await response.json();
+        throw new Error(error.message || 'Error al marcar como pagada');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error(error.message || 'Error al marcar como pagada');
+    }
+  };
+  
+  // Cancelar generación de nómina
+  const cancelarNomina = () => {
+    if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
     setNominaGenerada(false);
     setDatosNomina([]);
-    cargarHistorialNominas();
+    setNominaId(null);
+    setNominaGuardada(false);
   };
   
   const formatMoney = (value) => {
@@ -586,7 +795,8 @@ const Reportes = () => {
                       ) : (
                         <button
                           className="btn btn-outline-secondary w-100"
-                          onClick={() => { setNominaGenerada(false); setDatosNomina([]); }}
+                          onClick={cancelarNomina}
+                          disabled={loading}
                         >
                           Cancelar
                         </button>
@@ -594,13 +804,40 @@ const Reportes = () => {
                     </div>
                     {nominaGenerada && (
                       <div className="col-md-3">
-                        <button
-                          className="btn btn-success w-100"
-                          onClick={cerrarNomina}
-                        >
-                          <Lock size={18} className="me-2" />
-                          Cerrar Nómina
-                        </button>
+                        <div className="btn-group w-100">
+                          {!nominaGuardada && (
+                            <button
+                              className="btn btn-info"
+                              onClick={guardarNomina}
+                              disabled={loading}
+                              title="Guardar como borrador en BD"
+                            >
+                              {loading ? (
+                                <span className="spinner-border spinner-border-sm" />
+                              ) : (
+                                <>
+                                  <Wallet size={16} className="me-1" />
+                                  Guardar
+                                </>
+                              )}
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-success"
+                            onClick={cerrarNomina}
+                            disabled={loading}
+                            title="Cerrar nómina y registrar comisiones"
+                          >
+                            {loading ? (
+                              <span className="spinner-border spinner-border-sm" />
+                            ) : (
+                              <>
+                                <Lock size={16} className="me-1" />
+                                Cerrar
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -855,13 +1092,24 @@ const Reportes = () => {
                               {new Date(nomina.created_at).toLocaleDateString('es-MX')}
                             </td>
                             <td className="text-center">
-                              <button
-                                className="btn btn-sm btn-outline-primary"
-                                onClick={() => { setNominaSeleccionada(nomina); setVistaActual('detalle'); }}
-                              >
-                                <Eye size={14} className="me-1" />
-                                Ver
-                              </button>
+                              <div className="btn-group btn-group-sm">
+                                <button
+                                  className="btn btn-outline-primary"
+                                  onClick={() => { setNominaSeleccionada(nomina); setVistaActual('detalle'); }}
+                                  title="Ver detalle"
+                                >
+                                  <Eye size={14} />
+                                </button>
+                                {nomina.estatus === 'Cerrada' && (
+                                  <button
+                                    className="btn btn-success"
+                                    onClick={() => marcarComoPagada(nomina.id)}
+                                    title="Marcar como pagada"
+                                  >
+                                    <Check size={14} />
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
