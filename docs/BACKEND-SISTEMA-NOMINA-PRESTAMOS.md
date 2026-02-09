@@ -357,6 +357,111 @@ Obtiene las comisiones de pólizas pagadas que aún no han sido incluidas en nó
 
 ---
 
+## NUEVO: Módulo de Corte Diario (Ingresos/Egresos)
+
+### Tabla `movimientos_financieros`
+
+```sql
+CREATE TABLE movimientos_financieros (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  tipo ENUM('ingreso', 'egreso') NOT NULL,
+  categoria ENUM('comisiones_cobradas', 'otros_ingresos', 'nomina', 'gastos_fijos', 'gastos_administrativos', 'consumibles') NOT NULL,
+  fecha DATE NOT NULL,
+  concepto VARCHAR(255) NOT NULL,
+  monto DECIMAL(12,2) NOT NULL,
+  referencia VARCHAR(100),  -- No. factura, recibo, etc.
+  observaciones TEXT,
+  es_automatico BOOLEAN DEFAULT FALSE,  -- TRUE si fue generado al cerrar nómina
+  nomina_id INT,  -- Referencia a nómina si es automático
+  created_by INT,  -- usuario que registró
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  
+  FOREIGN KEY (nomina_id) REFERENCES nominas(id),
+  INDEX idx_fecha (fecha),
+  INDEX idx_tipo (tipo),
+  INDEX idx_categoria (categoria)
+);
+```
+
+### Endpoints Corte Diario
+
+#### `GET /api/corte-diario`
+Lista movimientos financieros filtrados por rango de fechas.
+
+**Query params:**
+- `fecha_desde` (required) - Fecha inicio YYYY-MM-DD
+- `fecha_hasta` (required) - Fecha fin YYYY-MM-DD
+- `tipo` (optional) - 'ingreso' | 'egreso'
+- `categoria` (optional)
+
+**Response:**
+```json
+[
+  {
+    "id": 1,
+    "tipo": "egreso",
+    "categoria": "gastos_fijos",
+    "fecha": "2026-02-05",
+    "concepto": "Pago de renta oficina febrero",
+    "monto": 8500.00,
+    "referencia": "FAC-2026-045",
+    "observaciones": "",
+    "es_automatico": false,
+    "created_at": "2026-02-05T10:30:00Z"
+  }
+]
+```
+
+#### `POST /api/corte-diario`
+Crea un nuevo movimiento financiero.
+
+**Request:**
+```json
+{
+  "tipo": "egreso",
+  "categoria": "gastos_fijos",
+  "fecha": "2026-02-05",
+  "concepto": "Pago de luz CFE",
+  "monto": 1850.50,
+  "referencia": "CFE-12345",
+  "observaciones": "Recibo bimestral"
+}
+```
+
+#### `PUT /api/corte-diario/:id`
+Actualiza un movimiento existente (solo los NO automáticos).
+
+#### `DELETE /api/corte-diario/:id`
+Elimina un movimiento (solo los NO automáticos).
+
+### Integración con Nómina
+
+Al cerrar una nómina (`POST /api/nominas/:id/cerrar`), se debe **crear automáticamente** un movimiento de egreso:
+
+```sql
+INSERT INTO movimientos_financieros (tipo, categoria, fecha, concepto, monto, referencia, es_automatico, nomina_id)
+VALUES ('egreso', 'nomina', CURDATE(), 'Pago de nómina NOM-2026-02-Q1', 34034.34, 'NOM-2026-02-Q1', TRUE, 1);
+```
+
+### Categorías
+
+**Ingresos:**
+| Valor | Descripción |
+|---|---|
+| `comisiones_cobradas` | Comisiones que la aseguradora paga a la agencia |
+| `otros_ingresos` | Cualquier otro ingreso extraordinario |
+
+**Egresos:**
+| Valor | Descripción |
+|---|---|
+| `nomina` | Pago de sueldos y comisiones (automático al cerrar nómina) |
+| `gastos_fijos` | Renta, luz, agua, teléfono, internet |
+| `gastos_administrativos` | Proveedores, servicios profesionales |
+| `consumibles` | Papelería, tóner, café, artículos de limpieza |
+
+---
+
 ## Estado - Actualizado 9 Feb 2026
 
 ### Frontend ✅ LISTO
@@ -369,6 +474,7 @@ Obtiene las comisiones de pólizas pagadas que aún no han sido incluidas en nó
 - [x] Función `marcarComoPagada()` → POST /api/nominas/:id/pagar
 - [x] Carga de préstamos → GET /api/prestamos
 - [x] Historial de nóminas → GET /api/nominas
+- [x] Corte Diario (ingresos/egresos) → GET/POST/PUT/DELETE /api/corte-diario
 
 ### Backend ❌ PENDIENTE (Hugo)
 - [ ] Crear tabla `nominas`
@@ -376,9 +482,14 @@ Obtiene las comisiones de pólizas pagadas que aún no han sido incluidas en nó
 - [ ] Crear tabla `prestamos`
 - [ ] Crear tabla `movimientos_prestamo`
 - [ ] Crear tabla `comisiones_pagadas`
+- [ ] Crear tabla `movimientos_financieros` (Corte Diario)
 - [ ] `POST /api/nominas/generar` - Guardar nómina
 - [ ] `PUT /api/nominas/:id` - Actualizar nómina
-- [ ] `POST /api/nominas/:id/cerrar` - Cerrar y registrar comisiones
+- [ ] `POST /api/nominas/:id/cerrar` - Cerrar, registrar comisiones y crear egreso automático
 - [ ] `POST /api/nominas/:id/pagar` - Marcar como pagada
 - [ ] `GET /api/nominas` - Historial
 - [ ] `GET /api/prestamos` - Lista de préstamos
+- [ ] `GET /api/corte-diario` - Listar movimientos financieros
+- [ ] `POST /api/corte-diario` - Crear movimiento
+- [ ] `PUT /api/corte-diario/:id` - Actualizar movimiento
+- [ ] `DELETE /api/corte-diario/:id` - Eliminar movimiento
