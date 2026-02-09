@@ -15,8 +15,7 @@ const Prestamos = () => {
   
   // Modal Abonar
   const [modalAbono, setModalAbono] = useState(false);
-  const [prestamoAbono, setPrestamoAbono] = useState(null);
-  const [prestamosParaAbonar, setPrestamosParaAbonar] = useState([]);
+  const [grupoAbono, setGrupoAbono] = useState(null); // grupo del empleado
   
   // Modal Ver (historial de movimientos)
   const [modalDetalle, setModalDetalle] = useState(false);
@@ -104,25 +103,25 @@ const Prestamos = () => {
     }
   };
   
-  // Abonar a un prestamo
-  const registrarAbono = async (prestamoId, datos) => {
+  // Abonar al saldo del empleado
+  const registrarAbono = async (empleadoId, datos) => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/prestamos/${prestamoId}/abono`, {
+      // Enviar al endpoint con empleado_id
+      const response = await fetch(`${API_URL}/api/prestamos/abono`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
         },
-        body: JSON.stringify(datos)
+        body: JSON.stringify({ empleado_id: empleadoId, ...datos })
       });
       
       if (response.ok) {
         toast.success('Abono registrado correctamente');
         cargarPrestamos();
         setModalAbono(false);
-        setPrestamoAbono(null);
-        setPrestamosParaAbonar([]);
+        setGrupoAbono(null);
       } else {
         const contentType = response.headers.get('content-type');
         if (contentType && contentType.includes('application/json')) {
@@ -135,17 +134,20 @@ const Prestamos = () => {
     } catch (error) {
       console.error('Error:', error);
       if (error.message.includes('Failed to fetch') || error.message.includes('no disponible')) {
-        // Modo desarrollo
-        const abono = parseFloat(datos.monto);
+        // Modo desarrollo: distribuir abono entre préstamos activos del empleado
+        let restante = parseFloat(datos.monto);
         setListaPrestamos(prev => prev.map(p => {
-          if (p.id === prestamoId) {
-            const nuevoSaldo = Math.max(0, parseFloat(p.saldo_pendiente) - abono);
+          if (p.empleado_id === empleadoId && p.estatus === 'Activo' && restante > 0) {
+            const saldo = parseFloat(p.saldo_pendiente);
+            const aplicar = Math.min(restante, saldo);
+            restante -= aplicar;
+            const nuevoSaldo = Math.max(0, saldo - aplicar);
             const movs = p.movimientos || [];
             movs.push({
-              id: Date.now(),
+              id: Date.now() + Math.random(),
               tipo: 'Cobro',
-              monto: abono,
-              saldo_anterior: parseFloat(p.saldo_pendiente),
+              monto: aplicar,
+              saldo_anterior: saldo,
               saldo_nuevo: nuevoSaldo,
               observaciones: datos.observaciones || '',
               fecha: datos.fecha || new Date().toISOString().split('T')[0],
@@ -160,10 +162,9 @@ const Prestamos = () => {
           }
           return p;
         }));
-        toast.success(`Abono de $${abono.toFixed(2)} registrado (modo desarrollo)`);
+        toast.success(`Abono de $${parseFloat(datos.monto).toFixed(2)} registrado (modo desarrollo)`);
         setModalAbono(false);
-        setPrestamoAbono(null);
-        setPrestamosParaAbonar([]);
+        setGrupoAbono(null);
       } else {
         toast.error(error.message || 'Error al registrar abono');
       }
@@ -240,29 +241,10 @@ const Prestamos = () => {
     setMovimientosPrestamo(flujo);
   };
 
-  // Cargar movimientos de un préstamo específico
-  const cargarMovimientos = async (prestamo) => {
-    try {
-      const response = await fetch(`${API_URL}/api/prestamos/${prestamo.id}/movimientos`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
-      });
-      if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-          return await response.json();
-        }
-      }
-      return prestamo.movimientos || [];
-    } catch {
-      return prestamo.movimientos || [];
-    }
-  };
-
-  // Abrir modal de abono para un grupo de préstamos del empleado
+  // Abrir modal de abono para el empleado
   const abrirAbonoGrupo = (grupo) => {
-    const activos = grupo.prestamos.filter(p => p.estatus === 'Activo');
-    setPrestamosParaAbonar(activos);
-    setPrestamoAbono(activos.length === 1 ? activos[0] : null);
+    if (grupo.total_saldo_pendiente <= 0) { toast.error('No hay saldo pendiente'); return; }
+    setGrupoAbono(grupo);
     setModalAbono(true);
   };
   
@@ -550,112 +532,64 @@ const Prestamos = () => {
       )}
 
       {/* Modal Abonar */}
-      {modalAbono && prestamosParaAbonar.length > 0 && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalAbono(false); setPrestamoAbono(null); setPrestamosParaAbonar([]); }}>
+      {modalAbono && grupoAbono && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => { setModalAbono(false); setGrupoAbono(null); }}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
               <div className="modal-header bg-success text-white">
-                <h5 className="modal-title"><DollarSign size={20} className="me-2" />Registrar Abono - {getNombreEmpleado(prestamosParaAbonar[0]?.empleado_id)}</h5>
-                <button type="button" className="btn-close btn-close-white" onClick={() => { setModalAbono(false); setPrestamoAbono(null); setPrestamosParaAbonar([]); }}></button>
+                <h5 className="modal-title"><DollarSign size={20} className="me-2" />Registrar Abono - {getNombreEmpleado(grupoAbono.empleado_id)}</h5>
+                <button type="button" className="btn-close btn-close-white" onClick={() => { setModalAbono(false); setGrupoAbono(null); }}></button>
               </div>
               <form onSubmit={(e) => {
                 e.preventDefault();
-                if (!prestamoAbono) { toast.error('Selecciona un préstamo primero'); return; }
                 const fd = new FormData(e.target);
                 const monto = parseFloat(fd.get('monto'));
                 if (monto <= 0) { toast.error('El monto debe ser mayor a 0'); return; }
-                if (monto > parseFloat(prestamoAbono.saldo_pendiente)) {
-                  if (!confirm(`El abono ($${monto.toFixed(2)}) es mayor al saldo pendiente ($${parseFloat(prestamoAbono.saldo_pendiente).toFixed(2)}). ¿Deseas continuar y liquidar el prestamo?`)) return;
+                if (monto > grupoAbono.total_saldo_pendiente) {
+                  if (!confirm(`El abono ($${monto.toFixed(2)}) es mayor al saldo ($${grupoAbono.total_saldo_pendiente.toFixed(2)}). ¿Continuar?`)) return;
                 }
-                registrarAbono(prestamoAbono.id, {
+                registrarAbono(grupoAbono.empleado_id, {
                   monto: monto,
                   fecha: fd.get('fecha'),
                   observaciones: fd.get('observaciones') || ''
                 });
               }}>
                 <div className="modal-body">
-                  {/* Selector de préstamo si hay múltiples */}
-                  {prestamosParaAbonar.length > 1 && (
-                    <div className="mb-3">
-                      <label className="form-label">Seleccionar Préstamo <span className="text-danger">*</span></label>
-                      <select className="form-select" value={prestamoAbono?.id || ''} onChange={(e) => {
-                        const val = e.target.value;
-                        const selected = prestamosParaAbonar.find(p => String(p.id) === val);
-                        setPrestamoAbono(selected || null);
-                      }}>
-                        <option value="">Seleccionar préstamo...</option>
-                        {prestamosParaAbonar.map((p, idx) => (
-                          <option key={p.id} value={p.id}>
-                            Préstamo #{idx + 1} - {formatMoney(p.monto_original || p.monto)} (Saldo: {formatMoney(p.saldo_pendiente)}) - {p.fecha_prestamo ? new Date(p.fecha_prestamo).toLocaleDateString('es-MX') : ''}
-                          </option>
-                        ))}
-                      </select>
+                  <div className="text-center p-3 mb-3 bg-light rounded">
+                    <small className="text-muted d-block">Saldo Pendiente</small>
+                    <h3 className="text-danger mb-0">{formatMoney(grupoAbono.total_saldo_pendiente)}</h3>
+                  </div>
+                  
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <label className="form-label">Monto del Abono <span className="text-danger">*</span></label>
+                      <div className="input-group">
+                        <span className="input-group-text">$</span>
+                        <input type="number" name="monto" className="form-control" placeholder="0.00" min="0.01" step="0.01" required autoFocus />
+                      </div>
                     </div>
-                  )}
-
-                  {prestamoAbono ? (
-                    <>
-                      {/* Info del prestamo seleccionado */}
-                      <div className="alert alert-info mb-3">
-                        <div className="d-flex justify-content-between">
-                          <span><strong>Monto Original:</strong> {formatMoney(prestamoAbono.monto_original || prestamoAbono.monto)}</span>
-                          <span><strong>Saldo Pendiente:</strong> <span className="text-danger fw-bold">{formatMoney(prestamoAbono.saldo_pendiente)}</span></span>
-                        </div>
-                        {prestamoAbono.motivo && (
-                          <div className="mt-1"><small className="text-muted">Motivo: {prestamoAbono.motivo}</small></div>
-                        )}
-                      </div>
-                      
-                      <div className="row g-3">
-                        <div className="col-md-6">
-                          <label className="form-label">Monto del Abono <span className="text-danger">*</span></label>
-                          <div className="input-group">
-                            <span className="input-group-text">$</span>
-                            <input type="number" name="monto" className="form-control" placeholder="0.00" min="0.01" step="0.01" max={parseFloat(prestamoAbono.saldo_pendiente)} required autoFocus />
-                          </div>
-                          <small className="text-muted">Saldo pendiente: {formatMoney(prestamoAbono.saldo_pendiente)}</small>
-                        </div>
-                        <div className="col-md-6">
-                          <label className="form-label">Fecha del Abono</label>
-                          <input type="date" name="fecha" className="form-control" defaultValue={new Date().toISOString().split('T')[0]} />
-                        </div>
-                        <div className="col-12">
-                          <label className="form-label">Observaciones</label>
-                          <input type="text" name="observaciones" className="form-control" placeholder="Ej: Descuento de nomina, pago en efectivo..." />
-                        </div>
-                      </div>
-                      
-                      {/* Botones rapidos */}
-                      <div className="mt-3">
-                        <small className="text-muted d-block mb-1">Abono rapido:</small>
-                        <div className="d-flex gap-2 flex-wrap">
-                          {prestamoAbono.cuota_quincenal > 0 && (
-                            <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => {
-                              const input = document.querySelector('input[name="monto"]');
-                              if (input) { input.value = prestamoAbono.cuota_quincenal; input.dispatchEvent(new Event('input', { bubbles: true })); }
-                            }}>
-                              Cuota quincenal ({formatMoney(prestamoAbono.cuota_quincenal)})
-                            </button>
-                          )}
-                          <button type="button" className="btn btn-sm btn-outline-success" onClick={() => {
-                            const input = document.querySelector('input[name="monto"]');
-                            if (input) { input.value = parseFloat(prestamoAbono.saldo_pendiente); input.dispatchEvent(new Event('input', { bubbles: true })); }
-                          }}>
-                            Liquidar total ({formatMoney(prestamoAbono.saldo_pendiente)})
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-center py-4 text-muted">
-                      <DollarSign size={32} className="mb-2 opacity-50" />
-                      <p>Selecciona un préstamo de la lista para registrar el abono</p>
+                    <div className="col-md-6">
+                      <label className="form-label">Fecha del Abono</label>
+                      <input type="date" name="fecha" className="form-control" defaultValue={new Date().toISOString().split('T')[0]} />
                     </div>
-                  )}
+                    <div className="col-12">
+                      <label className="form-label">Observaciones</label>
+                      <input type="text" name="observaciones" className="form-control" placeholder="Ej: Descuento de nomina, pago en efectivo..." />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-3">
+                    <button type="button" className="btn btn-sm btn-outline-success" onClick={() => {
+                      const input = document.querySelector('input[name="monto"]');
+                      if (input) { input.value = grupoAbono.total_saldo_pendiente; input.dispatchEvent(new Event('input', { bubbles: true })); }
+                    }}>
+                      Liquidar saldo completo ({formatMoney(grupoAbono.total_saldo_pendiente)})
+                    </button>
+                  </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={() => { setModalAbono(false); setPrestamoAbono(null); setPrestamosParaAbonar([]); }}>Cancelar</button>
-                  <button type="submit" className="btn btn-success" disabled={loading || !prestamoAbono}>
+                  <button type="button" className="btn btn-secondary" onClick={() => { setModalAbono(false); setGrupoAbono(null); }}>Cancelar</button>
+                  <button type="submit" className="btn btn-success" disabled={loading}>
                     {loading ? <span className="spinner-border spinner-border-sm me-1" /> : <DollarSign size={16} className="me-1" />}
                     Registrar Abono
                   </button>
