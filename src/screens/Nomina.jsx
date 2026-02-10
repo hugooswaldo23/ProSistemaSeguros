@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp, Users, ArrowRight } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
@@ -19,8 +19,7 @@ const Nomina = () => {
   
   // Estados para datos
   const [datosNomina, setDatosNomina] = useState([]);
-  const [faseNomina, setFaseNomina] = useState('agentes'); // 'agentes' = solo agentes | 'completa' = distribuido a vendedores
-  const [datosPeriodicosSueldo, setDatosPeriodicosSueldo] = useState(null); // datos de sueldo para empleados no-agentes
+  const [agentesRevisados, setAgentesRevisados] = useState(new Set()); // IDs de agentes cuyo detalle ya fue revisado/aplicado
   const [historialNominas, setHistorialNominas] = useState([]);
   const [nominaSeleccionada, setNominaSeleccionada] = useState(null);
   const [detalleNominaConsulta, setDetalleNominaConsulta] = useState(null);
@@ -325,9 +324,11 @@ const Nomina = () => {
       } // end if tipoNomina !== 'solo_sueldos'
       
       // FASE 1: Solo mostrar agentes con todas sus pólizas
-      const agentesActivos = empleados.filter(emp => emp.activo !== false && emp.perfil === 'Agente');
+      const ORDEN_PERFIL = { 'Administrador': 0, 'Ejecutivo': 1, 'Agente': 2, 'Vendedor': 3 };
+      const empleadosActivos = empleados.filter(emp => emp.activo !== false)
+        .sort((a, b) => (ORDEN_PERFIL[a.perfil] ?? 4) - (ORDEN_PERFIL[b.perfil] ?? 4));
       
-      const nominaAgentes = agentesActivos.map(emp => {
+      const todosEmpleados = empleadosActivos.map(emp => {
         const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
         
         // Calcular días ya pagados que se solapan con el período actual
@@ -347,16 +348,18 @@ const Nomina = () => {
         
         const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
         const sueldo = tipoNomina === 'solo_comisiones' ? 0 : sueldoDiario * diasAPagar;
-        // En fase agentes, la comisión es el total (antes de distribuir a vendedores)
-        const comisionesTotal = comisionesPorAgente[emp.id] || 0;
-        const detalleComisiones = detalleComisionesPorAgente[emp.id] || [];
+        // Los agentes inician con comisión TOTAL (antes de split)
+        // Los vendedores/otros inician con 0 comisiones (se les asignará al revisar cada agente)
+        const esAgente = emp.perfil === 'Agente';
+        const comisionesTotal = esAgente ? (comisionesPorAgente[emp.id] || 0) : 0;
+        const detalleComisiones = esAgente ? (detalleComisionesPorAgente[emp.id] || []) : [];
         const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
         const subtotal = Math.round((sueldo + comisionesTotal) * 100) / 100;
         
         return {
           empleado_id: emp.id,
           nombre: `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim(),
-          perfil: emp.perfil || 'Agente',
+          perfil: emp.perfil || 'Empleado',
           esquemaCompensacion: emp.esquemaCompensacion || 'mixto',
           sueldoDiario: sueldoDiario,
           diasPeriodo: diasPeriodo,
@@ -375,58 +378,17 @@ const Nomina = () => {
         };
       });
       
-      // Guardar datos de sueldo para empleados no-agentes (se usarán al distribuir)
-      const datosNoAgentes = empleados.filter(emp => emp.activo !== false && emp.perfil !== 'Agente').map(emp => {
-        const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
-        let diasYaPagados = 0;
-        const periodos = periodosYaPagados[emp.id] || [];
-        const inicioMs = inicio.getTime();
-        const finMs = fin.getTime();
-        for (const [pInicio, pFin] of periodos) {
-          const overlapInicio = Math.max(inicioMs, pInicio);
-          const overlapFin = Math.min(finMs, pFin);
-          if (overlapInicio <= overlapFin) {
-            diasYaPagados += Math.ceil((overlapFin - overlapInicio) / (1000 * 60 * 60 * 24)) + 1;
-          }
-        }
-        const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
-        return {
-          empleado_id: emp.id,
-          nombre: `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim(),
-          perfil: emp.perfil || 'Empleado',
-          esquemaCompensacion: emp.esquemaCompensacion || 'mixto',
-          sueldoDiario, diasPeriodo, diasYaPagados, diasAPagar,
-          saldo_prestamo: prestamosEmpleados[emp.id] || 0
-        };
-      });
-      setDatosPeriodicosSueldo(datosNoAgentes);
+      setDatosNomina(todosEmpleados);
+      setAgentesRevisados(new Set());
+      setNominaGenerada(true);
       
-      // Si es solo sueldos, ir directo a fase completa con todos los empleados
       if (tipoNomina === 'solo_sueldos') {
-        const todosEmpleados = [...nominaAgentes, ...datosNoAgentes.map(emp => ({
-          ...emp,
-          sueldo: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100,
-          comisiones: 0,
-          detalleComisiones: [],
-          subtotal: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100,
-          descuentos: 0,
-          motivo_descuento: '',
-          prestamo_nuevo: 0,
-          cobro_prestamo: 0,
-          total_pagar: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100
-        }))];
-        setDatosNomina(todosEmpleados);
-        setFaseNomina('completa');
-        setNominaGenerada(true);
         toast.success(`Nómina (Solo Sueldos) generada: ${todosEmpleados.length} empleados.`);
       } else {
-        setDatosNomina(nominaAgentes);
-        setFaseNomina('agentes');
-        setNominaGenerada(true);
-        
         const polizasEncontradas = recibosPagadosEnPeriodo.length;
-        const agentesConComision = nominaAgentes.filter(a => a.comisiones > 0).length;
-        toast.success(`Fase 1: ${agentesConComision} agentes con ${polizasEncontradas} pólizas. Revisa y edita antes de distribuir a vendedores.`);
+        const agentesConComision = todosEmpleados.filter(a => a.perfil === 'Agente' && a.comisiones > 0).length;
+        const agentesConCompartidas = todosEmpleados.filter(a => a.perfil === 'Agente' && a.detalleComisiones.some(d => d.tipo === 'Compartida')).length;
+        toast.success(`Nómina generada: ${todosEmpleados.length} empleados, ${polizasEncontradas} pólizas.${agentesConCompartidas > 0 ? ` Revisa el detalle de ${agentesConCompartidas} agente(s) con comisiones compartidas.` : ''}`);
       }
       
     } catch (error) {
@@ -491,116 +453,104 @@ const Nomina = () => {
   
   const aplicarCambiosDetalle = () => {
     if (!empleadoDetalle) return;
-    // En fase agentes: mostrar comisión TOTAL por póliza (antes de distribuir)
-    // En fase completa: mostrar solo la parte de esta persona
-    const nuevaComision = detalleEditado.reduce((sum, det) => {
-      if (faseNomina === 'agentes') {
-        return sum + (det.comisionTotal || det.comision || 0);
-      }
+    const agenteId = empleadoDetalle.empleado_id;
+    const esAgente = empleadoDetalle.perfil === 'Agente';
+    
+    // Calcular la comisión que le corresponde al agente (solo su parte)
+    const nuevaComisionAgente = detalleEditado.reduce((sum, det) => {
       return sum + (det.comisionAgente || det.comision || 0);
     }, 0);
     
-    setDatosNomina(prev => prev.map(emp => {
-      if (emp.empleado_id === empleadoDetalle.empleado_id) {
-        const nuevoSubtotal = emp.sueldo + nuevaComision;
-        return {
-          ...emp,
-          comisiones: Math.round(nuevaComision * 100) / 100,
-          detalleComisiones: detalleEditado,
-          subtotal: Math.round(nuevoSubtotal * 100) / 100,
-          total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo + (emp.prestamo_nuevo || 0)) * 100) / 100
-        };
-      }
-      return emp;
-    }));
-    
-    toast.success('Comisiones del agente actualizadas');
-    setEmpleadoDetalle(null);
-  };
-  
-  // FASE 2: Distribuir comisiones a vendedores y agregar todos los empleados
-  const distribuirVendedores = () => {
-    // Recopilar comisiones para vendedores desde los detalles de los agentes
-    const comisionesPorVendedor = {};
-    const detalleComisionesPorVendedor = {};
-    
-    // Recalcular las comisiones de agentes (solo su parte, no el total)
-    const agentesActualizados = datosNomina.map(agente => {
-      let comisionRealAgente = 0;
-      const detallesActualizados = agente.detalleComisiones.map(det => {
-        if (det.tipo === 'Compartida' && det.vendedorId) {
-          // Calcular split
-          const comisionAgente = det.comisionAgente || 0;
-          const comisionVendedor = det.comisionVendedor || 0;
-          comisionRealAgente += comisionAgente;
-          
-          // Acumular para el vendedor
-          if (!comisionesPorVendedor[det.vendedorId]) {
-            comisionesPorVendedor[det.vendedorId] = 0;
-            detalleComisionesPorVendedor[det.vendedorId] = [];
-          }
-          comisionesPorVendedor[det.vendedorId] += comisionVendedor;
-          detalleComisionesPorVendedor[det.vendedorId].push({
-            ...det,
-            comision: comisionVendedor // La parte del vendedor
-          });
-          
-          return { ...det, comision: comisionAgente }; // La parte del agente
-        } else {
-          // Directa: el agente se queda todo
-          comisionRealAgente += (det.comisionTotal || det.comision || 0);
-          return { ...det, comision: det.comisionTotal || det.comision || 0 };
+    setDatosNomina(prev => {
+      let nuevos = prev.map(emp => {
+        if (emp.empleado_id === agenteId) {
+          const nuevoSubtotal = emp.sueldo + nuevaComisionAgente;
+          return {
+            ...emp,
+            comisiones: Math.round(nuevaComisionAgente * 100) / 100,
+            detalleComisiones: detalleEditado.map(det => ({
+              ...det,
+              comision: det.comisionAgente || det.comision // La parte del agente
+            })),
+            subtotal: Math.round(nuevoSubtotal * 100) / 100,
+            total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo + (emp.prestamo_nuevo || 0)) * 100) / 100
+          };
         }
+        return emp;
       });
       
-      const sueldo = agente.sueldo;
-      const comisiones = Math.round(comisionRealAgente * 100) / 100;
-      const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
+      // Distribuir comisiones compartidas a los vendedores correspondientes
+      if (esAgente) {
+        const comisionesPorVendedor = {};
+        const detalleComisionesPorVendedor = {};
+        
+        detalleEditado.forEach(det => {
+          if (det.tipo === 'Compartida' && det.vendedorId) {
+            const comisionVendedor = det.comisionVendedor || 0;
+            if (!comisionesPorVendedor[det.vendedorId]) {
+              comisionesPorVendedor[det.vendedorId] = 0;
+              detalleComisionesPorVendedor[det.vendedorId] = [];
+            }
+            comisionesPorVendedor[det.vendedorId] += comisionVendedor;
+            detalleComisionesPorVendedor[det.vendedorId].push({
+              ...det,
+              comision: comisionVendedor
+            });
+          }
+        });
+        
+        // Primero limpiar comisiones de este agente que ya estaban asignadas a vendedores
+        // (por si se re-aplica el detalle varias veces)
+        nuevos = nuevos.map(emp => {
+          if (emp.perfil !== 'Agente' && emp.detalleComisiones?.length > 0) {
+            // Quitar las comisiones que venían de este agente
+            const detallesFiltrados = emp.detalleComisiones.filter(d => d.nombreAgente !== empleadoDetalle.nombre);
+            const comisionesFiltradas = detallesFiltrados.reduce((s, d) => s + (d.comision || 0), 0);
+            const nuevoSubtotal = emp.sueldo + comisionesFiltradas;
+            return {
+              ...emp,
+              comisiones: Math.round(comisionesFiltradas * 100) / 100,
+              detalleComisiones: detallesFiltrados,
+              subtotal: Math.round(nuevoSubtotal * 100) / 100,
+              total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo + (emp.prestamo_nuevo || 0)) * 100) / 100
+            };
+          }
+          return emp;
+        });
+        
+        // Ahora asignar las comisiones actualizadas a los vendedores
+        Object.entries(comisionesPorVendedor).forEach(([vendedorId, monto]) => {
+          const vid = parseInt(vendedorId);
+          nuevos = nuevos.map(emp => {
+            if (emp.empleado_id === vid) {
+              const detallesExistentes = emp.detalleComisiones || [];
+              const nuevosDetalles = [...detallesExistentes, ...(detalleComisionesPorVendedor[vid] || [])];
+              const totalComisiones = nuevosDetalles.reduce((s, d) => s + (d.comision || 0), 0);
+              const nuevoSubtotal = emp.sueldo + totalComisiones;
+              return {
+                ...emp,
+                comisiones: Math.round(totalComisiones * 100) / 100,
+                detalleComisiones: nuevosDetalles,
+                subtotal: Math.round(nuevoSubtotal * 100) / 100,
+                total_pagar: Math.round((nuevoSubtotal - emp.descuentos - emp.cobro_prestamo + (emp.prestamo_nuevo || 0)) * 100) / 100
+              };
+            }
+            return emp;
+          });
+        });
+      }
       
-      return {
-        ...agente,
-        comisiones,
-        detalleComisiones: detallesActualizados,
-        subtotal,
-        total_pagar: Math.round((subtotal - agente.descuentos - agente.cobro_prestamo + (agente.prestamo_nuevo || 0)) * 100) / 100
-      };
+      return nuevos;
     });
     
-    // Crear entradas para vendedores y otros empleados
-    const empleadosNoAgentes = (datosPeriodicosSueldo || []).map(emp => {
-      const sueldo = tipoNomina === 'solo_comisiones' ? 0 : (emp.sueldoDiario * emp.diasAPagar);
-      const comisiones = comisionesPorVendedor[emp.empleado_id] || 0;
-      const detalleComisiones = detalleComisionesPorVendedor[emp.empleado_id] || [];
-      const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
-      
-      return {
-        empleado_id: emp.empleado_id,
-        nombre: emp.nombre,
-        perfil: emp.perfil,
-        esquemaCompensacion: emp.esquemaCompensacion,
-        sueldoDiario: emp.sueldoDiario,
-        diasPeriodo: emp.diasPeriodo,
-        diasYaPagados: emp.diasYaPagados,
-        diasAPagar: emp.diasAPagar,
-        sueldo: Math.round(sueldo * 100) / 100,
-        comisiones: Math.round(comisiones * 100) / 100,
-        detalleComisiones: detalleComisiones,
-        subtotal,
-        descuentos: 0,
-        motivo_descuento: '',
-        saldo_prestamo: emp.saldo_prestamo || 0,
-        prestamo_nuevo: 0,
-        cobro_prestamo: 0,
-        total_pagar: subtotal
-      };
-    });
-    
-    // Combinar: agentes actualizados + vendedores/empleados
-    setDatosNomina([...agentesActualizados, ...empleadosNoAgentes]);
-    setFaseNomina('completa');
-    
-    const vendedoresConComision = Object.keys(comisionesPorVendedor).length;
-    toast.success(`Distribución completa: ${vendedoresConComision} vendedor(es) con comisiones asignadas. Nómina lista para guardar.`);
+    // Marcar agente como revisado
+    if (esAgente) {
+      setAgentesRevisados(prev => new Set([...prev, agenteId]));
+      toast.success(`Comisiones de ${empleadoDetalle.nombre} aplicadas y distribuidas a vendedores.`);
+    } else {
+      toast.success('Comisiones actualizadas.');
+    }
+    setEmpleadoDetalle(null);
   };
   
   const totales = useMemo(() => {
@@ -614,6 +564,17 @@ const Nomina = () => {
       neto: datosNomina.reduce((sum, item) => sum + (item.total_pagar || 0), 0)
     };
   }, [datosNomina]);
+  
+  // Agentes con comisiones compartidas que necesitan revisión
+  const agentesConCompartidas = useMemo(() => {
+    if (tipoNomina === 'solo_sueldos') return [];
+    return datosNomina.filter(emp => emp.perfil === 'Agente' && emp.detalleComisiones?.some(d => d.tipo === 'Compartida'));
+  }, [datosNomina, tipoNomina]);
+  
+  const todosAgentesRevisados = useMemo(() => {
+    if (agentesConCompartidas.length === 0) return true;
+    return agentesConCompartidas.every(a => agentesRevisados.has(a.empleado_id));
+  }, [agentesConCompartidas, agentesRevisados]);
   
   const guardarNomina = async () => {
     if (!datosNomina.length) { toast.error('No hay datos de nómina para guardar'); return; }
@@ -688,7 +649,7 @@ const Nomina = () => {
       if (response.ok) {
         toast.success('Nómina cerrada exitosamente. Las comisiones han sido registradas.');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
-        setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
+        setAgentesRevisados(new Set());
         cargarHistorialNominas(); cargarPrestamosEmpleados();
       } else {
         const error = await response.json();
@@ -699,7 +660,7 @@ const Nomina = () => {
       if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
         toast.success('Nómina cerrada exitosamente (modo desarrollo)');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
-        setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
+        setAgentesRevisados(new Set());
       } else {
         toast.error(error.message || 'Error al cerrar la nómina');
       }
@@ -765,7 +726,7 @@ const Nomina = () => {
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
     setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false); 
-    setEmpleadoExpandido(null); setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
+    setEmpleadoExpandido(null); setAgentesRevisados(new Set());
   };
   
   const formatMoney = (value) => {
@@ -848,22 +809,16 @@ const Nomina = () => {
                 </div>
                 {nominaGenerada && (
                   <div className="col-md-3">
-                    {faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' ? (
-                      <button className="btn btn-warning w-100 fw-bold" onClick={distribuirVendedores} disabled={loading} title="Distribuir comisiones compartidas a vendedores y agregar empleados">
-                        <Users size={16} className="me-1" />Distribuir a Vendedores <ArrowRight size={16} className="ms-1" />
-                      </button>
-                    ) : (
-                      <div className="btn-group w-100">
-                        {!nominaGuardada && (
-                          <button className="btn btn-info" onClick={guardarNomina} disabled={loading} title="Guardar como borrador en BD">
-                            {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar</>}
-                          </button>
-                        )}
-                        <button className="btn btn-success" onClick={cerrarNomina} disabled={loading} title="Cerrar nómina y registrar comisiones">
-                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Cerrar</>}
+                    <div className="btn-group w-100">
+                      {!nominaGuardada && (
+                        <button className="btn btn-info" onClick={guardarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes con comisiones compartidas antes de guardar' : 'Guardar como borrador en BD'}>
+                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar</>}
                         </button>
-                      </div>
-                    )}
+                      )}
+                      <button className="btn btn-success" onClick={cerrarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes con comisiones compartidas antes de cerrar' : 'Cerrar nómina y registrar comisiones'}>
+                        {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Cerrar</>}
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -872,11 +827,19 @@ const Nomina = () => {
           
           {nominaGenerada && datosNomina.length > 0 && (
             <>
-            {faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' && (
+            {!todosAgentesRevisados && agentesConCompartidas.length > 0 && (
               <div className="alert alert-warning py-2 mb-3 d-flex align-items-center" style={{ fontSize: '0.85rem' }}>
                 <AlertCircle size={18} className="me-2 flex-shrink-0" />
-                <span><strong>Fase 1 — Solo Agentes:</strong> Los montos de comisión mostrados son el <strong>total por póliza</strong> (antes de distribuir a vendedores). 
-                Revisa cada agente, edita % si necesitas, y luego da clic en <strong>"Distribuir a Vendedores"</strong> para calcular los splits y ver la nómina completa.</span>
+                <span>
+                  <strong>Revisión pendiente:</strong> {agentesConCompartidas.length - [...agentesRevisados].filter(id => agentesConCompartidas.some(a => a.empleado_id === id)).length} de {agentesConCompartidas.length} agente(s) con comisiones compartidas por revisar.
+                  Entra al detalle de cada agente (botón <Eye size={12} className="mx-1" />) y da clic en <strong>"Aplicar"</strong> para distribuir sus comisiones a los vendedores correspondientes.
+                </span>
+              </div>
+            )}
+            {todosAgentesRevisados && agentesConCompartidas.length > 0 && (
+              <div className="alert alert-success py-2 mb-3 d-flex align-items-center" style={{ fontSize: '0.85rem' }}>
+                <CheckCircle2 size={18} className="me-2 flex-shrink-0" />
+                <span><strong>Todos los agentes revisados.</strong> Las comisiones han sido distribuidas a los vendedores. Ya puedes guardar o cerrar la nómina.</span>
               </div>
             )}
             <div className="row mb-4">
@@ -906,17 +869,15 @@ const Nomina = () => {
             <div className="card-header bg-light d-flex justify-content-between align-items-center">
               <div>
                 <h5 className="mb-0 d-inline">
-                  {nominaGenerada 
-                    ? faseNomina === 'agentes' 
-                      ? 'Fase 1: Revisión de Comisiones por Agente' 
-                      : 'Nómina Completa' 
-                    : 'Resultados'}
+                  {nominaGenerada ? 'Nómina' : 'Resultados'}
                 </h5>
-                {nominaGenerada && faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' && (
-                  <small className="text-muted ms-2">Revisa las pólizas y % de cada agente, luego da clic en "Distribuir a Vendedores"</small>
+                {nominaGenerada && !todosAgentesRevisados && agentesConCompartidas.length > 0 && (
+                  <span className="badge bg-warning text-dark ms-2" style={{ fontSize: '0.7rem' }}>
+                    {agentesConCompartidas.length - [...agentesRevisados].filter(id => agentesConCompartidas.some(a => a.empleado_id === id)).length} agente(s) por revisar
+                  </span>
                 )}
               </div>
-              {nominaGenerada && datosNomina.length > 0 && faseNomina === 'completa' && (
+              {nominaGenerada && datosNomina.length > 0 && (
                 <button className="btn btn-sm btn-success" onClick={() => toast.info('Exportación en desarrollo')}>
                   <Download size={16} className="me-2" />Exportar Excel
                 </button>
@@ -951,9 +912,12 @@ const Nomina = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {datosNomina.map((item, index) => (
+                      {datosNomina.map((item, index) => {
+                        const tieneCompartidas = item.perfil === 'Agente' && item.detalleComisiones?.some(d => d.tipo === 'Compartida');
+                        const yaRevisado = agentesRevisados.has(item.empleado_id);
+                        return (
                         <React.Fragment key={item.empleado_id}>
-                        <tr>
+                        <tr className={tieneCompartidas && !yaRevisado ? 'table-warning' : ''}>
                           <td>
                             <div className="d-flex justify-content-between align-items-center">
                               <div className="d-flex align-items-center">
@@ -961,12 +925,23 @@ const Nomina = () => {
                                   {empleadoExpandido === item.empleado_id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                 </button>
                                 <strong>{item.nombre}</strong>
+                                {tieneCompartidas && (
+                                  yaRevisado 
+                                    ? <CheckCircle2 size={14} className="ms-2 text-success" title="Comisiones revisadas y distribuidas" />
+                                    : <AlertCircle size={14} className="ms-2 text-warning" title="Pendiente de revisión — entra al detalle y aplica" />
+                                )}
                               </div>
-                              {item.detalleComisiones?.length > 0 && (
-                                <button className="btn btn-sm btn-outline-success py-0 px-1" onClick={() => abrirDetalleEmpleado(item)} title="Ver/Editar detalle de comisiones">
-                                  <Eye size={14} className="me-1" />{item.detalleComisiones.length}
-                                </button>
-                              )}
+                              <div className="d-flex align-items-center gap-1">
+                                {item.detalleComisiones?.length > 0 && (
+                                  <button 
+                                    className={`btn btn-sm py-0 px-1 ${tieneCompartidas && !yaRevisado ? 'btn-warning fw-bold' : 'btn-outline-success'}`} 
+                                    onClick={() => abrirDetalleEmpleado(item)} 
+                                    title={tieneCompartidas && !yaRevisado ? 'Revisar y aplicar comisiones compartidas' : 'Ver/Editar detalle de comisiones'}
+                                  >
+                                    <Eye size={14} className="me-1" />{item.detalleComisiones.length}{tieneCompartidas && !yaRevisado ? ' ⚠' : ''}
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </td>
                           <td className="text-center">
@@ -1083,7 +1058,8 @@ const Nomina = () => {
                           </tr>
                         )}
                         </React.Fragment>
-                      ))}
+                      );
+                      })}
                     </tbody>
                     <tfoot className="table-light">
                       <tr>
@@ -1469,7 +1445,12 @@ const Nomina = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setEmpleadoDetalle(null)}>Cancelar</button>
-                <button type="button" className="btn btn-success" onClick={aplicarCambiosDetalle}><Check size={16} className="me-1" />Aplicar Cambios</button>
+                <button type="button" className="btn btn-success" onClick={aplicarCambiosDetalle}>
+                  <Check size={16} className="me-1" />
+                  {empleadoDetalle?.perfil === 'Agente' && empleadoDetalle?.detalleComisiones?.some(d => d.tipo === 'Compartida')
+                    ? 'Aplicar y Distribuir a Vendedores'
+                    : 'Aplicar Cambios'}
+                </button>
               </div>
             </div>
           </div>
