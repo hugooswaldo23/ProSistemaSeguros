@@ -26,6 +26,7 @@ const Nomina = () => {
   const [nominaGuardada, setNominaGuardada] = useState(false);
   const [empleadoDetalle, setEmpleadoDetalle] = useState(null);
   const [detalleEditado, setDetalleEditado] = useState([]);
+  const [comisionesConsulta, setComisionesConsulta] = useState(null);
   const [prestamosEmpleados, setPrestamosEmpleados] = useState({});
   
   // Establecer fechas por defecto al montar
@@ -930,7 +931,9 @@ const Nomina = () => {
                             <td>
                               <strong>{nombre}</strong>
                               {det.detalle_comisiones?.length > 0 && (
-                                <span className="badge bg-success ms-2" style={{ fontSize: '0.65rem' }}>{det.detalle_comisiones.length} pólizas</span>
+                                <button className="btn btn-sm btn-outline-success py-0 px-1 ms-2" style={{ fontSize: '0.65rem' }} onClick={() => setComisionesConsulta({ nombre, comisiones, detalle: det.detalle_comisiones })} title="Ver detalle de comisiones">
+                                  <Eye size={12} className="me-1" />{det.detalle_comisiones.length} pólizas
+                                </button>
                               )}
                             </td>
                             <td className="text-end">{formatMoney(sueldo)}</td>
@@ -959,6 +962,64 @@ const Nomina = () => {
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal consulta de comisiones (solo lectura, desde vista detalle) */}
+      {comisionesConsulta && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setComisionesConsulta(null)}>
+          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title"><DollarSign size={20} className="me-2" />Comisiones - {comisionesConsulta.nombre}</h5>
+                <button type="button" className="btn-close btn-close-white" onClick={() => setComisionesConsulta(null)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="row mb-3">
+                  <div className="col-md-6">
+                    <div className="card bg-light"><div className="card-body py-2 text-center"><small className="text-muted">P\u00f3lizas</small><h6 className="mb-0">{comisionesConsulta.detalle.length}</h6></div></div>
+                  </div>
+                  <div className="col-md-6">
+                    <div className="card bg-success text-white"><div className="card-body py-2 text-center"><small className="text-white-50">Total Comisiones</small><h6 className="mb-0">{formatMoney(comisionesConsulta.comisiones)}</h6></div></div>
+                  </div>
+                </div>
+                <div className="table-responsive">
+                  <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.8rem' }}>
+                    <thead className="table-dark">
+                      <tr>
+                        <th>Expediente</th>
+                        <th>Recibo</th>
+                        <th className="text-end">Comisi\u00f3n</th>
+                        <th className="text-center">% Aplicado</th>
+                        <th className="text-center">Compartida</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comisionesConsulta.detalle.map((com, idx) => (
+                        <tr key={idx}>
+                          <td>#{com.expediente_id}</td>
+                          <td>#{com.recibo_id}</td>
+                          <td className="text-end text-success fw-bold">{formatMoney(com.monto_comision)}</td>
+                          <td className="text-center">{com.porcentaje_aplicado}%</td>
+                          <td className="text-center">{com.es_comision_compartida ? <span className="badge bg-info">S\u00ed</span> : <span className="badge bg-secondary">No</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="table-light">
+                      <tr>
+                        <th colSpan="2" className="text-end">TOTAL:</th>
+                        <th className="text-end text-success">{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.monto_comision || 0), 0))}</th>
+                        <th colSpan="2"></th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setComisionesConsulta(null)}>Cerrar</button>
+              </div>
             </div>
           </div>
         </div>
