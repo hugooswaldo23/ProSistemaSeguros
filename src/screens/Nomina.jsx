@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
@@ -20,6 +20,7 @@ const Nomina = () => {
   const [datosNomina, setDatosNomina] = useState([]);
   const [historialNominas, setHistorialNominas] = useState([]);
   const [nominaSeleccionada, setNominaSeleccionada] = useState(null);
+  const [detalleNominaConsulta, setDetalleNominaConsulta] = useState(null);
   const [nominaGenerada, setNominaGenerada] = useState(false);
   const [nominaId, setNominaId] = useState(null);
   const [nominaGuardada, setNominaGuardada] = useState(false);
@@ -105,7 +106,7 @@ const Nomina = () => {
     
     setLoading(true);
     try {
-      const [expResponse, asegResponse, prodResponse] = await Promise.all([
+      const [expResponse, asegResponse, prodResponse, nominasResponse] = await Promise.all([
         fetch(`${API_URL}/api/expedientes`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         }),
@@ -113,6 +114,9 @@ const Nomina = () => {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         }),
         fetch(`${API_URL}/api/tiposProductos`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+        }),
+        fetch(`${API_URL}/api/nominas`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         })
       ]);
@@ -124,6 +128,49 @@ const Nomina = () => {
       const expedientes = await expResponse.json();
       const aseguradoras = asegResponse.ok ? await asegResponse.json() : [];
       const tiposProductos = prodResponse.ok ? await prodResponse.json() : [];
+      
+      // Recopilar recibo_ids ya comisionados y días de sueldo ya pagados en nóminas previas (Pagada/Cerrada)
+      const recibosYaPagados = new Set();
+      // Guardar períodos ya pagados por empleado para evitar pagar sueldo doble
+      // Estructura: { empleado_id: [ [inicioMs, finMs], ... ] }
+      const periodosYaPagados = {};
+      if (nominasResponse.ok) {
+        const nominasPrevias = await nominasResponse.json();
+        for (const nomina of nominasPrevias) {
+          if (nomina.estatus === 'Pagada' || nomina.estatus === 'Cerrada') {
+            const nomInicio = new Date(nomina.fecha_inicio);
+            const nomFin = new Date(nomina.fecha_fin);
+            // Cargar detalle de cada nómina para extraer recibo_ids y empleados con sueldo
+            try {
+              const detResp = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+              });
+              if (detResp.ok) {
+                const detData = await detResp.json();
+                if (detData.detalles) {
+                  detData.detalles.forEach(det => {
+                    // Recibos ya comisionados
+                    if (det.detalle_comisiones && Array.isArray(det.detalle_comisiones)) {
+                      det.detalle_comisiones.forEach(com => {
+                        if (com.recibo_id) recibosYaPagados.add(com.recibo_id);
+                      });
+                    }
+                    // Empleados que ya recibieron sueldo en este período
+                    if (parseFloat(det.sueldo || 0) > 0) {
+                      if (!periodosYaPagados[det.empleado_id]) periodosYaPagados[det.empleado_id] = [];
+                      periodosYaPagados[det.empleado_id].push([nomInicio.getTime(), nomFin.getTime()]);
+                    }
+                  });
+                }
+              }
+            } catch (e) { /* continuar sin este detalle */ }
+          }
+        }
+      }
+      
+      if (recibosYaPagados.size > 0) {
+        console.log(`Excluyendo ${recibosYaPagados.size} recibos ya comisionados en nóminas anteriores`);
+      }
       
       const productoIdMap = {};
       tiposProductos.forEach(prod => {
@@ -158,6 +205,9 @@ const Nomina = () => {
         if (exp.recibos && Array.isArray(exp.recibos)) {
           exp.recibos.forEach(recibo => {
             if (recibo.estatus === 'Pagado' && recibo.fecha_pago_real) {
+              // Excluir recibos ya comisionados en nóminas anteriores
+              if (recibosYaPagados.has(recibo.id)) return;
+              
               const fechaPago = new Date(recibo.fecha_pago_real);
               if (fechaPago >= inicio && fechaPago <= fin) {
                 let primaBase = parseFloat(exp.prima_neta) || parseFloat(exp.subtotal) || 0;
@@ -282,7 +332,25 @@ const Nomina = () => {
       
       const nominaReal = empleadosActivos.map(emp => {
         const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
-        const sueldo = sueldoDiario * diasPeriodo;
+        
+        // Calcular días ya pagados que se solapan con el período actual
+        let diasYaPagados = 0;
+        const periodos = periodosYaPagados[emp.id] || [];
+        const inicioMs = inicio.getTime();
+        const finMs = fin.getTime();
+        
+        for (const [pInicio, pFin] of periodos) {
+          // Calcular overlap entre el período actual y el período ya pagado
+          const overlapInicio = Math.max(inicioMs, pInicio);
+          const overlapFin = Math.min(finMs, pFin);
+          if (overlapInicio <= overlapFin) {
+            const diasOverlap = Math.ceil((overlapFin - overlapInicio) / (1000 * 60 * 60 * 24)) + 1;
+            diasYaPagados += diasOverlap;
+          }
+        }
+        
+        const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
+        const sueldo = sueldoDiario * diasAPagar;
         const comisiones = comisionesPorEmpleado[emp.id] || 0;
         const detalleComisiones = detalleComisionesPorEmpleado[emp.id] || [];
         const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
@@ -493,6 +561,48 @@ const Nomina = () => {
     } catch (error) { console.error('Error:', error); toast.error(error.message || 'Error al marcar como pagada'); }
   };
   
+  const cargarDetalleNomina = async (nomina) => {
+    setNominaSeleccionada(nomina);
+    setDetalleNominaConsulta(null);
+    setVistaActual('detalle');
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDetalleNominaConsulta(data);
+      } else {
+        toast.error('Error al cargar detalle de nómina');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al cargar detalle');
+    }
+  };
+
+  const eliminarNomina = async (idNomina, codigo) => {
+    if (!confirm(`¿Eliminar nómina ${codigo}? Esto revertirá sueldos y comisiones para que puedan recalcularse.`)) return;
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${idNomina}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (response.ok) {
+        toast.success(`Nómina ${codigo} eliminada`);
+        cargarHistorialNominas();
+      } else if (response.status === 404) {
+        toast.error('Endpoint DELETE /api/nominas/:id no disponible. Hugo necesita implementarlo.');
+      } else {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Error al eliminar');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error(error.message || 'Error al eliminar nómina');
+    }
+  };
+
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
     setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
@@ -739,10 +849,11 @@ const Nomina = () => {
                         <td className="text-center">{new Date(nomina.created_at).toLocaleDateString('es-MX')}</td>
                         <td className="text-center">
                           <div className="btn-group btn-group-sm">
-                            <button className="btn btn-outline-primary" onClick={() => { setNominaSeleccionada(nomina); setVistaActual('detalle'); }} title="Ver detalle"><Eye size={14} /></button>
+                            <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle"><Eye size={14} /></button>
                             {nomina.estatus === 'Cerrada' && (
                               <button className="btn btn-success" onClick={() => marcarComoPagada(nomina.id)} title="Marcar como pagada"><Check size={14} /></button>
                             )}
+                            <button className="btn btn-outline-danger" onClick={() => eliminarNomina(nomina.id, nomina.codigo)} title="Eliminar nómina"><Trash2 size={14} /></button>
                           </div>
                         </td>
                       </tr>
@@ -751,6 +862,104 @@ const Nomina = () => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Vista: Detalle de Nómina (solo consulta) */}
+      {vistaActual === 'detalle' && nominaSeleccionada && (
+        <div>
+          <button className="btn btn-outline-secondary mb-3" onClick={() => setVistaActual('historial')}>
+            ← Volver al Historial
+          </button>
+          
+          <div className="card mb-4">
+            <div className="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+              <h5 className="mb-0"><FileText size={20} className="me-2" />Nómina {nominaSeleccionada.codigo}</h5>
+              <span className={`badge ${nominaSeleccionada.estatus === 'Pagada' ? 'bg-success' : nominaSeleccionada.estatus === 'Cerrada' ? 'bg-warning' : 'bg-secondary'}`}>{nominaSeleccionada.estatus}</span>
+            </div>
+            <div className="card-body py-2">
+              <div className="row text-center">
+                <div className="col-md-2"><small className="text-muted d-block">Período</small><strong>{new Date(nominaSeleccionada.fecha_inicio).toLocaleDateString('es-MX')} - {new Date(nominaSeleccionada.fecha_fin).toLocaleDateString('es-MX')}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Sueldos</small><strong className="text-info">{formatMoney(nominaSeleccionada.total_sueldos)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Comisiones</small><strong className="text-success">{formatMoney(nominaSeleccionada.total_comisiones)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Descuentos</small><strong className="text-danger">{formatMoney(nominaSeleccionada.total_descuentos)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Préstamos</small><strong className="text-warning">{formatMoney(nominaSeleccionada.total_prestamos_otorgados)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Total Neto</small><h5 className="text-primary mb-0">{formatMoney(nominaSeleccionada.total_neto)}</h5></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header bg-light">
+              <h5 className="mb-0">Detalle por Empleado</h5>
+            </div>
+            <div className="card-body p-0">
+              {!detalleNominaConsulta ? (
+                <div className="text-center py-5">
+                  <span className="spinner-border" /><p className="mt-2 text-muted">Cargando detalle...</p>
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table className="table table-striped table-hover table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
+                    <thead className="table-dark">
+                      <tr>
+                        <th style={{ minWidth: '200px' }}>Empleado</th>
+                        <th className="text-end" style={{ width: '100px' }}>Sueldo</th>
+                        <th className="text-end" style={{ width: '100px' }}>Comisiones</th>
+                        <th className="text-end" style={{ width: '100px' }}>Subtotal</th>
+                        <th className="text-end" style={{ width: '100px' }}>Descuentos</th>
+                        <th className="text-end" style={{ width: '100px' }}>Préstamo (+)</th>
+                        <th className="text-end" style={{ width: '100px' }}>Cobro (-)</th>
+                        <th className="text-end" style={{ width: '120px' }}>Total Pagado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalleNominaConsulta.detalles?.map((det) => {
+                        const emp = empleados.find(e => e.id === det.empleado_id);
+                        const nombre = emp ? `${emp.nombre || ''} ${emp.apellidoPaterno || ''}`.trim() : `Empleado #${det.empleado_id}`;
+                        const sueldo = parseFloat(det.sueldo || 0);
+                        const comisiones = parseFloat(det.comisiones || 0);
+                        const subtotal = sueldo + comisiones;
+                        const descuentos = parseFloat(det.descuentos || 0);
+                        const prestamoNuevo = parseFloat(det.prestamo_nuevo || 0);
+                        const cobroPrestamo = parseFloat(det.cobro_prestamo || 0);
+                        const totalPagar = parseFloat(det.total_pagar || 0);
+                        return (
+                          <tr key={det.id}>
+                            <td>
+                              <strong>{nombre}</strong>
+                              {det.detalle_comisiones?.length > 0 && (
+                                <span className="badge bg-success ms-2" style={{ fontSize: '0.65rem' }}>{det.detalle_comisiones.length} pólizas</span>
+                              )}
+                            </td>
+                            <td className="text-end">{formatMoney(sueldo)}</td>
+                            <td className="text-end text-success fw-bold">{formatMoney(comisiones)}</td>
+                            <td className="text-end fw-bold">{formatMoney(subtotal)}</td>
+                            <td className="text-end text-danger">{descuentos > 0 ? formatMoney(descuentos) : '-'}</td>
+                            <td className="text-end text-warning">{prestamoNuevo > 0 ? formatMoney(prestamoNuevo) : '-'}</td>
+                            <td className="text-end">{cobroPrestamo > 0 ? formatMoney(cobroPrestamo) : '-'}</td>
+                            <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(totalPagar)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="table-light">
+                      <tr>
+                        <th className="text-end">TOTALES:</th>
+                        <th className="text-end">{formatMoney(nominaSeleccionada.total_sueldos)}</th>
+                        <th className="text-end text-success">{formatMoney(nominaSeleccionada.total_comisiones)}</th>
+                        <th className="text-end">{formatMoney(parseFloat(nominaSeleccionada.total_sueldos || 0) + parseFloat(nominaSeleccionada.total_comisiones || 0))}</th>
+                        <th className="text-end text-danger">{formatMoney(nominaSeleccionada.total_descuentos)}</th>
+                        <th className="text-end text-warning">{formatMoney(nominaSeleccionada.total_prestamos_otorgados)}</th>
+                        <th className="text-end">{formatMoney(nominaSeleccionada.total_prestamos_cobrados)}</th>
+                        <th className="text-end text-primary" style={{ fontSize: '1.1rem' }}>{formatMoney(nominaSeleccionada.total_neto)}</th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

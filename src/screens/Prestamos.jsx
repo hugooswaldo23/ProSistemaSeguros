@@ -90,45 +90,61 @@ const Prestamos = () => {
   }, [balancePorEmpleado]);
 
   // --- Registrar movimiento (Prestamo o Abono) ---
-  const registrarMovimiento = async (empleadoId, tipo, datos) => {
+  const registrarMovimiento = async (grupo, tipo, datos) => {
     setLoading(true);
-    const endpoint = tipo === 'Prestamo'
-      ? `${API_URL}/api/prestamos`
-      : `${API_URL}/api/prestamos/abono`;
-    const body = tipo === 'Prestamo'
-      ? { empleado_id: empleadoId, monto: datos.monto, motivo: datos.observaciones, fecha_prestamo: datos.fecha }
-      : { empleado_id: empleadoId, monto: datos.monto, observaciones: datos.observaciones, fecha: datos.fecha };
-
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
-        },
-        body: JSON.stringify(body)
-      });
+      if (tipo === 'Prestamo') {
+        // POST /api/prestamos
+        const response = await fetch(`${API_URL}/api/prestamos`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+          },
+          body: JSON.stringify({
+            empleado_id: grupo.empleado_id,
+            monto: datos.monto,
+            motivo: datos.observaciones,
+            fecha_prestamo: datos.fecha
+          })
+        });
+        if (!response.ok) throw new Error('Error al registrar prestamo');
+        toast.success('Prestamo registrado');
+      } else {
+        // Abono: distribuir entre prestamos activos del empleado
+        // POST /api/prestamos/:id/abono
+        const prestamosActivos = grupo.prestamos
+          .filter(p => parseFloat(p.saldo_pendiente || 0) > 0)
+          .sort((a, b) => new Date(a.fecha_prestamo || a.created_at) - new Date(b.fecha_prestamo || b.created_at));
 
-      if (response.ok) {
-        toast.success(tipo === 'Prestamo' ? 'Prestamo registrado' : 'Abono registrado');
-        cargarPrestamos();
-        cerrarModalMovimiento();
-        return;
-      }
+        let montoRestante = datos.monto;
+        for (const prestamo of prestamosActivos) {
+          if (montoRestante <= 0) break;
+          const saldoPrestamo = parseFloat(prestamo.saldo_pendiente || 0);
+          const montoAbonar = Math.min(montoRestante, saldoPrestamo);
 
-      const ct = response.headers.get('content-type');
-      if (ct && ct.includes('application/json')) {
-        const err = await response.json();
-        throw new Error(err.message || 'Error');
+          const response = await fetch(`${API_URL}/api/prestamos/${prestamo.id}/abono`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('ss_token')}`
+            },
+            body: JSON.stringify({
+              monto: montoAbonar,
+              observaciones: datos.observaciones || '',
+              fecha: datos.fecha
+            })
+          });
+          if (!response.ok) throw new Error(`Error al abonar al prestamo #${prestamo.id}`);
+          montoRestante -= montoAbonar;
+        }
+        toast.success('Abono registrado');
       }
-      throw new Error('Endpoint no disponible');
+      cargarPrestamos();
+      cerrarModalMovimiento();
     } catch (error) {
       console.error('Error:', error);
-      if (error.message.includes('Failed to fetch') || error.message.includes('no disponible')) {
-        toast.error(`El endpoint de ${tipo === 'Prestamo' ? 'prestamos' : 'abonos'} no esta disponible. Hugo necesita implementarlo.`);
-      } else {
-        toast.error(error.message);
-      }
+      toast.error(error.message);
     } finally {
       setLoading(false);
     }
@@ -359,7 +375,7 @@ const Prestamos = () => {
                 if (tipoMovimiento === 'Abono' && monto > empleadoMovimiento.saldo) {
                   if (!confirm(`El abono ($${monto.toFixed(2)}) es mayor al saldo ($${empleadoMovimiento.saldo.toFixed(2)}). Continuar?`)) return;
                 }
-                registrarMovimiento(empleadoMovimiento.empleado_id, tipoMovimiento, {
+                registrarMovimiento(empleadoMovimiento, tipoMovimiento, {
                   monto,
                   fecha: fd.get('fecha'),
                   observaciones: fd.get('observaciones') || ''
