@@ -816,7 +816,7 @@ const Nomina = () => {
                   <div className="col-md-4">
                     <div className="btn-group w-100">
                       {!nominaGuardada && (
-                        <button className="btn btn-outline-secondary" onClick={guardarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes antes de guardar' : 'Guardar borrador sin procesar'}>
+                        <button className="btn btn-outline-secondary" onClick={guardarNomina} disabled={loading} title="Guardar borrador sin procesar">
                           {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar Borrador</>}
                         </button>
                       )}
