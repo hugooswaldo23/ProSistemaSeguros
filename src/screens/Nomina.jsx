@@ -312,6 +312,7 @@ const Nomina = () => {
           comisionTotal: comisionTotal,
           porcentajeProducto: porcentajeComision,
           tipo: esCompartida ? 'Compartida' : 'Directa',
+          agenteId: agente.id,
           nombreAgente: nombreAgenteCompleto,
           porcentajeAgente: esCompartida ? (100 - porcentajeVendedorSugerido) : 100,
           comisionAgente: esCompartida ? comisionTotal * ((100 - porcentajeVendedorSugerido) / 100) : comisionTotal,
@@ -443,8 +444,8 @@ const Nomina = () => {
       item.comisionAgente = comisionTotal * (item.porcentajeAgenteEdit / 100);
       item.comisionVendedor = comisionTotal * (item.porcentajeVendedorEdit / 100);
       item.porcentajeProducto = item.comisionBaseEdit;
-      item.porcentajeAgente = item.comisionBaseEdit * (item.porcentajeAgenteEdit / 100);
-      item.porcentajeVendedor = item.comisionBaseEdit * (item.porcentajeVendedorEdit / 100);
+      item.porcentajeAgente = item.porcentajeAgenteEdit;
+      item.porcentajeVendedor = item.porcentajeVendedorEdit;
       
       nuevos[index] = item;
       return nuevos;
@@ -504,7 +505,7 @@ const Nomina = () => {
         nuevos = nuevos.map(emp => {
           if (emp.perfil !== 'Agente' && emp.detalleComisiones?.length > 0) {
             // Quitar las comisiones que venían de este agente
-            const detallesFiltrados = emp.detalleComisiones.filter(d => d.nombreAgente !== empleadoDetalle.nombre);
+            const detallesFiltrados = emp.detalleComisiones.filter(d => d.agenteId !== agenteId);
             const comisionesFiltradas = detallesFiltrados.reduce((s, d) => s + (d.comision || 0), 0);
             const nuevoSubtotal = emp.sueldo + comisionesFiltradas;
             return {
