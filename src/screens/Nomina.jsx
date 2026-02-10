@@ -277,6 +277,11 @@ const Nomina = () => {
           const nombreAgenteCompleto = `${agente.nombre || ''} ${agente.apellidoPaterno || ''}`.trim();
           const nombreVendedorCompleto = `${vendedor.nombre || ''} ${vendedor.apellidoPaterno || ''}`.trim();
           
+          // Construir descripción del bien asegurado
+          const bienAsegurado = recibo.expediente.marca || recibo.expediente.modelo
+            ? `${recibo.expediente.marca || ''} ${recibo.expediente.modelo || ''}`.trim()
+            : `${recibo.expediente.nombre || ''} ${recibo.expediente.apellido_paterno || ''}`.trim();
+          
           const datosCompartidos = {
             expediente_id: recibo.expediente.id,
             recibo_id: recibo.id,
@@ -284,6 +289,9 @@ const Nomina = () => {
             compania: recibo.compania,
             clave: claveAgente,
             producto: recibo.producto,
+            tipo_cobertura: recibo.expediente.tipo_cobertura || '',
+            bien_asegurado: bienAsegurado,
+            anio: recibo.expediente.anio || '',
             prima: primaBase,
             comisionTotal: comisionTotal,
             porcentajeProducto: porcentajeComision,
@@ -317,6 +325,11 @@ const Nomina = () => {
             detalleComisionesPorEmpleado[agente.id] = [];
           }
           comisionesPorEmpleado[agente.id] += comisionTotal;
+          // Construir descripción del bien asegurado
+          const bienAseguradoDir = recibo.expediente.marca || recibo.expediente.modelo
+            ? `${recibo.expediente.marca || ''} ${recibo.expediente.modelo || ''}`.trim()
+            : `${recibo.expediente.nombre || ''} ${recibo.expediente.apellido_paterno || ''}`.trim();
+          
           detalleComisionesPorEmpleado[agente.id].push({
             expediente_id: recibo.expediente.id,
             recibo_id: recibo.id,
@@ -324,6 +337,9 @@ const Nomina = () => {
             compania: recibo.compania,
             clave: claveAgente,
             producto: recibo.producto,
+            tipo_cobertura: recibo.expediente.tipo_cobertura || '',
+            bien_asegurado: bienAseguradoDir,
+            anio: recibo.expediente.anio || '',
             prima: primaBase,
             comision: comisionTotal,
             comisionTotal: comisionTotal,
@@ -510,6 +526,9 @@ const Nomina = () => {
             poliza: det.poliza,
             compania: det.compania,
             producto: det.producto,
+            tipo_cobertura: det.tipo_cobertura,
+            bien_asegurado: det.bien_asegurado,
+            anio: det.anio,
             clave: det.clave,
             prima: det.prima,
             comision_total: det.comisionTotal,
@@ -869,13 +888,26 @@ const Nomina = () => {
                                       <div className="card-body py-2">
                                         {item.detalleComisiones?.length > 0 ? (
                                           <>
-                                            <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                                            <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
                                               {item.detalleComisiones.map((det, i) => (
-                                                <div key={i} className="d-flex justify-content-between border-bottom py-1" style={{ fontSize: '0.7rem' }}>
-                                                  <span className="text-truncate me-2" style={{ maxWidth: '60%' }}>
-                                                    {det.poliza} <small className="text-muted">({det.compania})</small>
-                                                  </span>
-                                                  <span className="text-success fw-bold text-nowrap">{formatMoney(det.comision)}</span>
+                                                <div key={i} className={`border-bottom py-1 ${det.tipo === 'Compartida' ? 'bg-warning bg-opacity-10' : ''}`} style={{ fontSize: '0.7rem' }}>
+                                                  <div className="d-flex justify-content-between">
+                                                    <span className="fw-bold">{det.poliza}</span>
+                                                    <span className="text-success fw-bold text-nowrap">{formatMoney(det.comision)}</span>
+                                                  </div>
+                                                  <div className="text-muted" style={{ fontSize: '0.6rem' }}>
+                                                    {det.compania} · {det.producto} {det.tipo_cobertura ? `(${det.tipo_cobertura})` : ''}
+                                                  </div>
+                                                  {det.bien_asegurado && (
+                                                    <div style={{ fontSize: '0.6rem' }}>{det.bien_asegurado} {det.anio ? `(${det.anio})` : ''}</div>
+                                                  )}
+                                                  {det.tipo === 'Compartida' && (
+                                                    <div style={{ fontSize: '0.6rem' }}>
+                                                      <span className="badge bg-warning text-dark" style={{ fontSize: '0.55rem' }}>Compartida</span>
+                                                      <span className="ms-1">con {item.perfil === 'Agente' ? det.nombreVendedor : det.nombreAgente}</span>
+                                                      <span className="ms-1 text-muted">({item.perfil === 'Agente' ? `${det.porcentajeAgente}% tuyo` : `${det.porcentajeVendedor}% tuyo`})</span>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               ))}
                                             </div>
@@ -1114,7 +1146,8 @@ const Nomina = () => {
                       <thead className="table-dark">
                         <tr>
                           <th style={{ fontSize: '0.65rem' }}>Aseg / Póliza</th>
-                          <th style={{ fontSize: '0.65rem' }}>Producto</th>
+                          <th style={{ fontSize: '0.65rem' }}>Producto / Asegurado</th>
+                          <th style={{ fontSize: '0.65rem' }}>Tipo</th>
                           <th style={{ fontSize: '0.65rem' }}>Vendedor</th>
                           <th style={{ fontSize: '0.65rem' }}>Prima</th>
                           <th style={{ fontSize: '0.65rem' }}>%Com</th>
@@ -1132,9 +1165,13 @@ const Nomina = () => {
                               <small className="text-muted d-block" style={{ fontSize: '0.6rem' }}>{com.compania}</small>
                               <strong style={{ fontSize: '0.65rem' }}>{com.poliza}</strong>
                             </td>
-                            <td style={{ padding: '4px' }}>
+                            <td className="text-start" style={{ padding: '4px' }}>
                               <span className="badge bg-primary" style={{ fontSize: '0.6rem' }}>{com.producto}</span>
-                              {com.clave && <small className="text-muted d-block" style={{ fontSize: '0.55rem' }}>{com.clave}</small>}
+                              {com.tipo_cobertura && <small className="text-muted ms-1" style={{ fontSize: '0.55rem' }}>{com.tipo_cobertura}</small>}
+                              {com.bien_asegurado && <div style={{ fontSize: '0.55rem' }} className="text-truncate" title={com.bien_asegurado}>{com.bien_asegurado} {com.anio ? `(${com.anio})` : ''}</div>}
+                            </td>
+                            <td style={{ padding: '4px', fontSize: '0.6rem' }}>
+                              {com.es_comision_compartida ? <span className="badge bg-warning text-dark" style={{ fontSize: '0.55rem' }}>Compartida</span> : <span className="badge bg-secondary" style={{ fontSize: '0.55rem' }}>Directa</span>}
                             </td>
                             <td style={{ padding: '4px', fontSize: '0.65rem' }}>{com.nombre_vendedor || '-'}</td>
                             <td style={{ fontSize: '0.65rem', padding: '4px' }}>{formatMoney(com.prima)}</td>
@@ -1149,7 +1186,7 @@ const Nomina = () => {
                       </tbody>
                       <tfoot className="table-light">
                         <tr>
-                          <th colSpan="6" className="text-end" style={{ fontSize: '0.65rem' }}>TOTALES:</th>
+                          <th colSpan="7" className="text-end" style={{ fontSize: '0.65rem' }}>TOTALES:</th>
                           <th className="text-success" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_agente || 0), 0))}</th>
                           <th></th>
                           <th className="text-info" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_vendedor || 0), 0))}</th>
@@ -1233,7 +1270,8 @@ const Nomina = () => {
                     <thead className="table-dark">
                       <tr>
                         <th style={{fontSize: '0.65rem'}}>Aseg / Póliza</th>
-                        <th style={{fontSize: '0.65rem'}}>Producto</th>
+                        <th style={{fontSize: '0.65rem'}}>Producto / Asegurado</th>
+                        <th style={{fontSize: '0.65rem'}}>Tipo</th>
                         <th style={{fontSize: '0.65rem'}}>Vendedor</th>
                         <th style={{fontSize: '0.65rem'}}>Prima</th>
                         <th style={{fontSize: '0.65rem'}}>%Com</th>
@@ -1251,9 +1289,13 @@ const Nomina = () => {
                             <small className="text-muted d-block" style={{fontSize: '0.6rem'}}>{det.compania}</small>
                             <strong style={{fontSize: '0.65rem'}}>{det.poliza}</strong>
                           </td>
-                          <td style={{padding: '4px'}}>
+                          <td className="text-start" style={{padding: '4px'}}>
                             <span className="badge bg-primary" style={{fontSize: '0.6rem'}}>{det.producto}</span>
-                            <small className="text-muted d-block" style={{fontSize: '0.55rem'}}>{det.clave}</small>
+                            {det.tipo_cobertura && <small className="text-muted ms-1" style={{fontSize: '0.55rem'}}>{det.tipo_cobertura}</small>}
+                            {det.bien_asegurado && <div style={{fontSize: '0.55rem'}} className="text-truncate" title={det.bien_asegurado}>{det.bien_asegurado} {det.anio ? `(${det.anio})` : ''}</div>}
+                          </td>
+                          <td style={{padding: '4px', fontSize: '0.6rem'}}>
+                            {det.tipo === 'Compartida' ? <span className="badge bg-warning text-dark" style={{fontSize: '0.55rem'}}>Compartida</span> : <span className="badge bg-secondary" style={{fontSize: '0.55rem'}}>Directa</span>}
                           </td>
                           <td style={{padding: '4px', fontSize: '0.65rem'}}>{det.nombreVendedor || '-'}</td>
                           <td style={{fontSize: '0.65rem', padding: '4px'}}>{formatMoney(det.prima)}</td>
@@ -1274,7 +1316,7 @@ const Nomina = () => {
                     </tbody>
                     <tfoot className="table-light">
                       <tr>
-                        <th colSpan="6" className="text-end" style={{fontSize: '0.65rem'}}>TOTALES:</th>
+                        <th colSpan="7" className="text-end" style={{fontSize: '0.65rem'}}>TOTALES:</th>
                         <th className="text-success" style={{fontSize: '0.65rem'}}>{formatMoney(detalleEditado.reduce((s, d) => s + (d.comisionAgente || 0), 0))}</th>
                         <th></th>
                         <th className="text-info" style={{fontSize: '0.65rem'}}>{formatMoney(detalleEditado.reduce((s, d) => s + (d.comisionVendedor || 0), 0))}</th>
