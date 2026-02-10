@@ -813,15 +813,15 @@ const Nomina = () => {
                   )}
                 </div>
                 {nominaGenerada && (
-                  <div className="col-md-3">
+                  <div className="col-md-4">
                     <div className="btn-group w-100">
                       {!nominaGuardada && (
-                        <button className="btn btn-info" onClick={guardarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes con comisiones compartidas antes de guardar' : 'Guardar como borrador en BD'}>
-                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar</>}
+                        <button className="btn btn-outline-secondary" onClick={guardarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes antes de guardar' : 'Guardar borrador sin procesar'}>
+                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar Borrador</>}
                         </button>
                       )}
-                      <button className="btn btn-success" onClick={cerrarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes con comisiones compartidas antes de cerrar' : 'Cerrar nómina y registrar comisiones'}>
-                        {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Cerrar</>}
+                      <button className="btn btn-success fw-bold" onClick={cerrarNomina} disabled={loading || !todosAgentesRevisados} title={!todosAgentesRevisados ? 'Revisa el detalle de todos los agentes antes de procesar' : 'Procesar nómina definitivamente'}>
+                        {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Procesar Nómina</>}
                       </button>
                     </div>
                   </div>
