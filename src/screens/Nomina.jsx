@@ -20,6 +20,7 @@ const Nomina = () => {
   const [datosNomina, setDatosNomina] = useState([]);
   const [historialNominas, setHistorialNominas] = useState([]);
   const [nominaSeleccionada, setNominaSeleccionada] = useState(null);
+  const [detalleNominaConsulta, setDetalleNominaConsulta] = useState(null);
   const [nominaGenerada, setNominaGenerada] = useState(false);
   const [nominaId, setNominaId] = useState(null);
   const [nominaGuardada, setNominaGuardada] = useState(false);
@@ -560,6 +561,26 @@ const Nomina = () => {
     } catch (error) { console.error('Error:', error); toast.error(error.message || 'Error al marcar como pagada'); }
   };
   
+  const cargarDetalleNomina = async (nomina) => {
+    setNominaSeleccionada(nomina);
+    setDetalleNominaConsulta(null);
+    setVistaActual('detalle');
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDetalleNominaConsulta(data);
+      } else {
+        toast.error('Error al cargar detalle de nómina');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al cargar detalle');
+    }
+  };
+
   const eliminarNomina = async (idNomina, codigo) => {
     if (!confirm(`¿Eliminar nómina ${codigo}? Esto revertirá sueldos y comisiones para que puedan recalcularse.`)) return;
     try {
@@ -828,7 +849,7 @@ const Nomina = () => {
                         <td className="text-center">{new Date(nomina.created_at).toLocaleDateString('es-MX')}</td>
                         <td className="text-center">
                           <div className="btn-group btn-group-sm">
-                            <button className="btn btn-outline-primary" onClick={() => { setNominaSeleccionada(nomina); setVistaActual('detalle'); }} title="Ver detalle"><Eye size={14} /></button>
+                            <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle"><Eye size={14} /></button>
                             {nomina.estatus === 'Cerrada' && (
                               <button className="btn btn-success" onClick={() => marcarComoPagada(nomina.id)} title="Marcar como pagada"><Check size={14} /></button>
                             )}
@@ -841,6 +862,104 @@ const Nomina = () => {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Vista: Detalle de Nómina (solo consulta) */}
+      {vistaActual === 'detalle' && nominaSeleccionada && (
+        <div>
+          <button className="btn btn-outline-secondary mb-3" onClick={() => setVistaActual('historial')}>
+            ← Volver al Historial
+          </button>
+          
+          <div className="card mb-4">
+            <div className="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+              <h5 className="mb-0"><FileText size={20} className="me-2" />Nómina {nominaSeleccionada.codigo}</h5>
+              <span className={`badge ${nominaSeleccionada.estatus === 'Pagada' ? 'bg-success' : nominaSeleccionada.estatus === 'Cerrada' ? 'bg-warning' : 'bg-secondary'}`}>{nominaSeleccionada.estatus}</span>
+            </div>
+            <div className="card-body py-2">
+              <div className="row text-center">
+                <div className="col-md-2"><small className="text-muted d-block">Período</small><strong>{new Date(nominaSeleccionada.fecha_inicio).toLocaleDateString('es-MX')} - {new Date(nominaSeleccionada.fecha_fin).toLocaleDateString('es-MX')}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Sueldos</small><strong className="text-info">{formatMoney(nominaSeleccionada.total_sueldos)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Comisiones</small><strong className="text-success">{formatMoney(nominaSeleccionada.total_comisiones)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Descuentos</small><strong className="text-danger">{formatMoney(nominaSeleccionada.total_descuentos)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Préstamos</small><strong className="text-warning">{formatMoney(nominaSeleccionada.total_prestamos_otorgados)}</strong></div>
+                <div className="col-md-2"><small className="text-muted d-block">Total Neto</small><h5 className="text-primary mb-0">{formatMoney(nominaSeleccionada.total_neto)}</h5></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header bg-light">
+              <h5 className="mb-0">Detalle por Empleado</h5>
+            </div>
+            <div className="card-body p-0">
+              {!detalleNominaConsulta ? (
+                <div className="text-center py-5">
+                  <span className="spinner-border" /><p className="mt-2 text-muted">Cargando detalle...</p>
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table className="table table-striped table-hover table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
+                    <thead className="table-dark">
+                      <tr>
+                        <th style={{ minWidth: '200px' }}>Empleado</th>
+                        <th className="text-end" style={{ width: '100px' }}>Sueldo</th>
+                        <th className="text-end" style={{ width: '100px' }}>Comisiones</th>
+                        <th className="text-end" style={{ width: '100px' }}>Subtotal</th>
+                        <th className="text-end" style={{ width: '100px' }}>Descuentos</th>
+                        <th className="text-end" style={{ width: '100px' }}>Préstamo (+)</th>
+                        <th className="text-end" style={{ width: '100px' }}>Cobro (-)</th>
+                        <th className="text-end" style={{ width: '120px' }}>Total Pagado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detalleNominaConsulta.detalles?.map((det) => {
+                        const emp = empleados.find(e => e.id === det.empleado_id);
+                        const nombre = emp ? `${emp.nombre || ''} ${emp.apellidoPaterno || ''}`.trim() : `Empleado #${det.empleado_id}`;
+                        const sueldo = parseFloat(det.sueldo || 0);
+                        const comisiones = parseFloat(det.comisiones || 0);
+                        const subtotal = sueldo + comisiones;
+                        const descuentos = parseFloat(det.descuentos || 0);
+                        const prestamoNuevo = parseFloat(det.prestamo_nuevo || 0);
+                        const cobroPrestamo = parseFloat(det.cobro_prestamo || 0);
+                        const totalPagar = parseFloat(det.total_pagar || 0);
+                        return (
+                          <tr key={det.id}>
+                            <td>
+                              <strong>{nombre}</strong>
+                              {det.detalle_comisiones?.length > 0 && (
+                                <span className="badge bg-success ms-2" style={{ fontSize: '0.65rem' }}>{det.detalle_comisiones.length} pólizas</span>
+                              )}
+                            </td>
+                            <td className="text-end">{formatMoney(sueldo)}</td>
+                            <td className="text-end text-success fw-bold">{formatMoney(comisiones)}</td>
+                            <td className="text-end fw-bold">{formatMoney(subtotal)}</td>
+                            <td className="text-end text-danger">{descuentos > 0 ? formatMoney(descuentos) : '-'}</td>
+                            <td className="text-end text-warning">{prestamoNuevo > 0 ? formatMoney(prestamoNuevo) : '-'}</td>
+                            <td className="text-end">{cobroPrestamo > 0 ? formatMoney(cobroPrestamo) : '-'}</td>
+                            <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(totalPagar)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="table-light">
+                      <tr>
+                        <th className="text-end">TOTALES:</th>
+                        <th className="text-end">{formatMoney(nominaSeleccionada.total_sueldos)}</th>
+                        <th className="text-end text-success">{formatMoney(nominaSeleccionada.total_comisiones)}</th>
+                        <th className="text-end">{formatMoney(parseFloat(nominaSeleccionada.total_sueldos || 0) + parseFloat(nominaSeleccionada.total_comisiones || 0))}</th>
+                        <th className="text-end text-danger">{formatMoney(nominaSeleccionada.total_descuentos)}</th>
+                        <th className="text-end text-warning">{formatMoney(nominaSeleccionada.total_prestamos_otorgados)}</th>
+                        <th className="text-end">{formatMoney(nominaSeleccionada.total_prestamos_cobrados)}</th>
+                        <th className="text-end text-primary" style={{ fontSize: '1.1rem' }}>{formatMoney(nominaSeleccionada.total_neto)}</th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
