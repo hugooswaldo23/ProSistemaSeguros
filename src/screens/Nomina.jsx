@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp, Users, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
@@ -19,6 +19,8 @@ const Nomina = () => {
   
   // Estados para datos
   const [datosNomina, setDatosNomina] = useState([]);
+  const [faseNomina, setFaseNomina] = useState('agentes'); // 'agentes' = solo agentes | 'completa' = distribuido a vendedores
+  const [datosPeriodicosSueldo, setDatosPeriodicosSueldo] = useState(null); // datos de sueldo para empleados no-agentes
   const [historialNominas, setHistorialNominas] = useState([]);
   const [nominaSeleccionada, setNominaSeleccionada] = useState(null);
   const [detalleNominaConsulta, setDetalleNominaConsulta] = useState(null);
@@ -233,14 +235,15 @@ const Nomina = () => {
         }
       });
       
-      const comisionesPorEmpleado = {};
-      const detalleComisionesPorEmpleado = {};
+      const comisionesPorAgente = {};
+      const detalleComisionesPorAgente = {};
       
       // Si el tipo de nómina es solo sueldos, omitir el cálculo de comisiones
       if (tipoNomina === 'solo_sueldos') {
         // No calcular comisiones - saltar directamente a generar empleados
       } else {
-      // Calcular comisiones (para 'completa' y 'solo_comisiones')
+      // FASE 1: Asignar TODAS las comisiones a los agentes (100% del total)
+      // Las compartidas se marcan con info del vendedor para distribuir después
       recibosPagadosEnPeriodo.forEach(recibo => {
         const porcentajeComision = obtenerComision(recibo.compania, recibo.producto);
         const primaBase = recibo.prima_neta;
@@ -256,106 +259,75 @@ const Nomina = () => {
           return nombreCompleto === nombreAgente || nombreAgente.includes(nombreCompleto) || nombreCompleto.includes(nombreAgente);
         }) : null;
         
+        if (!agente) return;
+        
         const vendedor = nombreSubAgente ? empleados.find(emp => {
           const nombreCompleto = `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim().toLowerCase();
           return nombreCompleto.includes(nombreSubAgente) || nombreSubAgente.includes(nombreCompleto.split(' ').slice(0, 2).join(' '));
         }) : null;
         
-        if (vendedor && agente) {
-          let porcentajeVendedor = 0;
-          
+        const nombreAgenteCompleto = `${agente.nombre || ''} ${agente.apellidoPaterno || ''}`.trim();
+        
+        // Construir descripción del bien asegurado
+        const bienAsegurado = recibo.expediente.marca || recibo.expediente.modelo
+          ? `${recibo.expediente.marca || ''} ${recibo.expediente.modelo || ''}`.trim()
+          : `${recibo.expediente.nombre || ''} ${recibo.expediente.apellido_paterno || ''}`.trim();
+        
+        // Determinar porcentaje sugerido del vendedor (para mostrar en preview)
+        let porcentajeVendedorSugerido = 0;
+        let nombreVendedorCompleto = '';
+        let vendedorId = null;
+        
+        if (vendedor) {
+          nombreVendedorCompleto = `${vendedor.nombre || ''} ${vendedor.apellidoPaterno || ''}`.trim();
+          vendedorId = vendedor.id;
           if (vendedor.comisionesCompartidas && Array.isArray(vendedor.comisionesCompartidas)) {
             const configComision = vendedor.comisionesCompartidas.find(cc => cc.clave === claveAgente);
             if (configComision) {
-              porcentajeVendedor = parseFloat(configComision.porcentajeVendedor) || 0;
+              porcentajeVendedorSugerido = parseFloat(configComision.porcentajeVendedor) || 0;
             }
           }
-          
-          const comisionVendedor = comisionTotal * (porcentajeVendedor / 100);
-          const comisionAgente = comisionTotal - comisionVendedor;
-          
-          const nombreAgenteCompleto = `${agente.nombre || ''} ${agente.apellidoPaterno || ''}`.trim();
-          const nombreVendedorCompleto = `${vendedor.nombre || ''} ${vendedor.apellidoPaterno || ''}`.trim();
-          
-          // Construir descripción del bien asegurado
-          const bienAsegurado = recibo.expediente.marca || recibo.expediente.modelo
-            ? `${recibo.expediente.marca || ''} ${recibo.expediente.modelo || ''}`.trim()
-            : `${recibo.expediente.nombre || ''} ${recibo.expediente.apellido_paterno || ''}`.trim();
-          
-          const datosCompartidos = {
-            expediente_id: recibo.expediente.id,
-            recibo_id: recibo.id,
-            poliza: recibo.expediente.numero_poliza,
-            compania: recibo.compania,
-            clave: claveAgente,
-            producto: recibo.producto,
-            tipo_cobertura: recibo.expediente.tipo_cobertura || '',
-            bien_asegurado: bienAsegurado,
-            anio: recibo.expediente.anio || '',
-            prima: primaBase,
-            comisionTotal: comisionTotal,
-            porcentajeProducto: porcentajeComision,
-            tipo: 'Compartida',
-            nombreAgente: nombreAgenteCompleto,
-            porcentajeAgente: 100 - porcentajeVendedor,
-            comisionAgente: comisionAgente,
-            nombreVendedor: nombreVendedorCompleto,
-            porcentajeVendedor: porcentajeVendedor,
-            comisionVendedor: comisionVendedor
-          };
-          
-          if (!comisionesPorEmpleado[vendedor.id]) {
-            comisionesPorEmpleado[vendedor.id] = 0;
-            detalleComisionesPorEmpleado[vendedor.id] = [];
-          }
-          comisionesPorEmpleado[vendedor.id] += comisionVendedor;
-          detalleComisionesPorEmpleado[vendedor.id].push({ ...datosCompartidos, comision: comisionVendedor });
-          
-          if (!comisionesPorEmpleado[agente.id]) {
-            comisionesPorEmpleado[agente.id] = 0;
-            detalleComisionesPorEmpleado[agente.id] = [];
-          }
-          comisionesPorEmpleado[agente.id] += comisionAgente;
-          detalleComisionesPorEmpleado[agente.id].push({ ...datosCompartidos, comision: comisionAgente });
-        } else if (agente) {
-          const nombreAgenteCompleto = `${agente.nombre || ''} ${agente.apellidoPaterno || ''}`.trim();
-          
-          if (!comisionesPorEmpleado[agente.id]) {
-            comisionesPorEmpleado[agente.id] = 0;
-            detalleComisionesPorEmpleado[agente.id] = [];
-          }
-          comisionesPorEmpleado[agente.id] += comisionTotal;
-          // Construir descripción del bien asegurado
-          const bienAseguradoDir = recibo.expediente.marca || recibo.expediente.modelo
-            ? `${recibo.expediente.marca || ''} ${recibo.expediente.modelo || ''}`.trim()
-            : `${recibo.expediente.nombre || ''} ${recibo.expediente.apellido_paterno || ''}`.trim();
-          
-          detalleComisionesPorEmpleado[agente.id].push({
-            expediente_id: recibo.expediente.id,
-            recibo_id: recibo.id,
-            poliza: recibo.expediente.numero_poliza,
-            compania: recibo.compania,
-            clave: claveAgente,
-            producto: recibo.producto,
-            tipo_cobertura: recibo.expediente.tipo_cobertura || '',
-            bien_asegurado: bienAseguradoDir,
-            anio: recibo.expediente.anio || '',
-            prima: primaBase,
-            comision: comisionTotal,
-            comisionTotal: comisionTotal,
-            porcentajeProducto: porcentajeComision,
-            tipo: 'Directa',
-            nombreAgente: nombreAgenteCompleto,
-            porcentajeAgente: 100,
-            comisionAgente: comisionTotal
-          });
         }
+        
+        const esCompartida = !!vendedor;
+        
+        if (!comisionesPorAgente[agente.id]) {
+          comisionesPorAgente[agente.id] = 0;
+          detalleComisionesPorAgente[agente.id] = [];
+        }
+        // En fase agentes, el agente ve la comisión TOTAL de la póliza
+        comisionesPorAgente[agente.id] += comisionTotal;
+        
+        detalleComisionesPorAgente[agente.id].push({
+          expediente_id: recibo.expediente.id,
+          recibo_id: recibo.id,
+          poliza: recibo.expediente.numero_poliza,
+          compania: recibo.compania,
+          clave: claveAgente,
+          producto: recibo.producto,
+          tipo_cobertura: recibo.expediente.tipo_cobertura || '',
+          bien_asegurado: bienAsegurado,
+          anio: recibo.expediente.anio || '',
+          prima: primaBase,
+          comision: comisionTotal,
+          comisionTotal: comisionTotal,
+          porcentajeProducto: porcentajeComision,
+          tipo: esCompartida ? 'Compartida' : 'Directa',
+          nombreAgente: nombreAgenteCompleto,
+          porcentajeAgente: esCompartida ? (100 - porcentajeVendedorSugerido) : 100,
+          comisionAgente: esCompartida ? comisionTotal * ((100 - porcentajeVendedorSugerido) / 100) : comisionTotal,
+          nombreVendedor: nombreVendedorCompleto,
+          vendedorId: vendedorId,
+          porcentajeVendedor: porcentajeVendedorSugerido,
+          comisionVendedor: esCompartida ? comisionTotal * (porcentajeVendedorSugerido / 100) : 0
+        });
       });
       } // end if tipoNomina !== 'solo_sueldos'
       
-      const empleadosActivos = empleados.filter(emp => emp.activo !== false);
+      // FASE 1: Solo mostrar agentes con todas sus pólizas
+      const agentesActivos = empleados.filter(emp => emp.activo !== false && emp.perfil === 'Agente');
       
-      const nominaReal = empleadosActivos.map(emp => {
+      const nominaAgentes = agentesActivos.map(emp => {
         const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
         
         // Calcular días ya pagados que se solapan con el período actual
@@ -365,7 +337,6 @@ const Nomina = () => {
         const finMs = fin.getTime();
         
         for (const [pInicio, pFin] of periodos) {
-          // Calcular overlap entre el período actual y el período ya pagado
           const overlapInicio = Math.max(inicioMs, pInicio);
           const overlapFin = Math.min(finMs, pFin);
           if (overlapInicio <= overlapFin) {
@@ -375,24 +346,24 @@ const Nomina = () => {
         }
         
         const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
-        // Si es solo comisiones, el sueldo es 0
         const sueldo = tipoNomina === 'solo_comisiones' ? 0 : sueldoDiario * diasAPagar;
-        const comisiones = comisionesPorEmpleado[emp.id] || 0;
-        const detalleComisiones = detalleComisionesPorEmpleado[emp.id] || [];
+        // En fase agentes, la comisión es el total (antes de distribuir a vendedores)
+        const comisionesTotal = comisionesPorAgente[emp.id] || 0;
+        const detalleComisiones = detalleComisionesPorAgente[emp.id] || [];
         const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
-        const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
+        const subtotal = Math.round((sueldo + comisionesTotal) * 100) / 100;
         
         return {
           empleado_id: emp.id,
           nombre: `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim(),
-          perfil: emp.perfil || 'Empleado',
+          perfil: emp.perfil || 'Agente',
           esquemaCompensacion: emp.esquemaCompensacion || 'mixto',
           sueldoDiario: sueldoDiario,
           diasPeriodo: diasPeriodo,
           diasYaPagados: diasYaPagados,
           diasAPagar: diasAPagar,
           sueldo: Math.round(sueldo * 100) / 100,
-          comisiones: Math.round(comisiones * 100) / 100,
+          comisiones: Math.round(comisionesTotal * 100) / 100,
           detalleComisiones: detalleComisiones,
           subtotal: subtotal,
           descuentos: 0,
@@ -404,12 +375,59 @@ const Nomina = () => {
         };
       });
       
-      setDatosNomina(nominaReal);
-      setNominaGenerada(true);
+      // Guardar datos de sueldo para empleados no-agentes (se usarán al distribuir)
+      const datosNoAgentes = empleados.filter(emp => emp.activo !== false && emp.perfil !== 'Agente').map(emp => {
+        const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
+        let diasYaPagados = 0;
+        const periodos = periodosYaPagados[emp.id] || [];
+        const inicioMs = inicio.getTime();
+        const finMs = fin.getTime();
+        for (const [pInicio, pFin] of periodos) {
+          const overlapInicio = Math.max(inicioMs, pInicio);
+          const overlapFin = Math.min(finMs, pFin);
+          if (overlapInicio <= overlapFin) {
+            diasYaPagados += Math.ceil((overlapFin - overlapInicio) / (1000 * 60 * 60 * 24)) + 1;
+          }
+        }
+        const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
+        return {
+          empleado_id: emp.id,
+          nombre: `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim(),
+          perfil: emp.perfil || 'Empleado',
+          esquemaCompensacion: emp.esquemaCompensacion || 'mixto',
+          sueldoDiario, diasPeriodo, diasYaPagados, diasAPagar,
+          saldo_prestamo: prestamosEmpleados[emp.id] || 0
+        };
+      });
+      setDatosPeriodicosSueldo(datosNoAgentes);
       
-      const polizasEncontradas = recibosPagadosEnPeriodo.length;
-      const tipoLabel = tipoNomina === 'solo_sueldos' ? ' (Solo Sueldos)' : tipoNomina === 'solo_comisiones' ? ' (Solo Comisiones)' : '';
-      toast.success(`Nómina${tipoLabel} generada: ${nominaReal.length} empleados, ${polizasEncontradas} pólizas pagadas en el período.`);
+      // Si es solo sueldos, ir directo a fase completa con todos los empleados
+      if (tipoNomina === 'solo_sueldos') {
+        const todosEmpleados = [...nominaAgentes, ...datosNoAgentes.map(emp => ({
+          ...emp,
+          sueldo: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100,
+          comisiones: 0,
+          detalleComisiones: [],
+          subtotal: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100,
+          descuentos: 0,
+          motivo_descuento: '',
+          prestamo_nuevo: 0,
+          cobro_prestamo: 0,
+          total_pagar: Math.round((emp.sueldoDiario * emp.diasAPagar) * 100) / 100
+        }))];
+        setDatosNomina(todosEmpleados);
+        setFaseNomina('completa');
+        setNominaGenerada(true);
+        toast.success(`Nómina (Solo Sueldos) generada: ${todosEmpleados.length} empleados.`);
+      } else {
+        setDatosNomina(nominaAgentes);
+        setFaseNomina('agentes');
+        setNominaGenerada(true);
+        
+        const polizasEncontradas = recibosPagadosEnPeriodo.length;
+        const agentesConComision = nominaAgentes.filter(a => a.comisiones > 0).length;
+        toast.success(`Fase 1: ${agentesConComision} agentes con ${polizasEncontradas} pólizas. Revisa y edita antes de distribuir a vendedores.`);
+      }
       
     } catch (error) {
       console.error('Error:', error);
@@ -459,6 +477,7 @@ const Nomina = () => {
       
       const comisionTotal = item.prima * (item.comisionBaseEdit / 100);
       item.comisionTotal = comisionTotal;
+      item.comision = comisionTotal; // Mantener en sync para display en fila expandida
       item.comisionAgente = comisionTotal * (item.porcentajeAgenteEdit / 100);
       item.comisionVendedor = comisionTotal * (item.porcentajeVendedorEdit / 100);
       item.porcentajeProducto = item.comisionBaseEdit;
@@ -472,9 +491,13 @@ const Nomina = () => {
   
   const aplicarCambiosDetalle = () => {
     if (!empleadoDetalle) return;
-    const esAgente = empleadoDetalle.perfil === 'Agente';
+    // En fase agentes: mostrar comisión TOTAL por póliza (antes de distribuir)
+    // En fase completa: mostrar solo la parte de esta persona
     const nuevaComision = detalleEditado.reduce((sum, det) => {
-      return sum + (esAgente ? det.comisionAgente : det.comisionVendedor);
+      if (faseNomina === 'agentes') {
+        return sum + (det.comisionTotal || det.comision || 0);
+      }
+      return sum + (det.comisionAgente || det.comision || 0);
     }, 0);
     
     setDatosNomina(prev => prev.map(emp => {
@@ -491,8 +514,93 @@ const Nomina = () => {
       return emp;
     }));
     
-    toast.success('Comisiones actualizadas');
+    toast.success('Comisiones del agente actualizadas');
     setEmpleadoDetalle(null);
+  };
+  
+  // FASE 2: Distribuir comisiones a vendedores y agregar todos los empleados
+  const distribuirVendedores = () => {
+    // Recopilar comisiones para vendedores desde los detalles de los agentes
+    const comisionesPorVendedor = {};
+    const detalleComisionesPorVendedor = {};
+    
+    // Recalcular las comisiones de agentes (solo su parte, no el total)
+    const agentesActualizados = datosNomina.map(agente => {
+      let comisionRealAgente = 0;
+      const detallesActualizados = agente.detalleComisiones.map(det => {
+        if (det.tipo === 'Compartida' && det.vendedorId) {
+          // Calcular split
+          const comisionAgente = det.comisionAgente || 0;
+          const comisionVendedor = det.comisionVendedor || 0;
+          comisionRealAgente += comisionAgente;
+          
+          // Acumular para el vendedor
+          if (!comisionesPorVendedor[det.vendedorId]) {
+            comisionesPorVendedor[det.vendedorId] = 0;
+            detalleComisionesPorVendedor[det.vendedorId] = [];
+          }
+          comisionesPorVendedor[det.vendedorId] += comisionVendedor;
+          detalleComisionesPorVendedor[det.vendedorId].push({
+            ...det,
+            comision: comisionVendedor // La parte del vendedor
+          });
+          
+          return { ...det, comision: comisionAgente }; // La parte del agente
+        } else {
+          // Directa: el agente se queda todo
+          comisionRealAgente += (det.comisionTotal || det.comision || 0);
+          return { ...det, comision: det.comisionTotal || det.comision || 0 };
+        }
+      });
+      
+      const sueldo = agente.sueldo;
+      const comisiones = Math.round(comisionRealAgente * 100) / 100;
+      const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
+      
+      return {
+        ...agente,
+        comisiones,
+        detalleComisiones: detallesActualizados,
+        subtotal,
+        total_pagar: Math.round((subtotal - agente.descuentos - agente.cobro_prestamo + (agente.prestamo_nuevo || 0)) * 100) / 100
+      };
+    });
+    
+    // Crear entradas para vendedores y otros empleados
+    const empleadosNoAgentes = (datosPeriodicosSueldo || []).map(emp => {
+      const sueldo = tipoNomina === 'solo_comisiones' ? 0 : (emp.sueldoDiario * emp.diasAPagar);
+      const comisiones = comisionesPorVendedor[emp.empleado_id] || 0;
+      const detalleComisiones = detalleComisionesPorVendedor[emp.empleado_id] || [];
+      const subtotal = Math.round((sueldo + comisiones) * 100) / 100;
+      
+      return {
+        empleado_id: emp.empleado_id,
+        nombre: emp.nombre,
+        perfil: emp.perfil,
+        esquemaCompensacion: emp.esquemaCompensacion,
+        sueldoDiario: emp.sueldoDiario,
+        diasPeriodo: emp.diasPeriodo,
+        diasYaPagados: emp.diasYaPagados,
+        diasAPagar: emp.diasAPagar,
+        sueldo: Math.round(sueldo * 100) / 100,
+        comisiones: Math.round(comisiones * 100) / 100,
+        detalleComisiones: detalleComisiones,
+        subtotal,
+        descuentos: 0,
+        motivo_descuento: '',
+        saldo_prestamo: emp.saldo_prestamo || 0,
+        prestamo_nuevo: 0,
+        cobro_prestamo: 0,
+        total_pagar: subtotal
+      };
+    });
+    
+    // Combinar: agentes actualizados + vendedores/empleados
+    setDatosNomina([...agentesActualizados, ...empleadosNoAgentes]);
+    setFaseNomina('completa');
+    
+    const vendedoresConComision = Object.keys(comisionesPorVendedor).length;
+    toast.success(`Distribución completa: ${vendedoresConComision} vendedor(es) con comisiones asignadas. Nómina lista para guardar.`);
   };
   
   const totales = useMemo(() => {
@@ -580,6 +688,7 @@ const Nomina = () => {
       if (response.ok) {
         toast.success('Nómina cerrada exitosamente. Las comisiones han sido registradas.');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
+        setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
         cargarHistorialNominas(); cargarPrestamosEmpleados();
       } else {
         const error = await response.json();
@@ -590,6 +699,7 @@ const Nomina = () => {
       if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
         toast.success('Nómina cerrada exitosamente (modo desarrollo)');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
+        setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
       } else {
         toast.error(error.message || 'Error al cerrar la nómina');
       }
@@ -654,7 +764,8 @@ const Nomina = () => {
 
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
-    setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false); setEmpleadoExpandido(null);
+    setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false); 
+    setEmpleadoExpandido(null); setFaseNomina('agentes'); setDatosPeriodicosSueldo(null);
   };
   
   const formatMoney = (value) => {
@@ -737,16 +848,22 @@ const Nomina = () => {
                 </div>
                 {nominaGenerada && (
                   <div className="col-md-3">
-                    <div className="btn-group w-100">
-                      {!nominaGuardada && (
-                        <button className="btn btn-info" onClick={guardarNomina} disabled={loading} title="Guardar como borrador en BD">
-                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar</>}
-                        </button>
-                      )}
-                      <button className="btn btn-success" onClick={cerrarNomina} disabled={loading} title="Cerrar nómina y registrar comisiones">
-                        {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Cerrar</>}
+                    {faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' ? (
+                      <button className="btn btn-warning w-100 fw-bold" onClick={distribuirVendedores} disabled={loading} title="Distribuir comisiones compartidas a vendedores y agregar empleados">
+                        <Users size={16} className="me-1" />Distribuir a Vendedores <ArrowRight size={16} className="ms-1" />
                       </button>
-                    </div>
+                    ) : (
+                      <div className="btn-group w-100">
+                        {!nominaGuardada && (
+                          <button className="btn btn-info" onClick={guardarNomina} disabled={loading} title="Guardar como borrador en BD">
+                            {loading ? <span className="spinner-border spinner-border-sm" /> : <><Wallet size={16} className="me-1" />Guardar</>}
+                          </button>
+                        )}
+                        <button className="btn btn-success" onClick={cerrarNomina} disabled={loading} title="Cerrar nómina y registrar comisiones">
+                          {loading ? <span className="spinner-border spinner-border-sm" /> : <><Lock size={16} className="me-1" />Cerrar</>}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -754,6 +871,14 @@ const Nomina = () => {
           </div>
           
           {nominaGenerada && datosNomina.length > 0 && (
+            <>
+            {faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' && (
+              <div className="alert alert-warning py-2 mb-3 d-flex align-items-center" style={{ fontSize: '0.85rem' }}>
+                <AlertCircle size={18} className="me-2 flex-shrink-0" />
+                <span><strong>Fase 1 — Solo Agentes:</strong> Los montos de comisión mostrados son el <strong>total por póliza</strong> (antes de distribuir a vendedores). 
+                Revisa cada agente, edita % si necesitas, y luego da clic en <strong>"Distribuir a Vendedores"</strong> para calcular los splits y ver la nómina completa.</span>
+              </div>
+            )}
             <div className="row mb-4">
               <div className="col-md-2">
                 <div className="card bg-info text-white"><div className="card-body py-2"><small className="text-white-50">Sueldos</small><h5 className="mb-0">{formatMoney(totales.sueldos)}</h5></div></div>
@@ -774,12 +899,24 @@ const Nomina = () => {
                 <div className="card bg-primary text-white"><div className="card-body py-2"><small className="text-white-50">Total a Pagar</small><h5 className="mb-0">{formatMoney(totales.neto)}</h5></div></div>
               </div>
             </div>
+            </>
           )}
           
           <div className="card">
             <div className="card-header bg-light d-flex justify-content-between align-items-center">
-              <h5 className="mb-0">{nominaGenerada ? 'Detalle de Nómina' : 'Resultados'}</h5>
-              {nominaGenerada && datosNomina.length > 0 && (
+              <div>
+                <h5 className="mb-0 d-inline">
+                  {nominaGenerada 
+                    ? faseNomina === 'agentes' 
+                      ? 'Fase 1: Revisión de Comisiones por Agente' 
+                      : 'Nómina Completa' 
+                    : 'Resultados'}
+                </h5>
+                {nominaGenerada && faseNomina === 'agentes' && tipoNomina !== 'solo_sueldos' && (
+                  <small className="text-muted ms-2">Revisa las pólizas y % de cada agente, luego da clic en "Distribuir a Vendedores"</small>
+                )}
+              </div>
+              {nominaGenerada && datosNomina.length > 0 && faseNomina === 'completa' && (
                 <button className="btn btn-sm btn-success" onClick={() => toast.info('Exportación en desarrollo')}>
                   <Download size={16} className="me-2" />Exportar Excel
                 </button>
