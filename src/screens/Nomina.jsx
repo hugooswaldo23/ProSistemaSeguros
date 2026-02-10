@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
@@ -560,6 +560,28 @@ const Nomina = () => {
     } catch (error) { console.error('Error:', error); toast.error(error.message || 'Error al marcar como pagada'); }
   };
   
+  const eliminarNomina = async (idNomina, codigo) => {
+    if (!confirm(`¿Eliminar nómina ${codigo}? Esto revertirá sueldos y comisiones para que puedan recalcularse.`)) return;
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${idNomina}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (response.ok) {
+        toast.success(`Nómina ${codigo} eliminada`);
+        cargarHistorialNominas();
+      } else if (response.status === 404) {
+        toast.error('Endpoint DELETE /api/nominas/:id no disponible. Hugo necesita implementarlo.');
+      } else {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.message || 'Error al eliminar');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error(error.message || 'Error al eliminar nómina');
+    }
+  };
+
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
     setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
@@ -810,6 +832,7 @@ const Nomina = () => {
                             {nomina.estatus === 'Cerrada' && (
                               <button className="btn btn-success" onClick={() => marcarComoPagada(nomina.id)} title="Marcar como pagada"><Check size={14} /></button>
                             )}
+                            <button className="btn btn-outline-danger" onClick={() => eliminarNomina(nomina.id, nomina.codigo)} title="Eliminar nómina"><Trash2 size={14} /></button>
                           </div>
                         </td>
                       </tr>
