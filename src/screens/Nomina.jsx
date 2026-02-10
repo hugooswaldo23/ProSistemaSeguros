@@ -105,7 +105,7 @@ const Nomina = () => {
     
     setLoading(true);
     try {
-      const [expResponse, asegResponse, prodResponse] = await Promise.all([
+      const [expResponse, asegResponse, prodResponse, nominasResponse] = await Promise.all([
         fetch(`${API_URL}/api/expedientes`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         }),
@@ -113,6 +113,9 @@ const Nomina = () => {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         }),
         fetch(`${API_URL}/api/tiposProductos`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+        }),
+        fetch(`${API_URL}/api/nominas`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
         })
       ]);
@@ -124,6 +127,38 @@ const Nomina = () => {
       const expedientes = await expResponse.json();
       const aseguradoras = asegResponse.ok ? await asegResponse.json() : [];
       const tiposProductos = prodResponse.ok ? await prodResponse.json() : [];
+      
+      // Recopilar recibo_ids ya comisionados en nóminas previas (Pagada/Cerrada)
+      const recibosYaPagados = new Set();
+      if (nominasResponse.ok) {
+        const nominasPrevias = await nominasResponse.json();
+        for (const nomina of nominasPrevias) {
+          if (nomina.estatus === 'Pagada' || nomina.estatus === 'Cerrada') {
+            // Cargar detalle de cada nómina para extraer recibo_ids
+            try {
+              const detResp = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+              });
+              if (detResp.ok) {
+                const detData = await detResp.json();
+                if (detData.detalles) {
+                  detData.detalles.forEach(det => {
+                    if (det.detalle_comisiones && Array.isArray(det.detalle_comisiones)) {
+                      det.detalle_comisiones.forEach(com => {
+                        if (com.recibo_id) recibosYaPagados.add(com.recibo_id);
+                      });
+                    }
+                  });
+                }
+              }
+            } catch (e) { /* continuar sin este detalle */ }
+          }
+        }
+      }
+      
+      if (recibosYaPagados.size > 0) {
+        console.log(`Excluyendo ${recibosYaPagados.size} recibos ya comisionados en nóminas anteriores`);
+      }
       
       const productoIdMap = {};
       tiposProductos.forEach(prod => {
@@ -158,6 +193,9 @@ const Nomina = () => {
         if (exp.recibos && Array.isArray(exp.recibos)) {
           exp.recibos.forEach(recibo => {
             if (recibo.estatus === 'Pagado' && recibo.fecha_pago_real) {
+              // Excluir recibos ya comisionados en nóminas anteriores
+              if (recibosYaPagados.has(recibo.id)) return;
+              
               const fechaPago = new Date(recibo.fecha_pago_real);
               if (fechaPago >= inicio && fechaPago <= fin) {
                 let primaBase = parseFloat(exp.prima_neta) || parseFloat(exp.subtotal) || 0;
