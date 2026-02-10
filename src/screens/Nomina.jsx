@@ -128,13 +128,18 @@ const Nomina = () => {
       const aseguradoras = asegResponse.ok ? await asegResponse.json() : [];
       const tiposProductos = prodResponse.ok ? await prodResponse.json() : [];
       
-      // Recopilar recibo_ids ya comisionados en nóminas previas (Pagada/Cerrada)
+      // Recopilar recibo_ids ya comisionados y días de sueldo ya pagados en nóminas previas (Pagada/Cerrada)
       const recibosYaPagados = new Set();
+      // Guardar períodos ya pagados por empleado para evitar pagar sueldo doble
+      // Estructura: { empleado_id: [ [inicioMs, finMs], ... ] }
+      const periodosYaPagados = {};
       if (nominasResponse.ok) {
         const nominasPrevias = await nominasResponse.json();
         for (const nomina of nominasPrevias) {
           if (nomina.estatus === 'Pagada' || nomina.estatus === 'Cerrada') {
-            // Cargar detalle de cada nómina para extraer recibo_ids
+            const nomInicio = new Date(nomina.fecha_inicio);
+            const nomFin = new Date(nomina.fecha_fin);
+            // Cargar detalle de cada nómina para extraer recibo_ids y empleados con sueldo
             try {
               const detResp = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
@@ -143,10 +148,16 @@ const Nomina = () => {
                 const detData = await detResp.json();
                 if (detData.detalles) {
                   detData.detalles.forEach(det => {
+                    // Recibos ya comisionados
                     if (det.detalle_comisiones && Array.isArray(det.detalle_comisiones)) {
                       det.detalle_comisiones.forEach(com => {
                         if (com.recibo_id) recibosYaPagados.add(com.recibo_id);
                       });
+                    }
+                    // Empleados que ya recibieron sueldo en este período
+                    if (parseFloat(det.sueldo || 0) > 0) {
+                      if (!periodosYaPagados[det.empleado_id]) periodosYaPagados[det.empleado_id] = [];
+                      periodosYaPagados[det.empleado_id].push([nomInicio.getTime(), nomFin.getTime()]);
                     }
                   });
                 }
@@ -320,7 +331,25 @@ const Nomina = () => {
       
       const nominaReal = empleadosActivos.map(emp => {
         const sueldoDiario = parseFloat(emp.sueldoDiario) || 0;
-        const sueldo = sueldoDiario * diasPeriodo;
+        
+        // Calcular días ya pagados que se solapan con el período actual
+        let diasYaPagados = 0;
+        const periodos = periodosYaPagados[emp.id] || [];
+        const inicioMs = inicio.getTime();
+        const finMs = fin.getTime();
+        
+        for (const [pInicio, pFin] of periodos) {
+          // Calcular overlap entre el período actual y el período ya pagado
+          const overlapInicio = Math.max(inicioMs, pInicio);
+          const overlapFin = Math.min(finMs, pFin);
+          if (overlapInicio <= overlapFin) {
+            const diasOverlap = Math.ceil((overlapFin - overlapInicio) / (1000 * 60 * 60 * 24)) + 1;
+            diasYaPagados += diasOverlap;
+          }
+        }
+        
+        const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
+        const sueldo = sueldoDiario * diasAPagar;
         const comisiones = comisionesPorEmpleado[emp.id] || 0;
         const detalleComisiones = detalleComisionesPorEmpleado[emp.id] || [];
         const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
