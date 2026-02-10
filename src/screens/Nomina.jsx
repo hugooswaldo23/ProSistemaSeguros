@@ -582,7 +582,7 @@ const Nomina = () => {
   }, [agentesPendientes, agentesRevisados]);
   
   const guardarNomina = async () => {
-    if (!datosNomina.length) { toast.error('No hay datos de nómina para guardar'); return; }
+    if (!datosNomina.length) { toast.error('No hay datos de nómina para guardar'); return null; }
     setLoading(true);
     try {
       const nominaData = {
@@ -628,6 +628,7 @@ const Nomina = () => {
         setNominaId(result.id);
         setNominaGuardada(true);
         toast.success(`Nómina guardada con código: ${result.codigo}`);
+        return result.id;
       } else {
         const error = await response.json();
         throw new Error(error.message || 'Error al guardar la nómina');
@@ -635,18 +636,24 @@ const Nomina = () => {
     } catch (error) {
       console.error('Error al guardar nómina:', error);
       toast.error(error.message || 'Error al guardar la nómina');
+      return null;
     } finally {
       setLoading(false);
     }
   };
   
   const cerrarNomina = async () => {
-    if (!confirm('¿Estás seguro de cerrar esta nómina? Una vez cerrada no podrás editarla.')) return;
-    if (!nominaGuardada) { await guardarNomina(); if (!nominaId) return; }
+    if (!confirm('¿Procesar nómina? Una vez procesada no podrás editarla.')) return;
+    
+    let idNomina = nominaId;
+    if (!nominaGuardada) {
+      idNomina = await guardarNomina();
+      if (!idNomina) return;
+    }
     
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/nominas/${nominaId}/cerrar`, {
+      const response = await fetch(`${API_URL}/api/nominas/${idNomina}/cerrar`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
       });
