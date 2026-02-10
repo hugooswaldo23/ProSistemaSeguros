@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2 } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
@@ -12,6 +12,7 @@ const Nomina = () => {
   // Estados para filtros del reporte de nómina
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
+  const [tipoNomina, setTipoNomina] = useState('completa'); // 'completa' | 'solo_sueldos' | 'solo_comisiones'
   
   // Usar el hook de equipo de trabajo
   const { equipoDeTrabajo: empleados, loading: loadingEmpleados } = useEquipoDeTrabajo();
@@ -28,6 +29,7 @@ const Nomina = () => {
   const [detalleEditado, setDetalleEditado] = useState([]);
   const [comisionesConsulta, setComisionesConsulta] = useState(null);
   const [prestamosEmpleados, setPrestamosEmpleados] = useState({});
+  const [empleadoExpandido, setEmpleadoExpandido] = useState(null); // id del empleado con row expandido
   
   // Establecer fechas por defecto al montar
   useEffect(() => {
@@ -234,6 +236,11 @@ const Nomina = () => {
       const comisionesPorEmpleado = {};
       const detalleComisionesPorEmpleado = {};
       
+      // Si el tipo de nómina es solo sueldos, omitir el cálculo de comisiones
+      if (tipoNomina === 'solo_sueldos') {
+        // No calcular comisiones - saltar directamente a generar empleados
+      } else {
+      // Calcular comisiones (para 'completa' y 'solo_comisiones')
       recibosPagadosEnPeriodo.forEach(recibo => {
         const porcentajeComision = obtenerComision(recibo.compania, recibo.producto);
         const primaBase = recibo.prima_neta;
@@ -328,6 +335,7 @@ const Nomina = () => {
           });
         }
       });
+      } // end if tipoNomina !== 'solo_sueldos'
       
       const empleadosActivos = empleados.filter(emp => emp.activo !== false);
       
@@ -351,7 +359,8 @@ const Nomina = () => {
         }
         
         const diasAPagar = Math.max(0, diasPeriodo - diasYaPagados);
-        const sueldo = sueldoDiario * diasAPagar;
+        // Si es solo comisiones, el sueldo es 0
+        const sueldo = tipoNomina === 'solo_comisiones' ? 0 : sueldoDiario * diasAPagar;
         const comisiones = comisionesPorEmpleado[emp.id] || 0;
         const detalleComisiones = detalleComisionesPorEmpleado[emp.id] || [];
         const saldoPrestamo = prestamosEmpleados[emp.id] || 0;
@@ -362,6 +371,10 @@ const Nomina = () => {
           nombre: `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim(),
           perfil: emp.perfil || 'Empleado',
           esquemaCompensacion: emp.esquemaCompensacion || 'mixto',
+          sueldoDiario: sueldoDiario,
+          diasPeriodo: diasPeriodo,
+          diasYaPagados: diasYaPagados,
+          diasAPagar: diasAPagar,
           sueldo: Math.round(sueldo * 100) / 100,
           comisiones: Math.round(comisiones * 100) / 100,
           detalleComisiones: detalleComisiones,
@@ -379,7 +392,8 @@ const Nomina = () => {
       setNominaGenerada(true);
       
       const polizasEncontradas = recibosPagadosEnPeriodo.length;
-      toast.success(`Nómina generada: ${nominaReal.length} empleados, ${polizasEncontradas} pólizas pagadas en el período.`);
+      const tipoLabel = tipoNomina === 'solo_sueldos' ? ' (Solo Sueldos)' : tipoNomina === 'solo_comisiones' ? ' (Solo Comisiones)' : '';
+      toast.success(`Nómina${tipoLabel} generada: ${nominaReal.length} empleados, ${polizasEncontradas} pólizas pagadas en el período.`);
       
     } catch (error) {
       console.error('Error:', error);
@@ -483,14 +497,29 @@ const Nomina = () => {
     try {
       const nominaData = {
         fecha_inicio: fechaInicio, fecha_fin: fechaFin, tipo_periodo: 'Quincenal',
+        tipo_nomina: tipoNomina,
         detalles: datosNomina.map(emp => ({
           empleado_id: emp.empleado_id, sueldo: emp.sueldo, comisiones: emp.comisiones,
           descuentos: emp.descuentos, motivo_descuento: emp.motivo_descuento,
           prestamo_nuevo: emp.prestamo_nuevo, cobro_prestamo: emp.cobro_prestamo,
+          sueldo_diario: emp.sueldoDiario, dias_periodo: emp.diasPeriodo, dias_pagados: emp.diasAPagar,
           detalle_comisiones: emp.detalleComisiones?.map(det => ({
             expediente_id: det.expediente_id, recibo_id: det.recibo_id,
             monto_comision: det.comision, porcentaje_aplicado: det.porcentajeProducto,
-            es_comision_compartida: det.tipo === 'Compartida'
+            es_comision_compartida: det.tipo === 'Compartida',
+            poliza: det.poliza,
+            compania: det.compania,
+            producto: det.producto,
+            clave: det.clave,
+            prima: det.prima,
+            comision_total: det.comisionTotal,
+            tipo: det.tipo,
+            nombre_agente: det.nombreAgente,
+            porcentaje_agente: det.porcentajeAgente,
+            comision_agente: det.comisionAgente,
+            nombre_vendedor: det.nombreVendedor,
+            porcentaje_vendedor: det.porcentajeVendedor,
+            comision_vendedor: det.comisionVendedor
           })) || []
         }))
       };
@@ -606,7 +635,7 @@ const Nomina = () => {
 
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
-    setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
+    setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false); setEmpleadoExpandido(null);
   };
   
   const formatMoney = (value) => {
@@ -666,13 +695,21 @@ const Nomina = () => {
                   <label className="form-label">Fecha Fin</label>
                   <input type="date" className="form-control" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} disabled={nominaGenerada} />
                 </div>
-                <div className="col-md-3">
+                <div className="col-md-2">
+                  <label className="form-label">Tipo de Nómina</label>
+                  <select className="form-select" value={tipoNomina} onChange={(e) => setTipoNomina(e.target.value)} disabled={nominaGenerada}>
+                    <option value="completa">Completa</option>
+                    <option value="solo_sueldos">Solo Sueldos</option>
+                    <option value="solo_comisiones">Solo Comisiones</option>
+                  </select>
+                </div>
+                <div className="col-md-2">
                   {!nominaGenerada ? (
                     <button className="btn btn-primary w-100" onClick={generarNomina} disabled={loading || loadingEmpleados}>
                       {loading || loadingEmpleados ? (
                         <><span className="spinner-border spinner-border-sm me-2" />{loadingEmpleados ? 'Cargando empleados...' : 'Generando...'}</>
                       ) : (
-                        <><FileText size={18} className="me-2" />Generar Nómina ({empleados.length})</>
+                        <><FileText size={18} className="me-2" />Generar ({empleados.length})</>
                       )}
                     </button>
                   ) : (
@@ -759,10 +796,16 @@ const Nomina = () => {
                     </thead>
                     <tbody>
                       {datosNomina.map((item, index) => (
-                        <tr key={item.empleado_id}>
+                        <React.Fragment key={item.empleado_id}>
+                        <tr>
                           <td>
                             <div className="d-flex justify-content-between align-items-center">
-                              <strong>{item.nombre}</strong>
+                              <div className="d-flex align-items-center">
+                                <button className="btn btn-sm btn-link p-0 me-1" onClick={() => setEmpleadoExpandido(empleadoExpandido === item.empleado_id ? null : item.empleado_id)} title="Ver desglose">
+                                  {empleadoExpandido === item.empleado_id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                </button>
+                                <strong>{item.nombre}</strong>
+                              </div>
                               {item.detalleComisiones?.length > 0 && (
                                 <button className="btn btn-sm btn-outline-success py-0 px-1" onClick={() => abrirDetalleEmpleado(item)} title="Ver/Editar detalle de comisiones">
                                   <Eye size={14} className="me-1" />{item.detalleComisiones.length}
@@ -792,6 +835,85 @@ const Nomina = () => {
                           </td>
                           <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(item.total_pagar)}</td>
                         </tr>
+                        {/* Fila expandida con desglose del empleado */}
+                        {empleadoExpandido === item.empleado_id && (
+                          <tr>
+                            <td colSpan="10" className="p-0">
+                              <div className="bg-light border-start border-4 border-primary p-3" style={{ fontSize: '0.8rem' }}>
+                                <div className="row g-2">
+                                  {/* Columna Sueldo */}
+                                  <div className="col-md-4">
+                                    <div className="card h-100">
+                                      <div className="card-header bg-info text-white py-1"><small className="fw-bold">Desglose Sueldo</small></div>
+                                      <div className="card-body py-2">
+                                        {item.sueldo > 0 ? (
+                                          <table className="table table-sm mb-0" style={{ fontSize: '0.75rem' }}>
+                                            <tbody>
+                                              <tr><td>Sueldo diario:</td><td className="text-end">{formatMoney(item.sueldoDiario)}</td></tr>
+                                              <tr><td>Días del período:</td><td className="text-end">{item.diasPeriodo}</td></tr>
+                                              {item.diasYaPagados > 0 && <tr className="text-danger"><td>Días ya pagados:</td><td className="text-end">-{item.diasYaPagados}</td></tr>}
+                                              <tr><td>Días a pagar:</td><td className="text-end fw-bold">{item.diasAPagar}</td></tr>
+                                              <tr className="table-info"><td className="fw-bold">Total sueldo:</td><td className="text-end fw-bold">{formatMoney(item.sueldo)}</td></tr>
+                                            </tbody>
+                                          </table>
+                                        ) : (
+                                          <p className="text-muted mb-0 text-center"><small>{tipoNomina === 'solo_comisiones' ? 'No incluido (Solo Comisiones)' : 'Sin sueldo configurado'}</small></p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {/* Columna Comisiones */}
+                                  <div className="col-md-4">
+                                    <div className="card h-100">
+                                      <div className="card-header bg-success text-white py-1"><small className="fw-bold">Comisiones ({item.detalleComisiones?.length || 0} pólizas)</small></div>
+                                      <div className="card-body py-2">
+                                        {item.detalleComisiones?.length > 0 ? (
+                                          <>
+                                            <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                                              {item.detalleComisiones.map((det, i) => (
+                                                <div key={i} className="d-flex justify-content-between border-bottom py-1" style={{ fontSize: '0.7rem' }}>
+                                                  <span className="text-truncate me-2" style={{ maxWidth: '60%' }}>
+                                                    {det.poliza} <small className="text-muted">({det.compania})</small>
+                                                  </span>
+                                                  <span className="text-success fw-bold text-nowrap">{formatMoney(det.comision)}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                            <div className="text-end mt-1 pt-1 border-top">
+                                              <strong className="text-success">{formatMoney(item.comisiones)}</strong>
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <p className="text-muted mb-0 text-center"><small>{tipoNomina === 'solo_sueldos' ? 'No incluido (Solo Sueldos)' : 'Sin comisiones en este período'}</small></p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {/* Columna Resumen */}
+                                  <div className="col-md-4">
+                                    <div className="card h-100">
+                                      <div className="card-header bg-primary text-white py-1"><small className="fw-bold">Resumen de Pago</small></div>
+                                      <div className="card-body py-2">
+                                        <table className="table table-sm mb-0" style={{ fontSize: '0.75rem' }}>
+                                          <tbody>
+                                            <tr><td>Sueldo:</td><td className="text-end">{formatMoney(item.sueldo)}</td></tr>
+                                            <tr><td>Comisiones:</td><td className="text-end text-success">{formatMoney(item.comisiones)}</td></tr>
+                                            <tr><td className="fw-bold">Subtotal:</td><td className="text-end fw-bold">{formatMoney(item.subtotal)}</td></tr>
+                                            {item.descuentos > 0 && <tr className="text-danger"><td>Descuentos:</td><td className="text-end">-{formatMoney(item.descuentos)}</td></tr>}
+                                            {item.cobro_prestamo > 0 && <tr><td>Cobro préstamo:</td><td className="text-end">-{formatMoney(item.cobro_prestamo)}</td></tr>}
+                                            {item.prestamo_nuevo > 0 && <tr className="text-warning"><td>Préstamo nuevo:</td><td className="text-end">+{formatMoney(item.prestamo_nuevo)}</td></tr>}
+                                            <tr className="table-primary"><td className="fw-bold">Total a pagar:</td><td className="text-end fw-bold text-primary" style={{ fontSize: '0.9rem' }}>{formatMoney(item.total_pagar)}</td></tr>
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                     <tfoot className="table-light">
@@ -970,7 +1092,7 @@ const Nomina = () => {
       {/* Modal consulta de comisiones (solo lectura, desde vista detalle) */}
       {comisionesConsulta && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }} onClick={() => setComisionesConsulta(null)}>
-          <div className="modal-dialog modal-lg" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-dialog modal-xl" onClick={(e) => e.stopPropagation()}>
             <div className="modal-content">
               <div className="modal-header bg-success text-white">
                 <h5 className="modal-title"><DollarSign size={20} className="me-2" />Comisiones - {comisionesConsulta.nombre}</h5>
@@ -979,43 +1101,101 @@ const Nomina = () => {
               <div className="modal-body">
                 <div className="row mb-3">
                   <div className="col-md-6">
-                    <div className="card bg-light"><div className="card-body py-2 text-center"><small className="text-muted">P\u00f3lizas</small><h6 className="mb-0">{comisionesConsulta.detalle.length}</h6></div></div>
+                    <div className="card bg-light"><div className="card-body py-2 text-center"><small className="text-muted">Pólizas</small><h6 className="mb-0">{comisionesConsulta.detalle.length}</h6></div></div>
                   </div>
                   <div className="col-md-6">
                     <div className="card bg-success text-white"><div className="card-body py-2 text-center"><small className="text-white-50">Total Comisiones</small><h6 className="mb-0">{formatMoney(comisionesConsulta.comisiones)}</h6></div></div>
                   </div>
                 </div>
-                <div className="table-responsive">
-                  <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.8rem' }}>
-                    <thead className="table-dark">
-                      <tr>
-                        <th>Expediente</th>
-                        <th>Recibo</th>
-                        <th className="text-end">Comisi\u00f3n</th>
-                        <th className="text-center">% Aplicado</th>
-                        <th className="text-center">Compartida</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {comisionesConsulta.detalle.map((com, idx) => (
-                        <tr key={idx}>
-                          <td>#{com.expediente_id}</td>
-                          <td>#{com.recibo_id}</td>
-                          <td className="text-end text-success fw-bold">{formatMoney(com.monto_comision)}</td>
-                          <td className="text-center">{com.porcentaje_aplicado}%</td>
-                          <td className="text-center">{com.es_comision_compartida ? <span className="badge bg-info">S\u00ed</span> : <span className="badge bg-secondary">No</span>}</td>
+                {/* Detectar si la data tiene los campos enriquecidos */}
+                {comisionesConsulta.detalle[0]?.poliza || comisionesConsulta.detalle[0]?.compania ? (
+                  <div className="table-responsive">
+                    <table className="table table-sm table-bordered mb-0 text-center" style={{ fontSize: '0.75rem' }}>
+                      <thead className="table-dark">
+                        <tr>
+                          <th style={{ fontSize: '0.65rem' }}>Aseg / Póliza</th>
+                          <th style={{ fontSize: '0.65rem' }}>Producto</th>
+                          <th style={{ fontSize: '0.65rem' }}>Vendedor</th>
+                          <th style={{ fontSize: '0.65rem' }}>Prima</th>
+                          <th style={{ fontSize: '0.65rem' }}>%Com</th>
+                          <th style={{ fontSize: '0.65rem', backgroundColor: '#198754', color: '#fff' }}>%Ag</th>
+                          <th style={{ fontSize: '0.65rem', backgroundColor: '#198754', color: '#fff' }}>$Agente</th>
+                          <th style={{ fontSize: '0.65rem', backgroundColor: '#0dcaf0' }}>%Ve</th>
+                          <th style={{ fontSize: '0.65rem', backgroundColor: '#0dcaf0' }}>$Vendedor</th>
+                          <th style={{ fontSize: '0.65rem' }}>Total</th>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="table-light">
-                      <tr>
-                        <th colSpan="2" className="text-end">TOTAL:</th>
-                        <th className="text-end text-success">{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.monto_comision || 0), 0))}</th>
-                        <th colSpan="2"></th>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {comisionesConsulta.detalle.map((com, idx) => (
+                          <tr key={idx}>
+                            <td className="text-start" style={{ padding: '4px' }}>
+                              <small className="text-muted d-block" style={{ fontSize: '0.6rem' }}>{com.compania}</small>
+                              <strong style={{ fontSize: '0.65rem' }}>{com.poliza}</strong>
+                            </td>
+                            <td style={{ padding: '4px' }}>
+                              <span className="badge bg-primary" style={{ fontSize: '0.6rem' }}>{com.producto}</span>
+                              {com.clave && <small className="text-muted d-block" style={{ fontSize: '0.55rem' }}>{com.clave}</small>}
+                            </td>
+                            <td style={{ padding: '4px', fontSize: '0.65rem' }}>{com.nombre_vendedor || '-'}</td>
+                            <td style={{ fontSize: '0.65rem', padding: '4px' }}>{formatMoney(com.prima)}</td>
+                            <td style={{ fontSize: '0.65rem', padding: '4px' }}>{com.porcentaje_aplicado}%</td>
+                            <td style={{ fontSize: '0.65rem', padding: '4px' }}>{com.porcentaje_agente != null ? `${parseFloat(com.porcentaje_agente).toFixed(0)}%` : '-'}</td>
+                            <td className="text-success" style={{ fontSize: '0.65rem', padding: '4px' }}><strong>{formatMoney(com.comision_agente || 0)}</strong></td>
+                            <td style={{ fontSize: '0.65rem', padding: '4px' }}>{com.porcentaje_vendedor != null ? `${parseFloat(com.porcentaje_vendedor).toFixed(0)}%` : '-'}</td>
+                            <td className="text-info" style={{ fontSize: '0.65rem', padding: '4px' }}><strong>{com.es_comision_compartida ? formatMoney(com.comision_vendedor || 0) : '-'}</strong></td>
+                            <td style={{ fontSize: '0.65rem', padding: '4px' }}><strong>{formatMoney(com.comision_total || com.monto_comision || 0)}</strong></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="table-light">
+                        <tr>
+                          <th colSpan="6" className="text-end" style={{ fontSize: '0.65rem' }}>TOTALES:</th>
+                          <th className="text-success" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_agente || 0), 0))}</th>
+                          <th></th>
+                          <th className="text-info" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_vendedor || 0), 0))}</th>
+                          <th style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_total || c.monto_comision || 0), 0))}</th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                ) : (
+                  /* Fallback para datos guardados con formato antiguo (sin campos enriquecidos) */
+                  <div className="table-responsive">
+                    <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.8rem' }}>
+                      <thead className="table-dark">
+                        <tr>
+                          <th>Expediente</th>
+                          <th>Recibo</th>
+                          <th className="text-end">Comisión</th>
+                          <th className="text-center">% Aplicado</th>
+                          <th className="text-center">Compartida</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {comisionesConsulta.detalle.map((com, idx) => (
+                          <tr key={idx}>
+                            <td>#{com.expediente_id}</td>
+                            <td>#{com.recibo_id}</td>
+                            <td className="text-end text-success fw-bold">{formatMoney(com.monto_comision)}</td>
+                            <td className="text-center">{com.porcentaje_aplicado}%</td>
+                            <td className="text-center">{com.es_comision_compartida ? <span className="badge bg-info">Sí</span> : <span className="badge bg-secondary">No</span>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="table-light">
+                        <tr>
+                          <th colSpan="2" className="text-end">TOTAL:</th>
+                          <th className="text-end text-success">{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.monto_comision || 0), 0))}</th>
+                          <th colSpan="2"></th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                    <div className="alert alert-warning mt-2 py-2" style={{ fontSize: '0.8rem' }}>
+                      <AlertCircle size={14} className="me-1" />
+                      Esta nómina fue guardada con el formato anterior. Las nuevas nóminas mostrarán el detalle completo con vendedor, agente y splits.
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setComisionesConsulta(null)}>Cerrar</button>
