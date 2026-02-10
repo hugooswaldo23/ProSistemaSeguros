@@ -566,16 +566,20 @@ const Nomina = () => {
     };
   }, [datosNomina]);
   
-  // Agentes con comisiones compartidas que necesitan revisión
-  const agentesConCompartidas = useMemo(() => {
+  // Agentes con comisiones que necesitan revisión (todos, no solo compartidas)
+  const agentesPendientes = useMemo(() => {
     if (tipoNomina === 'solo_sueldos') return [];
-    return datosNomina.filter(emp => emp.perfil === 'Agente' && emp.detalleComisiones?.some(d => d.tipo === 'Compartida'));
+    return datosNomina.filter(emp => emp.perfil === 'Agente' && emp.detalleComisiones?.length > 0);
   }, [datosNomina, tipoNomina]);
   
   const todosAgentesRevisados = useMemo(() => {
-    if (agentesConCompartidas.length === 0) return true;
-    return agentesConCompartidas.every(a => agentesRevisados.has(a.empleado_id));
-  }, [agentesConCompartidas, agentesRevisados]);
+    if (agentesPendientes.length === 0) return true;
+    return agentesPendientes.every(a => agentesRevisados.has(a.empleado_id));
+  }, [agentesPendientes, agentesRevisados]);
+  
+  const cantidadPorRevisar = useMemo(() => {
+    return agentesPendientes.filter(a => !agentesRevisados.has(a.empleado_id)).length;
+  }, [agentesPendientes, agentesRevisados]);
   
   const guardarNomina = async () => {
     if (!datosNomina.length) { toast.error('No hay datos de nómina para guardar'); return; }
@@ -828,19 +832,19 @@ const Nomina = () => {
           
           {nominaGenerada && datosNomina.length > 0 && (
             <>
-            {!todosAgentesRevisados && agentesConCompartidas.length > 0 && (
+            {!todosAgentesRevisados && agentesPendientes.length > 0 && (
               <div className="alert alert-warning py-2 mb-3 d-flex align-items-center" style={{ fontSize: '0.85rem' }}>
                 <AlertCircle size={18} className="me-2 flex-shrink-0" />
                 <span>
-                  <strong>Revisión pendiente:</strong> {agentesConCompartidas.length - [...agentesRevisados].filter(id => agentesConCompartidas.some(a => a.empleado_id === id)).length} de {agentesConCompartidas.length} agente(s) con comisiones compartidas por revisar.
-                  Entra al detalle de cada agente (botón <Eye size={12} className="mx-1" />) y da clic en <strong>"Aplicar"</strong> para distribuir sus comisiones a los vendedores correspondientes.
+                  <strong>Revisión pendiente:</strong> {cantidadPorRevisar} de {agentesPendientes.length} agente(s) con comisiones por revisar.
+                  Entra al detalle de cada agente (botón <Eye size={12} className="mx-1" />) y da clic en <strong>"Aplicar"</strong> para confirmar sus comisiones.
                 </span>
               </div>
             )}
-            {todosAgentesRevisados && agentesConCompartidas.length > 0 && (
+            {todosAgentesRevisados && agentesPendientes.length > 0 && (
               <div className="alert alert-success py-2 mb-3 d-flex align-items-center" style={{ fontSize: '0.85rem' }}>
                 <CheckCircle2 size={18} className="me-2 flex-shrink-0" />
-                <span><strong>Todos los agentes revisados.</strong> Las comisiones han sido distribuidas a los vendedores. Ya puedes guardar o cerrar la nómina.</span>
+                <span><strong>Todos los agentes revisados.</strong> Las comisiones están confirmadas. Ya puedes guardar o cerrar la nómina.</span>
               </div>
             )}
             <div className="row mb-4">
@@ -872,9 +876,9 @@ const Nomina = () => {
                 <h5 className="mb-0 d-inline">
                   {nominaGenerada ? 'Nómina' : 'Resultados'}
                 </h5>
-                {nominaGenerada && !todosAgentesRevisados && agentesConCompartidas.length > 0 && (
+                {nominaGenerada && !todosAgentesRevisados && agentesPendientes.length > 0 && (
                   <span className="badge bg-warning text-dark ms-2" style={{ fontSize: '0.7rem' }}>
-                    {agentesConCompartidas.length - [...agentesRevisados].filter(id => agentesConCompartidas.some(a => a.empleado_id === id)).length} agente(s) por revisar
+                    {cantidadPorRevisar} agente(s) por revisar
                   </span>
                 )}
               </div>
@@ -914,11 +918,13 @@ const Nomina = () => {
                     </thead>
                     <tbody>
                       {datosNomina.map((item, index) => {
-                        const tieneCompartidas = item.perfil === 'Agente' && item.detalleComisiones?.some(d => d.tipo === 'Compartida');
+                        const esAgente = item.perfil === 'Agente';
+                        const tieneComisiones = esAgente && item.detalleComisiones?.length > 0;
                         const yaRevisado = agentesRevisados.has(item.empleado_id);
+                        const pendienteRevision = tieneComisiones && !yaRevisado;
                         return (
                         <React.Fragment key={item.empleado_id}>
-                        <tr className={tieneCompartidas && !yaRevisado ? 'table-warning' : ''}>
+                        <tr className={pendienteRevision ? 'table-warning' : ''}>
                           <td>
                             <div className="d-flex justify-content-between align-items-center">
                               <div className="d-flex align-items-center">
@@ -926,20 +932,20 @@ const Nomina = () => {
                                   {empleadoExpandido === item.empleado_id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                                 </button>
                                 <strong>{item.nombre}</strong>
-                                {tieneCompartidas && (
+                                {tieneComisiones && (
                                   yaRevisado 
-                                    ? <CheckCircle2 size={14} className="ms-2 text-success" title="Comisiones revisadas y distribuidas" />
+                                    ? <CheckCircle2 size={14} className="ms-2 text-success" title="Comisiones revisadas" />
                                     : <AlertCircle size={14} className="ms-2 text-warning" title="Pendiente de revisión — entra al detalle y aplica" />
                                 )}
                               </div>
                               <div className="d-flex align-items-center gap-1">
                                 {item.detalleComisiones?.length > 0 && (
                                   <button 
-                                    className={`btn btn-sm py-0 px-1 ${tieneCompartidas && !yaRevisado ? 'btn-warning fw-bold' : 'btn-outline-success'}`} 
+                                    className={`btn btn-sm py-0 px-1 ${pendienteRevision ? 'btn-warning fw-bold' : 'btn-outline-success'}`} 
                                     onClick={() => abrirDetalleEmpleado(item)} 
-                                    title={tieneCompartidas && !yaRevisado ? 'Revisar y aplicar comisiones compartidas' : 'Ver/Editar detalle de comisiones'}
+                                    title={pendienteRevision ? 'Revisar y aplicar comisiones' : 'Ver/Editar detalle de comisiones'}
                                   >
-                                    <Eye size={14} className="me-1" />{item.detalleComisiones.length}{tieneCompartidas && !yaRevisado ? ' ⚠' : ''}
+                                    <Eye size={14} className="me-1" />{item.detalleComisiones.length}{pendienteRevision ? ' ⚠' : ''}
                                   </button>
                                 )}
                               </div>
@@ -1450,7 +1456,7 @@ const Nomina = () => {
                   <Check size={16} className="me-1" />
                   {empleadoDetalle?.perfil === 'Agente' && empleadoDetalle?.detalleComisiones?.some(d => d.tipo === 'Compartida')
                     ? 'Aplicar y Distribuir a Vendedores'
-                    : 'Aplicar Cambios'}
+                    : 'Aplicar'}
                 </button>
               </div>
             </div>
