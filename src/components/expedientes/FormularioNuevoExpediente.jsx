@@ -170,6 +170,9 @@ const FormularioNuevoExpediente = ({
           estatusPago: datosPoliza.estatusPago || datosPoliza.estatus_pago || prev.estatusPago,
           estatus_pago: datosPoliza.estatus_pago || datosPoliza.estatusPago || prev.estatus_pago,
           
+          // ⚠️ RECIBOS extraídos del PDF (fechas reales de "Páguese antes de")
+          recibos: datosPoliza.recibos || prev.recibos,
+          
           uso: aplicarSiVacio(datosPoliza.uso, prev.uso),
           servicio: aplicarSiVacio(datosPoliza.servicio, prev.servicio),
           movimiento: aplicarSiVacio(datosPoliza.movimiento, prev.movimiento),

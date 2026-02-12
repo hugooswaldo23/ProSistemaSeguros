@@ -829,13 +829,17 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     if (decision === 'usar-existente') {
       console.log(`✅ Usando agente: ${agenteEncontrado?.nombre} | Clave ${datosExtraidos.clave_agente}: ${claveYaExiste ? 'existente' : 'nueva'}`);
       
-      // Si la clave NO existe, agregarla
+      // Si la clave NO existe, agregarla automáticamente al agente
       if (!claveYaExiste && datosExtraidos.clave_agente && agenteEncontrado) {
         
         try {
           // Identificar aseguradora
           const companiaExtraida = datosExtraidos.compania;
           let aseguradoraId = null;
+          let aseguradoraNombre = '';
+          
+          console.log('🔍 [AUTO-CLAVE] Buscando aseguradora:', companiaExtraida, '| Catálogo tiene:', aseguradoras.length, 'aseguradoras');
+          console.log('🔍 [AUTO-CLAVE] Aseguradoras disponibles:', aseguradoras.map(a => `${a.id}:${a.nombre}`).join(', '));
           
           if (companiaExtraida && aseguradoras.length > 0) {
             const normalizarNombre = (nombre) => {
@@ -843,8 +847,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
                 .toUpperCase()
                 .replace(/\s+/g, ' ')
-                .replace(/^(EL|LA|LOS|LAS)\s+/i, '')
-                .replace(/\s+(SEGUROS|SEGURO|S\.A\.|SA|DE\s+CV)$/i, '')
                 .trim();
             };
             
@@ -862,6 +864,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               } else if (nombreAsegNormalizado.includes(companiaExtraidaNormalizada) || 
                          companiaExtraidaNormalizada.includes(nombreAsegNormalizado)) {
                 score = 80;
+              } else {
+                const palabrasClave = companiaExtraidaNormalizada.split(/\s+/);
+                const palabrasAseg = nombreAsegNormalizado.split(/\s+/);
+                for (const pc of palabrasClave) {
+                  if (pc.length >= 3 && palabrasAseg.some(pa => pa.includes(pc) || pc.includes(pa))) {
+                    score = Math.max(score, 60);
+                  }
+                }
               }
               
               if (score > mejorScore) {
@@ -870,60 +880,138 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               }
             }
             
-            if (aseguradoraMatch && mejorScore >= 60) {
+            if (aseguradoraMatch && mejorScore >= 50) {
               aseguradoraId = aseguradoraMatch.id;
+              aseguradoraNombre = aseguradoraMatch.nombre;
+              console.log(`✅ [AUTO-CLAVE] Aseguradora: ${aseguradoraNombre} (id: ${aseguradoraId}, score: ${mejorScore})`);
+            } else {
+              console.warn(`⚠️ [AUTO-CLAVE] No se encontró aseguradora para "${companiaExtraida}"`);
             }
           }
           
-          // Buscar producto
+          // Buscar producto — obtener catálogo real desde API (tiposProductos prop puede ser solo strings)
           const productoExtraido = datosExtraidos.producto;
           let productoMatch = null;
           
-          if (productoExtraido && tiposProductos.length > 0) {
-            productoMatch = tiposProductos.find(prod =>
-              prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
+          let productosReales = [];
+          try {
+            const { obtenerTiposProductos } = await import('../../services/tiposProductosService');
+            const resProductos = await obtenerTiposProductos();
+            if (resProductos && resProductos.success && Array.isArray(resProductos.data)) {
+              productosReales = resProductos.data;
+            }
+          } catch (e) {
+            console.warn('⚠️ [AUTO-CLAVE] No se pudieron obtener productos del API:', e);
+          }
+          
+          console.log('🔍 [AUTO-CLAVE] Buscando producto:', productoExtraido, '| Catálogo real tiene:', productosReales.length, 'productos');
+          console.log('🔍 [AUTO-CLAVE] Productos disponibles:', productosReales.map(p => `${p.id}:${p.nombre}`).join(', '));
+          
+          if (productoExtraido && productosReales.length > 0) {
+            // Coincidencia exacta
+            productoMatch = productosReales.find(prod =>
+              prod.nombre && prod.nombre.toLowerCase() === productoExtraido.toLowerCase()
             );
-            
+            // Coincidencia parcial
             if (!productoMatch) {
-              productoMatch = tiposProductos.find(prod =>
-                prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+              productoMatch = productosReales.find(prod =>
+                prod.nombre && (
+                  productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase()) ||
+                  prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
+                )
               );
             }
-            
+            // Buscar "auto" 
             if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
-              productoMatch = tiposProductos.find(prod => 
+              productoMatch = productosReales.find(prod => 
                 prod.nombre && prod.nombre.toLowerCase().includes('auto')
               );
             }
+            // Palabras clave
+            if (!productoMatch) {
+              const palabrasProducto = productoExtraido.toLowerCase().split(/\s+/);
+              productoMatch = productosReales.find(prod =>
+                prod.nombre && palabrasProducto.some(p => p.length >= 3 && prod.nombre.toLowerCase().includes(p))
+              );
+            }
+          }
+          // Fallback: primer producto tipo auto
+          if (!productoMatch && productosReales.length > 0) {
+            productoMatch = productosReales.find(prod =>
+              prod.nombre && prod.nombre.toLowerCase().includes('auto')
+            ) || productosReales[0];
+            console.warn(`⚠️ [AUTO-CLAVE] Producto fallback: ${productoMatch?.nombre}`);
           }
           
-          // Vincular agente con nueva clave
+          console.log(`🔍 [AUTO-CLAVE] Producto: ${productoMatch?.nombre} (id: ${productoMatch?.id})`);
+          
+          // Vincular agente con nueva clave (2 pasos)
           if (aseguradoraId && productoMatch) {
-            const { guardarEjecutivosPorProducto } = await import('../../services/equipoDeTrabajoService');
-            const asignacion = {
-              usuarioId: agenteEncontrado.id,
-              aseguradoraId: aseguradoraId,
-              productoId: productoMatch.id,
-              ejecutivoId: agenteEncontrado.id,
-              clave: datosExtraidos.clave_agente,
-              comisionPersonalizada: 0
-            };
+            const { actualizarMiembroEquipo, obtenerEjecutivosPorProducto: getAsig } = await import('../../services/equipoDeTrabajoService');
             
-            const resultadoAsignacion = await guardarEjecutivosPorProducto(asignacion);
+            // PASO 1: Agregar la combinación aseguradora-producto al array productosAseguradoras del agente
+            // Primero obtener las asignaciones actuales para reconstruir productosAseguradoras
+            let productosActuales = [];
+            try {
+              const asigResult = await getAsig(agenteEncontrado.id);
+              if (asigResult.success && asigResult.data) {
+                productosActuales = asigResult.data.map(a => ({
+                  aseguradoraId: a.aseguradoraId || null,
+                  productoId: a.productoId,
+                  ejecutivoId: a.ejecutivoId || null,
+                  comisionPersonalizada: a.comisionPersonalizada || 0,
+                  clave: a.clave || null
+                }));
+              }
+            } catch (e) {
+              console.warn('⚠️ [AUTO-CLAVE] No se pudieron obtener asignaciones actuales:', e);
+            }
             
-            if (resultadoAsignacion.success) {
-              console.log('✅ Nueva clave agregada al agente');
-              toast.success(`Clave ${datosExtraidos.clave_agente} agregada al agente ${agenteEncontrado.nombre}`);
+            // Verificar si ya existe esta combinación aseguradora+producto
+            const yaExisteCombo = productosActuales.some(p => 
+              String(p.aseguradoraId) === String(aseguradoraId) && 
+              String(p.productoId) === String(productoMatch.id)
+            );
+            
+            if (!yaExisteCombo) {
+              // Agregar nueva combinación
+              productosActuales.push({
+                aseguradoraId: aseguradoraId,
+                productoId: productoMatch.id,
+                ejecutivoId: null,
+                comisionPersonalizada: productoMatch.comisionBase || 0,
+                clave: datosExtraidos.clave_agente
+              });
+              
+              // Actualizar el agente con el nuevo productosAseguradoras
+              console.log('📡 [AUTO-CLAVE] PASO 1: Actualizando productosAseguradoras del agente...');
+              const updateResult = await actualizarMiembroEquipo(agenteEncontrado.id, {
+                productosAseguradoras: productosActuales
+              });
+              
+              if (!updateResult.success) {
+                console.error('❌ [AUTO-CLAVE] Error al actualizar productosAseguradoras:', updateResult.error);
+              } else {
+                console.log('✅ [AUTO-CLAVE] PASO 1 OK: productosAseguradoras actualizado');
+              }
             } else {
-              console.error('❌ Error al agregar clave:', resultadoAsignacion.error);
-              toast.error('No se pudo agregar la clave al agente');
+              console.log('ℹ️ [AUTO-CLAVE] Combo aseguradora+producto ya existe, solo falta la clave');
+            }
+            
+            // Nota: El ejecutivo se configura manualmente desde Equipo de Trabajo
+            if (!yaExisteCombo) {
+              toast.success(`Clave ${datosExtraidos.clave_agente} (${aseguradoraNombre}) agregada a ${agenteEncontrado.nombre}. Configure el ejecutivo en Equipo de Trabajo.`);
             }
           } else {
-            console.warn('⚠️ No se pudo vincular: falta aseguradoraId o producto');
+            if (!aseguradoraId) {
+              toast.error(`No se encontró "${companiaExtraida}" en el catálogo de aseguradoras. Agrega la clave manualmente.`);
+            } else if (!productoMatch) {
+              toast.error(`No se encontró el producto "${productoExtraido}" en el catálogo. Agrega la clave manualmente.`);
+            }
           }
         } catch (error) {
-          console.error('❌ Error al agregar clave:', error);
-          toast.error('Error al agregar la clave al agente');
+          console.error('❌ [AUTO-CLAVE] Error:', error);
+          toast.error('Error al agregar la clave: ' + error.message);
         }
       }
       
@@ -1304,7 +1392,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Combinar los datos extraídos del PDF con los datos normalizados del cliente
       const datosConCliente = {
         ...datosExtraidos,
-        cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null
+        cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null,
+        agente_id: agenteEncontrado?.id || datosExtraidos.agente_id || null
       };
       
       // Cliente vinculado

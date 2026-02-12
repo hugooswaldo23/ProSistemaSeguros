@@ -21,10 +21,18 @@ export const guardarEjecutivosPorProducto = async (asignaciones) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(asignaciones)
     });
-    if (!res.ok) throw new Error('Error al guardar asignaciones');
+    if (!res.ok) {
+      let errorMsg = `Error al guardar asignaciones (HTTP ${res.status})`;
+      try {
+        const errorData = await res.json();
+        errorMsg = errorData.error || errorData.message || errorMsg;
+      } catch (e) { /* no JSON response */ }
+      throw new Error(errorMsg);
+    }
     const data = await res.json();
     return { success: true, data };
   } catch (error) {
+    console.error('❌ guardarEjecutivosPorProducto error:', error);
     return { success: false, error: error.message };
   }
 };

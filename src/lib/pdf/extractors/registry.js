@@ -38,8 +38,8 @@ export async function loadExtractor(company, producto = 'autos') {
           return await import('./elpotosi/autos.js');
           
         case 'HDI':
-          console.log(`   ✅ Cargando: ./hdi.js`);
-          return await import('./hdi.js');
+          console.log(`   ✅ Cargando: ./hdi/autos.js`);
+          return await import('./hdi/autos.js');
           
         case 'GNP':
           console.log(`   ✅ Cargando: ./gnp.js`);
