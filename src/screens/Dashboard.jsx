@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import CalendarioAgenda from '../components/dashboard/CalendarioAgenda';
 const API_URL = import.meta.env.VITE_API_URL;
 import { 
   Plus, FileText, AlertCircle, 
@@ -1737,6 +1738,10 @@ DCPRO Administración`;
               </div>
             </div>
           </div>
+
+          {/* Calendario de Agenda */}
+          <CalendarioAgenda />
+
         </div>
       </div>
 
