@@ -258,6 +258,101 @@ export async function obtenerCotizaciones(expedienteId) {
   }
 }
 
+// ====================================================================
+// RECIBOS DE PAGO DE ASEGURADORA
+// ====================================================================
+
+/**
+ * Subir recibo de pago de la aseguradora (PDF/imagen por número de recibo)
+ * @param {number} expedienteId - ID del expediente
+ * @param {number} numeroRecibo - Número de recibo (1, 2, 3...)
+ * @param {File} file - Archivo PDF o imagen a subir
+ * @returns {Promise<Object>} Datos del archivo subido { url, filename }
+ */
+export async function subirReciboPago(expedienteId, numeroRecibo, file) {
+  try {
+    console.log('📤 Subiendo recibo de pago de aseguradora...', {
+      expedienteId,
+      numeroRecibo,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type
+    });
+
+    // Validar tipo de archivo (PDF o imagen)
+    const tiposPermitidos = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+    if (!tiposPermitidos.includes(file.type)) {
+      throw new Error('El archivo debe ser un PDF o imagen (JPG, PNG, WebP)');
+    }
+
+    // Validar tamaño (10MB máximo)
+    const maxSize = 10 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new Error('El archivo no debe superar los 10MB');
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('tipo', 'recibo-pago');
+    formData.append('numero_recibo', numeroRecibo);
+
+    const url = `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-pago`;
+    console.log('📍 URL del endpoint:', url);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Error del servidor:', errorText);
+      let errorMessage = 'Error al subir el recibo de pago';
+      try {
+        const error = JSON.parse(errorText);
+        errorMessage = error.message || errorMessage;
+      } catch (e) {
+        errorMessage = errorText || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log('✅ Recibo de pago subido exitosamente:', data);
+    return data.data;
+  } catch (error) {
+    console.error('❌ Error en subirReciboPago:', error);
+    throw error;
+  }
+}
+
+/**
+ * Obtener URL firmada del recibo de pago de aseguradora
+ * @param {number} expedienteId - ID del expediente
+ * @param {number} numeroRecibo - Número de recibo
+ * @param {number} expiration - Tiempo de expiración en segundos (default: 3600)
+ * @returns {Promise<Object>} URL firmada { url, expiresAt }
+ */
+export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiration = 3600) {
+  try {
+    const response = await fetch(
+      `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-pago-url?expiration=${expiration}`,
+      { method: 'GET' }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener URL del recibo');
+    }
+
+    const data = await response.json();
+    return data.data;
+  } catch (error) {
+    console.error('Error en obtenerReciboPagoURL:', error);
+    throw error;
+  }
+}
+
 /**
  * Obtener URL firmada de una cotización
  * @param {number} expedienteId - ID del expediente

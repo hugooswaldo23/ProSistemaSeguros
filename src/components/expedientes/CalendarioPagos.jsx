@@ -5,11 +5,12 @@
  * Tabla de pagos con resumen, cálculo de estados y botones de aviso
  */
 
-import React from 'react';
-import { FileText, Mail, Trash2 } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { FileText, Mail, Trash2, Upload, Download, Loader } from 'lucide-react';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
+import { subirReciboPago, obtenerReciboPagoURL } from '../../services/pdfService';
 import { Badge } from './UIComponents';
 
 const CalendarioPagos = ({ 
@@ -22,6 +23,12 @@ const CalendarioPagos = ({
   onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
+  // === Estado para recibos de pago de aseguradora ===
+  const [subiendoRecibo, setSubiendoRecibo] = useState(null); // número de recibo que se está subiendo
+  const [recibosSubidos, setRecibosSubidos] = useState({}); // {numero: {url, nombre}}
+  const fileInputRef = useRef(null);
+  const [reciboSeleccionado, setReciboSeleccionado] = useState(null); // para saber qué pago quiere subir
+
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
   const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
@@ -287,6 +294,100 @@ const CalendarioPagos = ({
     return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
+  // ====================================================================
+  // HANDLERS: Recibo de pago de aseguradora (subir/ver)
+  // ====================================================================
+  
+  /**
+   * Abre el selector de archivo para subir recibo de pago
+   */
+  const handleClickSubirRecibo = (numeroPago) => {
+    setReciboSeleccionado(numeroPago);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''; // Reset para permitir re-selección
+      fileInputRef.current.click();
+    }
+  };
+
+  /**
+   * Procesa el archivo seleccionado y lo sube a S3
+   */
+  const handleArchivoRecibo = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !reciboSeleccionado) return;
+
+    setSubiendoRecibo(reciboSeleccionado);
+    try {
+      const resultado = await subirReciboPago(expediente.id, reciboSeleccionado, file);
+      
+      // Guardar referencia local del recibo subido
+      setRecibosSubidos(prev => ({
+        ...prev,
+        [reciboSeleccionado]: {
+          url: resultado.url || resultado.pdf_url,
+          nombre: file.name
+        }
+      }));
+
+      // Feedback visual
+      if (window.toast) {
+        window.toast.success(`✅ Recibo #${reciboSeleccionado} subido correctamente`);
+      } else {
+        alert(`Recibo #${reciboSeleccionado} subido correctamente`);
+      }
+    } catch (error) {
+      console.error('❌ Error al subir recibo:', error);
+      if (window.toast) {
+        window.toast.error(`Error al subir recibo: ${error.message}`);
+      } else {
+        alert(`Error al subir recibo: ${error.message}`);
+      }
+    } finally {
+      setSubiendoRecibo(null);
+      setReciboSeleccionado(null);
+    }
+  };
+
+  /**
+   * Abre en nueva pestaña el recibo de pago (URL firmada)
+   */
+  const handleVerRecibo = async (numeroPago) => {
+    try {
+      // Primero verificar si tenemos URL local (recién subido)
+      const reciboLocal = recibosSubidos[numeroPago];
+      if (reciboLocal?.url) {
+        window.open(reciboLocal.url, '_blank');
+        return;
+      }
+
+      // Si no, buscar en el backend la URL del recibo
+      // Verificar si el pago tiene recibo_pago_url del backend
+      const pago = pagosProcesados.find(p => p.numero === numeroPago);
+      if (pago?.recibo_pago_url) {
+        window.open(pago.recibo_pago_url, '_blank');
+        return;
+      }
+
+      // Intentar obtener URL firmada del backend
+      const data = await obtenerReciboPagoURL(expediente.id, numeroPago);
+      if (data?.url) {
+        window.open(data.url, '_blank');
+      } else {
+        alert('No se encontró el recibo de pago para este período');
+      }
+    } catch (error) {
+      console.error('❌ Error al obtener recibo:', error);
+      alert('Error al obtener el recibo de pago');
+    }
+  };
+
+  /**
+   * Determina si un pago tiene recibo de aseguradora subido
+   */
+  const tieneReciboAseguradora = (pago) => {
+    return !!(recibosSubidos[pago.numero]?.url || pago.recibo_pago_url);
+  };
+
   if (compacto) {
     return (
       <div className="mt-1">
@@ -365,6 +466,14 @@ const CalendarioPagos = ({
         )}
         
         <div className="table-responsive">
+          {/* Input oculto para seleccionar archivo de recibo */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            onChange={handleArchivoRecibo}
+          />
           <table className="table table-sm table-striped mb-0">
             <thead>
               <tr>
@@ -372,7 +481,8 @@ const CalendarioPagos = ({
                 <th>Fecha de Pago</th>
                 <th>Monto</th>
                 <th width="150">Estado</th>
-                <th width="200">Acciones</th>
+                <th width="100" className="text-center">Recibo</th>
+                <th width="150">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -401,6 +511,46 @@ const CalendarioPagos = ({
                         </span>
                       )}
                     </div>
+                  </td>
+                  {/* Columna: Recibo de pago de la aseguradora */}
+                  <td className="text-center">
+                    {subiendoRecibo === pago.numero ? (
+                      <button 
+                        className="btn btn-sm btn-outline-secondary" 
+                        disabled
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                      >
+                        <Loader size={12} className="spinner-border spinner-border-sm" />
+                      </button>
+                    ) : tieneReciboAseguradora(pago) ? (
+                      <div className="d-flex gap-1 justify-content-center">
+                        <button
+                          className="btn btn-sm btn-outline-success"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => handleVerRecibo(pago.numero)}
+                          title="Ver recibo de pago de aseguradora"
+                        >
+                          <Download size={12} />
+                        </button>
+                        <button
+                          className="btn btn-sm btn-outline-warning"
+                          style={{ padding: '0.2rem 0.4rem', fontSize: '0.65rem' }}
+                          onClick={() => handleClickSubirRecibo(pago.numero)}
+                          title="Reemplazar recibo"
+                        >
+                          <Upload size={10} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="btn btn-sm btn-outline-primary"
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                        onClick={() => handleClickSubirRecibo(pago.numero)}
+                        title="Subir recibo de pago de aseguradora"
+                      >
+                        <Upload size={12} />
+                      </button>
+                    )}
                   </td>
                   <td>
                     <div className="d-flex gap-1">
@@ -486,7 +636,7 @@ const CalendarioPagos = ({
               <tfoot>
                 <tr className="table-info">
                   <td colSpan="3" className="text-end"><strong>Total Anual:</strong></td>
-                  <td colSpan="2"><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
+                  <td colSpan="3"><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
                 </tr>
               </tfoot>
             )}
