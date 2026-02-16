@@ -3970,7 +3970,8 @@ const ModuloNvoExpedientes = () => {
                           fecha: pagoSeleccionado.fecha_vencimiento,
                           monto: pagoSeleccionado.monto,
                           estado: pagoSeleccionado.estado_pago,
-                          totalPagos: expedienteParaCompartir.recibos?.length || null
+                          totalPagos: expedienteParaCompartir.recibos?.length || null,
+                          recibo_pago_url: pagoSeleccionado.recibo_pago_url || null
                         };
                         await enviarAvisoPagoWhatsApp(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {
@@ -3994,7 +3995,8 @@ const ModuloNvoExpedientes = () => {
                           fecha: pagoSeleccionado.fecha_vencimiento,
                           monto: pagoSeleccionado.monto,
                           estado: pagoSeleccionado.estado_pago,
-                          totalPagos: expedienteParaCompartir.recibos?.length || null
+                          totalPagos: expedienteParaCompartir.recibos?.length || null,
+                          recibo_pago_url: pagoSeleccionado.recibo_pago_url || null
                         };
                         await enviarAvisoPagoEmail(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {

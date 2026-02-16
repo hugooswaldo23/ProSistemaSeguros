@@ -157,7 +157,7 @@ export function determinarTipoMensaje(expediente) {
  * @param {boolean} esCompartirPoliza - Si es true, usa formato "Te compartimos tu póliza..." sin importar el estado
  * @returns {Object} { tipoMensaje, mensaje }
  */
-export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompartirPoliza = true) {
+export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompartirPoliza = true, reciboPagoUrl = null) {
   const tipoMensaje = determinarTipoMensaje(expediente);
   
   const numeroPoliza = expediente.numero_poliza || 'Sin número';
@@ -267,6 +267,11 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
       ...(pdfUrl ? [
         `📄 *Descarga tu póliza aquí:*`,
         `👉 ${pdfUrl}`
+      ] : []),
+      ...(reciboPagoUrl ? [
+        '',
+        `🧳 *Descarga tu recibo de pago aquí:*`,
+        `👉 ${reciboPagoUrl}`
       ] : []),
       '',
       '◆ Cualquier duda, estamos para servirte.',
@@ -420,7 +425,7 @@ export function generarMensajeWhatsApp(expediente, utils, pdfUrl = null, esCompa
  * @param {boolean} esCompartirPoliza - Si es true, usa formato "Le compartimos su póliza..."
  * @returns {Object} { tipoMensaje, asunto, cuerpo }
  */
-export function generarMensajeEmail(expediente, pdfUrl = null, esCompartirPoliza = true) {
+export function generarMensajeEmail(expediente, pdfUrl = null, reciboPagoUrl = null, esCompartirPoliza = true) {
   const tipoMensaje = determinarTipoMensaje(expediente);
   
   const numeroPoliza = expediente.numero_poliza || 'Sin número';
@@ -475,7 +480,10 @@ Prima Total: $${primaTotal}
 Fecha de pago: ${fechaPago}${pdfUrl ? `
 
 📄 Descargue su póliza aquí:
-${pdfUrl}` : ''}
+${pdfUrl}` : ''}${reciboPagoUrl ? `
+
+🧳 Descargue su recibo de pago aquí:
+${reciboPagoUrl}` : ''}
 
 Cualquier duda, estamos a sus órdenes.
 
