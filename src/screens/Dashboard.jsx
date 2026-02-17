@@ -2035,15 +2035,16 @@ DCPRO Administración`;
                                       const esFraccionado = poliza.tipo_pago === 'Fraccionado' || 
                                                            (poliza.forma_pago && poliza.forma_pago.toUpperCase() === 'FRACCIONADO');
                                       
-                                      // Calcular total de recibos
+                                      // Calcular total de recibos basado en frecuencia (NO en recibos.length para evitar recibos fantasma)
                                       const frecuencia = (poliza.frecuencia_pago || poliza.frecuenciaPago || '').toLowerCase();
                                       let totalRecibos = 1; // Por defecto Anual = 1
                                       if (esFraccionado) {
-                                        totalRecibos = recibos.length || 
-                                                      (frecuencia.includes('trimestral') ? 4 : 
+                                        const totalPorFrecuencia = frecuencia.includes('trimestral') ? 4 : 
                                                        frecuencia.includes('semestral') ? 2 : 
                                                        frecuencia.includes('mensual') ? 12 : 
-                                                       frecuencia.includes('cuatrimestral') ? 3 : 1);
+                                                       frecuencia.includes('cuatrimestral') ? 3 : 0;
+                                        // Priorizar frecuencia; solo usar recibos.length si no hay frecuencia definida
+                                        totalRecibos = totalPorFrecuencia || recibos.filter(r => parseFloat(r.monto || 0) > 0).length || 1;
                                       }
                                       
                                       // Contar recibos pagados

@@ -5,13 +5,20 @@ const LOCAL_KEY = 'prosistema_citas';
 const getLocal = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
 const setLocal = (citas) => localStorage.setItem(LOCAL_KEY, JSON.stringify(citas));
 
+// Normalizar fecha ISO ("2026-02-20T06:00:00.000Z") a "YYYY-MM-DD"
+const normalizarCita = (c) => ({
+  ...c,
+  fecha: c.fecha ? c.fecha.split('T')[0] : c.fecha
+});
+
 // Obtener todas las citas
 export const obtenerCitas = async () => {
   try {
     const res = await fetch(`${API_URL}/api/citas?t=${Date.now()}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return { success: true, data: Array.isArray(data) ? data : [] };
+    const citas = (Array.isArray(data) ? data : []).map(normalizarCita);
+    return { success: true, data: citas };
   } catch {
     // Fallback a localStorage
     return { success: true, data: getLocal(), local: true };
@@ -22,7 +29,6 @@ export const obtenerCitas = async () => {
 export const crearCita = async (cita) => {
   const citaData = {
     ...cita,
-    id: cita.id || `cita_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     estatus: cita.estatus || 'pendiente',
     historial: cita.historial || [],
     fecha_creacion: cita.fecha_creacion || new Date().toISOString(),
@@ -36,7 +42,7 @@ export const crearCita = async (cita) => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return { success: true, data: data || citaData };
+    return { success: true, data: normalizarCita(data || citaData) };
   } catch {
     // Fallback a localStorage
     const local = getLocal();
@@ -61,7 +67,7 @@ export const actualizarCita = async (id, cita) => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    return { success: true, data: data || citaData };
+    return { success: true, data: normalizarCita(data || citaData) };
   } catch {
     // Fallback a localStorage
     const local = getLocal();

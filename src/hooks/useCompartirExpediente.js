@@ -268,11 +268,28 @@ export const useCompartirExpediente = ({
         console.log('⚠️ El expediente no tiene pdf_key - No se puede incluir link de descarga');
       }
       
+      // 📄 Obtener URL del recibo de pago del próximo pago pendiente (si existe)
+      let reciboPagoUrl = null;
+      if (expediente.recibos && Array.isArray(expediente.recibos)) {
+        // Buscar el próximo recibo pendiente que tenga recibo de pago subido
+        const reciboPendiente = expediente.recibos.find(r => r.recibo_pago_url && !r.fecha_pago_real);
+        const reciboConRecibo = reciboPendiente || expediente.recibos.find(r => r.recibo_pago_url);
+        if (reciboConRecibo) {
+          try {
+            const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, reciboConRecibo.numero_recibo, 86400);
+            reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+            console.log('✅ Recibo de pago incluido en póliza WhatsApp:', reciboPagoUrl?.substring(0, 50) + '...');
+          } catch (e) { console.warn('⚠️ No se pudo obtener URL recibo de pago:', e); }
+        }
+      }
+
       // Generar mensaje dinámico según el estado usando el servicio
       const { tipoMensaje, mensaje } = notificacionesService.generarMensajeWhatsApp(
         expediente, 
         utils, 
-        pdfUrl
+        pdfUrl,
+        true,
+        reciboPagoUrl
       );
 
       // Crear la URL de WhatsApp
@@ -423,8 +440,22 @@ export const useCompartirExpediente = ({
         }
       }
 
+      // 📄 Obtener URL del recibo de pago del próximo pago pendiente (si existe)
+      let reciboPagoUrl = null;
+      if (expediente.recibos && Array.isArray(expediente.recibos)) {
+        const reciboPendiente = expediente.recibos.find(r => r.recibo_pago_url && !r.fecha_pago_real);
+        const reciboConRecibo = reciboPendiente || expediente.recibos.find(r => r.recibo_pago_url);
+        if (reciboConRecibo) {
+          try {
+            const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, reciboConRecibo.numero_recibo, 86400);
+            reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+            console.log('✅ Recibo de pago incluido en póliza Email:', reciboPagoUrl?.substring(0, 50) + '...');
+          } catch (e) { console.warn('⚠️ No se pudo obtener URL recibo de pago (Email):', e); }
+        }
+      }
+
       // Generar mensaje dinámico según el estado
-      const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl);
+      const { tipoMensaje, asunto, cuerpo } = notificacionesService.generarMensajeEmail(expediente, pdfUrl, reciboPagoUrl);
 
       // Opción 1: Usar mailto (cliente de correo local)
       const mailtoUrl = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
@@ -642,6 +673,31 @@ export const useCompartirExpediente = ({
         });
       }
       
+      // 📄 Obtener URL firmada del recibo de pago de aseguradora (si existe)
+      let reciboPagoUrl = null;
+      let polizaPdfUrl = null;
+      try {
+        const reciboBackend = expediente.recibos?.find(r => r.numero_recibo === pago.numero);
+        if (pago.recibo_pago_url || reciboBackend?.recibo_pago_url) {
+          const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
+          reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+          console.log('✅ URL de recibo de pago obtenida:', reciboPagoUrl?.substring(0, 50) + '...');
+        }
+      } catch (errorRecibo) {
+        console.warn('⚠️ No se pudo obtener URL del recibo de pago:', errorRecibo);
+      }
+
+      // 📄 Fallback: Si no hay recibo de pago, incluir PDF de la póliza
+      if (!reciboPagoUrl && expediente.pdf_key) {
+        try {
+          const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400);
+          polizaPdfUrl = pdfData?.signed_url;
+          console.log('✅ URL de póliza (fallback) obtenida:', polizaPdfUrl?.substring(0, 50) + '...');
+        } catch (errorPdf) {
+          console.warn('⚠️ No se pudo obtener URL de la póliza:', errorPdf);
+        }
+      }
+
       const mensaje = `Hola ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: *${expediente.numero_poliza || 'Sin número'}*\n` +
@@ -652,6 +708,8 @@ export const useCompartirExpediente = ({
         `Estado: ${estadoFinal}\n` +
         `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
+        (reciboPagoUrl ? `📄 *Descarga tu recibo de pago aquí:*\n👉 ${reciboPagoUrl}\n\n` : '') +
+        (polizaPdfUrl ? `📄 *Descarga tu póliza aquí:*\n👉 ${polizaPdfUrl}\n\n` : '') +
         `Para cualquier duda o realizar tu pago, estamos a tus órdenes.\n\n` +
         `Saludos cordiales`;
       
@@ -705,6 +763,7 @@ export const useCompartirExpediente = ({
           metodo_contacto: 'WhatsApp',
           destinatario_nombre: nombreDestinatario,
           destinatario_contacto: telefono,
+          documento_url: reciboPagoUrl || polizaPdfUrl || null,
           datos_adicionales: {
             canal: 'WhatsApp',
             numero_poliza: expediente.numero_poliza,
@@ -875,6 +934,31 @@ export const useCompartirExpediente = ({
         });
       }
       
+      // 📄 Obtener URL firmada del recibo de pago de aseguradora (si existe)
+      let reciboPagoUrl = null;
+      let polizaPdfUrl = null;
+      try {
+        const reciboBackend = expediente.recibos?.find(r => r.numero_recibo === pago.numero);
+        if (pago.recibo_pago_url || reciboBackend?.recibo_pago_url) {
+          const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
+          reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+          console.log('✅ URL de recibo de pago (Email) obtenida:', reciboPagoUrl?.substring(0, 50) + '...');
+        }
+      } catch (errorRecibo) {
+        console.warn('⚠️ No se pudo obtener URL del recibo de pago (Email):', errorRecibo);
+      }
+
+      // 📄 Fallback: Si no hay recibo de pago, incluir PDF de la póliza
+      if (!reciboPagoUrl && expediente.pdf_key) {
+        try {
+          const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400);
+          polizaPdfUrl = pdfData?.signed_url;
+          console.log('✅ URL de póliza (fallback Email) obtenida:', polizaPdfUrl?.substring(0, 50) + '...');
+        } catch (errorPdf) {
+          console.warn('⚠️ No se pudo obtener URL de la póliza (Email):', errorPdf);
+        }
+      }
+
       const cuerpo = `Estimado/a ${nombreDestinatario},\n\n` +
         `${titulo}\n\n` +
         `Póliza: ${expediente.numero_poliza || 'Sin número'}\n` +
@@ -885,6 +969,8 @@ export const useCompartirExpediente = ({
         `Estado: ${estadoFinal}\n` +
         `${resumenRecibos}\n` +
         `${mensajeImportante}\n\n` +
+        (reciboPagoUrl ? `📄 Descargue su recibo de pago aquí:\n${reciboPagoUrl}\n\n` : '') +
+        (polizaPdfUrl ? `📄 Descargue su póliza aquí:\n${polizaPdfUrl}\n\n` : '') +
         `Para realizar su pago o cualquier aclaración, estamos a sus órdenes.\n\n` +
         `Saludos cordiales`;
       
@@ -933,6 +1019,7 @@ export const useCompartirExpediente = ({
           metodo_contacto: 'Email',
           destinatario_nombre: nombreDestinatario,
           destinatario_contacto: email,
+          documento_url: reciboPagoUrl || polizaPdfUrl || null,
           datos_adicionales: {
             canal: 'Email',
             asunto: asunto,

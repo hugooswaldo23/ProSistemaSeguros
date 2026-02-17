@@ -168,7 +168,13 @@ export const obtenerEstatusPagoDesdeBackend = (expediente) => {
   
   // NUEVA LÓGICA: Si tiene recibos, usar la misma lógica que en ListaExpedientes
   if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
-    const recibosTotal = expediente.recibos.length;
+    // Calcular total basado en frecuencia para evitar contar recibos fantasma (monto $0)
+    const frecuenciaCalc = (expediente.frecuencia_pago || expediente.frecuenciaPago || '').toLowerCase();
+    const totalPorFrec = frecuenciaCalc.includes('trimestral') ? 4 :
+                         frecuenciaCalc.includes('semestral') ? 2 :
+                         frecuenciaCalc.includes('mensual') ? 12 :
+                         frecuenciaCalc.includes('cuatrimestral') ? 3 : 0;
+    const recibosTotal = totalPorFrec || expediente.recibos.filter(r => parseFloat(r.monto || 0) > 0).length || expediente.recibos.length;
     const recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
     
     // Si todos están pagados
@@ -300,7 +306,13 @@ export const EstadoPago = React.memo(({ expediente }) => {
   let estatusProgreso = estatusDesdeBackend; // El estatus que se muestra en el progreso
   
   if (expediente.recibos && expediente.recibos.length > 0) {
-    totalRecibos = expediente.recibos.length;
+    // Calcular total basado en frecuencia para evitar contar recibos fantasma (monto $0)
+    const frecuenciaExp = (expediente.frecuencia_pago || expediente.frecuenciaPago || '').toLowerCase();
+    const totalPorFrecuencia = frecuenciaExp.includes('trimestral') ? 4 :
+                               frecuenciaExp.includes('semestral') ? 2 :
+                               frecuenciaExp.includes('mensual') ? 12 :
+                               frecuenciaExp.includes('cuatrimestral') ? 3 : 0;
+    totalRecibos = totalPorFrecuencia || expediente.recibos.filter(r => parseFloat(r.monto || 0) > 0).length || expediente.recibos.length;
     recibosPagados = expediente.recibos.filter(r => r.fecha_pago_real).length;
     
     // 🔥 Determinar qué número de recibo mostrar según el estatus

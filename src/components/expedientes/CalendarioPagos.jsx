@@ -5,12 +5,12 @@
  * Tabla de pagos con resumen, cálculo de estados y botones de aviso
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Mail, Trash2, Upload, Download, Loader } from 'lucide-react';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
-import { subirReciboPago, obtenerReciboPagoURL } from '../../services/pdfService';
+import { subirReciboPago, obtenerReciboPagoURL, obtenerURLFirmadaPDF } from '../../services/pdfService';
 import { Badge } from './UIComponents';
 
 const CalendarioPagos = ({ 
@@ -25,9 +25,24 @@ const CalendarioPagos = ({
 }) => {
   // === Estado para recibos de pago de aseguradora ===
   const [subiendoRecibo, setSubiendoRecibo] = useState(null); // número de recibo que se está subiendo
-  const [recibosSubidos, setRecibosSubidos] = useState({}); // {numero: {url, nombre}}
+  const [recibosSubidos, setRecibosSubidos] = useState({}); // {numero: {subido, nombre}}
   const fileInputRef = useRef(null);
   const [reciboSeleccionado, setReciboSeleccionado] = useState(null); // para saber qué pago quiere subir
+
+  // Inicializar recibosSubidos con los datos del backend al montar/cambiar expediente
+  useEffect(() => {
+    if (expediente?.recibos && Array.isArray(expediente.recibos)) {
+      const subidos = {};
+      expediente.recibos.forEach(r => {
+        if (r.recibo_pago_url) {
+          subidos[r.numero_recibo] = { subido: true, nombre: r.recibo_pago_nombre || 'recibo' };
+        }
+      });
+      if (Object.keys(subidos).length > 0) {
+        setRecibosSubidos(prev => ({ ...subidos, ...prev }));
+      }
+    }
+  }, [expediente?.id, expediente?.recibos]);
 
   // Normalizar campos (aceptar múltiples nombres)
   const tipoPago = expediente.tipo_pago || expediente.forma_pago;
@@ -79,7 +94,8 @@ const CalendarioPagos = ({
             estatusBackend: estatusNormalizado, // Puede ser null si no viene del backend
             comprobante_url: r.comprobante_url,
             comprobante_nombre: r.comprobante_nombre,
-            fecha_pago_real: r.fecha_pago_real
+            fecha_pago_real: r.fecha_pago_real,
+            recibo_pago_url: r.recibo_pago_url
           };
         });
     } else {
@@ -320,11 +336,11 @@ const CalendarioPagos = ({
     try {
       const resultado = await subirReciboPago(expediente.id, reciboSeleccionado, file);
       
-      // Guardar referencia local del recibo subido
+      // Guardar referencia local del recibo subido (solo marcar como subido, NO guardar URL directa de S3)
       setRecibosSubidos(prev => ({
         ...prev,
         [reciboSeleccionado]: {
-          url: resultado.url || resultado.pdf_url,
+          subido: true,
           nombre: file.name
         }
       }));
@@ -353,25 +369,10 @@ const CalendarioPagos = ({
    */
   const handleVerRecibo = async (numeroPago) => {
     try {
-      // Primero verificar si tenemos URL local (recién subido)
-      const reciboLocal = recibosSubidos[numeroPago];
-      if (reciboLocal?.url) {
-        window.open(reciboLocal.url, '_blank');
-        return;
-      }
-
-      // Si no, buscar en el backend la URL del recibo
-      // Verificar si el pago tiene recibo_pago_url del backend
-      const pago = pagosProcesados.find(p => p.numero === numeroPago);
-      if (pago?.recibo_pago_url) {
-        window.open(pago.recibo_pago_url, '_blank');
-        return;
-      }
-
-      // Intentar obtener URL firmada del backend
+      // Siempre obtener URL firmada del backend (las URLs directas de S3 dan Access Denied)
       const data = await obtenerReciboPagoURL(expediente.id, numeroPago);
-      if (data?.url) {
-        window.open(data.url, '_blank');
+      if (data?.url || data?.signed_url) {
+        window.open(data.url || data.signed_url, '_blank');
       } else {
         alert('No se encontró el recibo de pago para este período');
       }
@@ -385,7 +386,7 @@ const CalendarioPagos = ({
    * Determina si un pago tiene recibo de aseguradora subido
    */
   const tieneReciboAseguradora = (pago) => {
-    return !!(recibosSubidos[pago.numero]?.url || pago.recibo_pago_url);
+    return !!(recibosSubidos[pago.numero]?.subido || pago.recibo_pago_url);
   };
 
   if (compacto) {
@@ -481,6 +482,7 @@ const CalendarioPagos = ({
                 <th>Fecha de Pago</th>
                 <th>Monto</th>
                 <th width="150">Estado</th>
+                {expediente?.pdf_url && <th width="80" className="text-center">Póliza</th>}
                 <th width="100" className="text-center">Recibo</th>
                 <th width="150">Acciones</th>
               </tr>
@@ -512,6 +514,29 @@ const CalendarioPagos = ({
                       )}
                     </div>
                   </td>
+                  {/* Columna: Póliza PDF (solo en primer recibo) */}
+                  {expediente?.pdf_url && (
+                    <td className="text-center">
+                      {pago.numero === 1 ? (
+                        <button
+                          className="btn btn-sm btn-outline-info"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={async () => {
+                            try {
+                              const { signed_url } = await obtenerURLFirmadaPDF(expediente.id, 3600);
+                              const win = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                              if (win) win.opener = null;
+                            } catch (err) {
+                              alert('No se pudo abrir el PDF: ' + (err?.message || 'desconocido'));
+                            }
+                          }}
+                          title="Ver PDF de la póliza"
+                        >
+                          <FileText size={12} />
+                        </button>
+                      ) : null}
+                    </td>
+                  )}
                   {/* Columna: Recibo de pago de la aseguradora */}
                   <td className="text-center">
                     {subiendoRecibo === pago.numero ? (
