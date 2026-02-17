@@ -763,6 +763,7 @@ export const useCompartirExpediente = ({
           metodo_contacto: 'WhatsApp',
           destinatario_nombre: nombreDestinatario,
           destinatario_contacto: telefono,
+          documento_url: reciboPagoUrl || polizaPdfUrl || null,
           datos_adicionales: {
             canal: 'WhatsApp',
             numero_poliza: expediente.numero_poliza,
@@ -1018,6 +1019,7 @@ export const useCompartirExpediente = ({
           metodo_contacto: 'Email',
           destinatario_nombre: nombreDestinatario,
           destinatario_contacto: email,
+          documento_url: reciboPagoUrl || polizaPdfUrl || null,
           datos_adicionales: {
             canal: 'Email',
             asunto: asunto,
