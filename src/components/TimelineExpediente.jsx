@@ -940,14 +940,23 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                               🕐 Fecha envío: <strong className="text-dark">{formatearFecha(evento.fecha_evento)}</strong>
                             </div>
                             
-                            {/* Link al PDF compartido */}
+                            {/* Link al PDF compartido - genera URL firmada fresca al hacer click */}
                             {evento.documento_url && (
                               <div className="text-muted">
                                 📄 PDF compartido:{' '}
                                 <a 
-                                  href={evento.documento_url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer"
+                                  href="#"
+                                  onClick={async (e) => {
+                                    e.preventDefault();
+                                    try {
+                                      const { signed_url } = await pdfService.obtenerURLFirmadaPDF(expedienteId, 3600);
+                                      const win = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                                      if (win) win.opener = null;
+                                    } catch (err) {
+                                      console.error('Error al obtener PDF:', err);
+                                      toast.error('No se pudo abrir el PDF: ' + (err?.message || 'desconocido'));
+                                    }
+                                  }}
                                   className="text-primary text-decoration-underline"
                                   style={{ cursor: 'pointer' }}
                                 >
@@ -1562,9 +1571,18 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                   {expandido && evento.documento_url && (
                     <div className="mt-2">
                       <a 
-                        href={evento.documento_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        href="#"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          try {
+                            const { signed_url } = await pdfService.obtenerURLFirmadaPDF(expedienteId, 3600);
+                            const win = window.open(signed_url, '_blank', 'noopener,noreferrer');
+                            if (win) win.opener = null;
+                          } catch (err) {
+                            console.error('Error al obtener PDF:', err);
+                            toast.error('No se pudo abrir el PDF: ' + (err?.message || 'desconocido'));
+                          }
+                        }}
                         className="btn btn-sm btn-outline-primary"
                         style={{ fontSize: '0.75rem' }}
                       >
