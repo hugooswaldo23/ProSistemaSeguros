@@ -141,3 +141,171 @@ En el frontend ya se aplicó un workaround temporal:
 - Se filtran recibos con `monto > 0` como fallback
 
 Pero el **fix real debe ser en el backend** para que no se generen recibos fantasma.
+
+---
+---
+
+# 🐛 BUG 2: Eliminar Expediente NO borra archivos de S3
+
+**Prioridad:** Media-Alta  
+
+---
+
+## 📋 Descripción del Problema
+
+Cuando se elimina un expediente desde el listado (`DELETE /api/expedientes/:id`), solo se borra el registro de la base de datos, pero **NO se eliminan los archivos asociados en S3**.
+
+Esto causa que se acumulen archivos huérfanos en el bucket `prosistema-polizas` que ya no están asociados a ningún expediente.
+
+---
+
+## 📁 Archivos S3 que un expediente puede tener
+
+Cada expediente puede tener hasta **4 tipos de archivos** en S3:
+
+| Tipo de Archivo | Endpoint de Subida | Ruta S3 aproximada |
+|----------------|-------------------|-------------------|
+| PDF de Póliza | `POST /api/expedientes/:id/pdf` | `polizas/{expedienteId}/...` |
+| Recibos de Pago | `POST /api/expedientes/:id/recibo-pago/:numero` | `recibos/{expedienteId}/...` |
+| Comprobantes de Pago | `POST /api/expedientes/:id/comprobante` | `comprobantes/{expedienteId}/...` |
+| Cotizaciones PDF | `POST /api/expedientes/:id/cotizacion` | `cotizaciones/{expedienteId}/...` |
+
+---
+
+## 🔍 Estado Actual del DELETE
+
+El frontend hace:
+```javascript
+// Solo borra el registro en la BD, NO toca S3
+const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
+  method: 'DELETE'
+});
+```
+
+El backend (probablemente) hace:
+```sql
+-- Solo borra de la BD
+DELETE FROM expedientes WHERE id = ?;
+-- Los recibos se borran por CASCADE, pero los archivos S3 quedan huérfanos
+```
+
+**Ningún archivo S3 se elimina.**
+
+---
+
+## ✅ Solución Requerida
+
+### Opción A: Limpiar S3 en el endpoint DELETE del backend (RECOMENDADA)
+
+Modificar `DELETE /api/expedientes/:id` para que **antes de borrar el registro**, elimine todos los archivos S3 asociados:
+
+```javascript
+// En el handler de DELETE /api/expedientes/:id
+router.delete('/api/expedientes/:id', async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // 1. Obtener info del expediente antes de borrar
+    const expediente = await db.query('SELECT * FROM expedientes WHERE id = ?', [id]);
+    if (!expediente.length) return res.status(404).json({ error: 'No encontrado' });
+    
+    // 2. Obtener recibos asociados (para sus archivos S3)
+    const recibos = await db.query('SELECT * FROM recibos_pago WHERE expediente_id = ?', [id]);
+    
+    // 3. Eliminar archivos de S3
+    const s3 = new AWS.S3();
+    const bucket = 'prosistema-polizas';
+    
+    // 3a. Eliminar PDF de póliza
+    if (expediente[0].pdf_url) {
+      const key = extraerKeyDeURL(expediente[0].pdf_url);
+      await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+    }
+    
+    // 3b. Eliminar comprobantes y recibos de pago
+    for (const recibo of recibos) {
+      if (recibo.comprobante_url) {
+        const key = extraerKeyDeURL(recibo.comprobante_url);
+        await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+      }
+      if (recibo.recibo_pago_url) {
+        const key = extraerKeyDeURL(recibo.recibo_pago_url);
+        await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+      }
+    }
+    
+    // 3c. Eliminar cotizaciones
+    const cotizaciones = await db.query('SELECT * FROM documentos_expediente WHERE expediente_id = ? AND tipo = "cotizacion"', [id]);
+    for (const cot of cotizaciones) {
+      if (cot.url) {
+        const key = extraerKeyDeURL(cot.url);
+        await s3.deleteObject({ Bucket: bucket, Key: key }).promise();
+      }
+    }
+    
+    // 3d. Otra opción más limpia: borrar todo el "folder" del expediente en S3
+    // await borrarCarpetaS3(bucket, `polizas/${id}/`);
+    // await borrarCarpetaS3(bucket, `recibos/${id}/`);
+    // await borrarCarpetaS3(bucket, `comprobantes/${id}/`);
+    
+    // 4. Ahora sí, borrar de la BD (CASCADE borra recibos)
+    await db.query('DELETE FROM expedientes WHERE id = ?', [id]);
+    
+    res.json({ success: true, message: 'Expediente y archivos eliminados' });
+  } catch (error) {
+    console.error('Error al eliminar expediente:', error);
+    res.status(500).json({ error: 'Error al eliminar' });
+  }
+});
+```
+
+### Función helper para borrar carpeta S3 completa:
+
+```javascript
+async function borrarCarpetaS3(bucket, prefix) {
+  const s3 = new AWS.S3();
+  
+  // Listar todos los objetos con ese prefijo
+  const listParams = { Bucket: bucket, Prefix: prefix };
+  const listedObjects = await s3.listObjectsV2(listParams).promise();
+  
+  if (listedObjects.Contents.length === 0) return;
+  
+  // Borrar todos los objetos encontrados
+  const deleteParams = {
+    Bucket: bucket,
+    Delete: {
+      Objects: listedObjects.Contents.map(({ Key }) => ({ Key }))
+    }
+  };
+  
+  await s3.deleteObjects(deleteParams).promise();
+  console.log(`🗑️ Eliminados ${listedObjects.Contents.length} archivos de S3: ${prefix}`);
+}
+```
+
+---
+
+## 🧹 Limpieza de archivos huérfanos existentes
+
+Para limpiar archivos S3 que ya están huérfanos (de expedientes eliminados anteriormente):
+
+```sql
+-- Ver todos los expedientes que se han eliminado pero pueden tener archivos en S3
+-- (Si tienes soft-delete o logs de eliminación)
+
+-- Opción: Listar todos los prefijos en S3 y cruzar con expedientes existentes
+-- Esto se haría con un script que:
+-- 1. Liste todos los folders en s3://prosistema-polizas/polizas/
+-- 2. Verifique cuáles IDs ya no existen en la tabla expedientes
+-- 3. Elimine esos folders
+```
+
+---
+
+## 🧪 Cómo Verificar
+
+1. Subir un PDF a un expediente de prueba
+2. Verificar que existe en S3
+3. Eliminar el expediente
+4. Verificar que el archivo ya **NO** existe en S3
