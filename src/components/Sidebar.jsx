@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { LogOut, Menu, X, ChevronDown, ChevronRight } from 'lucide-react';
-import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2, BarChart3, Receipt, Banknote, DollarSign } from 'lucide-react';
+import { Shield, User, Home, Users, FileText, UserCheck, Package, PieChart, Settings, Clipboard, BookOpen, Database, Building2, BarChart3, Receipt, Banknote, DollarSign, Wallet, TrendingUp, Briefcase, HandCoins, ShieldCheck } from 'lucide-react';
 import { useNavigate, useLocation } from "react-router-dom";
 
 // Sidebar Component (memoizado)
@@ -10,6 +10,20 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
     const [subMenuAbierto, setSubMenuAbierto] = useState(() => {
         // Auto-expandir si estamos en una sub-ruta de reportes
         return location.pathname.startsWith('/reportes') ? 'reportes' : null;
+    });
+    const [subGrupoAbierto, setSubGrupoAbierto] = useState(() => {
+        // Auto-expandir el sub-grupo correspondiente según la ruta actual
+        if (location.pathname.startsWith('/reportes/nomina') || 
+            location.pathname.startsWith('/reportes/prestamos') || 
+            location.pathname.startsWith('/reportes/corte-diario')) {
+            return 'ingresos-egresos';
+        }
+        if (location.pathname.startsWith('/reportes/produccion-cartera') || 
+            location.pathname.startsWith('/reportes/cobranza') || 
+            location.pathname.startsWith('/reportes/salud-cartera')) {
+            return 'productividad';
+        }
+        return null;
     });
 
     const modulos = useMemo(() => [
@@ -21,9 +35,16 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
         { key: '/aseguradoras', nombre: 'Aseguradoras', icono: Building2, activo: true },
         { key: '/configuracion-tablas', nombre: 'Configuración de Tablas', icono: Database, activo: true },
         { key: '/reportes', nombre: 'Reportes', icono: BarChart3, activo: true, subMenuKey: 'reportes', subItems: [
-            { key: '/reportes/nomina', nombre: 'Nómina', icono: Receipt },
-            { key: '/reportes/prestamos', nombre: 'Préstamos', icono: Banknote },
-            { key: '/reportes/corte-diario', nombre: 'Corte Diario', icono: DollarSign }
+            { type: 'group', groupKey: 'ingresos-egresos', nombre: 'Ingresos y Egresos', icono: Wallet, items: [
+                { key: '/reportes/nomina', nombre: 'Nómina', icono: Receipt },
+                { key: '/reportes/prestamos', nombre: 'Préstamos', icono: Banknote },
+                { key: '/reportes/corte-diario', nombre: 'Corte Diario', icono: DollarSign }
+            ]},
+            { type: 'group', groupKey: 'productividad', nombre: 'Productividad', icono: TrendingUp, items: [
+                { key: '/reportes/produccion-cartera', nombre: 'Producción y Cartera', icono: Briefcase },
+                { key: '/reportes/cobranza', nombre: 'Cobranza y Estado Financiero', icono: HandCoins },
+                { key: '/reportes/salud-cartera', nombre: 'Salud de Cartera', icono: ShieldCheck }
+            ]}
         ]},
         { key: '/configuracion', nombre: 'Configuración', icono: Settings, activo: true }
     ], []);
@@ -151,10 +172,74 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
                                     </>
                                 )}
                             </button>
-                            {/* Sub-items */}
+                            {/* Sub-items con soporte para grupos */}
                             {tieneSubItems && subMenuExpandido && mostrarTexto && (
                                 <div style={{ backgroundColor: 'rgba(255,255,255,0.05)' }}>
                                     {modulo.subItems.map(sub => {
+                                        // Renderizar sub-grupo colapsable
+                                        if (sub.type === 'group') {
+                                            const IconoGrupo = sub.icono;
+                                            const grupoExpandido = subGrupoAbierto === sub.groupKey;
+                                            const grupoActivo = sub.items.some(item => location.pathname === item.key);
+                                            return (
+                                                <React.Fragment key={sub.groupKey}>
+                                                    <button
+                                                        onClick={() => {
+                                                            setSubGrupoAbierto(grupoExpandido ? null : sub.groupKey);
+                                                            if (!grupoExpandido && sub.items.length > 0) {
+                                                                navigate(sub.items[0].key);
+                                                            }
+                                                        }}
+                                                        className={`btn w-100 text-white d-flex py-2 border-0 ${
+                                                            grupoActivo && !grupoExpandido ? 'bg-primary bg-opacity-50' : 'bg-transparent'
+                                                        }`}
+                                                        style={{ 
+                                                            borderRadius: '0',
+                                                            paddingLeft: '2.2rem',
+                                                            paddingRight: '1rem',
+                                                            alignItems: 'center',
+                                                            paddingTop: '0.4rem',
+                                                            paddingBottom: '0.4rem',
+                                                            fontSize: '0.9em'
+                                                        }}
+                                                    >
+                                                        <IconoGrupo size={15} className="me-2" style={{ flexShrink: 0 }} />
+                                                        <span style={{ textAlign: 'left', lineHeight: '1.3', flex: 1 }}>{sub.nombre}</span>
+                                                        {grupoExpandido ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                                    </button>
+                                                    {grupoExpandido && (
+                                                        <div style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}>
+                                                            {sub.items.map(item => {
+                                                                const IconoItem = item.icono;
+                                                                const isItemActive = location.pathname === item.key;
+                                                                return (
+                                                                    <button
+                                                                        key={item.key}
+                                                                        onClick={() => navigate(item.key)}
+                                                                        className={`btn w-100 text-white d-flex py-2 border-0 ${
+                                                                            isItemActive ? 'bg-primary bg-opacity-75' : 'bg-transparent'
+                                                                        }`}
+                                                                        style={{ 
+                                                                            borderRadius: '0',
+                                                                            paddingLeft: '3.2rem',
+                                                                            paddingRight: '1rem',
+                                                                            alignItems: 'center',
+                                                                            paddingTop: '0.35rem',
+                                                                            paddingBottom: '0.35rem',
+                                                                            fontSize: '0.85em'
+                                                                        }}
+                                                                    >
+                                                                        <IconoItem size={14} className="me-2" style={{ flexShrink: 0 }} />
+                                                                        <span style={{ textAlign: 'left', lineHeight: '1.3' }}>{item.nombre}</span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
+                                                </React.Fragment>
+                                            );
+                                        }
+                                        // Renderizar sub-item directo (sin grupo)
                                         const IconoSub = sub.icono;
                                         const isSubActive = location.pathname === sub.key;
                                         return (

@@ -22,6 +22,9 @@ const Reportes = lazy(() => import('./screens/Reportes'));
 const Nomina = lazy(() => import('./screens/Nomina'));
 const Prestamos = lazy(() => import('./screens/Prestamos'));
 const CorteDiario = lazy(() => import('./screens/CorteDiario'));
+const ProduccionCartera = lazy(() => import('./screens/ProduccionCartera'));
+const CobranzaEstadoFinanciero = lazy(() => import('./screens/CobranzaEstadoFinanciero'));
+const SaludCartera = lazy(() => import('./screens/SaludCartera'));
 const Productos = lazy(() => import('./screens/Productos'));
 const DetallesProducto = lazy(() => import('./screens/Productos/Detalles'));
 function App() {
@@ -68,6 +71,9 @@ function App() {
           <Route path="/reportes/nomina" element={<Nomina/>}/>
           <Route path="/reportes/prestamos" element={<Prestamos/>}/>
           <Route path="/reportes/corte-diario" element={<CorteDiario/>}/>
+          <Route path="/reportes/produccion-cartera" element={<ProduccionCartera/>}/>
+          <Route path="/reportes/cobranza" element={<CobranzaEstadoFinanciero/>}/>
+          <Route path="/reportes/salud-cartera" element={<SaludCartera/>}/>
           <Route path="/configuracion" element={<Configuracion/>}/>
         </Routes>
         </Suspense>
