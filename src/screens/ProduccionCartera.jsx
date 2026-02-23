@@ -104,24 +104,7 @@ const ProduccionCartera = () => {
       if (!res.ok) throw new Error('Error');
       const reales = await res.json();
 
-      // ── Datos dummy para demo (GMM y Vida) ── TODO: eliminar cuando haya datos reales
-      const hoy = new Date();
-      const mesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
-      const dummyGMM = [
-        { id: 'dummy-gmm-1', numero_poliza: 'GMM-2026-001', nombre: 'María', apellido_paterno: 'López', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '45200', fecha_emision: `${mesActual}-03`, termino_vigencia: '2027-02-03', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-gmm-2', numero_poliza: 'GMM-2026-002', nombre: 'Roberto', apellido_paterno: 'Díaz', compania: 'AXA', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '38900', fecha_emision: `${mesActual}-05`, termino_vigencia: '2027-02-05', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-gmm-3', numero_poliza: 'GMM-2026-003', nombre: 'Empresa XYZ', apellido_paterno: '', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'RENOVACION', total: '62300', fecha_emision: `${mesActual}-08`, termino_vigencia: '2027-02-08', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-gmm-4', numero_poliza: 'GMM-2026-004', nombre: 'Laura', apellido_paterno: 'Hernández', compania: 'Zurich', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '29750', fecha_emision: `${mesActual}-12`, termino_vigencia: '2027-02-12', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-gmm-5', numero_poliza: 'GMM-2026-005', nombre: 'Grupo Industrial SA', apellido_paterno: '', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'ENDOSO', total: '5400', fecha_emision: `${mesActual}-15`, termino_vigencia: '2027-02-15', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-      ];
-      const dummyVida = [
-        { id: 'dummy-vida-1', numero_poliza: 'VIDA-2026-001', nombre: 'Alejandro', apellido_paterno: 'Torres', compania: 'Chubb', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '18500', fecha_emision: `${mesActual}-02`, termino_vigencia: '2027-02-02', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-vida-2', numero_poliza: 'VIDA-2026-002', nombre: 'Patricia', apellido_paterno: 'Morales', compania: 'HDI', producto: 'Vida', tipo_movimiento: 'RENOVACION', total: '22100', fecha_emision: `${mesActual}-06`, termino_vigencia: '2027-02-06', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-vida-3', numero_poliza: 'VIDA-2026-003', nombre: 'Fernando', apellido_paterno: 'Castillo', compania: 'Chubb', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '15800', fecha_emision: `${mesActual}-10`, termino_vigencia: '2027-02-10', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-vida-4', numero_poliza: 'VIDA-2026-004', nombre: 'Sofía', apellido_paterno: 'Ramírez', compania: 'HDI', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '12400', fecha_emision: `${mesActual}-14`, termino_vigencia: '2027-02-14', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz', estatus: 'Cancelada' },
-      ];
-
-      setExpedientes([...reales, ...dummyGMM, ...dummyVida]);
+      setExpedientes(Array.isArray(reales) ? reales : []);
     } catch {
       toast.error('Error al cargar datos de producción');
     } finally {
@@ -528,7 +511,6 @@ const ProduccionCartera = () => {
               { label: 'Total', val: kpis.total, color: '#0d6efd', icon: FileText, sub: formatMoney(kpis.prima), tipo: 'total' },
               { label: 'Nuevas', val: kpis.nuevas, color: '#198754', icon: TrendingUp, sub: formatMoney(kpis.primaN), tipo: 'nuevas' },
               { label: 'Renovaciones', val: kpis.renov, color: '#0dcaf0', icon: RefreshCw, sub: formatMoney(kpis.primaR), tipo: 'renov' },
-              { label: 'Endosos', val: kpis.endos, color: '#6f42c1', icon: FileText, sub: null, tipo: 'endosos' },
               { label: 'Cancelaciones', val: kpis.cancel, color: '#dc3545', icon: XCircle, sub: null, tipo: 'cancel' }
             ].map(k => {
               const Ic = k.icon;
@@ -629,7 +611,6 @@ const ProduccionCartera = () => {
                         <th>{agrupacion === 'ramo' ? 'Ramo' : agrupacion === 'agente' ? 'Agente' : 'Aseguradora'}</th>
                         <th className="text-center">Nuevas</th>
                         <th className="text-center">Renov.</th>
-                        <th className="text-center">Endosos</th>
                         <th className="text-center">Cancel.</th>
                         <th className="text-end">Prima</th>
                         <th style={{ width: 100 }}>% Prima</th>
@@ -652,7 +633,6 @@ const ProduccionCartera = () => {
                             </td>
                             <CeldaCount count={row.nuevas} tipo="nuevas" dimension={agrupacion} valor={row.key} label={row.label} color="success" />
                             <CeldaCount count={row.renov} tipo="renov" dimension={agrupacion} valor={row.key} label={row.label} color="info" />
-                            <CeldaCount count={row.endosos} tipo="endosos" dimension={agrupacion} valor={row.key} label={row.label} color="purple" />
                             <CeldaCount count={row.cancel} tipo="cancel" dimension={agrupacion} valor={row.key} label={row.label} color="danger" />
                             <td className="text-end fw-semibold">{formatMoney(row.prima)}</td>
                             <td>
@@ -673,7 +653,6 @@ const ProduccionCartera = () => {
                         <td>Total</td>
                         <td className="text-center">{kpis.nuevas}</td>
                         <td className="text-center">{kpis.renov}</td>
-                        <td className="text-center">{kpis.endos}</td>
                         <td className="text-center">{kpis.cancel}</td>
                         <td className="text-end">{formatMoney(kpis.prima)}</td>
                         <td></td>
@@ -711,7 +690,6 @@ const ProduccionCartera = () => {
                           <th>Vendedor</th>
                           <th className="text-center">Nuevas</th>
                           <th className="text-center">Renov.</th>
-                          <th className="text-center">Endosos</th>
                           <th className="text-center">Cancel.</th>
                           <th className="text-end">Prima</th>
                           <th style={{ width: 130 }}>% del Total</th>
@@ -736,7 +714,6 @@ const ProduccionCartera = () => {
                               </td>
                               <td className="text-center">{row.nuevas || <span className="text-muted">—</span>}</td>
                               <td className="text-center">{row.renov || <span className="text-muted">—</span>}</td>
-                              <td className="text-center">{row.endosos || <span className="text-muted">—</span>}</td>
                               <td className="text-center">{row.cancel ? <span className="text-danger fw-bold">{row.cancel}</span> : <span className="text-muted">—</span>}</td>
                               <td className="text-end fw-semibold">{formatMoney(row.prima)}</td>
                               <td>
@@ -757,7 +734,6 @@ const ProduccionCartera = () => {
                           <td>Total</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.nuevas, 0)}</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.renov, 0)}</td>
-                          <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.endosos, 0)}</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.cancel, 0)}</td>
                           <td className="text-end">{formatMoney(vendorDrillDown.primaTotal)}</td>
                           <td><span className="fw-bold" style={{ fontSize: '0.8em' }}>100%</span></td>
