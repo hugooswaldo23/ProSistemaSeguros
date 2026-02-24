@@ -40,6 +40,7 @@ export function detectarAseguradora(textoInicial) {
   if (/\bMAPFRE\b/.test(texto)) return 'MAPFRE';
   if (/\bAXA\b/.test(texto)) return 'AXA';
   if (/\bZURICH\b/.test(texto)) return 'ZURICH';
+  if (/\bLATINOAMERICANA\b|\bLA\s+LATINO\b|\bLATINO\s+SEGUROS\b/i.test(texto)) return 'LALATINO';
   if (/\bANA\b/.test(texto)) return 'ANA';
   if (/\bINBURSA\b/.test(texto)) return 'INBURSA';
   if (/\bBANORTE\b/.test(texto)) return 'BANORTE';

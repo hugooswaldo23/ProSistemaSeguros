@@ -5,7 +5,15 @@
  * 
  * NOTA: Los imports deben ser estáticos para que Vite/esbuild los pre-bundlee.
  * Por eso usamos imports directos en lugar de template literals dinámicos.
+ * 
+ * Aseguradoras con extractor IA (Gemini):
+ * - LALATINO (La Latinoamericana)
+ * 
+ * Para agregar más aseguradoras con IA, solo agregar el case con import de gemini-extractor.js
  */
+
+// Aseguradoras que usan el extractor Gemini IA
+const ASEGURADORAS_GEMINI = new Set(['LALATINO']);
 
 /**
  * Carga el extractor específico para una aseguradora y producto
@@ -20,8 +28,15 @@ export async function loadExtractor(company, producto = 'autos') {
   console.log(`📦 Registry: Cargando extractor [${aseguradora}/${prod}]`);
   
   try {
+    // ==================== EXTRACTORES IA (GEMINI) ====================
+    // Estas aseguradoras usan extracción con IA — funcionan para CUALQUIER producto
+    if (ASEGURADORAS_GEMINI.has(aseguradora)) {
+      console.log(`   🤖 Cargando extractor Gemini IA para ${aseguradora}`);
+      return await import('./gemini-extractor.js');
+    }
+
+    // ==================== EXTRACTORES REGEX (POR ASEGURADORA) ====================
     // IMPORTANTE: Imports estáticos para compatibilidad con Vite/esbuild
-    // Solo soportamos 'autos' por ahora. Para otros productos, agregar más cases.
     
     if (prod === 'autos') {
       switch (aseguradora) {
