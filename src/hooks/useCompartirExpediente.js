@@ -673,18 +673,18 @@ export const useCompartirExpediente = ({
         });
       }
       
-      // 📄 Obtener URL firmada del recibo de pago de aseguradora (si existe)
+      // 📄 Obtener URL firmada del recibo de pago de aseguradora
+      // Siempre intentar obtener del backend, sin depender del campo local recibo_pago_url
       let reciboPagoUrl = null;
       let polizaPdfUrl = null;
       try {
-        const reciboBackend = expediente.recibos?.find(r => r.numero_recibo === pago.numero);
-        if (pago.recibo_pago_url || reciboBackend?.recibo_pago_url) {
-          const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
-          reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+        const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
+        reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+        if (reciboPagoUrl) {
           console.log('✅ URL de recibo de pago obtenida:', reciboPagoUrl?.substring(0, 50) + '...');
         }
       } catch (errorRecibo) {
-        console.warn('⚠️ No se pudo obtener URL del recibo de pago:', errorRecibo);
+        console.warn('⚠️ No se encontró recibo de pago en S3, intentando póliza como fallback:', errorRecibo?.message);
       }
 
       // 📄 Fallback: Si no hay recibo de pago, incluir PDF de la póliza
@@ -692,7 +692,7 @@ export const useCompartirExpediente = ({
         try {
           const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400);
           polizaPdfUrl = pdfData?.signed_url;
-          console.log('✅ URL de póliza (fallback) obtenida:', polizaPdfUrl?.substring(0, 50) + '...');
+          console.log('ℹ️ Recibo no disponible, se adjunta póliza como respaldo:', polizaPdfUrl?.substring(0, 50) + '...');
         } catch (errorPdf) {
           console.warn('⚠️ No se pudo obtener URL de la póliza:', errorPdf);
         }
@@ -934,18 +934,18 @@ export const useCompartirExpediente = ({
         });
       }
       
-      // 📄 Obtener URL firmada del recibo de pago de aseguradora (si existe)
+      // 📄 Obtener URL firmada del recibo de pago de aseguradora
+      // Siempre intentar obtener del backend, sin depender del campo local recibo_pago_url
       let reciboPagoUrl = null;
       let polizaPdfUrl = null;
       try {
-        const reciboBackend = expediente.recibos?.find(r => r.numero_recibo === pago.numero);
-        if (pago.recibo_pago_url || reciboBackend?.recibo_pago_url) {
-          const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
-          reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+        const dataRecibo = await pdfService.obtenerReciboPagoURL(expediente.id, pago.numero, 86400);
+        reciboPagoUrl = dataRecibo?.url || dataRecibo?.signed_url;
+        if (reciboPagoUrl) {
           console.log('✅ URL de recibo de pago (Email) obtenida:', reciboPagoUrl?.substring(0, 50) + '...');
         }
       } catch (errorRecibo) {
-        console.warn('⚠️ No se pudo obtener URL del recibo de pago (Email):', errorRecibo);
+        console.warn('⚠️ No se encontró recibo de pago en S3 (Email), intentando póliza como fallback:', errorRecibo?.message);
       }
 
       // 📄 Fallback: Si no hay recibo de pago, incluir PDF de la póliza
@@ -953,7 +953,7 @@ export const useCompartirExpediente = ({
         try {
           const pdfData = await pdfService.obtenerURLFirmadaPDF(expediente.id, 86400);
           polizaPdfUrl = pdfData?.signed_url;
-          console.log('✅ URL de póliza (fallback Email) obtenida:', polizaPdfUrl?.substring(0, 50) + '...');
+          console.log('ℹ️ Recibo no disponible (Email), se adjunta póliza como respaldo:', polizaPdfUrl?.substring(0, 50) + '...');
         } catch (errorPdf) {
           console.warn('⚠️ No se pudo obtener URL de la póliza (Email):', errorPdf);
         }

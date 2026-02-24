@@ -2675,6 +2675,30 @@ const ModuloClientes = () => {
                               <tr key={expediente.id}>
                                 <td>
                                   <strong className="text-primary">{expediente.numero_poliza || expediente.no_poliza || '-'}</strong>
+                                  {(() => {
+                                    // Buscar póliza anterior vinculada (por campo o por vehículo)
+                                    let anterior = null;
+                                    if (expediente.renovacion_de) {
+                                      anterior = expedientesDelCliente.find(e => e.id === expediente.renovacion_de || e.id === Number(expediente.renovacion_de));
+                                    }
+                                    if (!anterior) {
+                                      // Buscar por mismo vehículo en pólizas anteriores
+                                      anterior = polizasAnterioresCliente.find(e => {
+                                        if (e.id === expediente.id) return false;
+                                        // Match por número de serie (más confiable)
+                                        if (expediente.numero_serie && e.numero_serie && expediente.numero_serie === e.numero_serie) return true;
+                                        // Match por marca+modelo+año
+                                        if (expediente.marca && e.marca && expediente.anio && e.anio &&
+                                            expediente.marca === e.marca && expediente.modelo === e.modelo && expediente.anio === e.anio) return true;
+                                        return false;
+                                      });
+                                    }
+                                    return anterior ? (
+                                      <div><small className="text-muted">🔄 Renueva: <span className="text-info">{anterior.numero_poliza || anterior.no_poliza}</span>
+                                        <span className="text-secondary"> ({new Date(anterior.inicio_vigencia || anterior.inicioVigencia).toLocaleDateString('es-MX')} - {new Date(anterior.termino_vigencia || anterior.terminoVigencia).toLocaleDateString('es-MX')})</span>
+                                      </small></div>
+                                    ) : null;
+                                  })()}
                                 </td>
                                 <td>
                                   <div>
@@ -2799,6 +2823,28 @@ const ModuloClientes = () => {
                             <tr key={expediente.id}>
                                 <td>
                                   <strong className="text-primary">{expediente.numero_poliza || expediente.no_poliza || '-'}</strong>
+                                  {(() => {
+                                    // Buscar póliza nueva que la renovó (por campo o por vehículo)
+                                    let nueva = null;
+                                    if (expediente.renovada_por) {
+                                      nueva = expedientesDelCliente.find(e => e.id === expediente.renovada_por || e.id === Number(expediente.renovada_por));
+                                    }
+                                    if (!nueva) {
+                                      // Buscar por mismo vehículo en pólizas vigentes
+                                      nueva = polizasVigentesCliente.find(e => {
+                                        if (e.id === expediente.id) return false;
+                                        if (expediente.numero_serie && e.numero_serie && expediente.numero_serie === e.numero_serie) return true;
+                                        if (expediente.marca && e.marca && expediente.anio && e.anio &&
+                                            expediente.marca === e.marca && expediente.modelo === e.modelo && expediente.anio === e.anio) return true;
+                                        return false;
+                                      });
+                                    }
+                                    return nueva ? (
+                                      <div><small className="text-muted">➡️ Renovada por: <span className="text-success">{nueva.numero_poliza || nueva.no_poliza}</span>
+                                        <span className="text-secondary"> ({new Date(nueva.inicio_vigencia || nueva.inicioVigencia).toLocaleDateString('es-MX')} - {new Date(nueva.termino_vigencia || nueva.terminoVigencia).toLocaleDateString('es-MX')})</span>
+                                      </small></div>
+                                    ) : null;
+                                  })()}
                                 </td>
                                 <td>
                                   <div>

@@ -15,9 +15,9 @@ const PAGE_SIZE = 50;
 const norm = (t) => (t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 // ─── Clasificadores puros (sin estado) ───
-const esNueva = (exp) => norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento;
-const esRenovacion = (exp) => norm(exp.tipo_movimiento) === 'RENOVACION';
+const esRenovacion = (exp) => norm(exp.etapa_activa) === 'RENOVADA' || norm(exp.etapa_activa).includes('RENOVACION EMITIDA') || norm(exp.tipo_movimiento) === 'RENOVACION' || !!exp.renovacion_de;
 const esEndoso = (exp) => norm(exp.tipo_movimiento) === 'ENDOSO';
+const esNueva = (exp) => !esRenovacion(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
 const esCancelada = (exp) => {
   const e = norm(exp.estatus || exp.etapa_activa);
   return e === 'CANCELADA' || e === 'CANCELADO';
@@ -104,24 +104,7 @@ const ProduccionCartera = () => {
       if (!res.ok) throw new Error('Error');
       const reales = await res.json();
 
-      // ── Datos dummy para demo (GMM y Vida) ── TODO: eliminar cuando haya datos reales
-      const hoy = new Date();
-      const mesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}`;
-      const dummyGMM = [
-        { id: 'dummy-gmm-1', numero_poliza: 'GMM-2026-001', nombre: 'María', apellido_paterno: 'López', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '45200', fecha_emision: `${mesActual}-03`, termino_vigencia: '2027-02-03', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-gmm-2', numero_poliza: 'GMM-2026-002', nombre: 'Roberto', apellido_paterno: 'Díaz', compania: 'AXA', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '38900', fecha_emision: `${mesActual}-05`, termino_vigencia: '2027-02-05', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-gmm-3', numero_poliza: 'GMM-2026-003', nombre: 'Empresa XYZ', apellido_paterno: '', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'RENOVACION', total: '62300', fecha_emision: `${mesActual}-08`, termino_vigencia: '2027-02-08', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-gmm-4', numero_poliza: 'GMM-2026-004', nombre: 'Laura', apellido_paterno: 'Hernández', compania: 'Zurich', producto: 'GMM', tipo_movimiento: 'NUEVA', total: '29750', fecha_emision: `${mesActual}-12`, termino_vigencia: '2027-02-12', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-gmm-5', numero_poliza: 'GMM-2026-005', nombre: 'Grupo Industrial SA', apellido_paterno: '', compania: 'GNP', producto: 'GMM', tipo_movimiento: 'ENDOSO', total: '5400', fecha_emision: `${mesActual}-15`, termino_vigencia: '2027-02-15', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-      ];
-      const dummyVida = [
-        { id: 'dummy-vida-1', numero_poliza: 'VIDA-2026-001', nombre: 'Alejandro', apellido_paterno: 'Torres', compania: 'Chubb', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '18500', fecha_emision: `${mesActual}-02`, termino_vigencia: '2027-02-02', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-vida-2', numero_poliza: 'VIDA-2026-002', nombre: 'Patricia', apellido_paterno: 'Morales', compania: 'HDI', producto: 'Vida', tipo_movimiento: 'RENOVACION', total: '22100', fecha_emision: `${mesActual}-06`, termino_vigencia: '2027-02-06', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz' },
-        { id: 'dummy-vida-3', numero_poliza: 'VIDA-2026-003', nombre: 'Fernando', apellido_paterno: 'Castillo', compania: 'Chubb', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '15800', fecha_emision: `${mesActual}-10`, termino_vigencia: '2027-02-10', agente: 'Pro Sistema', agente_id: 'agent-ps', vendedor_id: null, sub_agente: 'Carlos Mendoza' },
-        { id: 'dummy-vida-4', numero_poliza: 'VIDA-2026-004', nombre: 'Sofía', apellido_paterno: 'Ramírez', compania: 'HDI', producto: 'Vida', tipo_movimiento: 'NUEVA', total: '12400', fecha_emision: `${mesActual}-14`, termino_vigencia: '2027-02-14', agente: 'Seguros MX', agente_id: 'agent-smx', vendedor_id: null, sub_agente: 'Ana Ruiz', estatus: 'Cancelada' },
-      ];
-
-      setExpedientes([...reales, ...dummyGMM, ...dummyVida]);
+      setExpedientes(Array.isArray(reales) ? reales : []);
     } catch {
       toast.error('Error al cargar datos de producción');
     } finally {
@@ -262,17 +245,58 @@ const ProduccionCartera = () => {
     });
   }, [expedientes, fechaInicio, fechaFin, filtroAgente, filtroVendedor, filtroRamo, filtroAseguradora, resolverAgenteId, resolverVendedorId]);
 
+  // 🔄 Mapa de pares de renovación (detectar cambio de compañía)
+  const renovacionPares = useMemo(() => {
+    const pares = new Map();
+    const renovadas = expedientes.filter(e => norm(e.etapa_activa) === 'RENOVADA');
+    renovadas.forEach(antigua => {
+      let nueva = null;
+      if (antigua.renovada_por) nueva = expedientes.find(e => String(e.id) === String(antigua.renovada_por));
+      if (!nueva) nueva = expedientes.find(e => e.renovacion_de && String(e.renovacion_de) === String(antigua.id));
+      if (!nueva) {
+        const cid = String(antigua.cliente_id || antigua.clienteId || '');
+        nueva = expedientes.find(e => {
+          if (e.id === antigua.id || norm(e.etapa_activa) === 'RENOVADA' || esCancelada(e)) return false;
+          if (String(e.cliente_id || e.clienteId || '') !== cid) return false;
+          if (antigua.numero_serie && e.numero_serie) return antigua.numero_serie === e.numero_serie;
+          if (antigua.marca && e.marca) return antigua.marca === e.marca && antigua.modelo === e.modelo && String(antigua.anio) === String(e.anio);
+          return false;
+        });
+      }
+      if (nueva) {
+        const misma = (antigua.compania || antigua.aseguradora) === (nueva.compania || nueva.aseguradora);
+        pares.set(antigua.id, { parejaId: nueva.id, mismaCompania: misma });
+        pares.set(nueva.id, { parejaId: antigua.id, mismaCompania: misma });
+      }
+    });
+    return pares;
+  }, [expedientes]);
+
+  // Clasificadores contextuales: cross-company → nueva para la aseguradora filtrada
+  const esRenovacionCtx = useMemo(() => (exp) => {
+    if (!esRenovacion(exp)) return false;
+    if (filtroAseguradora !== 'todos') {
+      const par = renovacionPares.get(exp.id);
+      if (par && !par.mismaCompania) return false;
+    }
+    return true;
+  }, [filtroAseguradora, renovacionPares]);
+
+  const esNuevaCtx = useMemo(() => (exp) => {
+    return !esRenovacionCtx(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
+  }, [esRenovacionCtx]);
+
   // ─── KPIs ───
   const kpis = useMemo(() => {
     let nuevas = 0, renov = 0, cancel = 0, endos = 0;
-    let prima = 0, primaN = 0, primaR = 0;
+    let prima = 0, primaN = 0, primaR = 0, primaCancel = 0;
     expedientesFiltrados.forEach(e => {
       const p = getPrima(e);
       prima += p;
-      if (esRenovacion(e)) { renov++; primaR += p; }
+      if (esRenovacionCtx(e)) { renov++; primaR += p; }
       else if (esEndoso(e)) { endos++; }
       else { nuevas++; primaN += p; }
-      if (esCancelada(e)) cancel++;
+      if (esCancelada(e)) { cancel++; primaCancel += p; }
     });
 
     // Tasa de renovación
@@ -282,8 +306,13 @@ const ProduccionCartera = () => {
     }).length;
     const tasaRen = debeRenovar > 0 ? ((renov / debeRenovar) * 100).toFixed(1) : null;
 
-    return { nuevas, renov, cancel, endos, prima, primaN, primaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
-  }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin]);
+    // Prima neta = producción total menos cancelaciones
+    const primaNeta = prima - primaCancel;
+    const primaNetaN = primaN - expedientesFiltrados.filter(e => esNuevaCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+    const primaNetaR = primaR - expedientesFiltrados.filter(e => esRenovacionCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+
+    return { nuevas, renov, cancel, endos, prima, primaN, primaR, primaCancel, primaNeta, primaNetaN, primaNetaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
+  }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Tabla resumen agrupada ───
   const tablaResumen = useMemo(() => {
@@ -300,16 +329,16 @@ const ProduccionCartera = () => {
         key = exp.compania || 'Sin aseguradora';
         label = key;
       }
-      if (!mapa.has(key)) mapa.set(key, { key, label, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0 });
+      if (!mapa.has(key)) mapa.set(key, { key, label, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0, primaCancel: 0 });
       const row = mapa.get(key);
-      if (esRenovacion(exp)) row.renov++;
+      if (esRenovacionCtx(exp)) row.renov++;
       else if (esEndoso(exp)) row.endosos++;
       else row.nuevas++;
-      if (esCancelada(exp)) row.cancel++;
+      if (esCancelada(exp)) { row.cancel++; row.primaCancel += getPrima(exp); }
       row.prima += getPrima(exp);
     });
     return [...mapa.values()].sort((a, b) => b.prima - a.prima);
-  }, [expedientesFiltrados, agrupacion, resolverAgenteId, getNombreAgente]);
+  }, [expedientesFiltrados, agrupacion, resolverAgenteId, getNombreAgente, esRenovacionCtx]);
 
   // ─── Drill-down: filtrar + paginar ───
   const drillDownData = useMemo(() => {
@@ -325,8 +354,8 @@ const ProduccionCartera = () => {
         return true;
       });
     }
-    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNueva);
-    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacion);
+    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNuevaCtx);
+    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacionCtx);
     else if (drillDown.tipo === 'endosos') filtered = filtered.filter(esEndoso);
     else if (drillDown.tipo === 'cancel') filtered = filtered.filter(esCancelada);
     // 'total' = no filter by tipo
@@ -347,7 +376,7 @@ const ProduccionCartera = () => {
     const total = filtered.length;
     const start = drillPage * PAGE_SIZE;
     return { items: filtered.slice(start, start + PAGE_SIZE), total };
-  }, [drillDown, drillPage, drillSort, expedientesFiltrados, resolverAgenteId, getNombreVendedor, getNombreAgente]);
+  }, [drillDown, drillPage, drillSort, expedientesFiltrados, resolverAgenteId, getNombreVendedor, getNombreAgente, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Drill-down handlers ───
   const abrirDrillDown = useCallback((tipo, dimension, valor, label) => {
@@ -377,8 +406,8 @@ const ProduccionCartera = () => {
 
     // Filtrar expedientes del agente + tipo
     let filtered = expedientesFiltrados.filter(exp => resolverAgenteId(exp) === drillDown.valor);
-    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNueva);
-    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacion);
+    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNuevaCtx);
+    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacionCtx);
     else if (drillDown.tipo === 'endosos') filtered = filtered.filter(esEndoso);
     else if (drillDown.tipo === 'cancel') filtered = filtered.filter(esCancelada);
 
@@ -396,7 +425,7 @@ const ProduccionCartera = () => {
 
       if (!mapa.has(key)) mapa.set(key, { key, label, esDirecto, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0, polizas: [] });
       const row = mapa.get(key);
-      if (esRenovacion(exp)) row.renov++;
+      if (esRenovacionCtx(exp)) row.renov++;
       else if (esEndoso(exp)) row.endosos++;
       else row.nuevas++;
       if (esCancelada(exp)) row.cancel++;
@@ -412,7 +441,7 @@ const ProduccionCartera = () => {
     });
 
     return { rows, primaTotal, totalPolizas: filtered.length };
-  }, [drillDown, expedientesFiltrados, resolverAgenteId, resolverVendedorId, getNombreVendedor]);
+  }, [drillDown, expedientesFiltrados, resolverAgenteId, resolverVendedorId, getNombreVendedor, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Colores de ramo ───
   const coloresRamo = { 'Autos': '#0d6efd', 'Vida': '#198754', 'Daños': '#dc3545', 'GMM': '#6f42c1', 'Equipo pesado': '#fd7e14', 'Embarcaciones': '#0dcaf0', 'Ahorro': '#20c997' };
@@ -525,11 +554,10 @@ const ProduccionCartera = () => {
           {/* ═══ KPIs ═══ */}
           <div className="row g-3 mb-4">
             {[
-              { label: 'Total', val: kpis.total, color: '#0d6efd', icon: FileText, sub: formatMoney(kpis.prima), tipo: 'total' },
-              { label: 'Nuevas', val: kpis.nuevas, color: '#198754', icon: TrendingUp, sub: formatMoney(kpis.primaN), tipo: 'nuevas' },
-              { label: 'Renovaciones', val: kpis.renov, color: '#0dcaf0', icon: RefreshCw, sub: formatMoney(kpis.primaR), tipo: 'renov' },
-              { label: 'Endosos', val: kpis.endos, color: '#6f42c1', icon: FileText, sub: null, tipo: 'endosos' },
-              { label: 'Cancelaciones', val: kpis.cancel, color: '#dc3545', icon: XCircle, sub: null, tipo: 'cancel' }
+              { label: 'Total', val: kpis.total, color: '#0d6efd', icon: FileText, sub: formatMoney(kpis.primaNeta), tipo: 'total' },
+              { label: 'Nuevas', val: kpis.nuevas, color: '#198754', icon: TrendingUp, sub: formatMoney(kpis.primaNetaN), tipo: 'nuevas' },
+              { label: 'Renovaciones', val: kpis.renov, color: '#0dcaf0', icon: RefreshCw, sub: formatMoney(kpis.primaNetaR), tipo: 'renov' },
+              { label: 'Cancelaciones', val: kpis.cancel, color: '#dc3545', icon: XCircle, sub: kpis.primaCancel > 0 ? formatMoney(kpis.primaCancel) : null, tipo: 'cancel' }
             ].map(k => {
               const Ic = k.icon;
               return (
@@ -629,7 +657,6 @@ const ProduccionCartera = () => {
                         <th>{agrupacion === 'ramo' ? 'Ramo' : agrupacion === 'agente' ? 'Agente' : 'Aseguradora'}</th>
                         <th className="text-center">Nuevas</th>
                         <th className="text-center">Renov.</th>
-                        <th className="text-center">Endosos</th>
                         <th className="text-center">Cancel.</th>
                         <th className="text-end">Prima</th>
                         <th style={{ width: 100 }}>% Prima</th>
@@ -637,7 +664,8 @@ const ProduccionCartera = () => {
                     </thead>
                     <tbody>
                       {tablaResumen.map((row, idx) => {
-                        const pct = kpis.prima > 0 ? ((row.prima / kpis.prima) * 100).toFixed(1) : 0;
+                        const primaNeta = row.prima - row.primaCancel;
+                        const pct = kpis.primaNeta > 0 ? ((primaNeta / kpis.primaNeta) * 100).toFixed(1) : 0;
                         const dotColor = agrupacion === 'ramo' ? (coloresRamo[row.label] || '#6c757d') : '#0d6efd';
                         return (
                           <tr key={row.key}>
@@ -652,9 +680,8 @@ const ProduccionCartera = () => {
                             </td>
                             <CeldaCount count={row.nuevas} tipo="nuevas" dimension={agrupacion} valor={row.key} label={row.label} color="success" />
                             <CeldaCount count={row.renov} tipo="renov" dimension={agrupacion} valor={row.key} label={row.label} color="info" />
-                            <CeldaCount count={row.endosos} tipo="endosos" dimension={agrupacion} valor={row.key} label={row.label} color="purple" />
                             <CeldaCount count={row.cancel} tipo="cancel" dimension={agrupacion} valor={row.key} label={row.label} color="danger" />
-                            <td className="text-end fw-semibold">{formatMoney(row.prima)}</td>
+                            <td className="text-end fw-semibold">{formatMoney(primaNeta)}</td>
                             <td>
                               <div className="d-flex align-items-center gap-1">
                                 <div className="progress flex-grow-1" style={{ height: 5 }}>
@@ -673,9 +700,8 @@ const ProduccionCartera = () => {
                         <td>Total</td>
                         <td className="text-center">{kpis.nuevas}</td>
                         <td className="text-center">{kpis.renov}</td>
-                        <td className="text-center">{kpis.endos}</td>
                         <td className="text-center">{kpis.cancel}</td>
-                        <td className="text-end">{formatMoney(kpis.prima)}</td>
+                        <td className="text-end">{formatMoney(kpis.primaNeta)}</td>
                         <td></td>
                       </tr>
                     </tfoot>
@@ -711,7 +737,6 @@ const ProduccionCartera = () => {
                           <th>Vendedor</th>
                           <th className="text-center">Nuevas</th>
                           <th className="text-center">Renov.</th>
-                          <th className="text-center">Endosos</th>
                           <th className="text-center">Cancel.</th>
                           <th className="text-end">Prima</th>
                           <th style={{ width: 130 }}>% del Total</th>
@@ -736,7 +761,6 @@ const ProduccionCartera = () => {
                               </td>
                               <td className="text-center">{row.nuevas || <span className="text-muted">—</span>}</td>
                               <td className="text-center">{row.renov || <span className="text-muted">—</span>}</td>
-                              <td className="text-center">{row.endosos || <span className="text-muted">—</span>}</td>
                               <td className="text-center">{row.cancel ? <span className="text-danger fw-bold">{row.cancel}</span> : <span className="text-muted">—</span>}</td>
                               <td className="text-end fw-semibold">{formatMoney(row.prima)}</td>
                               <td>
@@ -757,7 +781,6 @@ const ProduccionCartera = () => {
                           <td>Total</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.nuevas, 0)}</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.renov, 0)}</td>
-                          <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.endosos, 0)}</td>
                           <td className="text-center">{vendorDrillDown.rows.reduce((s, r) => s + r.cancel, 0)}</td>
                           <td className="text-end">{formatMoney(vendorDrillDown.primaTotal)}</td>
                           <td><span className="fw-bold" style={{ fontSize: '0.8em' }}>100%</span></td>
@@ -817,7 +840,7 @@ const ProduccionCartera = () => {
                         </thead>
                         <tbody>
                           {drillDownData.items.map((exp, i) => {
-                            const tipo = esRenovacion(exp) ? 'Renov.' : esEndoso(exp) ? 'Endoso' : 'Nueva';
+                            const tipo = esRenovacionCtx(exp) ? 'Renov.' : esEndoso(exp) ? 'Endoso' : 'Nueva';
                             const tipoColor = tipo === 'Renov.' ? 'info' : tipo === 'Endoso' ? 'purple' : 'success';
                             return (
                               <tr key={exp.id || i}>

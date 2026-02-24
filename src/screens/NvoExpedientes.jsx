@@ -896,24 +896,24 @@ const ModuloNvoExpedientes = () => {
         setDestinatariosCompartir(destinatarios);
         setDestinatarioCompartirSeleccionado(destinatarios[0]); // Seleccionar el primero por defecto
         
-        // Si hay recibos, seleccionar el primer recibo vencido o pendiente (no pagado)
+        // Si hay recibos, seleccionar automáticamente el más relevante
         if (expediente.recibos && expediente.recibos.length > 0) {
           const hoy = new Date();
           hoy.setHours(0, 0, 0, 0);
           
-          // Filtrar solo recibos no pagados
+          // Prioridad: 1) Vencido no pagado, 2) Pendiente no pagado, 3) Primer recibo (incluso pagado)
           const recibosNoPagados = expediente.recibos.filter(r => !r.fecha_pago_real);
           
           if (recibosNoPagados.length > 0) {
-            // Buscar primer recibo vencido
             const primerVencido = recibosNoPagados.find(r => {
               const fechaVenc = new Date(r.fecha_vencimiento);
               fechaVenc.setHours(0, 0, 0, 0);
               return fechaVenc < hoy;
             });
-            
-            // Si no hay vencidos, tomar el primer pendiente
             setPagoSeleccionado(primerVencido || recibosNoPagados[0]);
+          } else {
+            // Todos pagados: seleccionar el último recibo pagado
+            setPagoSeleccionado(expediente.recibos[expediente.recibos.length - 1]);
           }
         }
         
@@ -989,13 +989,16 @@ const ModuloNvoExpedientes = () => {
   /**
    * 🆕 Opción 2: Cargar Póliza Renovada desde el modal de opciones
    * - Cierra modal de opciones
-   * - Abre el extractor PDF con referencia al expediente anterior
+   * - Abre el formulario de nuevo expediente con contexto de renovación
+   * - expedienteAnteriorParaRenovacion ya fue seteado por abrirModalOpcionesRenovacion
    */
   const seleccionarCargarPolizaRenovada = useCallback(() => {
     setMostrarModalOpcionesRenovacion(false);
-    // El extractor se abrirá con expedienteAnteriorParaRenovacion disponible
-    setMostrarExtractorPDF(true);
-  }, []);
+    // Navegar al formulario de nuevo expediente con contexto de renovación
+    setModoEdicion(false);
+    setVistaActual('formulario');
+    toast.success(`Capturando renovación de póliza ${expedienteAnteriorParaRenovacion?.numero_poliza || ''}`);
+  }, [expedienteAnteriorParaRenovacion]);
 
   /**
    * 1. Iniciar Cotización de Renovación
@@ -2173,6 +2176,11 @@ const ModuloNvoExpedientes = () => {
         // 🆕 Si hay expediente anterior (renovación), vincular
         if (expedienteAnteriorParaRenovacion) {
           datos.renovacion_de = expedienteAnteriorParaRenovacion.id;
+          datos.tipo_movimiento = 'RENOVACION';
+          // Usar etapa especial para distinguir renovaciones de pólizas nuevas
+          if (!datos.etapa_activa || datos.etapa_activa === 'Emitida' || datos.etapa_activa === 'Captura') {
+            datos.etapa_activa = 'Renovación Emitida';
+          }
           console.log('🔗 Vinculando renovación - expediente anterior:', expedienteAnteriorParaRenovacion.id);
         }
         
@@ -2942,19 +2950,81 @@ const ModuloNvoExpedientes = () => {
     if (!window.confirm('¿Está seguro de eliminar este expediente?')) return;
 
     try {
+      // 🔄 Antes de eliminar: si es una renovación, revertir la póliza anterior
+      const expedienteAEliminar = expedientes.find(e => e.id === id || String(e.id) === String(id));
+      let anteriorRevertida = null;
+
+      if (expedienteAEliminar) {
+        // Buscar la póliza anterior que fue marcada como "Renovada" por esta
+        const norm = (t) => (t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        let anterior = null;
+
+        // 1. Por campo renovacion_de
+        if (expedienteAEliminar.renovacion_de) {
+          anterior = expedientes.find(e => String(e.id) === String(expedienteAEliminar.renovacion_de));
+        }
+        // 2. Buscar quién tiene renovada_por apuntando a este
+        if (!anterior) {
+          anterior = expedientes.find(e =>
+            e.renovada_por && String(e.renovada_por) === String(id) && norm(e.etapa_activa) === 'RENOVADA'
+          );
+        }
+        // 3. Fallback: mismo cliente + vehículo con etapa "Renovada"
+        if (!anterior) {
+          const cid = String(expedienteAEliminar.cliente_id || expedienteAEliminar.clienteId || '');
+          anterior = expedientes.find(e => {
+            if (e.id === id || norm(e.etapa_activa) !== 'RENOVADA') return false;
+            if (String(e.cliente_id || e.clienteId || '') !== cid) return false;
+            if (e.numero_serie && expedienteAEliminar.numero_serie) return e.numero_serie === expedienteAEliminar.numero_serie;
+            if (e.marca && expedienteAEliminar.marca) return e.marca === expedienteAEliminar.marca && e.modelo === expedienteAEliminar.modelo && String(e.anio) === String(expedienteAEliminar.anio);
+            return false;
+          });
+        }
+
+        if (anterior) {
+          // Revertir: quitar "Renovada" → calcular etapa real según vigencia
+          const hoy = new Date().toISOString().split('T')[0];
+          const tv = (anterior.fin_vigencia || anterior.termino_vigencia || '').split('T')[0];
+          let nuevaEtapa = 'Por Renovar'; // Default si no se puede calcular
+          if (tv && tv >= hoy) nuevaEtapa = 'En Vigencia';
+          else if (tv && tv < hoy) nuevaEtapa = 'Por Renovar';
+
+          try {
+            const respRevert = await fetch(`${API_URL}/api/expedientes/${anterior.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                etapa_activa: nuevaEtapa,
+                renovada_por: null
+              })
+            });
+            if (respRevert.ok) {
+              anteriorRevertida = anterior;
+              console.log(`🔄 Póliza anterior ${anterior.numero_poliza} revertida a "${nuevaEtapa}"`);
+            }
+          } catch (err) {
+            console.warn('⚠️ No se pudo revertir póliza anterior:', err);
+          }
+        }
+      }
+
       const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
         method: 'DELETE'
       });
 
       if (!response.ok) throw new Error('Error al eliminar');
 
-      toast.success('Expediente eliminado correctamente');
+      if (anteriorRevertida) {
+        toast.success(`Expediente eliminado. Póliza ${anteriorRevertida.numero_poliza} regresó a su etapa anterior.`);
+      } else {
+        toast.success('Expediente eliminado correctamente');
+      }
       await recargarExpedientes();
     } catch (error) {
       console.error('Error al eliminar:', error);
       toast.error('Error al eliminar expediente');
     }
-  }, []);
+  }, [expedientes]);
 
   const verDetalles = useCallback(async (expediente) => {
     // 🎯 CARGA LAZY: Cargar recibos solo cuando se necesita (ver detalle)
@@ -3810,65 +3880,69 @@ const ModuloNvoExpedientes = () => {
                     </div>
 
                     {/* Selector de pago (solo si tipo es 'pago') */}
-                    {tipoEnvio === 'pago' && expedienteParaCompartir.recibos && expedienteParaCompartir.recibos.length > 0 && (
+                    {tipoEnvio === 'pago' && (
                       <div className="mb-3">
                         <label className="form-label mb-1"><strong>Seleccionar Pago:</strong></label>
-                        <select
-                          className="form-select form-select-sm"
-                          value={pagoSeleccionado?.numero_recibo || (expedienteParaCompartir.recibos?.[0]?.numero_recibo || '')}
-                          onChange={(e) => {
-                            const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
-                            setPagoSeleccionado(pago);
-                          }}
-                        >
-                          {expedienteParaCompartir.recibos
-                            .filter(recibo => {
-                              // Solo mostrar recibos pendientes o vencidos (no pagados)
-                              if (recibo.fecha_pago_real) return false; // Si ya tiene fecha de pago real, está pagado
-                              
-                              // Calcular estado real basado en fecha
-                              const hoy = new Date();
-                              hoy.setHours(0, 0, 0, 0);
-                              const fechaVenc = new Date(recibo.fecha_vencimiento);
-                              fechaVenc.setHours(0, 0, 0, 0);
-                              
-                              // Si está vencido o pendiente, mostrarlo
-                              return fechaVenc <= hoy || !recibo.fecha_pago_real;
-                            })
-                            .map(recibo => {
-                              // Calcular estado real para mostrar
-                              const hoy = new Date();
-                              hoy.setHours(0, 0, 0, 0);
-                              const fechaVenc = new Date(recibo.fecha_vencimiento);
-                              fechaVenc.setHours(0, 0, 0, 0);
-                              const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-                              
-                              let estadoReal;
-                              let iconoEstado;
-                              if (recibo.fecha_pago_real) {
-                                estadoReal = 'Pagado';
-                                iconoEstado = ' ✅';
-                              } else if (diasRestantes < 0) {
-                                estadoReal = 'Vencido';
-                                iconoEstado = ' 🚨';
-                              } else if (diasRestantes <= 7) {
-                                estadoReal = 'Por Vencer';
-                                iconoEstado = ' ⏰';
-                              } else {
-                                estadoReal = 'Pendiente';
-                                iconoEstado = ' ⏳';
-                              }
-                              
-                              return (
-                                <option key={recibo.numero_recibo} value={recibo.numero_recibo}>
-                                  Pago #{recibo.numero_recibo} - Vence {utils.formatearFecha(recibo.fecha_vencimiento)} - ${utils.formatearMoneda(recibo.monto)} - {estadoReal}{iconoEstado}
-                                </option>
-                              );
-                            })}
-                        </select>
-                        <small className="text-muted d-block mt-1">
-                          Solo se muestran pagos pendientes o vencidos
-                        </small>
+                        {expedienteParaCompartir.recibos && expedienteParaCompartir.recibos.length > 0 ? (
+                          <>
+                            {/* Alerta si todos los recibos están pagados */}
+                            {expedienteParaCompartir.recibos.every(r => r.fecha_pago_real) && (
+                              <div className="alert alert-success py-2 px-3 mb-2 d-flex align-items-center" style={{ fontSize: '0.85em' }}>
+                                <span className="me-2">✅</span>
+                                <span>Todos los pagos están al corriente. Puedes reenviar un comprobante de pago.</span>
+                              </div>
+                            )}
+                            <select
+                              className="form-select form-select-sm"
+                              value={pagoSeleccionado?.numero_recibo || ''}
+                              onChange={(e) => {
+                                const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
+                                setPagoSeleccionado(pago);
+                              }}
+                            >
+                              {expedienteParaCompartir.recibos
+                                .map(recibo => {
+                                  const hoy = new Date();
+                                  hoy.setHours(0, 0, 0, 0);
+                                  const fechaVenc = new Date(recibo.fecha_vencimiento);
+                                  fechaVenc.setHours(0, 0, 0, 0);
+                                  const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+                                  
+                                  let estadoReal;
+                                  let iconoEstado;
+                                  if (recibo.fecha_pago_real) {
+                                    estadoReal = 'Pagado';
+                                    iconoEstado = ' ✅';
+                                  } else if (diasRestantes < 0) {
+                                    estadoReal = 'Vencido';
+                                    iconoEstado = ' 🚨';
+                                  } else if (diasRestantes <= 7) {
+                                    estadoReal = 'Por Vencer';
+                                    iconoEstado = ' ⏰';
+                                  } else {
+                                    estadoReal = 'Pendiente';
+                                    iconoEstado = ' ⏳';
+                                  }
+                                  
+                                  return (
+                                    <option key={recibo.numero_recibo} value={recibo.numero_recibo}>
+                                      Pago #{recibo.numero_recibo} - Vence {utils.formatearFecha(recibo.fecha_vencimiento)} - ${utils.formatearMoneda(recibo.monto)} - {estadoReal}{iconoEstado}
+                                    </option>
+                                  );
+                                })}
+                            </select>
+                            <small className="text-muted d-block mt-1">
+                              {expedienteParaCompartir.recibos.some(r => !r.fecha_pago_real)
+                                ? 'Se muestran todos los pagos. Los pendientes/vencidos aparecen primero.'
+                                : 'Todos los pagos están cubiertos. Selecciona uno para reenviar el comprobante.'}
+                            </small>
+                          </>
+                        ) : (
+                          <div className="alert alert-warning py-2 px-3 mb-0 d-flex align-items-center" style={{ fontSize: '0.85em' }}>
+                            <span className="me-2">⚠️</span>
+                            <span>Esta póliza no tiene recibos de pago registrados.</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -3963,8 +4037,11 @@ const ModuloNvoExpedientes = () => {
                   <button
                     className="btn btn-success d-flex align-items-center justify-content-center"
                     onClick={async () => {
-                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
-                        // Transformar recibo a formato esperado por el hook
+                      if (tipoEnvio === 'pago') {
+                        if (!pagoSeleccionado) {
+                          toast.error('Selecciona un recibo de pago antes de enviar');
+                          return;
+                        }
                         const pagoTransformado = {
                           numero: pagoSeleccionado.numero_recibo,
                           fecha: pagoSeleccionado.fecha_vencimiento,
@@ -3975,7 +4052,6 @@ const ModuloNvoExpedientes = () => {
                         };
                         await enviarAvisoPagoWhatsApp(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {
-                        // Compartir cotización de renovación
                         await compartirCotizacionWhatsApp(expedienteParaCompartir);
                       } else {
                         await compartirPorWhatsApp(expedienteParaCompartir);
@@ -3988,8 +4064,11 @@ const ModuloNvoExpedientes = () => {
                   <button
                     className="btn btn-info d-flex align-items-center justify-content-center"
                     onClick={async () => {
-                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
-                        // Transformar recibo a formato esperado por el hook
+                      if (tipoEnvio === 'pago') {
+                        if (!pagoSeleccionado) {
+                          toast.error('Selecciona un recibo de pago antes de enviar');
+                          return;
+                        }
                         const pagoTransformado = {
                           numero: pagoSeleccionado.numero_recibo,
                           fecha: pagoSeleccionado.fecha_vencimiento,
@@ -4000,7 +4079,6 @@ const ModuloNvoExpedientes = () => {
                         };
                         await enviarAvisoPagoEmail(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {
-                        // Compartir cotización de renovación por Email
                         await compartirCotizacionEmail(expedienteParaCompartir);
                       } else {
                         await compartirPorEmail(expedienteParaCompartir);

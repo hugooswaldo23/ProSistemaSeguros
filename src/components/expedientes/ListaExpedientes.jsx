@@ -93,7 +93,7 @@ const ListaExpedientes = React.memo(({
   const calcularEtapaReal = (exp) => {
     // Etapas que NO deben modificarse (proceso de renovación)
     const etapasRenovacion = [
-      'Renovada', 'En Cotización - Renovación', 
+      'Renovada', 'Renovación Emitida', 'En Cotización - Renovación', 
       'Cotización Lista', 'Cotización Enviada', 'Por Emitir - Renovación',
       'Por Renovar'
     ];
@@ -177,6 +177,17 @@ const ListaExpedientes = React.memo(({
     return true;
   };
   
+  // 📂 HELPER: Determinar si la etapa es de PROCESO de renovación (cotización/por emitir)
+  // Estas NO deben aparecer en carpetas normales (vigentes, en_proceso)
+  const esEtapaProcesoRenovacion = (etapa) => {
+    if (!etapa) return false;
+    return etapa === 'En Cotización - Renovación' ||
+           etapa === 'Cotización Lista' ||
+           etapa === 'Cotización Enviada' ||
+           etapa === 'Por Emitir - Renovación' ||
+           etapa === 'Por Renovar';
+  };
+
   // 📂 FILTROS DE PÓLIZAS POR CARPETA
   const expedientesFiltrados = React.useMemo(() => {
     switch (carpetaSeleccionada) {
@@ -186,10 +197,8 @@ const ListaExpedientes = React.memo(({
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
           
-          // Si ya tiene etapa de renovación, no mostrar aquí
-          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-              exp.etapa_activa?.toLowerCase().includes('renovación') ||
-              exp.etapa_activa?.toLowerCase().includes('cotización')) {
+          // Si está en proceso de renovación (cotización), no mostrar aquí
+          if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
             return false;
           }
           
@@ -216,10 +225,8 @@ const ListaExpedientes = React.memo(({
             return tieneVigenciaActiva(exp);
           }
           
-          // Si ya tiene etapa de renovación, no mostrar en vigentes
-          if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-              exp.etapa_activa?.toLowerCase().includes('renovación') ||
-              exp.etapa_activa?.toLowerCase().includes('cotización')) {
+          // Si está en proceso de renovación (cotización), no mostrar en vigentes
+          if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
             return false;
           }
           
@@ -359,9 +366,7 @@ const ListaExpedientes = React.memo(({
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
         
-        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-            exp.etapa_activa?.toLowerCase().includes('renovación') ||
-            exp.etapa_activa?.toLowerCase().includes('cotización')) {
+        if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
           return false;
         }
         
@@ -385,10 +390,8 @@ const ListaExpedientes = React.memo(({
           return tieneVigenciaActiva(exp);
         }
         
-        // Si ya tiene etapa de renovación, no contar en vigentes
-        if (exp.etapa_activa?.toLowerCase().includes('renovar') || 
-            exp.etapa_activa?.toLowerCase().includes('renovación') ||
-            exp.etapa_activa?.toLowerCase().includes('cotización')) {
+        // Si está en proceso de renovación (cotización), no contar en vigentes
+        if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
           return false;
         }
         
