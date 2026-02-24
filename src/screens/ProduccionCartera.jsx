@@ -15,9 +15,10 @@ const PAGE_SIZE = 50;
 const norm = (t) => (t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 // ─── Clasificadores puros (sin estado) ───
-const esRenovacion = (exp) => norm(exp.etapa_activa) === 'RENOVADA' || norm(exp.etapa_activa).includes('RENOVACION EMITIDA') || norm(exp.tipo_movimiento) === 'RENOVACION' || !!exp.renovacion_de;
+const esRenovacion = (exp) => norm(exp.etapa_activa).includes('RENOVACION EMITIDA') || norm(exp.tipo_movimiento) === 'RENOVACION' || !!exp.renovacion_de;
+const esRenovada = (exp) => norm(exp.etapa_activa) === 'RENOVADA'; // Póliza anterior reemplazada
 const esEndoso = (exp) => norm(exp.tipo_movimiento) === 'ENDOSO';
-const esNueva = (exp) => !esRenovacion(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
+const esNueva = (exp) => !esRenovacion(exp) && !esRenovada(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
 const esCancelada = (exp) => {
   const e = norm(exp.estatus || exp.etapa_activa);
   return e === 'CANCELADA' || e === 'CANCELADO';
@@ -283,7 +284,7 @@ const ProduccionCartera = () => {
   }, [filtroAseguradora, renovacionPares]);
 
   const esNuevaCtx = useMemo(() => (exp) => {
-    return !esRenovacionCtx(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
+    return !esRenovacionCtx(exp) && !esRenovada(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
   }, [esRenovacionCtx]);
 
   // ─── KPIs ───
@@ -291,6 +292,7 @@ const ProduccionCartera = () => {
     let nuevas = 0, renov = 0, cancel = 0, endos = 0;
     let prima = 0, primaN = 0, primaR = 0, primaCancel = 0;
     expedientesFiltrados.forEach(e => {
+      if (esRenovada(e)) return; // Póliza anterior reemplazada: no contar en producción
       const p = getPrima(e);
       prima += p;
       if (esRenovacionCtx(e)) { renov++; primaR += p; }
@@ -299,10 +301,10 @@ const ProduccionCartera = () => {
       if (esCancelada(e)) { cancel++; primaCancel += p; }
     });
 
-    // Tasa de renovación
+    // Tasa de renovación (excluir las ya marcadas Renovada)
     const debeRenovar = expedientes.filter(e => {
       const t = e.termino_vigencia ? e.termino_vigencia.split('T')[0] : null;
-      return t && t >= fechaInicio && t <= fechaFin;
+      return t && t >= fechaInicio && t <= fechaFin && !esRenovada(e);
     }).length;
     const tasaRen = debeRenovar > 0 ? ((renov / debeRenovar) * 100).toFixed(1) : null;
 
@@ -318,6 +320,7 @@ const ProduccionCartera = () => {
   const tablaResumen = useMemo(() => {
     const mapa = new Map();
     expedientesFiltrados.forEach(exp => {
+      if (esRenovada(exp)) return; // Póliza anterior reemplazada: no contar
       let key, label;
       if (agrupacion === 'ramo') {
         key = exp.producto || 'Sin clasificar';

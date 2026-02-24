@@ -24,11 +24,12 @@ const COLORES_RAMO = ['#0d6efd','#198754','#fd7e14','#6f42c1','#dc3545','#0dcaf0
 /** "YYYY-MM" */
 const toYM = (d) => { if (!d) return null; const s = typeof d === 'string' ? d : d.toISOString(); return s.slice(0, 7); };
 
-// ─── Clasificación: renovación = etapa Renovada (antigua) o Renovación Emitida (nueva) ─
-const esRenovacion = (e) => norm(e.etapa_activa) === 'RENOVADA' || norm(e.etapa_activa).includes('RENOVACION EMITIDA') || norm(e.tipo_movimiento) === 'RENOVACION' || !!e.renovacion_de;
+// ─── Clasificación: renovación = solo la póliza NUEVA (no la anterior marcada como Renovada) ─
+const esRenovacion = (e) => norm(e.etapa_activa).includes('RENOVACION EMITIDA') || norm(e.tipo_movimiento) === 'RENOVACION' || !!e.renovacion_de;
+const esRenovada = (e) => norm(e.etapa_activa) === 'RENOVADA'; // Póliza anterior que ya fue reemplazada
 const esCancelada = (e) => { const et = norm(e.etapa_activa); const es = norm(e.estatus); return et === 'CANCELADA' || et === 'CANCELADO' || es === 'CANCELADA' || es === 'CANCELADO'; };
 const esEndoso = (e) => norm(e.tipo_movimiento) === 'ENDOSO';
-const clasificar = (e) => { if (esCancelada(e)) return 'cancelacion'; if (esEndoso(e)) return 'endoso'; if (esRenovacion(e)) return 'renovacion'; return 'nueva'; };
+const clasificar = (e) => { if (esCancelada(e)) return 'cancelacion'; if (esRenovada(e)) return 'renovada'; if (esEndoso(e)) return 'endoso'; if (esRenovacion(e)) return 'renovacion'; return 'nueva'; };
 
 const getFechaExp = (e) => { const fe = e.fecha_emision ? e.fecha_emision.split('T')[0] : null; const fc = (e.fecha_creacion || e.created_at || ''); return fe || (fc ? fc.split('T')[0] : null); };
 const mesExp = (e) => toYM(getFechaExp(e));
@@ -145,6 +146,7 @@ const SaludCartera = () => {
   // Con filtro de aseguradora: solo cuenta si se renovó con la misma compañía
   const clasificarCtx = useMemo(() => (e) => {
     if (esCancelada(e)) return 'cancelacion';
+    if (esRenovada(e)) return 'renovada';
     if (esEndoso(e)) return 'endoso';
     if (esRenovacion(e)) {
       if (filtroAseguradora !== 'todos') {
@@ -174,10 +176,10 @@ const SaludCartera = () => {
     const renovAnt = delMesAnt.filter(e => clasificarCtx(e) === 'renovacion');
     const cancelAnt = delMesAnt.filter(e => clasificarCtx(e) === 'cancelacion');
 
-    // Vigentes al cierre del mes seleccionado
+    // Vigentes al cierre del mes seleccionado (excluir Renovadas y Canceladas)
     const vigentes = expedientesFiltrados.filter(e => {
       const tv = (e.fin_vigencia || e.termino_vigencia || '').split('T')[0];
-      return tv >= hoyStr && !esCancelada(e);
+      return tv >= hoyStr && !esCancelada(e) && !esRenovada(e);
     });
     const carteraVigente = vigentes.length;
     const primaTotalVigente = vigentes.reduce((s, e) => s + getPrima(e), 0);
@@ -189,7 +191,7 @@ const SaludCartera = () => {
       const fe = getFechaExp(e);
       if (!fe || fe > mesAntStr) return false; // emitida después del mes anterior → no cuenta
       const tv = (e.fin_vigencia || e.termino_vigencia || '').split('T')[0];
-      return tv >= mesAntStr && !esCancelada(e);
+      return tv >= mesAntStr && !esCancelada(e) && !esRenovada(e);
     });
     const primaVigMesAnt = vigMesAnt.reduce((s, e) => s + getPrima(e), 0);
     const polizasVigMesAnt = vigMesAnt.length;
@@ -201,10 +203,10 @@ const SaludCartera = () => {
       : (primaTotalVigente > 0 ? '100.0' : '0.0');
     const deltaPolizas = carteraVigente - polizasVigMesAnt;
 
-    // Retención
+    // Retención: solo pólizas activas que vencían (no las ya marcadas Renovada)
     const debianRenovar = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;
-      return tv && toYM(tv) === ymActual && !esCancelada(e);
+      return tv && toYM(tv) === ymActual && !esCancelada(e) && !esRenovada(e);
     });
     const debianRenovarAnt = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;
