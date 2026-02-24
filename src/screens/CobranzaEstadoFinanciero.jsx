@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { HandCoins, DollarSign, AlertTriangle, CheckCircle2, Clock, RefreshCw, Filter, TrendingUp, ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { HandCoins, DollarSign, AlertTriangle, CheckCircle2, Clock, RefreshCw, Filter, TrendingUp, ChevronDown, ChevronUp, FileText, Ban } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -14,7 +14,7 @@ const CobranzaEstadoFinanciero = () => {
   });
   const [fechaFin, setFechaFin] = useState(() => new Date().toISOString().split('T')[0]);
   const [filtroRapido, setFiltroRapido] = useState('mes-actual');
-  const [seccionAbierta, setSeccionAbierta] = useState(null); // 'pagados' | 'pendientes' | 'vencidos'
+  const [seccionAbierta, setSeccionAbierta] = useState(null); // 'pagados' | 'pendientes' | 'vencidos' | 'cancelados'
 
   const aplicarFiltroRapido = (tipo) => {
     const hoy = new Date();
@@ -81,12 +81,25 @@ const CobranzaEstadoFinanciero = () => {
     return map;
   }, [expedientes]);
 
+  // Helper para detectar pólizas canceladas
+  const esCancelada = (exp) => {
+    const norm = (v) => (v || '').toString().toUpperCase().trim();
+    const et = norm(exp.etapa_activa);
+    const es = norm(exp.estatus);
+    return et === 'CANCELADA' || et === 'CANCELADO' || es === 'CANCELADA' || es === 'CANCELADO';
+  };
+
   // Solo recibos de expedientes que existen (ignorar huérfanos de pólizas eliminadas)
   const recibosActivos = useMemo(() => {
     if (expedientes.length === 0) return []; // Aún no cargan los expedientes
     const idsActivos = new Set(expedientes.map(e => String(e.id)));
     return recibos.filter(r => idsActivos.has(String(r.expediente_id)));
   }, [recibos, expedientes]);
+
+  // IDs de expedientes cancelados
+  const idsCancelados = useMemo(() => {
+    return new Set(expedientes.filter(esCancelada).map(e => String(e.id)));
+  }, [expedientes]);
 
   // ===== LÓGICA CORREGIDA DE KPIs =====
   const kpis = useMemo(() => {
@@ -102,12 +115,27 @@ const CobranzaEstadoFinanciero = () => {
       return fp >= fechaInicio && fp <= fechaFin;
     });
 
+    // ── RECIBOS DE PÓLIZAS CANCELADAS (sin cobrar) ──
+    // Recibos de pólizas canceladas que nunca se pagaron.
+    // Estos NO cuentan como cartera vencida porque ya no se van a cobrar.
+    const cancelados = recibosActivos.filter(r => {
+      if (r.fecha_pago_real) return false; // Si se pagó antes de cancelar, no cuenta
+      if (!idsCancelados.has(String(r.expediente_id))) return false;
+      const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
+      return fv && fv <= fechaFin;
+    });
+    const idsCancelSet = new Set(cancelados.map(r => r.id));
+
     // ── CARTERA VENCIDA (ACUMULADA) ──
     // TODOS los recibos que están vencidos y no pagados hasta la fecha de corte.
     // Esto es acumulativo: incluye deuda de meses anteriores que sigue sin pagarse.
+    // EXCLUYE recibos de pólizas canceladas (esos ya no se van a cobrar).
     const vencidos = recibosActivos.filter(r => {
       // Si ya tiene fecha_pago_real, no es deuda pendiente
       if (r.fecha_pago_real) return false;
+      // Excluir pólizas canceladas
+      if (idsCancelSet.has(r.id)) return false;
+      if (idsCancelados.has(String(r.expediente_id))) return false;
       const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
       if (!fv) return false;
       // Vencido = fecha de vencimiento ya pasó (hasta la fecha de corte del filtro)
@@ -120,8 +148,10 @@ const CobranzaEstadoFinanciero = () => {
     // ── PENDIENTE POR COBRAR ──
     // Recibos sin pagar cuyo vencimiento cae dentro del período seleccionado
     // y que aún no están vencidos (fecha_vencimiento >= hoy).
+    // EXCLUYE recibos de pólizas canceladas.
     const pendientes = recibosActivos.filter(r => {
       if (r.fecha_pago_real) return false; // Ya pagado
+      if (idsCancelados.has(String(r.expediente_id))) return false; // Póliza cancelada
       const est = (r.estatus || '').toLowerCase();
       if (est === 'pagado') return false;
       const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
@@ -137,10 +167,14 @@ const CobranzaEstadoFinanciero = () => {
     const montoPendiente = pendientes.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
     const montoSinCobrar = montoVencido + montoPendiente;
 
+    const montoCancelado = cancelados.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
+
     // ── % COBRANZA DEL PERÍODO ──
     // De los recibos que vencían en el rango de fechas, qué porcentaje
     // (en monto) ya se cobró. Responde: "¿qué tan bien cobramos lo que debíamos cobrar?"
+    // EXCLUYE recibos de pólizas canceladas del denominador.
     const recibosDelPeriodo = recibosActivos.filter(r => {
+      if (idsCancelados.has(String(r.expediente_id)) && !r.fecha_pago_real) return false;
       const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
       return fv && fv >= fechaInicio && fv <= fechaFin;
     });
@@ -153,13 +187,14 @@ const CobranzaEstadoFinanciero = () => {
       : 0;
 
     return {
-      pagados, vencidos, pendientes,
+      pagados, vencidos, pendientes, cancelados,
       montoPagado, montoVencido, montoPendiente, montoSinCobrar,
+      montoCancelado,
       montoPagadoPeriodo, montoTotalPeriodo,
       recibosDelPeriodo: recibosDelPeriodo.length,
       porcentajeCobranza
     };
-  }, [recibosActivos, fechaInicio, fechaFin]);
+  }, [recibosActivos, idsCancelados, fechaInicio, fechaFin]);
 
   const formatMoney = (num) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(num);
 
@@ -321,7 +356,7 @@ const CobranzaEstadoFinanciero = () => {
           {/* KPIs principales */}
           <div className="row g-3 mb-4">
             {/* Cobrado */}
-            <div className="col-md-3">
+            <div className="col-lg col-md-6">
               <div
                 className="card border-0 shadow-sm h-100"
                 style={{ borderLeftWidth: '4px', borderLeftStyle: 'solid', borderLeftColor: '#198754', cursor: 'pointer' }}
@@ -341,7 +376,7 @@ const CobranzaEstadoFinanciero = () => {
               </div>
             </div>
             {/* Pendiente */}
-            <div className="col-md-3">
+            <div className="col-lg col-md-6">
               <div
                 className="card border-0 shadow-sm h-100"
                 style={{ borderLeftWidth: '4px', borderLeftStyle: 'solid', borderLeftColor: '#ffc107', cursor: 'pointer' }}
@@ -361,7 +396,7 @@ const CobranzaEstadoFinanciero = () => {
               </div>
             </div>
             {/* Vencido */}
-            <div className="col-md-3">
+            <div className="col-lg col-md-6">
               <div
                 className="card border-0 shadow-sm h-100"
                 style={{ borderLeftWidth: '4px', borderLeftStyle: 'solid', borderLeftColor: '#dc3545', cursor: 'pointer' }}
@@ -380,8 +415,30 @@ const CobranzaEstadoFinanciero = () => {
                 </div>
               </div>
             </div>
+            {/* Cancelados */}
+            {kpis.cancelados.length > 0 && (
+            <div className="col-lg col-md-6">
+              <div
+                className="card border-0 shadow-sm h-100"
+                style={{ borderLeftWidth: '4px', borderLeftStyle: 'solid', borderLeftColor: '#6c757d', cursor: 'pointer' }}
+                onClick={() => toggleSeccion('cancelados')}
+              >
+                <div className="card-body p-3">
+                  <div className="d-flex align-items-center justify-content-between mb-1">
+                    <span className="text-muted" style={{ fontSize: '0.8em' }}>Pólizas canceladas (incobrable)</span>
+                    <Ban size={18} className="text-secondary" />
+                  </div>
+                  <h4 className="mb-0 fw-bold text-secondary">{formatMoney(kpis.montoCancelado)}</h4>
+                  <small className="text-muted">{kpis.cancelados.length} recibos de pólizas canceladas</small>
+                  <div className="text-end">
+                    {seccionAbierta === 'cancelados' ? <ChevronUp size={14} className="text-muted" /> : <ChevronDown size={14} className="text-muted" />}
+                  </div>
+                </div>
+              </div>
+            </div>
+            )}
             {/* % Cobranza */}
-            <div className="col-md-3">
+            <div className="col-lg col-md-6">
               <div className="card border-0 shadow-sm h-100" style={{ borderLeftWidth: '4px', borderLeftStyle: 'solid', borderLeftColor: '#0d6efd' }}>
                 <div className="card-body p-3">
                   <div className="d-flex align-items-center justify-content-between mb-1">
@@ -413,8 +470,15 @@ const CobranzaEstadoFinanciero = () => {
           {seccionAbierta === 'vencidos' && (
             <TablaDetalleRecibos
               recibosLista={kpis.vencidos}
-              titulo="Cartera Vencida Acumulada (toda la deuda atrasada)"
+              titulo="Cartera Vencida Acumulada (deuda atrasada cobrable)"
               colorClase="text-danger"
+            />
+          )}
+          {seccionAbierta === 'cancelados' && (
+            <TablaDetalleRecibos
+              recibosLista={kpis.cancelados}
+              titulo="Recibos de Pólizas Canceladas (ya no se cobrarán)"
+              colorClase="text-secondary"
             />
           )}
 
@@ -428,23 +492,25 @@ const CobranzaEstadoFinanciero = () => {
               {(() => {
                 const total = kpis.recibosDelPeriodo;
                 if (total === 0) return <div className="text-center text-muted mt-2">Sin recibos en el período seleccionado</div>;
-                // Contar por estatus dentro de los recibos del período
+                // Contar por estatus dentro de los recibos del período (excluyendo canceladas)
                 const recsPeriodo = recibosActivos.filter(r => {
+                  if (idsCancelados.has(String(r.expediente_id)) && !r.fecha_pago_real) return false;
                   const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
                   return fv && fv >= fechaInicio && fv <= fechaFin;
                 });
-                const pagPeriodo = recsPeriodo.filter(r => (r.estatus || '').toLowerCase() === 'pagado').length;
-                const venPeriodo = recsPeriodo.filter(r => (r.estatus || '').toLowerCase() === 'vencido').length;
-                const penPeriodo = recsPeriodo.filter(r => (r.estatus || '').toLowerCase() === 'pendiente').length;
+                const pagPeriodo = recsPeriodo.filter(r => !!r.fecha_pago_real).length;
+                const venPeriodo = recsPeriodo.filter(r => !r.fecha_pago_real && (r.estatus || '').toLowerCase() === 'vencido').length;
+                const penPeriodo = recsPeriodo.filter(r => !r.fecha_pago_real && (r.estatus || '').toLowerCase() !== 'vencido' && (r.estatus || '').toLowerCase() !== 'pagado').length;
+                const totalBarra = pagPeriodo + venPeriodo + penPeriodo || 1;
                 return (
                   <div className="progress" style={{ height: '30px', borderRadius: '8px' }}>
-                    <div className="progress-bar bg-success" style={{ width: `${(pagPeriodo / total) * 100}%` }}>
+                    <div className="progress-bar bg-success" style={{ width: `${(pagPeriodo / totalBarra) * 100}%` }}>
                       {pagPeriodo > 0 && `${pagPeriodo} Pagados`}
                     </div>
-                    <div className="progress-bar bg-warning" style={{ width: `${(penPeriodo / total) * 100}%` }}>
+                    <div className="progress-bar bg-warning" style={{ width: `${(penPeriodo / totalBarra) * 100}%` }}>
                       {penPeriodo > 0 && `${penPeriodo} Pendientes`}
                     </div>
-                    <div className="progress-bar bg-danger" style={{ width: `${(venPeriodo / total) * 100}%` }}>
+                    <div className="progress-bar bg-danger" style={{ width: `${(venPeriodo / totalBarra) * 100}%` }}>
                       {venPeriodo > 0 && `${venPeriodo} Vencidos`}
                     </div>
                   </div>
@@ -481,9 +547,18 @@ const CobranzaEstadoFinanciero = () => {
                       <td className="text-end fw-bold text-warning">{formatMoney(kpis.montoPendiente)}</td>
                     </tr>
                     <tr style={{ borderTop: '2px solid #dee2e6' }}>
-                      <td className="fw-bold">Total sin cobrar</td>
+                      <td className="fw-bold">Total sin cobrar (excl. canceladas)</td>
                       <td className="text-end fw-bold">{formatMoney(kpis.montoSinCobrar)}</td>
                     </tr>
+                    {kpis.cancelados.length > 0 && (
+                    <tr className="table-secondary">
+                      <td className="fw-semibold ps-4" style={{ color: '#6c757d' }}>
+                        <Ban size={14} className="me-1" />
+                        Pólizas canceladas — incobrable ({kpis.cancelados.length} recibos)
+                      </td>
+                      <td className="text-end fw-bold" style={{ color: '#6c757d', textDecoration: 'line-through' }}>{formatMoney(kpis.montoCancelado)}</td>
+                    </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
