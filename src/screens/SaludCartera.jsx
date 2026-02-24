@@ -110,6 +110,52 @@ const SaludCartera = () => {
     return true;
   }), [expedientes, filtroRamo, filtroAseguradora, filtroAgente]);
 
+  // 🔄 Mapa de pares de renovación (detectar cambio de compañía)
+  const renovacionPares = useMemo(() => {
+    const pares = new Map();
+    const renovadas = expedientes.filter(e => norm(e.etapa_activa) === 'RENOVADA');
+    renovadas.forEach(antigua => {
+      let nueva = null;
+      // 1. Por campo renovada_por
+      if (antigua.renovada_por) nueva = expedientes.find(e => String(e.id) === String(antigua.renovada_por));
+      // 2. Por campo renovacion_de en la nueva
+      if (!nueva) nueva = expedientes.find(e => e.renovacion_de && String(e.renovacion_de) === String(antigua.id));
+      // 3. Fallback: mismo cliente + vehículo
+      if (!nueva) {
+        const cid = String(antigua.cliente_id || antigua.clienteId || '');
+        nueva = expedientes.find(e => {
+          if (e.id === antigua.id || norm(e.etapa_activa) === 'RENOVADA' || esCancelada(e)) return false;
+          if (String(e.cliente_id || e.clienteId || '') !== cid) return false;
+          if (antigua.numero_serie && e.numero_serie) return antigua.numero_serie === e.numero_serie;
+          if (antigua.marca && e.marca) return antigua.marca === e.marca && antigua.modelo === e.modelo && String(antigua.anio) === String(e.anio);
+          return false;
+        });
+      }
+      if (nueva) {
+        const misma = (antigua.compania || antigua.aseguradora) === (nueva.compania || nueva.aseguradora);
+        pares.set(antigua.id, { parejaId: nueva.id, mismaCompania: misma });
+        pares.set(nueva.id, { parejaId: antigua.id, mismaCompania: misma });
+      }
+    });
+    return pares;
+  }, [expedientes]);
+
+  // Clasificación contextual: cross-company → nueva para la aseguradora filtrada
+  // Sin filtro (vista agente): toda renovación cuenta como retención
+  // Con filtro de aseguradora: solo cuenta si se renovó con la misma compañía
+  const clasificarCtx = useMemo(() => (e) => {
+    if (esCancelada(e)) return 'cancelacion';
+    if (esEndoso(e)) return 'endoso';
+    if (esRenovacion(e)) {
+      if (filtroAseguradora !== 'todos') {
+        const par = renovacionPares.get(e.id);
+        if (par && !par.mismaCompania) return 'nueva';
+      }
+      return 'renovacion';
+    }
+    return 'nueva';
+  }, [filtroAseguradora, renovacionPares]);
+
   // ═══ CÁLCULOS ═══
   const data = useMemo(() => {
     const ymActual = `${anio}-${String(mes + 1).padStart(2, '0')}`;
@@ -120,13 +166,13 @@ const SaludCartera = () => {
     const delMes = expedientesFiltrados.filter(e => mesExp(e) === ymActual);
     const delMesAnt = expedientesFiltrados.filter(e => mesExp(e) === ymAnterior);
 
-    const nuevasMes = delMes.filter(e => clasificar(e) === 'nueva');
-    const renovMes = delMes.filter(e => clasificar(e) === 'renovacion');
-    const cancelMes = delMes.filter(e => clasificar(e) === 'cancelacion');
+    const nuevasMes = delMes.filter(e => clasificarCtx(e) === 'nueva');
+    const renovMes = delMes.filter(e => clasificarCtx(e) === 'renovacion');
+    const cancelMes = delMes.filter(e => clasificarCtx(e) === 'cancelacion');
 
-    const nuevasAnt = delMesAnt.filter(e => clasificar(e) === 'nueva');
-    const renovAnt = delMesAnt.filter(e => clasificar(e) === 'renovacion');
-    const cancelAnt = delMesAnt.filter(e => clasificar(e) === 'cancelacion');
+    const nuevasAnt = delMesAnt.filter(e => clasificarCtx(e) === 'nueva');
+    const renovAnt = delMesAnt.filter(e => clasificarCtx(e) === 'renovacion');
+    const cancelAnt = delMesAnt.filter(e => clasificarCtx(e) === 'cancelacion');
 
     // Vigentes al cierre del mes seleccionado
     const vigentes = expedientesFiltrados.filter(e => {

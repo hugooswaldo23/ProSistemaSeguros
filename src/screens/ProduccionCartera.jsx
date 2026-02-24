@@ -245,6 +245,47 @@ const ProduccionCartera = () => {
     });
   }, [expedientes, fechaInicio, fechaFin, filtroAgente, filtroVendedor, filtroRamo, filtroAseguradora, resolverAgenteId, resolverVendedorId]);
 
+  // 🔄 Mapa de pares de renovación (detectar cambio de compañía)
+  const renovacionPares = useMemo(() => {
+    const pares = new Map();
+    const renovadas = expedientes.filter(e => norm(e.etapa_activa) === 'RENOVADA');
+    renovadas.forEach(antigua => {
+      let nueva = null;
+      if (antigua.renovada_por) nueva = expedientes.find(e => String(e.id) === String(antigua.renovada_por));
+      if (!nueva) nueva = expedientes.find(e => e.renovacion_de && String(e.renovacion_de) === String(antigua.id));
+      if (!nueva) {
+        const cid = String(antigua.cliente_id || antigua.clienteId || '');
+        nueva = expedientes.find(e => {
+          if (e.id === antigua.id || norm(e.etapa_activa) === 'RENOVADA' || esCancelada(e)) return false;
+          if (String(e.cliente_id || e.clienteId || '') !== cid) return false;
+          if (antigua.numero_serie && e.numero_serie) return antigua.numero_serie === e.numero_serie;
+          if (antigua.marca && e.marca) return antigua.marca === e.marca && antigua.modelo === e.modelo && String(antigua.anio) === String(e.anio);
+          return false;
+        });
+      }
+      if (nueva) {
+        const misma = (antigua.compania || antigua.aseguradora) === (nueva.compania || nueva.aseguradora);
+        pares.set(antigua.id, { parejaId: nueva.id, mismaCompania: misma });
+        pares.set(nueva.id, { parejaId: antigua.id, mismaCompania: misma });
+      }
+    });
+    return pares;
+  }, [expedientes]);
+
+  // Clasificadores contextuales: cross-company → nueva para la aseguradora filtrada
+  const esRenovacionCtx = useMemo(() => (exp) => {
+    if (!esRenovacion(exp)) return false;
+    if (filtroAseguradora !== 'todos') {
+      const par = renovacionPares.get(exp.id);
+      if (par && !par.mismaCompania) return false;
+    }
+    return true;
+  }, [filtroAseguradora, renovacionPares]);
+
+  const esNuevaCtx = useMemo(() => (exp) => {
+    return !esRenovacionCtx(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
+  }, [esRenovacionCtx]);
+
   // ─── KPIs ───
   const kpis = useMemo(() => {
     let nuevas = 0, renov = 0, cancel = 0, endos = 0;
@@ -252,7 +293,7 @@ const ProduccionCartera = () => {
     expedientesFiltrados.forEach(e => {
       const p = getPrima(e);
       prima += p;
-      if (esRenovacion(e)) { renov++; primaR += p; }
+      if (esRenovacionCtx(e)) { renov++; primaR += p; }
       else if (esEndoso(e)) { endos++; }
       else { nuevas++; primaN += p; }
       if (esCancelada(e)) { cancel++; primaCancel += p; }
@@ -267,11 +308,11 @@ const ProduccionCartera = () => {
 
     // Prima neta = producción total menos cancelaciones
     const primaNeta = prima - primaCancel;
-    const primaNetaN = primaN - expedientesFiltrados.filter(e => esNueva(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
-    const primaNetaR = primaR - expedientesFiltrados.filter(e => esRenovacion(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+    const primaNetaN = primaN - expedientesFiltrados.filter(e => esNuevaCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+    const primaNetaR = primaR - expedientesFiltrados.filter(e => esRenovacionCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
 
     return { nuevas, renov, cancel, endos, prima, primaN, primaR, primaCancel, primaNeta, primaNetaN, primaNetaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
-  }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin]);
+  }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Tabla resumen agrupada ───
   const tablaResumen = useMemo(() => {
@@ -290,14 +331,14 @@ const ProduccionCartera = () => {
       }
       if (!mapa.has(key)) mapa.set(key, { key, label, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0, primaCancel: 0 });
       const row = mapa.get(key);
-      if (esRenovacion(exp)) row.renov++;
+      if (esRenovacionCtx(exp)) row.renov++;
       else if (esEndoso(exp)) row.endosos++;
       else row.nuevas++;
       if (esCancelada(exp)) { row.cancel++; row.primaCancel += getPrima(exp); }
       row.prima += getPrima(exp);
     });
     return [...mapa.values()].sort((a, b) => b.prima - a.prima);
-  }, [expedientesFiltrados, agrupacion, resolverAgenteId, getNombreAgente]);
+  }, [expedientesFiltrados, agrupacion, resolverAgenteId, getNombreAgente, esRenovacionCtx]);
 
   // ─── Drill-down: filtrar + paginar ───
   const drillDownData = useMemo(() => {
@@ -313,8 +354,8 @@ const ProduccionCartera = () => {
         return true;
       });
     }
-    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNueva);
-    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacion);
+    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNuevaCtx);
+    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacionCtx);
     else if (drillDown.tipo === 'endosos') filtered = filtered.filter(esEndoso);
     else if (drillDown.tipo === 'cancel') filtered = filtered.filter(esCancelada);
     // 'total' = no filter by tipo
@@ -335,7 +376,7 @@ const ProduccionCartera = () => {
     const total = filtered.length;
     const start = drillPage * PAGE_SIZE;
     return { items: filtered.slice(start, start + PAGE_SIZE), total };
-  }, [drillDown, drillPage, drillSort, expedientesFiltrados, resolverAgenteId, getNombreVendedor, getNombreAgente]);
+  }, [drillDown, drillPage, drillSort, expedientesFiltrados, resolverAgenteId, getNombreVendedor, getNombreAgente, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Drill-down handlers ───
   const abrirDrillDown = useCallback((tipo, dimension, valor, label) => {
@@ -365,8 +406,8 @@ const ProduccionCartera = () => {
 
     // Filtrar expedientes del agente + tipo
     let filtered = expedientesFiltrados.filter(exp => resolverAgenteId(exp) === drillDown.valor);
-    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNueva);
-    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacion);
+    if (drillDown.tipo === 'nuevas') filtered = filtered.filter(esNuevaCtx);
+    else if (drillDown.tipo === 'renov') filtered = filtered.filter(esRenovacionCtx);
     else if (drillDown.tipo === 'endosos') filtered = filtered.filter(esEndoso);
     else if (drillDown.tipo === 'cancel') filtered = filtered.filter(esCancelada);
 
@@ -384,7 +425,7 @@ const ProduccionCartera = () => {
 
       if (!mapa.has(key)) mapa.set(key, { key, label, esDirecto, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0, polizas: [] });
       const row = mapa.get(key);
-      if (esRenovacion(exp)) row.renov++;
+      if (esRenovacionCtx(exp)) row.renov++;
       else if (esEndoso(exp)) row.endosos++;
       else row.nuevas++;
       if (esCancelada(exp)) row.cancel++;
@@ -400,7 +441,7 @@ const ProduccionCartera = () => {
     });
 
     return { rows, primaTotal, totalPolizas: filtered.length };
-  }, [drillDown, expedientesFiltrados, resolverAgenteId, resolverVendedorId, getNombreVendedor]);
+  }, [drillDown, expedientesFiltrados, resolverAgenteId, resolverVendedorId, getNombreVendedor, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Colores de ramo ───
   const coloresRamo = { 'Autos': '#0d6efd', 'Vida': '#198754', 'Daños': '#dc3545', 'GMM': '#6f42c1', 'Equipo pesado': '#fd7e14', 'Embarcaciones': '#0dcaf0', 'Ahorro': '#20c997' };
@@ -799,7 +840,7 @@ const ProduccionCartera = () => {
                         </thead>
                         <tbody>
                           {drillDownData.items.map((exp, i) => {
-                            const tipo = esRenovacion(exp) ? 'Renov.' : esEndoso(exp) ? 'Endoso' : 'Nueva';
+                            const tipo = esRenovacionCtx(exp) ? 'Renov.' : esEndoso(exp) ? 'Endoso' : 'Nueva';
                             const tipoColor = tipo === 'Renov.' ? 'info' : tipo === 'Endoso' ? 'purple' : 'success';
                             return (
                               <tr key={exp.id || i}>
