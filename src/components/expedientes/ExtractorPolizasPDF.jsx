@@ -53,12 +53,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     // Verificar si ya hay un archivo seleccionado desde el modal anterior
     if (window._selectedPDFFile && window._autoExtractorMode) {
       const file = window._selectedPDFFile;
+      const metodoDesdeUI = window._extractorMetodo || 'auto';
       // 📄 NO borrar window._selectedPDFFile aquí - se necesita para subir a S3 después de guardar
       // Solo borrar el flag de auto-extracción
       delete window._autoExtractorMode; // Limpiar flag
+      delete window._extractorMetodo;
       
       // Configurar método automático y procesar directamente
-      setMetodoExtraccion('auto');
+      setMetodoExtraccion(metodoDesdeUI);
       setArchivo(file);
       setInformacionArchivo({
         nombre: file.name,
@@ -68,7 +70,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       });
       // Procesar inmediatamente sin esperar
       setEstado('procesando');
-      setTimeout(() => procesarPDF(file), 100);
+      setTimeout(() => procesarPDF(file, metodoDesdeUI), 100);
     }
   }, []);
   
@@ -88,9 +90,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     }
   }, [metodoExtraccion, estado]);
 
-  const procesarPDF = useCallback(async (file) => {
+  const procesarPDF = useCallback(async (file, metodoForzado = null) => {
     setEstado('procesando');
     setErrores([]);
+
+    const metodoActivo = metodoForzado || metodoExtraccion;
 
     try {
       // Extraer texto del PDF usando PDF.js
@@ -234,33 +238,63 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
 
       // ==================== SISTEMA AUTOMÁTICO DE EXTRACCIÓN ====================
       let datosExtraidos = {};
-      
-      try {
-        // Usar el sistema automático (regex)
-        console.log('⚙️ Usando extractor automático...');
-        const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
-        const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
-        
-        const deteccion = detectarAseguradoraYProducto(textoPagina1);
-        const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
-        
-        if (moduloExtractor && moduloExtractor.extraer) {
-          datosExtraidos = await moduloExtractor.extraer({
+
+      const extraerConIA = async () => {
+        const response = await fetch(`${API_URL}/api/expedientes/extract-pdf-ia`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
             textoCompleto,
             textoPagina1,
             textoPagina2: textoPaginaCaratula,
-            textoAvisoDeCobro,
-            todasLasPaginas
-          });
+            textoAvisoDeCobro
+          })
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || payload?.error || 'No se pudo extraer con IA');
+        }
+
+        console.log('🤖 Datos completos extraídos por IA (API):', payload?.data || {});
+        console.log('🤖 Datos completos extraídos por IA (JSON):', JSON.stringify(payload?.data || {}, null, 2));
+
+        return payload.data || {};
+      };
+      
+      try {
+        if (metodoActivo === 'openai') {
+          console.log('🤖 Usando extracción con IA...');
+          datosExtraidos = await extraerConIA();
         } else {
-          console.error('❌ No se encontró extractor para:', deteccion);
-          setEstado('error');
-          setErrores([{
-            tipo: 'error',
-            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Esta aseguradora aún no está soportada. Disponibles: Qualitas, Chubb.'
-          }]);
-          return;
+          // Usar el sistema automático (regex)
+          console.log('⚙️ Usando extractor automático...');
+          const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
+          const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
+          
+          const deteccion = detectarAseguradoraYProducto(textoPagina1);
+          const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
+          
+          if (moduloExtractor && moduloExtractor.extraer) {
+            datosExtraidos = await moduloExtractor.extraer({
+              textoCompleto,
+              textoPagina1,
+              textoPagina2: textoPaginaCaratula,
+              textoAvisoDeCobro,
+              todasLasPaginas
+            });
+          } else {
+            console.error('❌ No se encontró extractor para:', deteccion);
+            setEstado('error');
+            setErrores([{
+              tipo: 'error',
+              mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+              detalle: 'Selecciona manualmente "Leer PDF con IA" para procesar este archivo.'
+            }]);
+            return;
+          }
         }
       } catch (error) {
         console.error('❌ Error en sistema de extracción:', error);
@@ -1631,13 +1665,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 <div className="text-center mb-3">
                   <h6 className="mb-1">Extractor Automático de Pólizas</h6>
                   <p className="text-muted small mb-0" style={{ fontSize: '0.75rem' }}>
-                    Extracción instantánea y gratuita por patrones de texto
+                    Elige cómo quieres procesar el PDF
                   </p>
                 </div>
                 
                 <div className="row g-3 justify-content-center">
-                  {/* ÚNICO Extractor Automático */}
-                  <div className="col-md-8 col-lg-6">
+                  <div className="col-md-6">
                     <div 
                       className="card h-100 border-primary cursor-pointer shadow-sm" 
                       style={{ cursor: 'pointer' }}
@@ -1658,7 +1691,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                             <line x1="12" y1="22.08" x2="12" y2="12"></line>
                           </svg>
                         </div>
-                        <h5 className="card-title mb-3">Continuar</h5>
+                        <h5 className="card-title mb-3">Extractor Automático</h5>
                         <p className="card-text text-muted mb-4">
                           Extrae datos de pólizas de forma instantánea usando patrones específicos para cada aseguradora.
                         </p>
@@ -1670,6 +1703,35 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         <div className="text-muted mt-3" style={{ fontSize: '0.9rem' }}>
                           <strong>Aseguradoras disponibles:</strong><br/>
                           <small>Qualitas • Chubb</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="col-md-6">
+                    <div
+                      className="card h-100 border-success cursor-pointer shadow-sm"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setMetodoExtraccion('openai');
+                        setEstado('esperando');
+                      }}
+                    >
+                      <div className="card-body text-center p-4">
+                        <div className="bg-success text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3"
+                             style={{ width: '70px', height: '70px', fontSize: '1.5rem' }}>
+                          🤖
+                        </div>
+                        <h5 className="card-title mb-3">Leer PDF con IA</h5>
+                        <p className="card-text text-muted mb-4">
+                          Útil cuando cambia el formato del PDF o no existe extractor específico.
+                        </p>
+                        <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
+                          <span className="badge bg-info text-dark">🧠 Flexible</span>
+                          <span className="badge bg-warning text-dark">⚠️ Requiere API key</span>
+                        </div>
+                        <div className="text-muted mt-3" style={{ fontSize: '0.9rem' }}>
+                          <small>Modo beta para pruebas del equipo</small>
                         </div>
                       </div>
                     </div>
@@ -1691,7 +1753,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
                 <p className="mb-2 fw-semibold">Esperando archivo PDF...</p>
                 <small className="text-muted">
-                  Método: Extractor Automático
+                  Método: {metodoExtraccion === 'openai' ? 'Leer PDF con IA' : 'Extractor Automático'}
                 </small>
                 <div className="mt-3">
                   <button 

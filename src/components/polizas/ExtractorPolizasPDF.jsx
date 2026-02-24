@@ -260,7 +260,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           setErrores([{
             tipo: 'error',
             mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Esta aseguradora aún no está soportada.'
+            detalle: 'Selecciona el método "Leer PDF con IA" en el extractor correspondiente.'
           }]);
           return;
         }
