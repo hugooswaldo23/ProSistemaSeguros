@@ -989,13 +989,16 @@ const ModuloNvoExpedientes = () => {
   /**
    * 🆕 Opción 2: Cargar Póliza Renovada desde el modal de opciones
    * - Cierra modal de opciones
-   * - Abre el extractor PDF con referencia al expediente anterior
+   * - Abre el formulario de nuevo expediente con contexto de renovación
+   * - expedienteAnteriorParaRenovacion ya fue seteado por abrirModalOpcionesRenovacion
    */
   const seleccionarCargarPolizaRenovada = useCallback(() => {
     setMostrarModalOpcionesRenovacion(false);
-    // El extractor se abrirá con expedienteAnteriorParaRenovacion disponible
-    setMostrarExtractorPDF(true);
-  }, []);
+    // Navegar al formulario de nuevo expediente con contexto de renovación
+    setModoEdicion(false);
+    setVistaActual('formulario');
+    toast.success(`Capturando renovación de póliza ${expedienteAnteriorParaRenovacion?.numero_poliza || ''}`);
+  }, [expedienteAnteriorParaRenovacion]);
 
   /**
    * 1. Iniciar Cotización de Renovación
@@ -2173,6 +2176,11 @@ const ModuloNvoExpedientes = () => {
         // 🆕 Si hay expediente anterior (renovación), vincular
         if (expedienteAnteriorParaRenovacion) {
           datos.renovacion_de = expedienteAnteriorParaRenovacion.id;
+          datos.tipo_movimiento = 'RENOVACION';
+          // Usar etapa especial para distinguir renovaciones de pólizas nuevas
+          if (!datos.etapa_activa || datos.etapa_activa === 'Emitida' || datos.etapa_activa === 'Captura') {
+            datos.etapa_activa = 'Renovación Emitida';
+          }
           console.log('🔗 Vinculando renovación - expediente anterior:', expedienteAnteriorParaRenovacion.id);
         }
         

@@ -58,6 +58,7 @@ export const getBadgeClass = (tipo, valor) => {
       'Cancelado': 'bg-danger',
       'Cancelada': 'bg-danger',
       'Emitida': 'bg-info',
+      'Renovación Emitida': 'bg-info',
       'Autorizado': 'bg-primary',
       'Cotización enviada': 'bg-warning',
       'En proceso emisión': 'bg-info',
@@ -65,7 +66,8 @@ export const getBadgeClass = (tipo, valor) => {
       'En Vigencia': 'bg-success',
       'Vigente / Cancelada': 'bg-warning text-dark',
       'Por Vencer': 'bg-warning text-dark',
-      'Vencida': 'bg-danger'
+      'Vencida': 'bg-danger',
+      'Renovada': 'bg-secondary'
     },
     pago: {
       'Pagado': 'bg-success',
