@@ -203,10 +203,10 @@ const SaludCartera = () => {
       : (primaTotalVigente > 0 ? '100.0' : '0.0');
     const deltaPolizas = carteraVigente - polizasVigMesAnt;
 
-    // Retención: solo pólizas activas que vencían (no las ya marcadas Renovada)
+    // Retención: pólizas que vencían este mes (incluye Renovadas: sí debían renovarse)
     const debianRenovar = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;
-      return tv && toYM(tv) === ymActual && !esCancelada(e) && !esRenovada(e);
+      return tv && toYM(tv) === ymActual && !esCancelada(e);
     });
     const debianRenovarAnt = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;

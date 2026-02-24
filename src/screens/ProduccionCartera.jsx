@@ -301,10 +301,10 @@ const ProduccionCartera = () => {
       if (esCancelada(e)) { cancel++; primaCancel += p; }
     });
 
-    // Tasa de renovación (excluir las ya marcadas Renovada)
+    // Tasa de renovación (Renovadas SÍ cuentan: son las que debían renovarse)
     const debeRenovar = expedientes.filter(e => {
       const t = e.termino_vigencia ? e.termino_vigencia.split('T')[0] : null;
-      return t && t >= fechaInicio && t <= fechaFin && !esRenovada(e);
+      return t && t >= fechaInicio && t <= fechaFin;
     }).length;
     const tasaRen = debeRenovar > 0 ? ((renov / debeRenovar) * 100).toFixed(1) : null;
 
