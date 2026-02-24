@@ -24,8 +24,8 @@ const COLORES_RAMO = ['#0d6efd','#198754','#fd7e14','#6f42c1','#dc3545','#0dcaf0
 /** "YYYY-MM" */
 const toYM = (d) => { if (!d) return null; const s = typeof d === 'string' ? d : d.toISOString(); return s.slice(0, 7); };
 
-// ─── Clasificación corregida (usa tipo_movimiento, NO movimiento de vehículo) ─
-const esRenovacion = (e) => norm(e.tipo_movimiento) === 'RENOVACION' || !!e.renovacion_de;
+// ─── Clasificación corregida (usa tipo_movimiento, renovacion_de o etapa) ─
+const esRenovacion = (e) => norm(e.tipo_movimiento) === 'RENOVACION' || !!e.renovacion_de || norm(e.etapa_activa).includes('RENOVACION EMITIDA');
 const esCancelada = (e) => { const et = norm(e.etapa_activa); const es = norm(e.estatus); return et === 'CANCELADA' || et === 'CANCELADO' || es === 'CANCELADA' || es === 'CANCELADO'; };
 const esEndoso = (e) => norm(e.tipo_movimiento) === 'ENDOSO';
 const clasificar = (e) => { if (esCancelada(e)) return 'cancelacion'; if (esEndoso(e)) return 'endoso'; if (esRenovacion(e)) return 'renovacion'; return 'nueva'; };
