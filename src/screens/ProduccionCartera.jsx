@@ -248,14 +248,14 @@ const ProduccionCartera = () => {
   // ─── KPIs ───
   const kpis = useMemo(() => {
     let nuevas = 0, renov = 0, cancel = 0, endos = 0;
-    let prima = 0, primaN = 0, primaR = 0;
+    let prima = 0, primaN = 0, primaR = 0, primaCancel = 0;
     expedientesFiltrados.forEach(e => {
       const p = getPrima(e);
       prima += p;
       if (esRenovacion(e)) { renov++; primaR += p; }
       else if (esEndoso(e)) { endos++; }
       else { nuevas++; primaN += p; }
-      if (esCancelada(e)) cancel++;
+      if (esCancelada(e)) { cancel++; primaCancel += p; }
     });
 
     // Tasa de renovación
@@ -265,7 +265,12 @@ const ProduccionCartera = () => {
     }).length;
     const tasaRen = debeRenovar > 0 ? ((renov / debeRenovar) * 100).toFixed(1) : null;
 
-    return { nuevas, renov, cancel, endos, prima, primaN, primaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
+    // Prima neta = producción total menos cancelaciones
+    const primaNeta = prima - primaCancel;
+    const primaNetaN = primaN - expedientesFiltrados.filter(e => esNueva(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+    const primaNetaR = primaR - expedientesFiltrados.filter(e => esRenovacion(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
+
+    return { nuevas, renov, cancel, endos, prima, primaN, primaR, primaCancel, primaNeta, primaNetaN, primaNetaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
   }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin]);
 
   // ─── Tabla resumen agrupada ───
@@ -283,12 +288,12 @@ const ProduccionCartera = () => {
         key = exp.compania || 'Sin aseguradora';
         label = key;
       }
-      if (!mapa.has(key)) mapa.set(key, { key, label, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0 });
+      if (!mapa.has(key)) mapa.set(key, { key, label, nuevas: 0, renov: 0, endosos: 0, cancel: 0, prima: 0, primaCancel: 0 });
       const row = mapa.get(key);
       if (esRenovacion(exp)) row.renov++;
       else if (esEndoso(exp)) row.endosos++;
       else row.nuevas++;
-      if (esCancelada(exp)) row.cancel++;
+      if (esCancelada(exp)) { row.cancel++; row.primaCancel += getPrima(exp); }
       row.prima += getPrima(exp);
     });
     return [...mapa.values()].sort((a, b) => b.prima - a.prima);
@@ -508,10 +513,10 @@ const ProduccionCartera = () => {
           {/* ═══ KPIs ═══ */}
           <div className="row g-3 mb-4">
             {[
-              { label: 'Total', val: kpis.total, color: '#0d6efd', icon: FileText, sub: formatMoney(kpis.prima), tipo: 'total' },
-              { label: 'Nuevas', val: kpis.nuevas, color: '#198754', icon: TrendingUp, sub: formatMoney(kpis.primaN), tipo: 'nuevas' },
-              { label: 'Renovaciones', val: kpis.renov, color: '#0dcaf0', icon: RefreshCw, sub: formatMoney(kpis.primaR), tipo: 'renov' },
-              { label: 'Cancelaciones', val: kpis.cancel, color: '#dc3545', icon: XCircle, sub: null, tipo: 'cancel' }
+              { label: 'Total', val: kpis.total, color: '#0d6efd', icon: FileText, sub: formatMoney(kpis.primaNeta), tipo: 'total' },
+              { label: 'Nuevas', val: kpis.nuevas, color: '#198754', icon: TrendingUp, sub: formatMoney(kpis.primaNetaN), tipo: 'nuevas' },
+              { label: 'Renovaciones', val: kpis.renov, color: '#0dcaf0', icon: RefreshCw, sub: formatMoney(kpis.primaNetaR), tipo: 'renov' },
+              { label: 'Cancelaciones', val: kpis.cancel, color: '#dc3545', icon: XCircle, sub: kpis.primaCancel > 0 ? formatMoney(kpis.primaCancel) : null, tipo: 'cancel' }
             ].map(k => {
               const Ic = k.icon;
               return (
@@ -618,7 +623,8 @@ const ProduccionCartera = () => {
                     </thead>
                     <tbody>
                       {tablaResumen.map((row, idx) => {
-                        const pct = kpis.prima > 0 ? ((row.prima / kpis.prima) * 100).toFixed(1) : 0;
+                        const primaNeta = row.prima - row.primaCancel;
+                        const pct = kpis.primaNeta > 0 ? ((primaNeta / kpis.primaNeta) * 100).toFixed(1) : 0;
                         const dotColor = agrupacion === 'ramo' ? (coloresRamo[row.label] || '#6c757d') : '#0d6efd';
                         return (
                           <tr key={row.key}>
@@ -634,7 +640,7 @@ const ProduccionCartera = () => {
                             <CeldaCount count={row.nuevas} tipo="nuevas" dimension={agrupacion} valor={row.key} label={row.label} color="success" />
                             <CeldaCount count={row.renov} tipo="renov" dimension={agrupacion} valor={row.key} label={row.label} color="info" />
                             <CeldaCount count={row.cancel} tipo="cancel" dimension={agrupacion} valor={row.key} label={row.label} color="danger" />
-                            <td className="text-end fw-semibold">{formatMoney(row.prima)}</td>
+                            <td className="text-end fw-semibold">{formatMoney(primaNeta)}</td>
                             <td>
                               <div className="d-flex align-items-center gap-1">
                                 <div className="progress flex-grow-1" style={{ height: 5 }}>
@@ -654,7 +660,7 @@ const ProduccionCartera = () => {
                         <td className="text-center">{kpis.nuevas}</td>
                         <td className="text-center">{kpis.renov}</td>
                         <td className="text-center">{kpis.cancel}</td>
-                        <td className="text-end">{formatMoney(kpis.prima)}</td>
+                        <td className="text-end">{formatMoney(kpis.primaNeta)}</td>
                         <td></td>
                       </tr>
                     </tfoot>
