@@ -896,24 +896,24 @@ const ModuloNvoExpedientes = () => {
         setDestinatariosCompartir(destinatarios);
         setDestinatarioCompartirSeleccionado(destinatarios[0]); // Seleccionar el primero por defecto
         
-        // Si hay recibos, seleccionar el primer recibo vencido o pendiente (no pagado)
+        // Si hay recibos, seleccionar automáticamente el más relevante
         if (expediente.recibos && expediente.recibos.length > 0) {
           const hoy = new Date();
           hoy.setHours(0, 0, 0, 0);
           
-          // Filtrar solo recibos no pagados
+          // Prioridad: 1) Vencido no pagado, 2) Pendiente no pagado, 3) Primer recibo (incluso pagado)
           const recibosNoPagados = expediente.recibos.filter(r => !r.fecha_pago_real);
           
           if (recibosNoPagados.length > 0) {
-            // Buscar primer recibo vencido
             const primerVencido = recibosNoPagados.find(r => {
               const fechaVenc = new Date(r.fecha_vencimiento);
               fechaVenc.setHours(0, 0, 0, 0);
               return fechaVenc < hoy;
             });
-            
-            // Si no hay vencidos, tomar el primer pendiente
             setPagoSeleccionado(primerVencido || recibosNoPagados[0]);
+          } else {
+            // Todos pagados: seleccionar el último recibo pagado
+            setPagoSeleccionado(expediente.recibos[expediente.recibos.length - 1]);
           }
         }
         
@@ -3810,65 +3810,69 @@ const ModuloNvoExpedientes = () => {
                     </div>
 
                     {/* Selector de pago (solo si tipo es 'pago') */}
-                    {tipoEnvio === 'pago' && expedienteParaCompartir.recibos && expedienteParaCompartir.recibos.length > 0 && (
+                    {tipoEnvio === 'pago' && (
                       <div className="mb-3">
                         <label className="form-label mb-1"><strong>Seleccionar Pago:</strong></label>
-                        <select
-                          className="form-select form-select-sm"
-                          value={pagoSeleccionado?.numero_recibo || (expedienteParaCompartir.recibos?.[0]?.numero_recibo || '')}
-                          onChange={(e) => {
-                            const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
-                            setPagoSeleccionado(pago);
-                          }}
-                        >
-                          {expedienteParaCompartir.recibos
-                            .filter(recibo => {
-                              // Solo mostrar recibos pendientes o vencidos (no pagados)
-                              if (recibo.fecha_pago_real) return false; // Si ya tiene fecha de pago real, está pagado
-                              
-                              // Calcular estado real basado en fecha
-                              const hoy = new Date();
-                              hoy.setHours(0, 0, 0, 0);
-                              const fechaVenc = new Date(recibo.fecha_vencimiento);
-                              fechaVenc.setHours(0, 0, 0, 0);
-                              
-                              // Si está vencido o pendiente, mostrarlo
-                              return fechaVenc <= hoy || !recibo.fecha_pago_real;
-                            })
-                            .map(recibo => {
-                              // Calcular estado real para mostrar
-                              const hoy = new Date();
-                              hoy.setHours(0, 0, 0, 0);
-                              const fechaVenc = new Date(recibo.fecha_vencimiento);
-                              fechaVenc.setHours(0, 0, 0, 0);
-                              const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
-                              
-                              let estadoReal;
-                              let iconoEstado;
-                              if (recibo.fecha_pago_real) {
-                                estadoReal = 'Pagado';
-                                iconoEstado = ' ✅';
-                              } else if (diasRestantes < 0) {
-                                estadoReal = 'Vencido';
-                                iconoEstado = ' 🚨';
-                              } else if (diasRestantes <= 7) {
-                                estadoReal = 'Por Vencer';
-                                iconoEstado = ' ⏰';
-                              } else {
-                                estadoReal = 'Pendiente';
-                                iconoEstado = ' ⏳';
-                              }
-                              
-                              return (
-                                <option key={recibo.numero_recibo} value={recibo.numero_recibo}>
-                                  Pago #{recibo.numero_recibo} - Vence {utils.formatearFecha(recibo.fecha_vencimiento)} - ${utils.formatearMoneda(recibo.monto)} - {estadoReal}{iconoEstado}
-                                </option>
-                              );
-                            })}
-                        </select>
-                        <small className="text-muted d-block mt-1">
-                          Solo se muestran pagos pendientes o vencidos
-                        </small>
+                        {expedienteParaCompartir.recibos && expedienteParaCompartir.recibos.length > 0 ? (
+                          <>
+                            {/* Alerta si todos los recibos están pagados */}
+                            {expedienteParaCompartir.recibos.every(r => r.fecha_pago_real) && (
+                              <div className="alert alert-success py-2 px-3 mb-2 d-flex align-items-center" style={{ fontSize: '0.85em' }}>
+                                <span className="me-2">✅</span>
+                                <span>Todos los pagos están al corriente. Puedes reenviar un comprobante de pago.</span>
+                              </div>
+                            )}
+                            <select
+                              className="form-select form-select-sm"
+                              value={pagoSeleccionado?.numero_recibo || ''}
+                              onChange={(e) => {
+                                const pago = expedienteParaCompartir.recibos.find(r => r.numero_recibo === parseInt(e.target.value));
+                                setPagoSeleccionado(pago);
+                              }}
+                            >
+                              {expedienteParaCompartir.recibos
+                                .map(recibo => {
+                                  const hoy = new Date();
+                                  hoy.setHours(0, 0, 0, 0);
+                                  const fechaVenc = new Date(recibo.fecha_vencimiento);
+                                  fechaVenc.setHours(0, 0, 0, 0);
+                                  const diasRestantes = Math.ceil((fechaVenc - hoy) / (1000 * 60 * 60 * 24));
+                                  
+                                  let estadoReal;
+                                  let iconoEstado;
+                                  if (recibo.fecha_pago_real) {
+                                    estadoReal = 'Pagado';
+                                    iconoEstado = ' ✅';
+                                  } else if (diasRestantes < 0) {
+                                    estadoReal = 'Vencido';
+                                    iconoEstado = ' 🚨';
+                                  } else if (diasRestantes <= 7) {
+                                    estadoReal = 'Por Vencer';
+                                    iconoEstado = ' ⏰';
+                                  } else {
+                                    estadoReal = 'Pendiente';
+                                    iconoEstado = ' ⏳';
+                                  }
+                                  
+                                  return (
+                                    <option key={recibo.numero_recibo} value={recibo.numero_recibo}>
+                                      Pago #{recibo.numero_recibo} - Vence {utils.formatearFecha(recibo.fecha_vencimiento)} - ${utils.formatearMoneda(recibo.monto)} - {estadoReal}{iconoEstado}
+                                    </option>
+                                  );
+                                })}
+                            </select>
+                            <small className="text-muted d-block mt-1">
+                              {expedienteParaCompartir.recibos.some(r => !r.fecha_pago_real)
+                                ? 'Se muestran todos los pagos. Los pendientes/vencidos aparecen primero.'
+                                : 'Todos los pagos están cubiertos. Selecciona uno para reenviar el comprobante.'}
+                            </small>
+                          </>
+                        ) : (
+                          <div className="alert alert-warning py-2 px-3 mb-0 d-flex align-items-center" style={{ fontSize: '0.85em' }}>
+                            <span className="me-2">⚠️</span>
+                            <span>Esta póliza no tiene recibos de pago registrados.</span>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -3963,8 +3967,11 @@ const ModuloNvoExpedientes = () => {
                   <button
                     className="btn btn-success d-flex align-items-center justify-content-center"
                     onClick={async () => {
-                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
-                        // Transformar recibo a formato esperado por el hook
+                      if (tipoEnvio === 'pago') {
+                        if (!pagoSeleccionado) {
+                          toast.error('Selecciona un recibo de pago antes de enviar');
+                          return;
+                        }
                         const pagoTransformado = {
                           numero: pagoSeleccionado.numero_recibo,
                           fecha: pagoSeleccionado.fecha_vencimiento,
@@ -3975,7 +3982,6 @@ const ModuloNvoExpedientes = () => {
                         };
                         await enviarAvisoPagoWhatsApp(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {
-                        // Compartir cotización de renovación
                         await compartirCotizacionWhatsApp(expedienteParaCompartir);
                       } else {
                         await compartirPorWhatsApp(expedienteParaCompartir);
@@ -3988,8 +3994,11 @@ const ModuloNvoExpedientes = () => {
                   <button
                     className="btn btn-info d-flex align-items-center justify-content-center"
                     onClick={async () => {
-                      if (tipoEnvio === 'pago' && pagoSeleccionado) {
-                        // Transformar recibo a formato esperado por el hook
+                      if (tipoEnvio === 'pago') {
+                        if (!pagoSeleccionado) {
+                          toast.error('Selecciona un recibo de pago antes de enviar');
+                          return;
+                        }
                         const pagoTransformado = {
                           numero: pagoSeleccionado.numero_recibo,
                           fecha: pagoSeleccionado.fecha_vencimiento,
@@ -4000,7 +4009,6 @@ const ModuloNvoExpedientes = () => {
                         };
                         await enviarAvisoPagoEmail(pagoTransformado, expedienteParaCompartir);
                       } else if (tipoEnvio === 'cotizacion') {
-                        // Compartir cotización de renovación por Email
                         await compartirCotizacionEmail(expedienteParaCompartir);
                       } else {
                         await compartirPorEmail(expedienteParaCompartir);
