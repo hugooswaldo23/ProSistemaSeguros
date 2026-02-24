@@ -2950,19 +2950,81 @@ const ModuloNvoExpedientes = () => {
     if (!window.confirm('¿Está seguro de eliminar este expediente?')) return;
 
     try {
+      // 🔄 Antes de eliminar: si es una renovación, revertir la póliza anterior
+      const expedienteAEliminar = expedientes.find(e => e.id === id || String(e.id) === String(id));
+      let anteriorRevertida = null;
+
+      if (expedienteAEliminar) {
+        // Buscar la póliza anterior que fue marcada como "Renovada" por esta
+        const norm = (t) => (t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        let anterior = null;
+
+        // 1. Por campo renovacion_de
+        if (expedienteAEliminar.renovacion_de) {
+          anterior = expedientes.find(e => String(e.id) === String(expedienteAEliminar.renovacion_de));
+        }
+        // 2. Buscar quién tiene renovada_por apuntando a este
+        if (!anterior) {
+          anterior = expedientes.find(e =>
+            e.renovada_por && String(e.renovada_por) === String(id) && norm(e.etapa_activa) === 'RENOVADA'
+          );
+        }
+        // 3. Fallback: mismo cliente + vehículo con etapa "Renovada"
+        if (!anterior) {
+          const cid = String(expedienteAEliminar.cliente_id || expedienteAEliminar.clienteId || '');
+          anterior = expedientes.find(e => {
+            if (e.id === id || norm(e.etapa_activa) !== 'RENOVADA') return false;
+            if (String(e.cliente_id || e.clienteId || '') !== cid) return false;
+            if (e.numero_serie && expedienteAEliminar.numero_serie) return e.numero_serie === expedienteAEliminar.numero_serie;
+            if (e.marca && expedienteAEliminar.marca) return e.marca === expedienteAEliminar.marca && e.modelo === expedienteAEliminar.modelo && String(e.anio) === String(expedienteAEliminar.anio);
+            return false;
+          });
+        }
+
+        if (anterior) {
+          // Revertir: quitar "Renovada" → calcular etapa real según vigencia
+          const hoy = new Date().toISOString().split('T')[0];
+          const tv = (anterior.fin_vigencia || anterior.termino_vigencia || '').split('T')[0];
+          let nuevaEtapa = 'Por Renovar'; // Default si no se puede calcular
+          if (tv && tv >= hoy) nuevaEtapa = 'En Vigencia';
+          else if (tv && tv < hoy) nuevaEtapa = 'Por Renovar';
+
+          try {
+            const respRevert = await fetch(`${API_URL}/api/expedientes/${anterior.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                etapa_activa: nuevaEtapa,
+                renovada_por: null
+              })
+            });
+            if (respRevert.ok) {
+              anteriorRevertida = anterior;
+              console.log(`🔄 Póliza anterior ${anterior.numero_poliza} revertida a "${nuevaEtapa}"`);
+            }
+          } catch (err) {
+            console.warn('⚠️ No se pudo revertir póliza anterior:', err);
+          }
+        }
+      }
+
       const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
         method: 'DELETE'
       });
 
       if (!response.ok) throw new Error('Error al eliminar');
 
-      toast.success('Expediente eliminado correctamente');
+      if (anteriorRevertida) {
+        toast.success(`Expediente eliminado. Póliza ${anteriorRevertida.numero_poliza} regresó a su etapa anterior.`);
+      } else {
+        toast.success('Expediente eliminado correctamente');
+      }
       await recargarExpedientes();
     } catch (error) {
       console.error('Error al eliminar:', error);
       toast.error('Error al eliminar expediente');
     }
-  }, []);
+  }, [expedientes]);
 
   const verDetalles = useCallback(async (expediente) => {
     // 🎯 CARGA LAZY: Cargar recibos solo cuando se necesita (ver detalle)
