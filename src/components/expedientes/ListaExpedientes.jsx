@@ -504,20 +504,23 @@ const ListaExpedientes = React.memo(({
   
   const paginacion = usePaginacion(expedientesFiltrados, 10);
 
-  // Detectar 3 tipos de duplicados
+  // Detectar 3 tipos de duplicados (excluir Renovadas: es normal que compartan VIN con la nueva)
   const analisisDuplicados = React.useMemo(() => {
     const polizasDuplicadas = [];
     const vinsDuplicados = [];
     const polizasVinDistinto = [];
 
-    expedientes.forEach((exp, index) => {
+    // Filtrar: no analizar pólizas con etapa "Renovada" (comparten VIN con su renovación)
+    const activos = expedientes.filter(e => e.etapa_activa !== 'Renovada');
+
+    activos.forEach((exp, index) => {
       // Solo analizar si tiene número de póliza
       if (!exp.numero_poliza) return;
 
       const vin = exp.numero_serie?.trim() || '';
 
       // Buscar otros expedientes
-      expedientes.forEach((otro, otroIndex) => {
+      activos.forEach((otro, otroIndex) => {
         if (index >= otroIndex || !otro.numero_poliza) return;
 
         const otroVin = otro.numero_serie?.trim() || '';
