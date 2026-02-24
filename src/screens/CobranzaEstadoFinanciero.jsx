@@ -173,29 +173,29 @@ const CobranzaEstadoFinanciero = () => {
     const montoCancelado = cancelados.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
 
     // ── % COBRANZA DEL PERÍODO ──
-    // De los recibos que vencían en el rango de fechas, qué porcentaje
-    // (en monto) ya se cobró. Responde: "¿qué tan bien cobramos lo que debíamos cobrar?"
-    // EXCLUYE recibos de pólizas canceladas del denominador.
-    const recibosDelPeriodo = recibosActivos.filter(r => {
+    // Refleja la realidad operativa: de todo lo que teníamos que cobrar
+    // (lo cobrado + lo pendiente + lo vencido), ¿cuánto se cobró?
+    // Esto incluye recibos pagados en el período (por fecha_pago_real)
+    // sin importar cuándo vencían originalmente.
+    const montoTotalOperativo = montoPagado + montoPendiente + montoVencido;
+    const porcentajeCobranza = montoTotalOperativo > 0
+      ? ((montoPagado / montoTotalOperativo) * 100).toFixed(1)
+      : 0;
+
+    // Recibos cuyo vencimiento cae dentro del período (para referencia informativa)
+    const vencianEnPeriodo = recibosActivos.filter(r => {
       if (idsCancelados.has(String(r.expediente_id)) && !r.fecha_pago_real) return false;
       const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
       return fv && fv >= fechaInicio && fv <= fechaFin;
-    });
-    const montoPagadoPeriodo = recibosDelPeriodo
-      .filter(r => !!r.fecha_pago_real)
-      .reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
-    const montoTotalPeriodo = recibosDelPeriodo.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0);
-    const porcentajeCobranza = montoTotalPeriodo > 0
-      ? ((montoPagadoPeriodo / montoTotalPeriodo) * 100).toFixed(1)
-      : 0;
+    }).length;
 
     return {
       pagados, vencidos, pendientes, cancelados,
       montoPagado, montoVencido, montoPendiente, montoSinCobrar,
       montoCancelado,
-      montoPagadoPeriodo, montoTotalPeriodo,
-      recibosDelPeriodo: recibosDelPeriodo.length,
-      porcentajeCobranza
+      montoTotalOperativo,
+      porcentajeCobranza,
+      vencianEnPeriodo
     };
   }, [recibosActivos, idsCancelados, fechaInicio, fechaFin]);
 
@@ -449,7 +449,7 @@ const CobranzaEstadoFinanciero = () => {
                     <TrendingUp size={18} className="text-primary" />
                   </div>
                   <h4 className="mb-0 fw-bold text-primary">{kpis.porcentajeCobranza}%</h4>
-                  <small className="text-muted">{formatMoney(kpis.montoPagadoPeriodo)} de {formatMoney(kpis.montoTotalPeriodo)} ({kpis.recibosDelPeriodo} recibos)</small>
+                  <small className="text-muted">{formatMoney(kpis.montoPagado)} de {formatMoney(kpis.montoTotalOperativo)}</small>
                 </div>
               </div>
             </div>
@@ -490,35 +490,31 @@ const CobranzaEstadoFinanciero = () => {
             <div className="card-body">
               <h6 className="fw-bold mb-3">Estado General de Cobranza del Período</h6>
               <small className="text-muted d-block mb-2">
-                Recibos con vencimiento entre {formatFecha(fechaInicio)} y {formatFecha(fechaFin)}
+                Cobrados (por fecha de pago), pendientes y vencidos al corte
               </small>
               {(() => {
-                const total = kpis.recibosDelPeriodo;
-                if (total === 0) return <div className="text-center text-muted mt-2">Sin recibos en el período seleccionado</div>;
-                // Contar por estatus dentro de los recibos del período (excluyendo canceladas)
-                const recsPeriodo = recibosActivos.filter(r => {
-                  if (idsCancelados.has(String(r.expediente_id)) && !r.fecha_pago_real) return false;
-                  const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
-                  return fv && fv >= fechaInicio && fv <= fechaFin;
-                });
-                const pagPeriodo = recsPeriodo.filter(r => !!r.fecha_pago_real).length;
-                const venPeriodo = recsPeriodo.filter(r => !r.fecha_pago_real && (r.estatus || '').toLowerCase() === 'vencido').length;
-                const penPeriodo = recsPeriodo.filter(r => !r.fecha_pago_real && (r.estatus || '').toLowerCase() !== 'vencido' && (r.estatus || '').toLowerCase() !== 'pagado').length;
-                const totalBarra = pagPeriodo + venPeriodo + penPeriodo || 1;
+                const pagCount = kpis.pagados.length;
+                const penCount = kpis.pendientes.length;
+                const venCount = kpis.vencidos.length;
+                const totalBarra = pagCount + penCount + venCount;
+                if (totalBarra === 0) return <div className="text-center text-muted mt-2">Sin recibos en el período seleccionado</div>;
                 return (
                   <div className="progress" style={{ height: '30px', borderRadius: '8px' }}>
-                    <div className="progress-bar bg-success" style={{ width: `${(pagPeriodo / totalBarra) * 100}%` }}>
-                      {pagPeriodo > 0 && `${pagPeriodo} Pagados`}
+                    <div className="progress-bar bg-success" style={{ width: `${(pagCount / totalBarra) * 100}%` }}>
+                      {pagCount > 0 && `${pagCount} Pagados`}
                     </div>
-                    <div className="progress-bar bg-warning" style={{ width: `${(penPeriodo / totalBarra) * 100}%` }}>
-                      {penPeriodo > 0 && `${penPeriodo} Pendientes`}
+                    <div className="progress-bar bg-warning" style={{ width: `${(penCount / totalBarra) * 100}%` }}>
+                      {penCount > 0 && `${penCount} Pendientes`}
                     </div>
-                    <div className="progress-bar bg-danger" style={{ width: `${(venPeriodo / totalBarra) * 100}%` }}>
-                      {venPeriodo > 0 && `${venPeriodo} Vencidos`}
+                    <div className="progress-bar bg-danger" style={{ width: `${(venCount / totalBarra) * 100}%` }}>
+                      {venCount > 0 && `${venCount} Vencidos`}
                     </div>
                   </div>
                 );
               })()}
+              <small className="text-muted d-block mt-2">
+                {kpis.pagados.length} cobrados en el período (por fecha de pago) · {kpis.vencianEnPeriodo} vencían en este período · {kpis.pendientes.length} pendiente{kpis.pendientes.length !== 1 ? 's' : ''}
+              </small>
             </div>
           </div>
 
