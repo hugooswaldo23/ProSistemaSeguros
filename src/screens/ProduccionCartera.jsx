@@ -274,14 +274,25 @@ const ProduccionCartera = () => {
   }, [expedientes]);
 
   // Clasificadores contextuales: cross-company → nueva para la aseguradora filtrada
+  // También detecta renovación por renovacionPares cuando la etapa cambió a "En Vigencia"
   const esRenovacionCtx = useMemo(() => (exp) => {
-    if (!esRenovacion(exp)) return false;
+    // Detección directa por campos
+    let esRenov = esRenovacion(exp);
+    // Detección por par: si tiene pareja "Renovada", esta ES la renovación
+    if (!esRenov && !esRenovada(exp)) {
+      const par = renovacionPares.get(exp.id);
+      if (par) {
+        const pareja = expedientes.find(x => x.id === par.parejaId);
+        if (pareja && norm(pareja.etapa_activa) === 'RENOVADA') esRenov = true;
+      }
+    }
+    if (!esRenov) return false;
     if (filtroAseguradora !== 'todos') {
       const par = renovacionPares.get(exp.id);
       if (par && !par.mismaCompania) return false;
     }
     return true;
-  }, [filtroAseguradora, renovacionPares]);
+  }, [filtroAseguradora, renovacionPares, expedientes]);
 
   const esNuevaCtx = useMemo(() => (exp) => {
     return !esRenovacionCtx(exp) && !esRenovada(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);

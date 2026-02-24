@@ -144,19 +144,25 @@ const SaludCartera = () => {
   // Clasificación contextual: cross-company → nueva para la aseguradora filtrada
   // Sin filtro (vista agente): toda renovación cuenta como retención
   // Con filtro de aseguradora: solo cuenta si se renovó con la misma compañía
+  // IMPORTANTE: También detecta renovación por renovacionPares (cuando la etapa
+  // ya cambió de "Renovación Emitida" a "En Vigencia" al registrar un pago)
   const clasificarCtx = useMemo(() => (e) => {
     if (esCancelada(e)) return 'cancelacion';
     if (esRenovada(e)) return 'renovada';
     if (esEndoso(e)) return 'endoso';
-    if (esRenovacion(e)) {
+
+    // Detectar renovación por campos explícitos O por pertenecer a un par de renovación
+    const par = renovacionPares.get(e.id);
+    const esRenov = esRenovacion(e) || (par && !esRenovada(e) && norm((expedientes.find(x => x.id === par.parejaId) || {}).etapa_activa) === 'RENOVADA');
+
+    if (esRenov) {
       if (filtroAseguradora !== 'todos') {
-        const par = renovacionPares.get(e.id);
         if (par && !par.mismaCompania) return 'nueva';
       }
       return 'renovacion';
     }
     return 'nueva';
-  }, [filtroAseguradora, renovacionPares]);
+  }, [filtroAseguradora, renovacionPares, expedientes]);
 
   // ═══ CÁLCULOS ═══
   const data = useMemo(() => {
