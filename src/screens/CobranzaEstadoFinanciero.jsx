@@ -12,7 +12,10 @@ const CobranzaEstadoFinanciero = () => {
     const hoy = new Date();
     return new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
   });
-  const [fechaFin, setFechaFin] = useState(() => new Date().toISOString().split('T')[0]);
+  const [fechaFin, setFechaFin] = useState(() => {
+    const hoy = new Date();
+    return new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().split('T')[0];
+  });
   const [filtroRapido, setFiltroRapido] = useState('mes-actual');
   const [seccionAbierta, setSeccionAbierta] = useState(null); // 'pagados' | 'pendientes' | 'vencidos' | 'cancelados'
 
@@ -32,7 +35,7 @@ const CobranzaEstadoFinanciero = () => {
       }
       case 'mes-actual':
         inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
-        fin = hoy.toISOString().split('T')[0];
+        fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().split('T')[0];
         break;
       case 'mes-anterior':
         inicio = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1).toISOString().split('T')[0];
