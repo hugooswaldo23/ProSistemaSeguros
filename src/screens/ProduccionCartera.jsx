@@ -15,7 +15,7 @@ const PAGE_SIZE = 50;
 const norm = (t) => (t || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 // ─── Clasificadores puros (sin estado) ───
-const esRenovacion = (exp) => norm(exp.tipo_movimiento) === 'RENOVACION' || !!exp.renovacion_de || norm(exp.etapa_activa).includes('RENOVACION EMITIDA');
+const esRenovacion = (exp) => norm(exp.etapa_activa) === 'RENOVADA' || norm(exp.etapa_activa).includes('RENOVACION EMITIDA') || norm(exp.tipo_movimiento) === 'RENOVACION' || !!exp.renovacion_de;
 const esEndoso = (exp) => norm(exp.tipo_movimiento) === 'ENDOSO';
 const esNueva = (exp) => !esRenovacion(exp) && !esEndoso(exp) && (norm(exp.tipo_movimiento) === 'NUEVA' || !exp.tipo_movimiento);
 const esCancelada = (exp) => {
