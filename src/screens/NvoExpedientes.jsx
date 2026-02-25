@@ -232,7 +232,7 @@ const ModuloNvoExpedientes = () => {
         setClientesMap(mapa);
         setAgentes(agentesData);
         setAseguradoras(aseguradorasData);
-        setTiposProductos(['Automóvil', 'Moto', 'Camión', 'Hogar', 'Empresa', 'GMM', 'Vida']);
+        setTiposProductos(['Autos', 'Vida', 'Daños', 'GMM', 'Equipo Pesado', 'Embarcaciones', 'Ahorro']);
       } catch (error) {
         console.error('❌ Error al cargar datos iniciales:', error);
         if (mounted) {

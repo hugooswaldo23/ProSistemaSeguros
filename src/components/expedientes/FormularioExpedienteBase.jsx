@@ -109,36 +109,20 @@ const FormularioExpedienteBase = React.memo(({
   const [vendedores, setVendedores] = useState([]);
   const [agenteIdSeleccionado, setAgenteIdSeleccionado] = useState(null);
 
-  // Función para obtener vendedores filtrados por clave de agente y aseguradora
-  const obtenerVendedoresPorAgente = async (agenteId, claveAgente = null, aseguradora = null) => {
+  // Función para obtener vendedores del agente
+  const obtenerVendedoresPorAgente = async (agenteId) => {
     if (!agenteId) {
       setVendedores([]);
       return;
     }
 
     try {
-      let url = `${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`;
-      const params = new URLSearchParams();
-      
-      if (claveAgente) params.append('clave', claveAgente);
-      if (aseguradora) params.append('aseguradora', aseguradora);
-      
-      if (params.toString()) url += `?${params.toString()}`;
+      const url = `${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`;
       
       const response = await fetch(url);
       if (response.ok) {
         const data = await response.json();
-        let vendedoresArray = data.vendedores || [];
-        
-        if (claveAgente && vendedoresArray.length > 0) {
-          vendedoresArray = vendedoresArray.filter(vendedor => {
-            const comisiones = vendedor.comisionesCompartidas || [];
-            return comisiones.some(com => 
-              com.clave && com.clave.toString() === claveAgente.toString()
-            );
-          });
-        }
-        
+        const vendedoresArray = data.vendedores || [];
         setVendedores(vendedoresArray);
       } else {
         setVendedores([]);
@@ -185,11 +169,10 @@ const FormularioExpedienteBase = React.memo(({
   useEffect(() => {
     if (formulario.agente && agentes.length > 0) {
       const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
-      const claveAgente = formulario.agente.trim().split(' ')[0];
       
       if (agenteId && agenteId !== agenteIdSeleccionado) {
         setAgenteIdSeleccionado(agenteId);
-        obtenerVendedoresPorAgente(agenteId, claveAgente, formulario.compania);
+        obtenerVendedoresPorAgente(agenteId);
       } else if (!agenteId) {
         setAgenteIdSeleccionado(null);
         setVendedores([]);
@@ -198,7 +181,7 @@ const FormularioExpedienteBase = React.memo(({
       setAgenteIdSeleccionado(null);
       setVendedores([]);
     }
-  }, [formulario.agente, formulario.compania, agentes]);
+  }, [formulario.agente, agentes]);
 
   return (
     <div className="p-3">

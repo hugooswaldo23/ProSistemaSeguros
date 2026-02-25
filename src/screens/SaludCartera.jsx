@@ -209,61 +209,96 @@ const SaludCartera = () => {
       : (primaTotalVigente > 0 ? '100.0' : '0.0');
     const deltaPolizas = carteraVigente - polizasVigMesAnt;
 
-    // Retención: pólizas que vencían este mes (incluye Renovadas: sí debían renovarse)
+    // Retención: TODA póliza vencida (fin_vigencia <= hoy) que no fue cancelada = debía renovarse
+    // Si ya fue renovada (etapa RENOVADA) = se renovó con éxito
+    // Si no = pendiente de renovar (afecta el score)
     const debianRenovar = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;
-      return tv && toYM(tv) === ymActual && !esCancelada(e);
+      if (!tv || esCancelada(e)) return false;
+      const tvStr = tv.split('T')[0];
+      return tvStr <= hoyStr; // ya venció o vence hoy
     });
+    // Renovadas exitosamente = las que tienen pareja de renovación completada
+    const renovadasExitosas = debianRenovar.filter(e => esRenovada(e));
+    const pendientesRenovar = debianRenovar.length - renovadasExitosas.length;
     const debianRenovarAnt = expedientesFiltrados.filter(e => {
       const tv = e.fin_vigencia || e.termino_vigencia;
       return tv && toYM(tv) === ymAnterior;
     });
-    const tasaRetencion = debianRenovar.length > 0 ? ((renovMes.length / debianRenovar.length) * 100).toFixed(1) : null;
+    const tasaRetencion = debianRenovar.length > 0 ? ((renovadasExitosas.length / debianRenovar.length) * 100).toFixed(1) : null;
     const tasaRetencionAnt = debianRenovarAnt.length > 0 ? ((renovAnt.length / debianRenovarAnt.length) * 100).toFixed(1) : null;
 
     // Cancelaciones desglose
     const cancelEnVigor = cancelMes.filter(e => { const et = norm(e.etapa_activa); return !et.includes('COTIZACION') && !et.includes('PROCESO'); }).length;
 
-    // ── Índice de salud: 50% Crecimiento (prima) + 50% Renovación ──
+    // ── Índice de salud: 33% Crecimiento + 33% Renovación + 34% Cobranza ──
     const crecimientoNeto = nuevasMes.length - cancelMes.length;
     const emisiones = nuevasMes.length + renovMes.length;
 
     // Sub-score Crecimiento: basado en % cambio de prima vigente vs mes anterior
-    // Si no hay prima en ninguno de los dos meses → null (sin actividad)
-    // Si había prima y creció → clamp entre 0-100 (50 = sin cambio, 100 = +100% o más)
     let saludCrecimiento = null;
     if (primaTotalVigente > 0 || primaVigMesAnt > 0) {
       if (primaVigMesAnt === 0) {
-        saludCrecimiento = 100; // creció de 0 a algo = excelente
+        saludCrecimiento = 100;
       } else {
         const pctCambio = (deltaPrima / primaVigMesAnt) * 100;
-        // Escala: -100% o peor = 0, 0% = 50, +100% o más = 100
         saludCrecimiento = Math.max(0, Math.min(100, 50 + (pctCambio / 2)));
       }
     }
 
-    // Sub-score Renovación: renovadas / debían renovar * 100
-    // Nada por renovar → null (sin actividad)
+    // Sub-score Renovación: renovadas exitosamente / total que debían renovar * 100
     const saludRenovacion = debianRenovar.length > 0
-      ? Math.max(0, Math.min(100, (renovMes.length / debianRenovar.length) * 100))
+      ? Math.max(0, Math.min(100, (renovadasExitosas.length / debianRenovar.length) * 100))
       : null;
 
-    // Score final: si ambos son null → null (sin actividad)
-    // Si solo uno tiene dato → ese vale 100%
-    // Si ambos tienen dato → 50/50
+    // Sub-score Cobranza: % de recibos de pólizas NO canceladas que están al corriente
+    // Incluye vigentes + vencidas (si tiene pagos pendientes/vencidos, afecta la salud)
+    const idsNoCanceladas = new Set(
+      expedientesFiltrados.filter(e => !esCancelada(e)).map(e => String(e.id))
+    );
+    const recibosCartera = recibos.filter(r => idsNoCanceladas.has(String(r.expediente_id)));
+    const recibosMorososCalc = recibosCartera.filter(r => {
+      const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
+      const est = (r.estatus || '').toLowerCase();
+      return fv && fv < hoyStr && (est === 'pendiente' || est === 'vencido');
+    });
+    let saludCobranza = null;
+    if (recibosCartera.length > 0) {
+      const recibosAlCorriente = recibosCartera.length - recibosMorososCalc.length;
+      saludCobranza = Math.max(0, Math.min(100, (recibosAlCorriente / recibosCartera.length) * 100));
+    }
+
+    // Score final: 33% Crecimiento + 33% Renovación + 34% Cobranza
+    // Componentes sin datos (null) se redistribuyen proporcionalmente
     let indiceSalud = null;
-    if (saludCrecimiento !== null && saludRenovacion !== null) {
-      indiceSalud = Math.round(saludCrecimiento * 0.50 + saludRenovacion * 0.50);
-    } else if (saludCrecimiento !== null) {
-      indiceSalud = Math.round(saludCrecimiento);
-    } else if (saludRenovacion !== null) {
-      indiceSalud = Math.round(saludRenovacion);
+    const componentes = [
+      { valor: saludCrecimiento, peso: 33 },
+      { valor: saludRenovacion, peso: 33 },
+      { valor: saludCobranza, peso: 34 },
+    ];
+    const componentesActivos = componentes.filter(c => c.valor !== null);
+    if (componentesActivos.length > 0) {
+      const pesoTotal = componentesActivos.reduce((s, c) => s + c.peso, 0);
+      indiceSalud = Math.round(
+        componentesActivos.reduce((s, c) => s + (c.valor * c.peso / pesoTotal), 0)
+      );
     }
 
     // Prima vigente mismo mes año anterior
+    // Una póliza estaba vigente en ese mes si:
+    //   - fue emitida/creada ANTES del fin de ese mes
+    //   - su fin de vigencia es POSTERIOR al inicio de ese mes
+    //   - no está cancelada ni renovada
+    const mesAntAnio = mes + 1; // mes humano (1-12)
+    const inicioMesAnioAnt = `${anio - 1}-${String(mesAntAnio).padStart(2, '0')}-01`;
+    const finMesAnioAnt = new Date(anio - 1, mesAntAnio, 0); // último día del mes
+    const finMesAnioAntStr = finMesAnioAnt.toISOString().split('T')[0];
     const primaVigenteAnioAnt = expedientesFiltrados.filter(e => {
+      const fe = getFechaExp(e);
+      if (!fe || fe > finMesAnioAntStr) return false; // no existía aún en ese mes
       const tv = (e.fin_vigencia || e.termino_vigencia || '').split('T')[0];
-      return tv >= `${anio - 1}-${String(mes + 1).padStart(2, '0')}-28` && !esCancelada(e);
+      if (!tv || tv < inicioMesAnioAnt) return false; // ya había vencido antes de ese mes
+      return !esCancelada(e) && !esRenovada(e);
     }).reduce((s, e) => s + getPrima(e), 0);
 
     // Morosos
@@ -355,11 +390,14 @@ const SaludCartera = () => {
       indiceSalud,
       saludCrecimiento: saludCrecimiento !== null ? Math.round(saludCrecimiento) : null,
       saludRenovacion: saludRenovacion !== null ? Math.round(saludRenovacion) : null,
+      saludCobranza: saludCobranza !== null ? Math.round(saludCobranza) : null,
       carteraVigente, primaTotalVigente,
       primaVigMesAnt, polizasVigMesAnt,
       deltaPrima, pctCrecimientoPrima: parseFloat(pctCrecimientoPrima), deltaPolizas,
       primaVigenteAnioAnt,
       debianRenovar: debianRenovar.length,
+      renovadasExitosas: renovadasExitosas.length,
+      pendientesRenovar,
       cancelEnVigor, cancelEnRenovacion: cancelMes.length - cancelEnVigor,
       recibosMorosos: recibosMorosos.length,
       montoMoroso: recibosMorosos.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0),
@@ -477,12 +515,12 @@ const SaludCartera = () => {
                 <div className="card-body p-3">
                   <div className="d-flex align-items-center gap-1 mb-2">
                     <CheckCircle2 size={16} className="text-primary" />
-                    <small className="text-muted fw-semibold">Retención del Mes</small>
+                    <small className="text-muted fw-semibold">Retención</small>
                   </div>
                   {data.tasaRetencion !== null ? (
                     <>
                       <div style={{ fontSize: '1rem', fontWeight: '600', color: '#333', lineHeight: 1.4 }}>
-                        {data.renovMes} renovadas de {data.debianRenovar} que vencían
+                        {data.renovadasExitosas} renovadas de {data.debianRenovar} vencidas
                       </div>
                       <div className="d-flex align-items-center gap-2 mt-1">
                         <span style={{
@@ -494,12 +532,17 @@ const SaludCartera = () => {
                         <span style={{ fontSize: '0.85em' }}>de retención</span>
                         <Semaforo valor={parseFloat(data.tasaRetencion)} umbrales={[60, 80]} />
                       </div>
+                      {data.pendientesRenovar > 0 && (
+                        <small className="text-danger d-block mt-1">
+                          ⚠️ {data.pendientesRenovar} pendiente(s) de renovar
+                        </small>
+                      )}
                       <VsAnterior actual={parseFloat(data.tasaRetencion)} anterior={data.tasaRetencionAnt} esPct />
                     </>
                   ) : (
                     <>
                       <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: '#6c757d', lineHeight: 1 }}>—</div>
-                      <small className="text-muted d-block">Sin vencimientos este mes</small>
+                      <small className="text-muted d-block">Sin vencimientos</small>
                       {data.renovMes > 0 && <small className="text-muted">{data.renovMes} renovaciones registradas</small>}
                     </>
                   )}
@@ -556,6 +599,14 @@ const SaludCartera = () => {
                       {data.saludRenovacion !== null ? (
                         <span className="fw-bold" style={{ color: data.saludRenovacion >= 75 ? '#198754' : data.saludRenovacion >= 50 ? '#ffc107' : '#dc3545' }}>
                           {data.saludRenovacion}%
+                        </span>
+                      ) : <span className="text-muted">—</span>}
+                    </div>
+                    <div style={{ borderLeft: '1px solid #dee2e6', paddingLeft: 12 }}>
+                      <span className="text-muted">Cobranza </span>
+                      {data.saludCobranza !== null ? (
+                        <span className="fw-bold" style={{ color: data.saludCobranza >= 75 ? '#198754' : data.saludCobranza >= 50 ? '#ffc107' : '#dc3545' }}>
+                          {data.saludCobranza}%
                         </span>
                       ) : <span className="text-muted">—</span>}
                     </div>

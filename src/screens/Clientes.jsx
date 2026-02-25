@@ -1089,11 +1089,13 @@ const ModuloClientes = () => {
                         'Vida': '👤',
                         'Daños': '🏢',
                         'GMM': '🏥',
-                        'Gastos Médicos': '🏥',
-                        'AP': '👥',
-                        'Accidentes Personales': '👥',
+                        'Equipo Pesado': '🚛',
+                        'Embarcaciones': '🚢',
                         'Ahorro': '💰',
-                        'Educativo': '🎓',
+                        'RC': '⚖️',
+                        'Transporte': '📦',
+                        'Viaje': '✈️',
+                        'Gastos Funerarios': '🕊️',
                         'Otro': '📋'
                       };
                       

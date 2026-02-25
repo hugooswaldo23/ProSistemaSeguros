@@ -826,7 +826,7 @@ export async function extraer(ctx) {
     
     // Póliza (Página 1)
     compania: 'Chubb',
-    producto: 'Autos Individual',
+    producto: 'Autos',
     plan, // Paquete (INTEGRAL, LIMITADA, etc.)
     etapa_activa: 'Emitida',
     clave_agente,

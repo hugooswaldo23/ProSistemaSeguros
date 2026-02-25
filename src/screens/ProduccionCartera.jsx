@@ -312,19 +312,29 @@ const ProduccionCartera = () => {
       if (esCancelada(e)) { cancel++; primaCancel += p; }
     });
 
-    // Tasa de renovación (Renovadas SÍ cuentan: son las que debían renovarse)
-    const debeRenovar = expedientes.filter(e => {
-      const t = e.termino_vigencia ? e.termino_vigencia.split('T')[0] : null;
-      return t && t >= fechaInicio && t <= fechaFin;
+    // Por Renovar: todas las pólizas vencidas que NO han sido renovadas ni canceladas (sin importar cuándo vencieron)
+    const hoyStr = new Date().toISOString().split('T')[0];
+    const porRenovar = expedientes.filter(e => {
+      const tvStr = e.termino_vigencia ? e.termino_vigencia.split('T')[0] : null;
+      if (!tvStr || tvStr > hoyStr) return false;
+      if (esCancelada(e)) return false;
+      if (norm(e.etapa_activa) === 'RENOVADA') return false;
+      return true;
     }).length;
-    const tasaRen = debeRenovar > 0 ? ((renov / debeRenovar) * 100).toFixed(1) : null;
+
+    // Renovadas del período: renovaciones emitidas/creadas en el rango seleccionado (sin importar cuándo vencía la original)
+    const renovadasMes = expedientes.filter(e => {
+      if (!esRenovacion(e)) return false;
+      const f = getFecha(e);
+      return f && f >= fechaInicio && f <= fechaFin;
+    }).length;
 
     // Prima neta = producción total menos cancelaciones
     const primaNeta = prima - primaCancel;
     const primaNetaN = primaN - expedientesFiltrados.filter(e => esNuevaCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
     const primaNetaR = primaR - expedientesFiltrados.filter(e => esRenovacionCtx(e) && esCancelada(e)).reduce((s, e) => s + getPrima(e), 0);
 
-    return { nuevas, renov, cancel, endos, prima, primaN, primaR, primaCancel, primaNeta, primaNetaN, primaNetaR, debeRenovar, tasaRen, perdidas: Math.max(0, debeRenovar - renov), total: expedientesFiltrados.length };
+    return { nuevas, renov, cancel, endos, prima, primaN, primaR, primaCancel, primaNeta, primaNetaN, primaNetaR, porRenovar, renovadasMes, total: expedientesFiltrados.length };
   }, [expedientesFiltrados, expedientes, fechaInicio, fechaFin, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Tabla resumen agrupada ───
@@ -458,7 +468,7 @@ const ProduccionCartera = () => {
   }, [drillDown, expedientesFiltrados, resolverAgenteId, resolverVendedorId, getNombreVendedor, esRenovacionCtx, esNuevaCtx]);
 
   // ─── Colores de ramo ───
-  const coloresRamo = { 'Autos': '#0d6efd', 'Vida': '#198754', 'Daños': '#dc3545', 'GMM': '#6f42c1', 'Equipo pesado': '#fd7e14', 'Embarcaciones': '#0dcaf0', 'Ahorro': '#20c997' };
+  const coloresRamo = { 'Autos': '#0d6efd', 'Vida': '#198754', 'Daños': '#dc3545', 'GMM': '#6f42c1', 'Equipo Pesado': '#fd7e14', 'Embarcaciones': '#0dcaf0', 'Ahorro': '#20c997', 'RC': '#d63384', 'Transporte': '#ffc107', 'Viaje': '#6610f2', 'Gastos Funerarios': '#495057' };
 
   // ─── Cell clickeable ───
   const CeldaCount = ({ count, tipo, dimension, valor, label, color = 'primary' }) => {
@@ -597,38 +607,39 @@ const ProduccionCartera = () => {
             })}
           </div>
 
-          {/* ═══ Tasa de Renovación ═══ */}
-          {kpis.tasaRen !== null && (
+          {/* ═══ Por Renovar / Renovadas ═══ */}
+          {(kpis.porRenovar > 0 || kpis.renovadasMes > 0) && (
             <div className="card border-0 shadow-sm mb-4">
               <div className="card-body py-3">
                 <div className="row align-items-center gx-4">
                   <div className="col-auto">
                     <div style={{
                       width: 44, height: 44, borderRadius: 10,
-                      backgroundColor: parseFloat(kpis.tasaRen) >= 70 ? '#d1e7dd' : parseFloat(kpis.tasaRen) >= 40 ? '#fff3cd' : '#f8d7da',
+                      backgroundColor: kpis.porRenovar === 0 ? '#d1e7dd' : kpis.porRenovar <= 5 ? '#fff3cd' : '#f8d7da',
                       display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>
-                      {parseFloat(kpis.tasaRen) >= 70 ? <ArrowUpRight size={22} className="text-success" /> :
-                       parseFloat(kpis.tasaRen) >= 40 ? <Minus size={22} className="text-warning" /> :
+                      {kpis.porRenovar === 0 ? <ArrowUpRight size={22} className="text-success" /> :
+                       kpis.porRenovar <= 5 ? <Minus size={22} className="text-warning" /> :
                        <ArrowDownRight size={22} className="text-danger" />}
                     </div>
                   </div>
                   <div className="col-auto">
-                    <small className="text-muted d-block" style={{ fontSize: '0.75em' }}>Tasa de Renovación</small>
+                    <small className="text-muted d-block" style={{ fontSize: '0.75em' }}>Estado de Renovaciones</small>
                     <span className="fw-bold fs-5" style={{
-                      color: parseFloat(kpis.tasaRen) >= 70 ? '#198754' : parseFloat(kpis.tasaRen) >= 40 ? '#ffc107' : '#dc3545'
-                    }}>{kpis.tasaRen}%</span>
+                      color: kpis.porRenovar === 0 ? '#198754' : kpis.porRenovar <= 5 ? '#ffc107' : '#dc3545'
+                    }}>{kpis.porRenovar} por renovar</span>
                   </div>
                   <div className="col">
                     <div className="d-flex gap-4 mb-1">
-                      <small className="text-muted">Debían: <strong>{kpis.debeRenovar}</strong></small>
-                      <small className="text-success">Renovadas: <strong>{kpis.renov}</strong></small>
-                      <small className="text-danger">Pendientes: <strong>{kpis.perdidas}</strong></small>
+                      <small className="text-danger">Por Renovar: <strong>{kpis.porRenovar}</strong></small>
+                      <small className="text-success">Renovadas (período): <strong>{kpis.renovadasMes}</strong></small>
                     </div>
-                    <div className="progress" style={{ height: 6 }}>
-                      <div className="progress-bar bg-success" style={{ width: `${kpis.tasaRen}%` }} />
-                      <div className="progress-bar bg-danger bg-opacity-50" style={{ width: `${100 - parseFloat(kpis.tasaRen)}%` }} />
-                    </div>
+                    {(kpis.porRenovar + kpis.renovadasMes) > 0 && (
+                      <div className="progress" style={{ height: 6 }}>
+                        <div className="progress-bar bg-success" style={{ width: `${(kpis.renovadasMes / (kpis.porRenovar + kpis.renovadasMes) * 100)}%` }} />
+                        <div className="progress-bar bg-danger bg-opacity-50" style={{ width: `${(kpis.porRenovar / (kpis.porRenovar + kpis.renovadasMes) * 100)}%` }} />
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

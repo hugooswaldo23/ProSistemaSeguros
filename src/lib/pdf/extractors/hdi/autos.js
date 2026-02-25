@@ -877,7 +877,7 @@ export async function extraer(ctx) {
 
     // Póliza
     compania,
-    producto: 'Autos Individual',
+    producto: 'Autos',
     etapa_activa: 'Emitida',
     clave_agente,
     agente,

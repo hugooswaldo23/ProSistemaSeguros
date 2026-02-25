@@ -157,6 +157,25 @@ async function extraerConImagen(imagen, API_KEY) {
   return normalizarDatos(datos);
 }
 
+// Normalizar producto que devuelve OpenAI a los ramos simplificados del sistema
+function normalizarProducto(producto) {
+  if (!producto) return '';
+  const p = producto.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (/AUTO|VEHIC|FRONTERIZO|FLOTILLA/.test(p)) return 'Autos';
+  if (/GMM|GASTOS MED|SALUD/.test(p)) return 'GMM';
+  if (/VIDA|DOTAL|UNIVERSAL|TEMPORAL/.test(p)) return 'Vida';
+  if (/FUNER/.test(p)) return 'Gastos Funerarios';
+  if (/DANO|INCENDIO|HOGAR|CASA|INMUEBLE|EMPRESA|NEGOCIO/.test(p)) return 'Daños';
+  if (/RESPONSABILIDAD|FIANZA/.test(p)) return 'RC';
+  if (/TRANSPORTE|CARGA/.test(p)) return 'Transporte';
+  if (/EQUIPO|MAQUINARIA|PESADO/.test(p)) return 'Equipo Pesado';
+  if (/EMBARC|LANCHA|YATE|AERONAVE/.test(p)) return 'Embarcaciones';
+  if (/VIAJE|VIAJERO/.test(p)) return 'Viaje';
+  if (/AHORRO|EDUCATIVO/.test(p)) return 'Ahorro';
+  if (/ACCIDENTE|\bAP\b/.test(p)) return 'Vida';
+  return producto; // Devolver tal cual si no se reconoce
+}
+
 function normalizarDatos(datos) {
   return {
     tipo_persona: datos.asegurado?.tipo_persona || '',
@@ -167,7 +186,7 @@ function normalizarDatos(datos) {
     rfc: datos.asegurado?.rfc || '',
     numero_poliza: datos.poliza?.numero_poliza || '',
     aseguradora: datos.poliza?.aseguradora || '',
-    producto: datos.poliza?.producto || '',
+    producto: normalizarProducto(datos.poliza?.producto || ''),
     tipo_cobertura: datos.poliza?.tipo_cobertura || '',
     forma_pago: datos.poliza?.forma_pago || '',
     marca: datos.vehiculo?.marca || '',

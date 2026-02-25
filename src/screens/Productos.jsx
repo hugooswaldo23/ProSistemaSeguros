@@ -12,7 +12,7 @@ const Productos = () => {
   const [formularioProducto, setFormularioProducto] = useState({});
   const [modoEdicionProducto, setModoEdicionProducto] = useState(false);
   const paginacion = usePaginacion(productosPersonalizados, 10);
-  const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
+  const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'GMM', 'Equipo Pesado', 'Embarcaciones', 'Ahorro'], []);
   const companias = useMemo(() => ['Qualitas', 'Banorte', 'HDI', 'El Aguila', 'Mapfre', 'Chubb', 'Afirme'], []);
   const [polizas, setPolizas] = useState([]);
   const [productoSeleccionado, setProductoSeleccionado] = useState(null);
@@ -49,8 +49,8 @@ const Productos = () => {
       id: `base-${index}`,
       codigo: `BASE${(index + 1).toString().padStart(3, '0')}`,
       nombre: prod,
-      categoria: prod === 'Autos' || prod === 'Equipo pesado' || prod === 'Embarcaciones' ? 'Vehículos' : 
-                  prod === 'Vida' || prod === 'Ahorro' ? 'Personas' : 'Patrimoniales',
+      categoria: prod === 'Autos' || prod === 'Equipo Pesado' || prod === 'Embarcaciones' ? 'Vehículos' : 
+                  prod === 'Vida' || prod === 'Ahorro' || prod === 'GMM' ? 'Personas' : 'Patrimoniales',
       descripcion: `Producto base del sistema - ${prod}`,
       companiasDisponibles: companias,
       activo: true,

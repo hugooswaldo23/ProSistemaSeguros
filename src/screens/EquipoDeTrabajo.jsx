@@ -8,7 +8,7 @@ import {
   MapPin, User, Lock, Briefcase, Hash, FileText,
   CheckCircle, AlertCircle, ChevronDown, UserCheck,
   Building2, Package, ChevronRight, Percent, Calculator,
-  TrendingUp, Wallet
+  TrendingUp, Wallet, ToggleLeft, ToggleRight
 } from 'lucide-react';
 
 // useEquipoDeTrabajo provisto por ../hooks/useEquipoDeTrabajo
@@ -482,16 +482,16 @@ const SistemaGestionPersonal = () => {
   // Estado para comisiones compartidas (relación agente-vendedor)
   const [comisionesCompartidas, setComisionesCompartidas] = useState([]);
   
-  // Estado para modal de selección de agente y claves (para vendedores)
+  // Estado para modal de selección de agente (para vendedores)
   const [mostrarModalAgenteClave, setMostrarModalAgenteClave] = useState(false);
   const [agenteSeleccionadoTemp, setAgenteSeleccionadoTemp] = useState('');
-  const [clavesSeleccionadasTemp, setClavesSeleccionadasTemp] = useState([]);
+  const [porcentajeAgenteTemp, setPorcentajeAgenteTemp] = useState(50);
   
   // Estado para vendedores autorizados (para agentes)
   const [vendedoresAutorizados, setVendedoresAutorizados] = useState([]);
   const [mostrarModalVendedor, setMostrarModalVendedor] = useState(false);
   const [vendedorSeleccionadoTemp, setVendedorSeleccionadoTemp] = useState('');
-  const [clavesVendedorTemp, setClavesVendedorTemp] = useState([]);
+  const [porcentajeVendedorTemp, setPorcentajeVendedorTemp] = useState(50);
 
   // Estado del formulario con campos de compensación
   const [formulario, setFormulario] = useState({
@@ -625,48 +625,38 @@ const SistemaGestionPersonal = () => {
 
   // Funciones para gestionar comisiones compartidas
   const agregarComisionCompartida = () => {
-    if (formulario.perfil === 'Vendedor') {
-      // Para vendedores, abrir modal para seleccionar agente y claves
-      setMostrarModalAgenteClave(true);
-      setAgenteSeleccionadoTemp('');
-      setClavesSeleccionadasTemp([]);
-    } else {
-      // Para agentes, agregar vendedor directamente
-      setComisionesCompartidas([...comisionesCompartidas, {
-        id: Date.now(),
-        agenteId: formulario.id,
-        vendedorId: '',
-        porcentajeVendedor: 50,
-        activo: true
-      }]);
-    }
+    // Para vendedores, abrir modal para seleccionar agente
+    setAgenteSeleccionadoTemp('');
+    setPorcentajeAgenteTemp(50);
+    setMostrarModalAgenteClave(true);
   };
   
-  // Función para guardar claves seleccionadas del modal
+  // Función para guardar agente seleccionado del modal
   const guardarClavesSeleccionadas = () => {
-    if (!agenteSeleccionadoTemp || clavesSeleccionadasTemp.length === 0) {
-      mostrarAlertaTemp('Selecciona un agente y al menos una clave', 'warning');
+    if (!agenteSeleccionadoTemp) {
+      mostrarAlertaTemp('Selecciona un agente', 'warning');
       return;
     }
-    
-    // Agregar cada clave seleccionada a la tabla
-    const nuevasComisiones = clavesSeleccionadasTemp.map(clave => ({
+
+    // Verificar si ya está agregado
+    const yaExiste = comisionesCompartidas.some(c => String(c.agenteId) === String(agenteSeleccionadoTemp));
+    if (yaExiste) {
+      mostrarAlertaTemp('Este agente ya está asignado', 'warning');
+      return;
+    }
+
+    const nuevaComision = {
       id: Date.now() + Math.random(),
       agenteId: agenteSeleccionadoTemp,
       vendedorId: formulario.id,
-      claveId: clave.id,
-      clave: clave.clave,
-      aseguradoraId: clave.aseguradoraId,
-      comisionBase: clave.comisionBase,
-      porcentajeVendedor: 50, // Default 50%
+      porcentajeVendedor: porcentajeAgenteTemp || 50,
       ejecutivoId: '',
       activo: true
-    }));
+    };
     
-    setComisionesCompartidas([...comisionesCompartidas, ...nuevasComisiones]);
+    setComisionesCompartidas([...comisionesCompartidas, nuevaComision]);
     setMostrarModalAgenteClave(false);
     setAgenteSeleccionadoTemp('');
-    setClavesSeleccionadasTemp([]);
   };
 
   const actualizarComisionCompartida = (index, field, value) => {
@@ -682,33 +672,34 @@ const SistemaGestionPersonal = () => {
   // Funciones para vendedores autorizados (Agentes)
   const agregarVendedorAutorizado = () => {
     setVendedorSeleccionadoTemp('');
-    setClavesVendedorTemp([]);
+    setPorcentajeVendedorTemp(50);
     setMostrarModalVendedor(true);
   };
 
   const guardarVendedorAutorizado = () => {
-    if (!vendedorSeleccionadoTemp || clavesVendedorTemp.length === 0) {
-      mostrarAlertaTemp('Selecciona un vendedor y al menos una clave', 'warning');
+    if (!vendedorSeleccionadoTemp) {
+      mostrarAlertaTemp('Selecciona un vendedor', 'warning');
       return;
     }
 
-    const nuevasAutorizaciones = clavesVendedorTemp.map(clave => ({
+    // Verificar si ya está agregado
+    const yaExiste = vendedoresAutorizados.some(v => String(v.vendedorId) === String(vendedorSeleccionadoTemp));
+    if (yaExiste) {
+      mostrarAlertaTemp('Este vendedor ya está autorizado', 'warning');
+      return;
+    }
+
+    const nuevaAutorizacion = {
       id: Date.now() + Math.random(),
       vendedorId: vendedorSeleccionadoTemp,
-      claveId: clave.id,
-      clave: clave.clave,
-      aseguradoraId: clave.aseguradoraId,
-      productoId: clave.productoId,
-      comisionBase: clave.comisionBase || 0,
-      porcentajeVendedor: clave.porcentajeVendedor || 50,
-      ejecutivoId: clave.ejecutivoId || '',
+      porcentajeVendedor: porcentajeVendedorTemp || 50,
+      ejecutivoId: '',
       activo: true
-    }));
+    };
 
-    setVendedoresAutorizados([...vendedoresAutorizados, ...nuevasAutorizaciones]);
+    setVendedoresAutorizados([...vendedoresAutorizados, nuevaAutorizacion]);
     setMostrarModalVendedor(false);
     setVendedorSeleccionadoTemp('');
-    setClavesVendedorTemp([]);
   };
 
   const actualizarVendedorAutorizado = (index, field, value) => {
@@ -999,35 +990,7 @@ const SistemaGestionPersonal = () => {
       comisiones = [];
     }
     
-    // 🔥 FIX: Reconstruir comisionBase desde las claves del agente
-    const comisionesConBase = comisiones.map(comision => {
-      // Si ya tiene comisionBase, usarlo
-      if (comision.comisionBase && comision.comisionBase > 0) {
-        return comision;
-      }
-      
-      // Si no, buscarlo en las claves del agente correspondiente
-      const agente = usuarios.find(u => String(u.id) === String(comision.agenteId));
-      if (agente && agente.productosAseguradoras) {
-        const claveAgente = agente.productosAseguradoras.find(pa => 
-          String(pa.aseguradoraId) === String(comision.aseguradoraId) && 
-          pa.clave === comision.clave
-        );
-        
-        if (claveAgente) {
-          const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
-          const comisionBase = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
-          return {
-            ...comision,
-            comisionBase: comisionBase
-          };
-        }
-      }
-      
-      return comision;
-    });
-    
-    setComisionesCompartidas(comisionesConBase);
+    setComisionesCompartidas(comisiones);
 
     // Cargar vendedores autorizados para este agente
     let vendedores = [];
@@ -1049,32 +1012,13 @@ const SistemaGestionPersonal = () => {
             c => String(c.agenteId) === String(usuario.id)
           );
           
-          // 🔥 FIX: Reconstruir comisionBase desde las claves del agente
-          const comisionesConBase = comisionesDeEsteAgente.map(comision => {
-            // Si ya tiene comisionBase, usarlo
-            if (comision.comisionBase && comision.comisionBase > 0) {
-              return comision;
-            }
-            
-            // Si no, buscarlo en las claves del agente
-            const claveAgente = usuario.productosAseguradoras?.find(pa => 
-              String(pa.aseguradoraId) === String(comision.aseguradoraId) && 
-              pa.clave === comision.clave
-            );
-            
-            if (claveAgente) {
-              const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
-              const comisionBase = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
-              return {
-                ...comision,
-                comisionBase: comisionBase
-              };
-            }
-            
-            return comision;
-          });
+          // Asignar vendedorId desde el usuario iterado (fix para vendedores creados con id null)
+          const comisionesConVendedor = comisionesDeEsteAgente.map(c => ({
+            ...c,
+            vendedorId: u.id
+          }));
           
-          vendedores.push(...comisionesConBase);
+          vendedores.push(...comisionesConVendedor);
         }
       });
     }
@@ -1108,12 +1052,25 @@ const SistemaGestionPersonal = () => {
     cargarAsignaciones();
   }, [mostrarDetalles, usuarioSeleccionado, obtenerEjecutivosPorProducto]);
 
-  // Confirmar y eliminar usuario
+  // Confirmar y desactivar usuario (soft-delete para no romper relaciones)
   const confirmarEliminar = async (id) => {
-    if (!window.confirm('¿Eliminar este usuario? Esta acción no se puede deshacer.')) return;
+    const usuario = usuarios.find(u => u.id === id);
+    if (!usuario) return;
+    const accion = usuario.activo ? 'desactivar' : 'reactivar';
+    if (!window.confirm(`¿${accion === 'desactivar' ? 'Desactivar' : 'Reactivar'} este usuario?`)) return;
+    const res = await actualizar(id, { ...usuario, activo: !usuario.activo });
+    if (res && res.success) mostrarAlertaTemp(`Usuario ${accion === 'desactivar' ? 'desactivado' : 'reactivado'}`, 'success');
+    else mostrarAlertaTemp(`Error al ${accion} usuario`, 'danger');
+  };
+
+  // Eliminar usuario permanentemente
+  const confirmarEliminarDefinitivo = async (id) => {
+    const usuario = usuarios.find(u => u.id === id);
+    if (!usuario) return;
+    if (!window.confirm(`¿Eliminar PERMANENTEMENTE a ${usuario.nombre} ${usuario.apellidoPaterno}? Esta acción no se puede deshacer.`)) return;
     const res = await eliminar(id);
-    if (res && res.success) mostrarAlertaTemp('Usuario eliminado', 'success');
-    else mostrarAlertaTemp('Error al eliminar usuario', 'danger');
+    if (res && res.success) mostrarAlertaTemp('Usuario eliminado permanentemente', 'success');
+    else mostrarAlertaTemp(res?.error || 'Error al eliminar usuario. Puede tener registros asociados (nóminas, comisiones). Desactívelo en su lugar.', 'danger');
   };
 
   const ingresos = calcularIngresosEstimados();
@@ -1306,7 +1263,10 @@ const SistemaGestionPersonal = () => {
                             <button className="btn btn-sm btn-outline-secondary" onClick={() => { setUsuarioSeleccionado(u); setMostrarDetalles(true); }} title="Ver">
                               <Eye size={14} />
                             </button>
-                            <button className="btn btn-sm btn-outline-danger" onClick={() => confirmarEliminar(u.id)} title="Eliminar">
+                            <button className={`btn btn-sm ${u.activo ? 'btn-outline-warning' : 'btn-outline-success'}`} onClick={() => confirmarEliminar(u.id)} title={u.activo ? 'Desactivar' : 'Reactivar'}>
+                              {u.activo ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                            </button>
+                            <button className="btn btn-sm btn-outline-danger" onClick={() => confirmarEliminarDefinitivo(u.id)} title="Eliminar permanentemente">
                               <Trash2 size={14} />
                             </button>
                           </div>
@@ -1745,7 +1705,7 @@ const SistemaGestionPersonal = () => {
                             <div className="d-flex justify-content-between align-items-center mb-3">
                               <h6 className="mb-0">
                                 <Percent size={20} className="me-2" />
-                                Vendedores autorizados a usar tu clave
+                                Vendedores autorizados
                               </h6>
                               <button
                                 type="button"
@@ -1760,63 +1720,28 @@ const SistemaGestionPersonal = () => {
                             {vendedoresAutorizados.length === 0 ? (
                               <div className="alert alert-info">
                                 <AlertCircle size={20} className="me-2" />
-                                No hay vendedores configurados. Agrega los vendedores que pueden usar tu clave y define su porcentaje de comisión.
+                                No hay vendedores configurados. Agrega los vendedores autorizados para vender bajo tu nombre.
                               </div>
                             ) : (
                               <div className="table-responsive">
                                 <table className="table table-bordered">
                                   <thead className="table-light">
                                     <tr>
-                                      <th width="25%">Vendedor</th>
-                                      <th width="15%">Aseguradora</th>
-                                      <th width="15%">Clave</th>
-                                      <th width="12%">Comisión Base</th>
-                                      <th width="15%">Comisión Vendedor</th>
-                                      <th width="12%">Ejecutivo</th>
+                                      <th width="35%">Vendedor</th>
+                                      <th width="20%">Comisión Vendedor</th>
+                                      <th width="20%">Ejecutivo</th>
+                                      <th width="10%" className="text-center">Estado</th>
                                       <th width="6%" className="text-center">Acciones</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {vendedoresAutorizados.map((autorizacion, index) => {
-                                      console.log('🔍 [VENDEDOR AUTORIZADO]', autorizacion);
-                                      console.log('📋 Lista de usuarios disponibles:', usuarios.map(u => ({ id: u.id, codigo: u.codigo, nombre: u.nombre, perfil: u.perfil })));
-                                      console.log('🔎 Buscando vendedorId:', autorizacion.vendedorId, 'Tipo:', typeof autorizacion.vendedorId);
                                       const vendedor = usuarios.find(u => String(u.id) === String(autorizacion.vendedorId));
-                                      console.log('✅ Vendedor encontrado:', vendedor);
-                                      const aseguradora = aseguradoras.find(a => String(a.id) === String(autorizacion.aseguradoraId));
-                                      
-                                      // 🔥 CONSULTAR COMISIÓN BASE ACTUAL desde las claves del agente (formulario actual)
-                                      let comisionBaseActual = autorizacion.comisionBase || 0;
-                                      const claveAgente = formulario.productosAseguradoras?.find(pa => 
-                                        String(pa.aseguradoraId) === String(autorizacion.aseguradoraId) && 
-                                        pa.clave === autorizacion.clave
-                                      );
-                                      if (claveAgente) {
-                                        const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
-                                        comisionBaseActual = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
-                                      }
-                                      
-                                      const porcentajeVendedor = parseFloat(autorizacion.porcentajeVendedor) || 0;
-                                      const porcentajeAgente = comisionBaseActual - porcentajeVendedor;
-                                      console.log('💰 Cálculo:', { comisionBaseActual, porcentajeVendedor, porcentajeAgente });
                                       
                                       return (
                                         <tr key={index}>
                                           <td>
                                             <strong>{vendedor ? `${vendedor.codigo} - ${vendedor.nombre} ${vendedor.apellidoPaterno}` : 'N/A'}</strong>
-                                          </td>
-                                          <td>
-                                            {aseguradora ? (
-                                              <span className={`badge bg-${aseguradora.nombre.toLowerCase() === 'qualitas' ? 'primary' : aseguradora.nombre.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
-                                                {aseguradora.nombre}
-                                              </span>
-                                            ) : 'N/A'}
-                                          </td>
-                                          <td>
-                                            <code>{autorizacion.clave || 'N/A'}</code>
-                                          </td>
-                                          <td className="text-center">
-                                            <span className="badge bg-info fs-6">{comisionBaseActual}%</span>
                                           </td>
                                           <td>
                                             <div className="input-group input-group-sm">
@@ -1826,11 +1751,12 @@ const SistemaGestionPersonal = () => {
                                                 value={autorizacion.porcentajeVendedor}
                                                 onChange={(e) => actualizarVendedorAutorizado(index, 'porcentajeVendedor', parseFloat(e.target.value) || 0)}
                                                 min="0"
-                                                max={comisionBaseActual || 100}
+                                                max="100"
                                                 step="1"
                                               />
                                               <span className="input-group-text">%</span>
                                             </div>
+                                            <small className="text-muted">% de la comisión base que recibe el vendedor</small>
                                           </td>
                                           <td>
                                             <select
@@ -1845,6 +1771,11 @@ const SistemaGestionPersonal = () => {
                                                 </option>
                                               ))}
                                             </select>
+                                          </td>
+                                          <td className="text-center">
+                                            <span className={`badge bg-${autorizacion.activo !== false ? 'success' : 'secondary'}`}>
+                                              {autorizacion.activo !== false ? 'Activo' : 'Inactivo'}
+                                            </span>
                                           </td>
                                           <td className="text-center">
                                             <button
@@ -1901,52 +1832,21 @@ const SistemaGestionPersonal = () => {
                                 <table className="table table-bordered">
                                   <thead className="table-light">
                                     <tr>
-                                      <th width="20%">Agente</th>
-                                      <th width="15%">Aseguradora</th>
-                                      <th width="15%">Clave</th>
-                                      <th width="10%">Comisión Base</th>
-                                      <th width="10%">Comisión Vendedor</th>
-                                      <th width="20%">Ejecutivo</th>
-                                      <th width="10%" className="text-center">Acciones</th>
+                                      <th width="30%">Agente</th>
+                                      <th width="20%">Comisión Vendedor</th>
+                                      <th width="25%">Ejecutivo</th>
+                                      <th width="10%">Estado</th>
+                                      <th width="15%" className="text-center">Acciones</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {comisionesCompartidas.map((comision, index) => {
                                       const agente = usuarios.find(u => String(u.id) === String(comision.agenteId));
-                                      
-                                      // 🔥 CONSULTAR COMISIÓN BASE ACTUAL desde las claves del agente
-                                      let comisionBaseActual = comision.comisionBase || 0;
-                                      if (agente && agente.productosAseguradoras) {
-                                        const claveAgente = agente.productosAseguradoras.find(pa => 
-                                          String(pa.aseguradoraId) === String(comision.aseguradoraId) && 
-                                          pa.clave === comision.clave
-                                        );
-                                        if (claveAgente) {
-                                          const producto = tiposProductos.find(p => String(p.id) === String(claveAgente.productoId));
-                                          comisionBaseActual = claveAgente.comisionPersonalizada || producto?.comisionBase || 0;
-                                        }
-                                      }
 
                                       return (
                                         <tr key={comision.id || index}>
                                           <td>
                                             <strong>{agente ? `${agente.codigo} - ${agente.nombre} ${agente.apellidoPaterno}` : 'N/A'}</strong>
-                                          </td>
-                                          <td>
-                                            {(() => {
-                                              const aseguradora = aseguradoras.find(a => String(a.id) === String(comision.aseguradoraId));
-                                              return aseguradora ? (
-                                                <span className={`badge bg-${aseguradora.nombre.toLowerCase() === 'qualitas' ? 'primary' : aseguradora.nombre.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
-                                                  {aseguradora.nombre}
-                                                </span>
-                                              ) : 'N/A';
-                                            })()}
-                                          </td>
-                                          <td>
-                                            <code>{comision.clave || 'N/A'}</code>
-                                          </td>
-                                          <td>
-                                            <span className="badge bg-secondary fs-6">{comisionBaseActual}%</span>
                                           </td>
                                           <td>
                                             <div className="input-group input-group-sm">
@@ -1956,8 +1856,8 @@ const SistemaGestionPersonal = () => {
                                                 value={comision.porcentajeVendedor}
                                                 onChange={(e) => actualizarComisionCompartida(index, 'porcentajeVendedor', parseFloat(e.target.value) || 0)}
                                                 min="0"
-                                                max={comisionBaseActual || 100}
-                                                step="5"
+                                                max="100"
+                                                step="1"
                                               />
                                               <span className="input-group-text">%</span>
                                             </div>
@@ -1975,6 +1875,11 @@ const SistemaGestionPersonal = () => {
                                                 </option>
                                               ))}
                                             </select>
+                                          </td>
+                                          <td>
+                                            <span className={`badge bg-${comision.activo ? 'success' : 'secondary'}`}>
+                                              {comision.activo ? 'Activo' : 'Inactivo'}
+                                            </span>
                                           </td>
                                           <td className="text-center">
                                             <button
@@ -1996,7 +1901,7 @@ const SistemaGestionPersonal = () => {
 
                             {comisionesCompartidas.length > 0 && (
                               <div className="alert alert-success mt-3">
-                                <strong>Nota:</strong> Solo podrás capturar pólizas usando las claves autorizadas de estos agentes. El porcentaje de comisión se calculará automáticamente según lo configurado.
+                                <strong>Nota:</strong> El vendedor podrá vender con cualquier clave de los agentes asignados. El porcentaje de comisión se calculará automáticamente.
                               </div>
                             )}
                           </div>
@@ -2076,13 +1981,13 @@ const SistemaGestionPersonal = () => {
     tiposProductos={tiposProductos}
       />
       
-      {/* Modal de Selección de Agente y Claves - Para Vendedores */}
+      {/* Modal de Selección de Agente - Para Vendedores */}
       {mostrarModalAgenteClave && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-lg modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Seleccionar Agente y Claves</h5>
+                <h5 className="modal-title">Agregar Agente</h5>
                 <button className="btn-close" onClick={() => setMostrarModalAgenteClave(false)}></button>
               </div>
               <div className="modal-body">
@@ -2092,13 +1997,10 @@ const SistemaGestionPersonal = () => {
                     <select
                       className="form-select"
                       value={agenteSeleccionadoTemp}
-                      onChange={(e) => {
-                        setAgenteSeleccionadoTemp(e.target.value);
-                        setClavesSeleccionadasTemp([]);
-                      }}
+                      onChange={(e) => setAgenteSeleccionadoTemp(e.target.value)}
                     >
                       <option value="">Seleccionar agente...</option>
-                      {usuarios.filter(u => u.perfil === 'Agente' && u.activo).map(agente => (
+                      {usuarios.filter(u => u.perfil === 'Agente' && u.activo && !comisionesCompartidas.some(c => String(c.agenteId) === String(u.id))).map(agente => (
                         <option key={agente.id} value={agente.id}>
                           {agente.codigo} - {agente.nombre} {agente.apellidoPaterno}
                         </option>
@@ -2106,116 +2008,37 @@ const SistemaGestionPersonal = () => {
                     </select>
                   </div>
                   
-                  {agenteSeleccionadoTemp && (() => {
-                    const agenteObj = usuarios.find(u => String(u.id) === String(agenteSeleccionadoTemp));
-                    const clavesAgente = agenteObj?.productosAseguradoras || [];
-                    
-                    return (
+                  {agenteSeleccionadoTemp && (
                     <div className="col-12 mt-3">
-                      <h6>Claves disponibles del agente:</h6>
-                      {clavesAgente.length === 0 ? (
-                        <div className="alert alert-warning">
-                          <AlertCircle size={16} className="me-2" />
-                          Este agente no tiene claves registradas. Debe agregar claves en la pestaña "Claves y Aseguradoras" del agente.
-                        </div>
-                      ) : (
-                        <>
-                          {/* Lista de claves del agente - Datos reales de BD */}
-                          <div className="list-group">
-                            {clavesAgente.map((productoAseg, index) => {
-                              const aseguradora = aseguradoras.find(a => String(a.id) === String(productoAseg.aseguradoraId));
-                              const producto = tiposProductos.find(p => String(p.id) === String(productoAseg.productoId));
-                              const clave = productoAseg.clave || 'Sin clave';
-                              const comisionBase = productoAseg.comisionPersonalizada || producto?.comisionBase || 0;
-                              
-                              const claveData = {
-                                id: productoAseg.id || index,
-                                aseguradoraId: productoAseg.aseguradoraId,
-                                aseguradora: aseguradora?.nombre || 'Sin aseguradora',
-                                clave: clave,
-                                comisionBase: comisionBase,
-                                productoId: productoAseg.productoId
-                              };
-                              
-                              // Verificar si esta clave ya está asignada al vendedor actual
-                              const yaAsignada = comisionesCompartidas.some(c => 
-                                String(c.agenteId) === String(agenteSeleccionadoTemp) &&
-                                String(c.aseguradoraId) === String(claveData.aseguradoraId) && 
-                                c.clave === claveData.clave
-                              );
-                              
-                              // No mostrar claves ya asignadas
-                              if (yaAsignada) return null;
-                              
-                              const isSelected = clavesSeleccionadasTemp.some(c => 
-                                String(c.aseguradoraId) === String(claveData.aseguradoraId) && 
-                                c.clave === claveData.clave
-                              );
-                              
-                              return (
-                                <div 
-                                  key={`${productoAseg.aseguradoraId}-${clave}-${index}`}
-                                  className={`list-group-item list-group-item-action ${isSelected ? 'active' : ''}`}
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={() => {
-                                    if (isSelected) {
-                                      setClavesSeleccionadasTemp(clavesSeleccionadasTemp.filter(c => 
-                                        !(String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave)
-                                      ));
-                                    } else {
-                                      setClavesSeleccionadasTemp([...clavesSeleccionadasTemp, claveData]);
-                                    }
-                                  }}
-                                >
-                                  <div className="d-flex w-100 justify-content-between align-items-center">
-                                    <div>
-                                      <input
-                                        type="checkbox"
-                                        className="form-check-input me-2"
-                                        checked={isSelected}
-                                        readOnly
-                                      />
-                                      <strong>{claveData.aseguradora}</strong> - <code>{clave}</code>
-                                    </div>
-                                    <span className="badge bg-primary">Comisión: {comisionBase}%</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          
-                          {clavesAgente.every(productoAseg => {
-                            const clave = productoAseg.clave || 'Sin clave';
-                            return comisionesCompartidas.some(c => 
-                              String(c.agenteId) === String(agenteSeleccionadoTemp) &&
-                              String(c.aseguradoraId) === String(productoAseg.aseguradoraId) && 
-                              c.clave === clave
-                            );
-                          }) && (
-                            <div className="alert alert-info mt-3">
-                              <AlertCircle size={16} className="me-2" />
-                              Ya tienes acceso a todas las claves disponibles de este agente.
-                            </div>
-                          )}
-                        </>
-                      )}
-                      
-                      
-                      {clavesSeleccionadasTemp.length > 0 && (
-                        <div className="alert alert-success mt-3">
-                          <strong>{clavesSeleccionadasTemp.length}</strong> clave(s) seleccionada(s)
-                        </div>
-                      )}
+                      <label className="form-label fw-semibold">Porcentaje de comisión para el vendedor</label>
+                      <div className="input-group" style={{ maxWidth: '200px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={porcentajeAgenteTemp}
+                          onChange={(e) => setPorcentajeAgenteTemp(Math.min(Math.max(Number(e.target.value) || 0, 0), 100))}
+                          min="0"
+                          max="100"
+                          step="1"
+                        />
+                        <span className="input-group-text">%</span>
+                      </div>
+                      <small className="text-muted d-block mt-1">
+                        El vendedor recibirá este porcentaje de la comisión base de cada póliza que venda bajo este agente.
+                        Podrá usar cualquier clave del agente.
+                      </small>
                     </div>
-                    );
-                  })()}
+                  )}
                 </div>
               </div>
               <div className="modal-footer">
                 <button 
                   type="button" 
                   className="btn btn-secondary"
-                  onClick={() => setMostrarModalAgenteClave(false)}
+                  onClick={() => {
+                    setMostrarModalAgenteClave(false);
+                    setAgenteSeleccionadoTemp('');
+                  }}
                 >
                   Cancelar
                 </button>
@@ -2223,10 +2046,10 @@ const SistemaGestionPersonal = () => {
                   type="button" 
                   className="btn btn-primary"
                   onClick={guardarClavesSeleccionadas}
-                  disabled={!agenteSeleccionadoTemp || clavesSeleccionadasTemp.length === 0}
+                  disabled={!agenteSeleccionadoTemp}
                 >
                   <Plus size={18} className="me-2" />
-                  Agregar Seleccionadas
+                  Agregar Agente
                 </button>
               </div>
             </div>
@@ -2234,29 +2057,26 @@ const SistemaGestionPersonal = () => {
         </div>
       )}
 
-      {/* Modal para Agente: Seleccionar Vendedor y Claves */}
+      {/* Modal para Agente: Seleccionar Vendedor */}
       {mostrarModalVendedor && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Autorizar Vendedor para usar tus Claves</h5>
+                <h5 className="modal-title">Agregar Vendedor Autorizado</h5>
                 <button className="btn-close" onClick={() => setMostrarModalVendedor(false)}></button>
               </div>
               <div className="modal-body">
                 <div className="row g-3">
                   <div className="col-12">
-                    <label className="form-label">Seleccionar Vendedor</label>
+                    <label className="form-label fw-semibold">Seleccionar Vendedor</label>
                     <select
                       className="form-select"
                       value={vendedorSeleccionadoTemp}
-                      onChange={(e) => {
-                        setVendedorSeleccionadoTemp(e.target.value);
-                        setClavesVendedorTemp([]);
-                      }}
+                      onChange={(e) => setVendedorSeleccionadoTemp(e.target.value)}
                     >
                       <option value="">Seleccionar vendedor...</option>
-                      {usuarios.filter(u => u.perfil === 'Vendedor' && u.activo).map(vendedor => (
+                      {usuarios.filter(u => u.perfil === 'Vendedor' && u.activo && !vendedoresAutorizados.some(v => String(v.vendedorId) === String(u.id))).map(vendedor => (
                         <option key={vendedor.id} value={vendedor.id}>
                           {vendedor.codigo} - {vendedor.nombre} {vendedor.apellidoPaterno}
                         </option>
@@ -2264,135 +2084,25 @@ const SistemaGestionPersonal = () => {
                     </select>
                   </div>
                   
-                  {vendedorSeleccionadoTemp && formulario.productosAseguradoras && formulario.productosAseguradoras.length > 0 && (
+                  {vendedorSeleccionadoTemp && (
                     <div className="col-12 mt-3">
-                      <h6>Tus claves disponibles para autorizar:</h6>
-                      <div className="list-group">
-                        {formulario.productosAseguradoras.map((productoAseg, index) => {
-                          const aseguradora = aseguradoras.find(a => String(a.id) === String(productoAseg.aseguradoraId));
-                          const producto = tiposProductos.find(p => String(p.id) === String(productoAseg.productoId));
-                          const clave = productoAseg.clave || 'Sin clave';
-                          const comisionBase = productoAseg.comisionPersonalizada || producto?.comisionBase || 0;
-                          
-                          const claveData = {
-                            id: productoAseg.id || index,
-                            aseguradoraId: productoAseg.aseguradoraId,
-                            aseguradora: aseguradora?.nombre || 'Sin aseguradora',
-                            clave: clave,
-                            comisionBase: comisionBase,
-                            productoId: productoAseg.productoId
-                          };
-                          
-                          // Verificar si esta clave ya está asignada al vendedor seleccionado
-                          const yaAsignada = vendedoresAutorizados.some(v => 
-                            String(v.vendedorId) === String(vendedorSeleccionadoTemp) &&
-                            String(v.aseguradoraId) === String(claveData.aseguradoraId) && 
-                            v.clave === claveData.clave
-                          );
-                          
-                          const isSelected = clavesVendedorTemp.some(c => 
-                            String(c.aseguradoraId) === String(claveData.aseguradoraId) && 
-                            c.clave === claveData.clave
-                          );
-                          
-                          // No mostrar claves ya asignadas
-                          if (yaAsignada) return null;
-                          
-                          return (
-                            <div key={index} className="list-group-item">
-                              <div className="d-flex align-items-start gap-3">
-                                <div className="form-check mt-1">
-                                  <input
-                                    className="form-check-input"
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setClavesVendedorTemp([...clavesVendedorTemp, { 
-                                          ...claveData,
-                                          porcentajeVendedor: 50
-                                        }]);
-                                      } else {
-                                        setClavesVendedorTemp(clavesVendedorTemp.filter(c => 
-                                          !(String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave)
-                                        ));
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                <div className="flex-grow-1">
-                                  <div className="d-flex align-items-center gap-2 mb-1">
-                                    <span className={`badge bg-${aseguradora?.nombre.toLowerCase() === 'qualitas' ? 'primary' : aseguradora?.nombre.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
-                                      {claveData.aseguradora}
-                                    </span>
-                                    <code className="bg-light px-2 py-1 rounded">{clave}</code>
-                                    <span className="badge bg-secondary">{comisionBase}%</span>
-                                  </div>
-                                  <small className="text-muted">{producto?.nombre || 'Producto'}</small>
-                                  
-                                  {isSelected && (
-                                    <div className="mt-2">
-                                      <label className="form-label mb-1">Comisión para el vendedor:</label>
-                                      <div className="input-group input-group-sm" style={{maxWidth: '200px'}}>
-                                        <input
-                                          type="number"
-                                          className="form-control"
-                                          value={clavesVendedorTemp.find(c => 
-                                            String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
-                                          )?.porcentajeVendedor ?? 50}
-                                          onChange={(e) => {
-                                            const inputValue = e.target.value;
-                                            let valor = inputValue === '' ? 0 : Number(inputValue);
-                                            valor = Math.min(Math.max(valor, 0), 100);
-                                            setClavesVendedorTemp(clavesVendedorTemp.map(c => 
-                                              (String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave)
-                                                ? { ...c, porcentajeVendedor: valor }
-                                                : c
-                                            ));
-                                          }}
-                                          min="0"
-                                          max="100"
-                                          step="1"
-                                        />
-                                        <span className="input-group-text">%</span>
-                                      </div>
-                                      <small className="text-muted d-block mt-1">
-                                        <strong>Nota:</strong> El vendedor recibirá el {clavesVendedorTemp.find(c => 
-                                          String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
-                                        )?.porcentajeVendedor ?? 50}% de la comisión base. Ejemplo: Si la póliza es $1,000 y la comisión base es {comisionBase}%, la comisión total es ${(1000 * comisionBase / 100).toFixed(0)} y el vendedor recibirá ${(1000 * comisionBase / 100 * ((clavesVendedorTemp.find(c => 
-                                          String(c.aseguradoraId) === String(claveData.aseguradoraId) && c.clave === claveData.clave
-                                        )?.porcentajeVendedor ?? 50) / 100)).toFixed(0)}.
-                                      </small>
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                      <label className="form-label fw-semibold">Porcentaje de comisión para el vendedor</label>
+                      <div className="input-group" style={{ maxWidth: '200px' }}>
+                        <input
+                          type="number"
+                          className="form-control"
+                          value={porcentajeVendedorTemp}
+                          onChange={(e) => setPorcentajeVendedorTemp(Math.min(Math.max(Number(e.target.value) || 0, 0), 100))}
+                          min="0"
+                          max="100"
+                          step="1"
+                        />
+                        <span className="input-group-text">%</span>
                       </div>
-                      {vendedorSeleccionadoTemp && formulario.productosAseguradoras.every((productoAseg) => {
-                        const clave = productoAseg.clave || 'Sin clave';
-                        return vendedoresAutorizados.some(v => 
-                          String(v.vendedorId) === String(vendedorSeleccionadoTemp) &&
-                          String(v.aseguradoraId) === String(productoAseg.aseguradoraId) && 
-                          v.clave === clave
-                        );
-                      }) && (
-                        <div className="alert alert-info mt-3">
-                          <AlertCircle size={16} className="me-2" />
-                          Este vendedor ya tiene acceso a todas tus claves disponibles.
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  {vendedorSeleccionadoTemp && (!formulario.productosAseguradoras || formulario.productosAseguradoras.length === 0) && (
-                    <div className="col-12 mt-3">
-                      <div className="alert alert-warning">
-                        <AlertCircle size={16} className="me-2" />
-                        No tienes claves registradas. Debes agregar claves en la pestaña "Claves y Aseguradoras" antes de autorizar vendedores.
-                      </div>
+                      <small className="text-muted d-block mt-1">
+                        El vendedor recibirá este porcentaje de la comisión base de cada póliza que venda.
+                        El vendedor podrá vender con cualquier clave del agente.
+                      </small>
                     </div>
                   )}
                 </div>
@@ -2404,7 +2114,6 @@ const SistemaGestionPersonal = () => {
                   onClick={() => {
                     setMostrarModalVendedor(false);
                     setVendedorSeleccionadoTemp('');
-                    setClavesVendedorTemp([]);
                   }}
                 >
                   Cancelar
@@ -2413,10 +2122,10 @@ const SistemaGestionPersonal = () => {
                   type="button" 
                   className="btn btn-primary"
                   onClick={guardarVendedorAutorizado}
-                  disabled={!vendedorSeleccionadoTemp || clavesVendedorTemp.length === 0}
+                  disabled={!vendedorSeleccionadoTemp}
                 >
                   <Plus size={18} className="me-2" />
-                  Agregar Seleccionadas
+                  Agregar Vendedor
                 </button>
               </div>
             </div>

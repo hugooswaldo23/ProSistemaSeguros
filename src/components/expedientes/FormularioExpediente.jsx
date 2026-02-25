@@ -916,7 +916,7 @@ const Formulario = React.memo(({
                   value={formulario.producto}
                   onChange={(e) => {
                     const nuevoProducto = e.target.value;
-                    if (formulario.producto === 'Autos Individual' && nuevoProducto !== 'Autos') {
+                    if (formulario.producto === 'Autos' && nuevoProducto !== 'Autos') {
                       setFormulario(prev => ({
                         ...prev, 
                         producto: nuevoProducto,
@@ -1128,7 +1128,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos de la Póliza - Visible para Autos o si ya existen valores (edición) */}
-          {(formulario.producto === 'Autos Individual' || formulario.uso || formulario.servicio || formulario.movimiento) && (
+          {(formulario.producto === 'Autos' || formulario.uso || formulario.servicio || formulario.movimiento) && (
             <div className="mb-2">
               <h6 className="card-title border-bottom pb-1 mb-2" style={{ fontSize: '0.9rem' }}>Datos de la Póliza</h6>
               <div className="row g-2">
@@ -1188,7 +1188,7 @@ const Formulario = React.memo(({
           )}
 
           {/* Datos del Conductor - Solo si es Autos */}
-          {formulario.producto === 'Autos Individual' && (
+          {formulario.producto === 'Autos' && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Conductor</h5>
               <div className="row g-3">

@@ -1,7 +1,7 @@
 // Constantes y opciones predefinidas para expedientes
 export const expedienteOpciones = {
   companias: ['Qualitas', 'Banorte', 'HDI', 'El Aguila', 'Mapfre', 'Chubb', 'Afirme'],
-  productos: ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'],
+  productos: ['Autos', 'Vida', 'Daños', 'GMM', 'Equipo Pesado', 'Embarcaciones', 'Ahorro'],
   etapasActivas: [
     'En cotización',
     'Cotización enviada', 

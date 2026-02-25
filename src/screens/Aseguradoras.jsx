@@ -1058,7 +1058,7 @@ export default function Aseguradoras() {
   const [vistaActual, setVistaActual] = useState('aseguradoras');
   const [modoEdicionAseguradora, setModoEdicionAseguradora] = useState(false);
   
-  const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'Equipo pesado', 'Embarcaciones', 'Ahorro'], []);
+  const productos = useMemo(() => ['Autos', 'Vida', 'Daños', 'GMM', 'Equipo Pesado', 'Embarcaciones', 'Ahorro'], []);
 
   const [formularioAseguradora, setFormularioAseguradora] = useState({
     codigo: '',
