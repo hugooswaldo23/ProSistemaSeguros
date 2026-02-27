@@ -74,10 +74,12 @@ export const calcularProximoPago = (
       return ''; // No hay más pagos después del último
     }
     
-    // Pagos subsecuentes: fecha inicio + N meses (SIN periodo de gracia)
+    // Pagos subsecuentes: fecha inicio + N meses + periodo de gracia
+    // (cada recibo tiene su propio periodo de gracia desde el inicio del periodo)
     const fechaPagoSubsecuente = new Date(fechaInicio);
     const mesesAAgregar = (numeroPago - 1) * CONSTANTS.MESES_POR_FRECUENCIA[frecuenciaPago];
     fechaPagoSubsecuente.setMonth(fechaPagoSubsecuente.getMonth() + mesesAAgregar);
+    fechaPagoSubsecuente.setDate(fechaPagoSubsecuente.getDate() + periodoGracia);
     
     return fechaPagoSubsecuente.toISOString().split('T')[0];
   }

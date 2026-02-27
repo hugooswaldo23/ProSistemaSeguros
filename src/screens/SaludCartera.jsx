@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   ShieldCheck, AlertTriangle, CheckCircle2, XCircle, RefreshCw,
   TrendingUp, Activity, PieChart, Building2, Package,
-  UserCheck, ArrowUpRight, ArrowDownRight, Filter, Ban
+  UserCheck, ArrowUpRight, ArrowDownRight, Filter, Ban, DollarSign
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import {
@@ -371,6 +371,30 @@ const SaludCartera = () => {
       return diff >= 0 && diff <= 30 && !esCancelada(e);
     }).sort((a, b) => getPrima(b) - getPrima(a));
 
+    // Pagos por vencer / vencidos (cobranza): recibos pendientes de pólizas activas
+    const mapaExp = new Map(expedientesFiltrados.map(e => [String(e.id), e]));
+    const recibosPendientes = recibos.filter(r => {
+      const exp = mapaExp.get(String(r.expediente_id));
+      if (!exp || esCancelada(exp) || esRenovada(exp)) return false;
+      const est = (r.estatus || '').toLowerCase();
+      if (est === 'pagado') return false;
+      if (r.fecha_pago_real) return false;
+      return true;
+    }).map(r => {
+      const exp = mapaExp.get(String(r.expediente_id));
+      const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
+      const dias = fv ? Math.ceil((new Date(fv) - hoyDate) / 864e5) : null;
+      return { ...r, exp, fechaVenc: fv, diasRestantes: dias };
+    });
+    // Vencidos: fecha < hoy
+    const pagosVencidos = recibosPendientes.filter(r => r.diasRestantes !== null && r.diasRestantes < 0)
+      .sort((a, b) => a.diasRestantes - b.diasRestantes);
+    // Por vencer: 0 <= dias <= 15
+    const pagosPorVencer = recibosPendientes.filter(r => r.diasRestantes !== null && r.diasRestantes >= 0 && r.diasRestantes <= 15)
+      .sort((a, b) => a.diasRestantes - b.diasRestantes);
+    // Unir: primero vencidos (urgentes), luego por vencer
+    const alertasCobranza = [...pagosVencidos, ...pagosPorVencer];
+
     const cancelPorCliente = {};
     expedientesFiltrados.filter(esCancelada).forEach(e => {
       const cid = e.cliente_id || 'sin-id';
@@ -403,7 +427,7 @@ const SaludCartera = () => {
       montoMoroso: recibosMorosos.reduce((s, r) => s + (parseFloat(r.monto) || 0), 0),
       datosMensuales,
       datosRamo: Object.values(distRamo).sort((a, b) => b.polizas - a.polizas),
-      buildDetalle, porVencer30, clientesConCancelMultiple,
+      buildDetalle, porVencer30, clientesConCancelMultiple, alertasCobranza,
     };
   }, [expedientesFiltrados, recibos, mes, anio]);
 
@@ -814,37 +838,47 @@ const SaludCartera = () => {
               </div>
             </div>
 
-            {/* Clientes con cancelaciones múltiples */}
+            {/* Cobranza: Pagos por vencer y vencidos */}
             <div className="col-md-6">
               <div className="card border-0 shadow-sm h-100">
                 <div className="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                  <h6 className="mb-0 fw-bold"><Ban size={16} className="me-2 text-danger" />Cancelaciones Múltiples por Cliente</h6>
-                  {data.clientesConCancelMultiple.length > 0 && <span className="badge bg-danger">{data.clientesConCancelMultiple.length}</span>}
+                  <h6 className="mb-0 fw-bold"><DollarSign size={16} className="me-2 text-danger" />Cobranza — Pagos Pendientes</h6>
+                  {data.alertasCobranza.length > 0 && <span className="badge bg-danger">{data.alertasCobranza.length}</span>}
                 </div>
                 <div className="card-body p-0" style={{ maxHeight: 360, overflowY: 'auto' }}>
-                  {data.clientesConCancelMultiple.length === 0 ? (
+                  {data.alertasCobranza.length === 0 ? (
                     <div className="text-center py-4 text-muted">
                       <CheckCircle2 size={28} className="text-success opacity-50 mb-2" />
-                      <p className="mb-0" style={{ fontSize: '0.9em' }}>Sin clientes con cancelaciones repetidas</p>
+                      <p className="mb-0" style={{ fontSize: '0.9em' }}>Sin pagos pendientes o por vencer</p>
                     </div>
                   ) : (
                     <div className="list-group list-group-flush">
-                      {data.clientesConCancelMultiple.map((cliente, idx) => (
-                        <div key={idx} className="list-group-item px-3 py-2">
-                          <div className="d-flex justify-content-between align-items-start">
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div className="fw-semibold" style={{ fontSize: '0.85em' }}>{cliente.nombre}</div>
-                              <small className="text-muted d-block">{cliente.polizas.map(p => p.numero_poliza || `Exp.${p.id}`).join(', ')}</small>
+                      {data.alertasCobranza.map((rec, idx) => {
+                        const nombre = rec.exp ? [rec.exp.nombre, rec.exp.apellido_paterno].filter(Boolean).join(' ') || rec.exp.asegurado || 'Sin nombre' : 'Sin nombre';
+                        const esVencido = rec.diasRestantes < 0;
+                        return (
+                          <div key={idx} className="list-group-item px-3 py-2">
+                            <div className="d-flex justify-content-between align-items-start">
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div className="fw-semibold text-truncate" style={{ fontSize: '0.85em' }}>
+                                  {rec.exp?.numero_poliza || `Exp. ${rec.expediente_id}`}
+                                  <small className="text-muted ms-1">Recibo {rec.numero_recibo}</small>
+                                </div>
+                                <small className="text-muted text-truncate d-block">{nombre} — {rec.exp?.compania || ''}</small>
+                                <small className="fw-semibold" style={{ color: '#198754' }}>${parseFloat(rec.monto || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</small>
+                              </div>
+                              <span className={`badge ms-2 ${esVencido ? 'bg-danger' : rec.diasRestantes <= 5 ? 'bg-warning text-dark' : 'bg-info text-dark'}`}>
+                                {esVencido ? `${Math.abs(rec.diasRestantes)}d vencido` : `${rec.diasRestantes}d`}
+                              </span>
                             </div>
-                            <span className="badge bg-danger ms-2">{cliente.cancelaciones} cancel.</span>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-                {data.clientesConCancelMultiple.length > 0 && (
-                  <div className="card-footer bg-light text-center" style={{ fontSize: '0.75em' }}>Clientes con 2+ cancelaciones — atención de retención urgente</div>
+                {data.alertasCobranza.length > 0 && (
+                  <div className="card-footer bg-light text-center" style={{ fontSize: '0.75em' }}>Recibos vencidos y por vencer (15 días)</div>
                 )}
               </div>
             </div>

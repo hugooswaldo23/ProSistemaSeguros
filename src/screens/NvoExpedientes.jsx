@@ -3241,7 +3241,8 @@ const ModuloNvoExpedientes = () => {
     const [year, month, day] = inicioVigencia.split('-');
     const fecha = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     
-    // REGLA SIMPLE: Primer recibo = inicio + periodo_gracia, Subsecuentes = inicio + N meses (SIN gracia)
+    // REGLA: Todos los recibos = fecha base del periodo + periodo_gracia
+    // (El PDF muestra que cada recibo tiene su propio periodo de gracia desde el inicio del periodo)
     
     // Para pago único/anual: inicio + periodo de gracia
     if (tipoPago === 'Anual' || tipoPago === 'Pago Único') {
@@ -3266,8 +3267,9 @@ const ModuloNvoExpedientes = () => {
         // PRIMER RECIBO: inicio_vigencia + periodo_gracia
         fecha.setDate(fecha.getDate() + periodoGracia);
       } else {
-        // RECIBOS SUBSECUENTES: inicio_vigencia + (N-1) * meses (SIN periodo de gracia)
+        // RECIBOS SUBSECUENTES: inicio_vigencia + (N-1) * meses + periodo_gracia
         fecha.setMonth(fecha.getMonth() + (meses * (numeroPago - 1)));
+        fecha.setDate(fecha.getDate() + periodoGracia);
       }
       
       return fecha.toISOString().split('T')[0];

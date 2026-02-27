@@ -61,6 +61,10 @@ export async function loadExtractor(company, producto = 'autos') {
           console.log(`   ✅ Cargando: ./lalatinoamericana/autos.js`);
           return await import('./lalatinoamericana/autos.js');
           
+        case 'BANORTE':
+          console.log(`   ✅ Cargando: ./banorte/autos.js`);
+          return await import('./banorte/autos.js');
+          
         default:
           console.warn(`   ⚠️ No hay extractor para ${aseguradora}/${prod}`);
           return null;

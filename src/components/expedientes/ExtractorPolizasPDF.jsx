@@ -1826,11 +1826,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                       
                       {/* COLUMNA DERECHA: Dirección y Ciudad/Estado */}
                       <div className="col-md-6 col-12">
-                        {/* Dirección */}
+                        {/* Dirección completa (calle, colonia, C.P.) */}
                         <div className="mb-1">
                           <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Dirección:</small>
                           <small className="mb-0" style={{ fontSize: '0.7rem' }}>
-                            {datosExtraidos.domicilio || <span className="text-muted">No encontrada</span>}
+                            {[datosExtraidos.domicilio, datosExtraidos.colonia, datosExtraidos.codigo_postal ? `C.P. ${datosExtraidos.codigo_postal}` : ''].filter(Boolean).join(', ') || <span className="text-muted">No encontrada</span>}
                           </small>
                         </div>
                         
