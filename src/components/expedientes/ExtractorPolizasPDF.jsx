@@ -51,14 +51,16 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Si hay un archivo pre-seleccionado, procesarlo inmediatamente
   useEffect(() => {
     // Verificar si ya hay un archivo seleccionado desde el modal anterior
-    if (window._selectedPDFFile && window._autoExtractorMode) {
+    if (window._selectedPDFFile && (window._autoExtractorMode || window._iaExtractorMode)) {
       const file = window._selectedPDFFile;
       // 📄 NO borrar window._selectedPDFFile aquí - se necesita para subir a S3 después de guardar
-      // Solo borrar el flag de auto-extracción
-      delete window._autoExtractorMode; // Limpiar flag
+      // Determinar método según el flag
+      const metodo = window._iaExtractorMode ? 'ia' : 'auto';
+      delete window._autoExtractorMode;
+      delete window._iaExtractorMode;
       
-      // Configurar método automático y procesar directamente
-      setMetodoExtraccion('auto');
+      // Configurar método y procesar directamente
+      setMetodoExtraccion(metodo);
       setArchivo(file);
       setInformacionArchivo({
         nombre: file.name,
@@ -68,7 +70,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       });
       // Procesar inmediatamente sin esperar
       setEstado('procesando');
-      setTimeout(() => procesarPDF(file), 100);
+      setTimeout(() => procesarPDF(file, metodo), 100);
     }
   }, []);
   
@@ -88,7 +90,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     }
   }, [metodoExtraccion, estado]);
 
-  const procesarPDF = useCallback(async (file) => {
+  const procesarPDF = useCallback(async (file, metodoOverride) => {
+    const metodoActual = metodoOverride || metodoExtraccion;
     setEstado('procesando');
     setErrores([]);
 
@@ -232,42 +235,70 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // ==================== SISTEMA AUTOMÁTICO DE EXTRACCIÓN ====================
+      // ==================== SISTEMA DE EXTRACCIÓN ====================
       let datosExtraidos = {};
       
       try {
-        // Usar el sistema automático (regex)
-        console.log('⚙️ Usando extractor automático...');
-        const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
-        const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
-        
-        const deteccion = detectarAseguradoraYProducto(textoPagina1);
-        const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
-        
-        if (moduloExtractor && moduloExtractor.extraer) {
-          datosExtraidos = await moduloExtractor.extraer({
-            textoCompleto,
-            textoPagina1,
-            textoPagina2: textoPaginaCaratula,
-            textoAvisoDeCobro,
-            todasLasPaginas
+        if (metodoActual === 'ia') {
+          // ==================== EXTRACCIÓN CON IA (Backend + Claude) ====================
+          console.log('🤖 Usando extracción con IA (Claude)...');
+          const response = await fetch(`${API_URL}/api/expedientes/extract-pdf-ia`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ textoCompleto })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Error del servidor: ${response.status}`);
+          }
+          
+          const resultado = await response.json();
+          
+          if (!resultado.success || !resultado.data) {
+            throw new Error(resultado.message || 'La IA no pudo extraer datos del PDF');
+          }
+          
+          datosExtraidos = resultado.data;
+          console.log('✅ Datos extraídos con IA:', {
+            modelo: resultado.meta?.model,
+            metodo: resultado.meta?.metodo,
+            campos: Object.keys(datosExtraidos).length
           });
         } else {
-          console.error('❌ No se encontró extractor para:', deteccion);
-          setEstado('error');
-          setErrores([{
-            tipo: 'error',
-            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Esta aseguradora aún no está soportada. Disponibles: Qualitas, Chubb.'
-          }]);
-          return;
+          // ==================== EXTRACCIÓN AUTOMÁTICA (Regex) ====================
+          console.log('⚙️ Usando extractor automático...');
+          const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
+          const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
+          
+          const deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
+          const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
+          
+          if (moduloExtractor && moduloExtractor.extraer) {
+            datosExtraidos = await moduloExtractor.extraer({
+              textoCompleto,
+              textoPagina1,
+              textoPagina2: textoPaginaCaratula,
+              textoAvisoDeCobro,
+              todasLasPaginas
+            });
+          } else {
+            console.error('❌ No se encontró extractor para:', deteccion);
+            setEstado('error');
+            setErrores([{
+              tipo: 'error',
+              mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+              detalle: 'Esta aseguradora aún no está soportada. Usa "Extraer con IA" para cualquier aseguradora.'
+            }]);
+            return;
+          }
         }
       } catch (error) {
         console.error('❌ Error en sistema de extracción:', error);
         setEstado('error');
         setErrores([{
           tipo: 'error',
-          mensaje: 'Error al procesar el PDF',
+          mensaje: metodoActual === 'ia' ? 'Error al extraer con IA' : 'Error al procesar el PDF',
           detalle: error.message
         }]);
         return;
@@ -1505,19 +1536,21 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       }
       
       // ================== FECHA LÍMITE DE PAGO (PRIMER RECIBO) ==================
-      // Calcular: inicio_vigencia + periodo_gracia
-      if (datosConCliente.inicio_vigencia && datosConCliente.periodo_gracia) {
+      // Prioridad: 1) fecha extraída del PDF, 2) cálculo inicio_vigencia + periodo_gracia
+      if (datosConCliente.fecha_limite_pago || datosConCliente.fecha_vencimiento_pago) {
+        // Usar la fecha real extraída del PDF (viene de la IA o del extractor regex)
+        const fechaReal = datosConCliente.fecha_vencimiento_pago || datosConCliente.fecha_limite_pago;
+        datosConCliente.fecha_vencimiento_pago = fechaReal;
+        datosConCliente.fecha_pago = fechaReal;
+        console.log('✅ Fecha límite de pago extraída del PDF:', fechaReal);
+      } else if (datosConCliente.inicio_vigencia && datosConCliente.periodo_gracia) {
+        // Fallback: calcular a partir de inicio_vigencia + periodo_gracia
         const [year, month, day] = datosConCliente.inicio_vigencia.split('-');
         const fechaInicio = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
         fechaInicio.setDate(fechaInicio.getDate() + parseInt(datosConCliente.periodo_gracia));
         datosConCliente.fecha_vencimiento_pago = fechaInicio.toISOString().split('T')[0];
         datosConCliente.fecha_pago = fechaInicio.toISOString().split('T')[0];
-        console.log('✅ Fecha límite de pago calculada:', datosConCliente.fecha_vencimiento_pago, `(${datosConCliente.inicio_vigencia} + ${datosConCliente.periodo_gracia} días)`);
-      } else if (datosConCliente.fecha_limite_pago) {
-        // Fallback: si el PDF trae fecha_limite_pago directamente, usarla
-        datosConCliente.fecha_vencimiento_pago = datosConCliente.fecha_limite_pago;
-        datosConCliente.fecha_pago = datosConCliente.fecha_limite_pago;
-        console.log('ℹ️ Fecha límite de pago extraída del PDF:', datosConCliente.fecha_limite_pago);
+        console.log('📅 Fecha límite de pago calculada:', datosConCliente.fecha_vencimiento_pago, `(${datosConCliente.inicio_vigencia} + ${datosConCliente.periodo_gracia} días)`);
       }
       
       // ================== FECHA AVISO DE RENOVACIÓN ==================
@@ -1636,8 +1669,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
                 
                 <div className="row g-3 justify-content-center">
-                  {/* ÚNICO Extractor Automático */}
-                  <div className="col-md-8 col-lg-6">
+                  {/* Extractor Automático (Regex) */}
+                  <div className="col-md-6 col-lg-5">
                     <div 
                       className="card h-100 border-primary cursor-pointer shadow-sm" 
                       style={{ cursor: 'pointer' }}
@@ -1646,10 +1679,10 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         setEstado('esperando');
                       }}
                     >
-                      <div className="card-body text-center p-4">
-                        <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3" 
-                             style={{ width: '70px', height: '70px' }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="35" height="35" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <div className="card-body text-center p-3">
+                        <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2" 
+                             style={{ width: '55px', height: '55px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
                             <polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline>
                             <polyline points="7.5 19.79 7.5 14.6 3 12"></polyline>
@@ -1658,18 +1691,51 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                             <line x1="12" y1="22.08" x2="12" y2="12"></line>
                           </svg>
                         </div>
-                        <h5 className="card-title mb-3">Continuar</h5>
-                        <p className="card-text text-muted mb-4">
-                          Extrae datos de pólizas de forma instantánea usando patrones específicos para cada aseguradora.
+                        <h6 className="card-title mb-2">Automático</h6>
+                        <p className="card-text text-muted small mb-2">
+                          Extracción instantánea por patrones de texto.
                         </p>
-                        <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
-                          <span className="badge bg-success">✓ Gratis</span>
-                          <span className="badge bg-success">⚡ Instantáneo</span>
-                          <span className="badge bg-success">🎯 Preciso</span>
+                        <div className="d-flex justify-content-center gap-1 flex-wrap mb-2">
+                          <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>✓ Gratis</span>
+                          <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>⚡ Instantáneo</span>
                         </div>
-                        <div className="text-muted mt-3" style={{ fontSize: '0.9rem' }}>
-                          <strong>Aseguradoras disponibles:</strong><br/>
-                          <small>Qualitas • Chubb</small>
+                        <div className="text-muted" style={{ fontSize: '0.7rem' }}>
+                          <small>Qualitas • Chubb • HDI • GNP • Zurich • Mapfre • El Potosí</small>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Extractor con IA (Claude) */}
+                  <div className="col-md-6 col-lg-5">
+                    <div 
+                      className="card h-100 border-warning cursor-pointer shadow-sm" 
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setMetodoExtraccion('ia');
+                        setEstado('esperando');
+                      }}
+                    >
+                      <div className="card-body text-center p-3">
+                        <div className="bg-warning text-dark rounded-circle d-inline-flex align-items-center justify-content-center mb-2" 
+                             style={{ width: '55px', height: '55px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.57-3.25 3.92L12 10V8a2 2 0 1 0-2 2H8.08A4 4 0 0 1 12 2z"></path>
+                            <path d="M12 22a4 4 0 0 0 4-4c0-1.95-1.4-3.57-3.25-3.92L12 14v2a2 2 0 1 1-2-2H8.08A4 4 0 0 0 12 22z"></path>
+                            <path d="M2 12a4 4 0 0 1 4-4c1.95 0 3.57 1.4 3.92 3.25L10 12H8a2 2 0 1 0 2 2v1.92A4 4 0 0 1 2 12z"></path>
+                            <path d="M22 12a4 4 0 0 0-4-4c-1.95 0-3.57 1.4-3.92 3.25L14 12h2a2 2 0 1 1-2 2v1.92A4 4 0 0 0 22 12z"></path>
+                          </svg>
+                        </div>
+                        <h6 className="card-title mb-2">Extraer con IA</h6>
+                        <p className="card-text text-muted small mb-2">
+                          Extracción inteligente con IA para cualquier aseguradora.
+                        </p>
+                        <div className="d-flex justify-content-center gap-1 flex-wrap mb-2">
+                          <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>🤖 IA</span>
+                          <span className="badge bg-info" style={{ fontSize: '0.65rem' }}>🌐 Universal</span>
+                        </div>
+                        <div className="text-muted" style={{ fontSize: '0.7rem' }}>
+                          <small>Cualquier aseguradora y ramo</small>
                         </div>
                       </div>
                     </div>
@@ -1691,7 +1757,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 </div>
                 <p className="mb-2 fw-semibold">Esperando archivo PDF...</p>
                 <small className="text-muted">
-                  Método: Extractor Automático
+                  Método: {metodoExtraccion === 'ia' ? 'Extracción con IA' : 'Extractor Automático'}
                 </small>
                 <div className="mt-3">
                   <button 

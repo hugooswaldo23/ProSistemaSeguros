@@ -1639,7 +1639,7 @@ const ListaExpedientes = React.memo(({
       {/* Modal de Selección de Método de Captura */}
       {mostrarModalMetodoCaptura && (
         <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-dialog modal-dialog-centered" style={{ maxWidth: '700px' }}>
             <div className="modal-content">
               <div className="modal-header border-0 pb-0">
                 <h5 className="modal-title w-100 text-center">
@@ -1657,7 +1657,7 @@ const ListaExpedientes = React.memo(({
                   ¿Cómo deseas agregar la nueva póliza?
                 </p>
 
-                {/* Input file oculto para PDF */}
+                {/* Input file oculto para PDF (automático) */}
                 <input
                   type="file"
                   accept="application/pdf"
@@ -1666,7 +1666,6 @@ const ListaExpedientes = React.memo(({
                   ref={(input) => {
                     if (input) {
                       input.onclick = () => {
-                        // Guardar referencia para poder procesar el archivo después
                         window._pdfInputForExtractor = input;
                       };
                     }
@@ -1674,26 +1673,43 @@ const ListaExpedientes = React.memo(({
                   onChange={(e) => {
                     const file = e.target.files[0];
                     if (file && file.type === 'application/pdf') {
-                      // Cerrar modal de selección
                       setMostrarModalMetodoCaptura(false);
-                      // Cambiar a vista formulario
                       setVistaActual('formulario');
                       setModoEdicion(false);
                       limpiarFormulario();
-                      // Guardar archivo y abrir el extractor directamente en modo automático
                       window._selectedPDFFile = file;
                       window._autoExtractorMode = true;
                       setTimeout(() => {
                         setMostrarExtractorPDF(true);
                       }, 100);
                     }
-                    // NO resetear el input todavía
+                  }}
+                />
+                {/* Input file oculto para PDF (IA) */}
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  style={{ display: 'none' }}
+                  id="pdfFileInputIA"
+                  onChange={(e) => {
+                    const file = e.target.files[0];
+                    if (file && file.type === 'application/pdf') {
+                      setMostrarModalMetodoCaptura(false);
+                      setVistaActual('formulario');
+                      setModoEdicion(false);
+                      limpiarFormulario();
+                      window._selectedPDFFile = file;
+                      window._iaExtractorMode = true;
+                      setTimeout(() => {
+                        setMostrarExtractorPDF(true);
+                      }, 100);
+                    }
                   }}
                 />
 
                 <div className="row g-3">
                   {/* Opción Captura Manual */}
-                  <div className="col-md-6">
+                  <div className="col-md-4">
                     <div 
                       className="card h-100 border-primary text-center p-3" 
                       style={{ cursor: 'pointer', transition: 'all 0.3s' }}
@@ -1706,16 +1722,16 @@ const ListaExpedientes = React.memo(({
                       onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(13,110,253,0.3)'}
                       onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
                     >
-                      <div className="card-body">
-                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                      <div className="card-body p-2">
+                        <div className="mb-2" style={{ fontSize: '40px' }}>
                           ✍️
                         </div>
-                        <h5 className="card-title text-primary mb-2">Captura Manual</h5>
-                        <p className="card-text text-muted small mb-3">
+                        <h6 className="card-title text-primary mb-1">Captura Manual</h6>
+                        <p className="card-text text-muted small mb-2" style={{ fontSize: '0.7rem' }}>
                           Llena el formulario campo por campo
                         </p>
                         <button 
-                          className="btn btn-primary w-100"
+                          className="btn btn-primary btn-sm w-100"
                           onClick={(e) => {
                             e.stopPropagation();
                             setMostrarModalMetodoCaptura(false);
@@ -1731,7 +1747,7 @@ const ListaExpedientes = React.memo(({
                   </div>
 
                   {/* Opción Extractor PDF */}
-                  <div className="col-md-6">
+                  <div className="col-md-4">
                     <div 
                       className="card h-100 border-success text-center p-3" 
                       style={{ cursor: 'pointer', transition: 'all 0.3s' }}
@@ -1741,33 +1757,65 @@ const ListaExpedientes = React.memo(({
                       onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(25,135,84,0.3)'}
                       onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
                     >
-                      <div className="card-body">
-                        <div className="mb-3" style={{ fontSize: '48px' }}>
+                      <div className="card-body p-2">
+                        <div className="mb-2" style={{ fontSize: '40px' }}>
                           📄
                         </div>
-                        <h5 className="card-title text-success mb-2">Extractor PDF</h5>
-                        <p className="card-text text-muted small mb-3">
-                          Importa datos automáticamente desde el PDF
+                        <h6 className="card-title text-success mb-1">Extractor PDF</h6>
+                        <p className="card-text text-muted small mb-2" style={{ fontSize: '0.7rem' }}>
+                          Extracción automática por patrones
                         </p>
                         <button 
-                          className="btn btn-success w-100"
+                          className="btn btn-success btn-sm w-100"
                           onClick={(e) => {
                             e.stopPropagation();
                             document.getElementById('pdfFileInput')?.click();
                           }}
                         >
-                          <Upload size={16} className="me-2" />
+                          <Upload size={16} className="me-1" />
                           Importar PDF
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Opción Extraer con IA */}
+                  <div className="col-md-4">
+                    <div 
+                      className="card h-100 border-warning text-center p-3" 
+                      style={{ cursor: 'pointer', transition: 'all 0.3s' }}
+                      onClick={() => {
+                        document.getElementById('pdfFileInputIA')?.click();
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,193,7,0.3)'}
+                      onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <div className="card-body p-2">
+                        <div className="mb-2" style={{ fontSize: '40px' }}>
+                          🤖
+                        </div>
+                        <h6 className="card-title text-warning mb-1" style={{ color: '#b8860b' }}>Extraer con IA</h6>
+                        <p className="card-text text-muted small mb-2" style={{ fontSize: '0.7rem' }}>
+                          IA para cualquier aseguradora
+                        </p>
+                        <button 
+                          className="btn btn-warning btn-sm w-100"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            document.getElementById('pdfFileInputIA')?.click();
+                          }}
+                        >
+                          🤖 Extraer con IA
                         </button>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="alert alert-info mt-4 mb-0">
+                <div className="alert alert-info mt-3 mb-0">
                   <small>
-                    <strong>💡 Recomendación:</strong> Usa el extractor PDF para mayor velocidad y precisión. 
-                    La captura manual es útil cuando no tienes el PDF de la póliza.
+                    <strong>💡 Recomendación:</strong> Usa el extractor PDF para aseguradoras soportadas (Qualitas, Chubb, HDI, etc). 
+                    Usa <strong>Extraer con IA</strong> para cualquier aseguradora y ramo.
                   </small>
                 </div>
               </div>

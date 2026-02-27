@@ -3298,7 +3298,6 @@ const ModuloNvoExpedientes = () => {
       const fechaInicio = new Date(formularioActual.inicio_vigencia);
       fechaInicio.setDate(fechaInicio.getDate() + periodoGracia);
       fechaLimitePago = fechaInicio.toISOString().split('T')[0];
-
     }
     
     // 4. Calcular estatus de pago basado en la fecha límite

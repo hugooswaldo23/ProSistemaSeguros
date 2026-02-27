@@ -40,6 +40,7 @@ export function detectarAseguradora(textoInicial) {
   if (/\bMAPFRE\b/.test(texto)) return 'MAPFRE';
   if (/\bAXA\b/.test(texto)) return 'AXA';
   if (/\bZURICH\b/.test(texto)) return 'ZURICH';
+  if (/LATINOAMERICANA|LATINO\s*SEGUROS|latinoseguros\.com/i.test(texto)) return 'LALATINOAMERICANA';
   if (/\bANA\b/.test(texto)) return 'ANA';
   if (/\bINBURSA\b/.test(texto)) return 'INBURSA';
   if (/\bBANORTE\b/.test(texto)) return 'BANORTE';
@@ -104,13 +105,25 @@ export function detectarProducto(textoInicial, aseguradora = '') {
 /**
  * Función principal: Detecta aseguradora y producto
  * @param {string} textoPagina1 - Texto completo de página 1
+ * @param {string} [textoCompleto] - Texto de todas las páginas (fallback si no detecta en pág 1)
  * @returns {{ aseguradora: string, producto: string, textoAnalizado: string }}
  */
-export function detectarAseguradoraYProducto(textoPagina1) {
+export function detectarAseguradoraYProducto(textoPagina1, textoCompleto) {
   const textoInicial = extraerPrimerasLineas(textoPagina1, 30);
   
-  const aseguradora = detectarAseguradora(textoInicial);
-  const producto = detectarProducto(textoInicial, aseguradora); // Pasar aseguradora
+  let aseguradora = detectarAseguradora(textoInicial);
+  let textoUsado = textoInicial;
+  
+  // Si no detectó en las primeras 30 líneas de pág 1, buscar en TODO el texto
+  if (aseguradora === 'DESCONOCIDA' && textoCompleto) {
+    console.log('🔍 No detectada en pág 1, buscando en texto completo...');
+    aseguradora = detectarAseguradora(textoCompleto);
+    textoUsado = textoCompleto;
+  }
+  
+  // Para producto, también intentar con texto completo si está disponible
+  const textoParaProducto = textoCompleto || textoInicial;
+  const producto = detectarProducto(textoParaProducto, aseguradora);
   
   console.log('🔍 Detector Ligero:');
   console.log('   Aseguradora detectada:', aseguradora);
@@ -120,6 +133,6 @@ export function detectarAseguradoraYProducto(textoPagina1) {
   return {
     aseguradora,
     producto,
-    textoAnalizado: textoInicial
+    textoAnalizado: textoUsado
   };
 }

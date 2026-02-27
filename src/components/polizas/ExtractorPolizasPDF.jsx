@@ -68,12 +68,14 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   
   // Si hay un archivo pre-seleccionado, procesarlo inmediatamente
   useEffect(() => {
-    if (window._selectedPDFFile && window._autoExtractorMode) {
+    if (window._selectedPDFFile && (window._autoExtractorMode || window._iaExtractorMode)) {
       const file = window._selectedPDFFile;
+      const metodo = window._iaExtractorMode ? 'ia' : 'auto';
       delete window._selectedPDFFile;
       delete window._autoExtractorMode;
+      delete window._iaExtractorMode;
       
-      setMetodoExtraccion('auto');
+      setMetodoExtraccion(metodo);
       setArchivo(file);
       setInformacionArchivo({
         nombre: file.name,
@@ -82,7 +84,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         fechaModificacion: new Date(file.lastModified).toLocaleDateString('es-MX')
       });
       setEstado('procesando');
-      setTimeout(() => procesarPDF(file), 100);
+      setTimeout(() => procesarPDF(file, metodo), 100);
     }
   }, []);
   
@@ -100,7 +102,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     }
   }, [metodoExtraccion, estado]);
 
-  const procesarPDF = useCallback(async (file) => {
+  const procesarPDF = useCallback(async (file, metodoOverride) => {
+    const metodoActual = metodoOverride || metodoExtraccion;
     setEstado('procesando');
     setErrores([]);
 
@@ -235,41 +238,70 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       };
 
-      // Sistema automático de extracción
+      // Sistema de extracción
       let datosExtraidos = {};
       
       try {
-        console.log('⚙️ Usando extractor automático...');
-        const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
-        const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
-        
-        const deteccion = detectarAseguradoraYProducto(textoPagina1);
-        const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
-        
-        if (moduloExtractor && moduloExtractor.extraer) {
-          datosExtraidos = await moduloExtractor.extraer({
-            textoCompleto,
-            textoPagina1,
-            textoPagina2: textoPaginaCaratula,
-            textoAvisoDeCobro,
-            todasLasPaginas
+        if (metodoActual === 'ia') {
+          // ==================== EXTRACCIÓN CON IA (Backend + Claude) ====================
+          console.log('🤖 Usando extracción con IA (Claude)...');
+          const response = await fetch(`${API_URL}/api/expedientes/extract-pdf-ia`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ textoCompleto })
+          });
+          
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Error del servidor: ${response.status}`);
+          }
+          
+          const resultado = await response.json();
+          
+          if (!resultado.success || !resultado.data) {
+            throw new Error(resultado.message || 'La IA no pudo extraer datos del PDF');
+          }
+          
+          datosExtraidos = resultado.data;
+          console.log('✅ Datos extraídos con IA:', {
+            modelo: resultado.meta?.model,
+            metodo: resultado.meta?.metodo,
+            campos: Object.keys(datosExtraidos).length
           });
         } else {
-          console.error('❌ No se encontró extractor para:', deteccion);
-          setEstado('error');
-          setErrores([{
-            tipo: 'error',
-            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Esta aseguradora aún no está soportada.'
-          }]);
-          return;
+          // ==================== EXTRACCIÓN AUTOMÁTICA (Regex) ====================
+          console.log('⚙️ Usando extractor automático...');
+          const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
+          const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
+          
+          const deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
+          const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
+          
+          if (moduloExtractor && moduloExtractor.extraer) {
+            datosExtraidos = await moduloExtractor.extraer({
+              textoCompleto,
+              textoPagina1,
+              textoPagina2: textoPaginaCaratula,
+              textoAvisoDeCobro,
+              todasLasPaginas
+            });
+          } else {
+            console.error('❌ No se encontró extractor para:', deteccion);
+            setEstado('error');
+            setErrores([{
+              tipo: 'error',
+              mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+              detalle: 'Esta aseguradora aún no está soportada. Usa "Extraer con IA" para cualquier aseguradora.'
+            }]);
+            return;
+          }
         }
       } catch (error) {
         console.error('❌ Error en sistema de extracción:', error);
         setEstado('error');
         setErrores([{
           tipo: 'error',
-          mensaje: 'Error al procesar el PDF',
+          mensaje: metodoActual === 'ia' ? 'Error al extraer con IA' : 'Error al procesar el PDF',
           detalle: error.message
         }]);
         return;
@@ -406,17 +438,63 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           <div className="modal-body p-3" style={{ overflowY: 'auto', flex: 1 }}>
             {/* Contenido del modal según el estado */}
             {estado === 'seleccionando-metodo' && (
-              <div className="text-center py-4">
-                <h6 className="mb-3">Extractor Automático de Pólizas</h6>
-                <button 
-                  className="btn btn-primary"
-                  onClick={() => {
-                    setMetodoExtraccion('auto');
-                    setEstado('esperando');
-                  }}
-                >
-                  Continuar
-                </button>
+              <div className="py-2">
+                <div className="text-center mb-3">
+                  <h6 className="mb-1">Extractor de Pólizas</h6>
+                  <p className="text-muted small mb-0" style={{ fontSize: '0.75rem' }}>Selecciona el método de extracción</p>
+                </div>
+                <div className="row g-3 justify-content-center">
+                  {/* Extractor Automático */}
+                  <div className="col-6">
+                    <div 
+                      className="card h-100 border-primary shadow-sm" 
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setMetodoExtraccion('auto');
+                        setEstado('esperando');
+                      }}
+                    >
+                      <div className="card-body text-center p-3">
+                        <div className="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style={{ width: '45px', height: '45px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                          </svg>
+                        </div>
+                        <h6 className="card-title mb-1" style={{ fontSize: '0.85rem' }}>Automático</h6>
+                        <small className="text-muted" style={{ fontSize: '0.65rem' }}>Gratis • Instantáneo</small>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Extractor con IA */}
+                  <div className="col-6">
+                    <div 
+                      className="card h-100 border-warning shadow-sm" 
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        setMetodoExtraccion('ia');
+                        setEstado('esperando');
+                      }}
+                    >
+                      <div className="card-body text-center p-3">
+                        <div className="bg-warning text-dark rounded-circle d-inline-flex align-items-center justify-content-center mb-2" style={{ width: '45px', height: '45px' }}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.57-3.25 3.92L12 10V8a2 2 0 1 0-2 2H8.08A4 4 0 0 1 12 2z"></path>
+                            <path d="M12 22a4 4 0 0 0 4-4c0-1.95-1.4-3.57-3.25-3.92L12 14v2a2 2 0 1 1-2-2H8.08A4 4 0 0 0 12 22z"></path>
+                            <path d="M2 12a4 4 0 0 1 4-4c1.95 0 3.57 1.4 3.92 3.25L10 12H8a2 2 0 1 0 2 2v1.92A4 4 0 0 1 2 12z"></path>
+                            <path d="M22 12a4 4 0 0 0-4-4c-1.95 0-3.57 1.4-3.92 3.25L14 12h2a2 2 0 1 1-2 2v1.92A4 4 0 0 0 22 12z"></path>
+                          </svg>
+                        </div>
+                        <h6 className="card-title mb-1" style={{ fontSize: '0.85rem' }}>Extraer con IA</h6>
+                        <small className="text-muted" style={{ fontSize: '0.65rem' }}>🤖 Universal • Cualquier aseguradora</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-center mt-3">
+                  <button className="btn btn-sm btn-outline-secondary" onClick={onClose}>Cancelar</button>
+                </div>
               </div>
             )}
             
