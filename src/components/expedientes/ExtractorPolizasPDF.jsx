@@ -283,14 +283,23 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
               todasLasPaginas
             });
           } else {
-            console.error('❌ No se encontró extractor para:', deteccion);
-            setEstado('error');
-            setErrores([{
-              tipo: 'error',
-              mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-              detalle: 'Esta aseguradora aún no está soportada. Usa "Extraer con IA" para cualquier aseguradora.'
-            }]);
-            return;
+            // No hay extractor regex → fallback automático a IA
+            console.warn(`⚠️ No hay extractor regex para ${deteccion.aseguradora}/${deteccion.producto} — usando IA como fallback`);
+            const responseIA = await fetch(`${API_URL}/api/expedientes/extract-pdf-ia`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ textoCompleto })
+            });
+            if (!responseIA.ok) {
+              const errorData = await responseIA.json().catch(() => ({}));
+              throw new Error(errorData.message || `Error del servidor IA: ${responseIA.status}`);
+            }
+            const resultadoIA = await responseIA.json();
+            if (!resultadoIA.success || !resultadoIA.data) {
+              throw new Error(resultadoIA.message || 'La IA no pudo extraer datos del PDF');
+            }
+            datosExtraidos = resultadoIA.data;
+            console.log('✅ Datos extraídos con IA (fallback):', Object.keys(datosExtraidos).length, 'campos');
           }
         }
       } catch (error) {
@@ -307,6 +316,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Limpiar montos (quitar comas) y asegurar defaults "0.00" si faltan
       const camposMontos = [
         'prima_pagada',
+        'prima_neta',
         'otros_descuentos',
         'cargo_pago_fraccionado',
         'gastos_expedicion',
@@ -1826,20 +1836,20 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                       
                       {/* COLUMNA DERECHA: Dirección y Ciudad/Estado */}
                       <div className="col-md-6 col-12">
-                        {/* Dirección completa (calle, colonia, C.P.) */}
+                        {/* Dirección (calle y colonia) */}
                         <div className="mb-1">
                           <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Dirección:</small>
                           <small className="mb-0" style={{ fontSize: '0.7rem' }}>
-                            {[datosExtraidos.domicilio, datosExtraidos.colonia, datosExtraidos.codigo_postal ? `C.P. ${datosExtraidos.codigo_postal}` : ''].filter(Boolean).join(', ') || <span className="text-muted">No encontrada</span>}
+                            {[datosExtraidos.domicilio, datosExtraidos.colonia].filter(Boolean).join(', ') || <span className="text-muted">No encontrada</span>}
                           </small>
                         </div>
                         
-                        {/* Ciudad/Estado */}
+                        {/* Ciudad/Estado/CP */}
                         <div>
                           <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Ciudad/Estado:</small>
                           <small className="mb-0" style={{ fontSize: '0.7rem' }}>
-                            {(datosExtraidos.municipio || datosExtraidos.estado) 
-                              ? [datosExtraidos.municipio, datosExtraidos.estado].filter(Boolean).join(', ')
+                            {(datosExtraidos.municipio || datosExtraidos.estado || datosExtraidos.codigo_postal) 
+                              ? [datosExtraidos.municipio, datosExtraidos.estado, datosExtraidos.codigo_postal ? `C.P. ${datosExtraidos.codigo_postal}` : ''].filter(Boolean).join(', ')
                               : <span className="text-muted">No encontrado</span>
                             }
                           </small>

@@ -70,8 +70,47 @@ export async function loadExtractor(company, producto = 'autos') {
           return null;
       }
     }
+
+    // ==================== GMM (Gastos Médicos Mayores) ====================
+    if (prod === 'gmm') {
+      switch (aseguradora) {
+        case 'LALATINOAMERICANA':
+          console.log(`   ✅ Cargando: ./lalatinoamericana/gmm.js`);
+          return await import('./lalatinoamericana/gmm.js');
+
+        default:
+          console.warn(`   ⚠️ No hay extractor regex para ${aseguradora}/${prod} — usar IA`);
+          return null;
+      }
+    }
+
+    // ==================== VIDA ====================
+    if (prod === 'vida') {
+      switch (aseguradora) {
+        case 'LALATINOAMERICANA':
+          console.log(`   ✅ Cargando: ./lalatinoamericana/vida.js`);
+          return await import('./lalatinoamericana/vida.js');
+
+        default:
+          console.warn(`   ⚠️ No hay extractor regex para ${aseguradora}/${prod} — usar IA`);
+          return null;
+      }
+    }
+
+    // ==================== DAÑOS ====================
+    if (prod === 'danos') {
+      switch (aseguradora) {
+        case 'LALATINOAMERICANA':
+          console.log(`   ✅ Cargando: ./lalatinoamericana/danos.js`);
+          return await import('./lalatinoamericana/danos.js');
+
+        default:
+          console.warn(`   ⚠️ No hay extractor regex para ${aseguradora}/${prod} — usar IA`);
+          return null;
+      }
+    }
     
-    console.warn(`   ⚠️ Producto '${prod}' no soportado aún`);
+    console.warn(`   ⚠️ Producto '${prod}' no soportado aún — usar IA`);
     return null;
   } catch (e) {
     console.error(`   ❌ Error cargando extractor ${aseguradora}/${prod}:`, e.message);

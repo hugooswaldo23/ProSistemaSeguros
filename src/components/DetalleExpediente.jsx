@@ -80,20 +80,27 @@ const DetalleExpediente = ({
   const servicioMostrar = datos?.servicio || datos?.servicio_poliza || datos?.Servicio || datos?.servicioVehiculo || datos?.servicio_vehiculo || '';
   const movimientoMostrar = datos?.movimiento || datos?.movimiento_poliza || datos?.Movimiento || datos?.movimientoVehiculo || datos?.movimiento_vehiculo || '';
 
-  // Determinar tipo de pago mostrado (prioriza forma_pago del PDF sobre tipo_pago calculado)
+  // Tipo de Pago = Anual o Fraccionado
   const tipoPagoMostrar = useMemo(() => {
-    const forma = (datos?.forma_pago || '').trim().toUpperCase();
     const tipo = (datos?.tipo_pago || '').trim();
-    const normalizar = (v) => v ? v.charAt(0) + v.slice(1).toLowerCase() : '';
-    
-    // PRIORIDAD 1: Si existe forma_pago extraída del PDF, usarla SIEMPRE
+    const normalizar = (v) => v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '';
+    if (tipo) return normalizar(tipo);
+    // Inferir: si hay forma_pago diferente de Anual, es Fraccionado
+    const forma = (datos?.forma_pago || '').trim().toUpperCase();
+    if (forma && forma !== 'ANUAL') return 'Fraccionado';
+    if (forma === 'ANUAL') return 'Anual';
+    return 'No especificado';
+  }, [datos?.forma_pago, datos?.tipo_pago]);
+
+  // Forma de Pago = Mensual, Trimestral, Semestral, Anual
+  const formaPagoMostrar = useMemo(() => {
+    const forma = (datos?.forma_pago || '').trim();
+    const normalizar = (v) => v ? v.charAt(0).toUpperCase() + v.slice(1).toLowerCase() : '';
     if (forma) return normalizar(forma);
-    
-    // PRIORIDAD 2: Si no hay forma_pago, usar tipo_pago normalizado
-    if (tipo && !['FRACCIONADO',''].includes(tipo.toUpperCase())) return normalizar(tipo);
-    
-    // FALLBACK: Devolver lo que haya
-    return tipo || forma || 'No especificado';
+    // Fallback: si tipo_pago es Anual, forma es Anual
+    const tipo = (datos?.tipo_pago || '').trim().toUpperCase();
+    if (tipo === 'ANUAL') return 'Anual';
+    return '';
   }, [datos?.forma_pago, datos?.tipo_pago]);
 
   const Caratula = () => (
@@ -149,7 +156,7 @@ const DetalleExpediente = ({
             {renderCampo('Inciso', datos?.inciso)}
             {renderCampo('Plan', datos?.plan?.toUpperCase?.() || datos?.plan)}
             {renderCampo('Producto', datos?.producto)}
-            {renderCampo('Tipo de Pago', tipoPagoMostrar || datos?.tipo_pago)}
+            {renderCampo('Tipo de Pago', tipoPagoMostrar)}
             {renderCampo('Agente', datos?.agente)}
           </div>
         </div>
@@ -187,7 +194,6 @@ const DetalleExpediente = ({
             {renderCampo('Cesión de Comisión', utils.formatearMoneda?.(datos?.cesion_comision || '0.00'), { forceShow: true })}
             {renderCampo('1er. Pago', utils.formatearMoneda?.(datos?.primer_pago || '0.00'), { forceShow: true })}
             {renderCampo('Subsecuentes', utils.formatearMoneda?.(datos?.pagos_subsecuentes || '0.00'), { forceShow: true })}
-            {renderCampo('Forma de Pago', (tipoPagoMostrar || datos?.tipo_pago)?.toUpperCase?.())}
           </div>
         </div>
 
@@ -303,10 +309,7 @@ const DetalleExpediente = ({
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.6rem' }}>Tipo de Pago:</small>
-                    <div><strong style={{ fontSize: '0.7rem' }}>{tipoPagoMostrar || datos.tipo_pago}</strong></div>
-                    {datos?.tipo_pago && datos?.tipo_pago.toUpperCase() === 'FRACCIONADO' && tipoPagoMostrar && tipoPagoMostrar.toUpperCase() !== 'ANUAL' && (
-                      <small className="text-muted" style={{ fontSize: '0.55rem' }}>Fraccionado ({tipoPagoMostrar})</small>
-                    )}
+                    <div><strong style={{ fontSize: '0.7rem' }}>{tipoPagoMostrar}</strong></div>
                   </div>
                   <div className="col-md-4">
                     <small className="text-muted" style={{ fontSize: '0.6rem' }}>Agente:</small>
@@ -373,7 +376,7 @@ const DetalleExpediente = ({
                   </div>
                   <div className="col-md-3">
                     <small className="text-muted" style={{ fontSize: '0.6rem' }}>Forma de Pago:</small>
-                    <div><strong className="text-uppercase" style={{ fontSize: '0.7rem' }}>{datos.tipo_pago || 'No especificado'}</strong></div>
+                    <div><strong className="text-uppercase" style={{ fontSize: '0.7rem' }}>{formaPagoMostrar || 'No especificado'}</strong></div>
                   </div>
                 </div>
                 <div className="row g-1 mt-1">
