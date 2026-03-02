@@ -370,6 +370,9 @@ const FormularioNuevoExpediente = ({
                       setMostrarModalSeleccion(false);
                       window._selectedPDFFile = file;
                       window._autoExtractorMode = true;
+                      if (!window._extractorMetodo) {
+                        window._extractorMetodo = 'auto';
+                      }
                       setModoCaptura('pdf');
                       setTimeout(() => {
                         setMostrarExtractorPDF(true);
@@ -451,11 +454,22 @@ const FormularioNuevoExpediente = ({
                           className="btn btn-success btn-sm w-100"
                           onClick={(e) => {
                             e.stopPropagation();
+                            window._extractorMetodo = 'auto';
                             document.getElementById('pdfFileInputNuevo')?.click();
                           }}
                         >
                           <Upload size={16} className="me-1" />
                           Importar PDF
+                        </button>
+                        <button
+                          className="btn btn-outline-success w-100 mt-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window._extractorMetodo = 'openai';
+                            document.getElementById('pdfFileInputNuevo')?.click();
+                          }}
+                        >
+                          🤖 Leer PDF con IA
                         </button>
                       </div>
                     </div>

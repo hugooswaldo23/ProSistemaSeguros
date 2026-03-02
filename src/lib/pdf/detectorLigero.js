@@ -1,7 +1,7 @@
 /**
  * Detector Ligero de Aseguradora y Producto
  * 
- * Lee SOLO las primeras 20-30 líneas de la primera página del PDF
+ * Usa una vista previa (20-30 líneas de la página 1)
  * para determinar qué aseguradora y qué producto es.
  * 
  * Esto permite cargar el extractor específico correcto sin procesar
@@ -128,7 +128,7 @@ export function detectarAseguradoraYProducto(textoPagina1, textoCompleto) {
   console.log('🔍 Detector Ligero:');
   console.log('   Aseguradora detectada:', aseguradora);
   console.log('   Producto detectado:', producto);
-  console.log('   Texto analizado (primeras 30 líneas):', textoInicial.substring(0, 200) + '...');
+  console.log('   Vista previa para detección (30 líneas):', textoInicial.substring(0, 200) + '...');
   
   return {
     aseguradora,

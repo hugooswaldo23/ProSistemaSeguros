@@ -136,11 +136,11 @@ export function usePDFWorkflow({ agentes, aseguradoras, tiposProductos }) {
       
       // 3. Cargar extractor específico
       const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
-      
+
       if (!moduloExtractor || !moduloExtractor.extraer) {
-        throw new Error(`No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`);
+        throw new Error(`No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}. Selecciona "Leer PDF con IA".`);
       }
-      
+
       // 4. Extraer datos con el extractor específico
       const datos = await moduloExtractor.extraer(textos);
       console.log('✅ Datos extraídos:', datos);
