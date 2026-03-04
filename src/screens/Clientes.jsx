@@ -199,9 +199,17 @@ const ModuloClientes = () => {
         }
         
         // Cargar expedientes (pólizas)
-        const resExpedientes = await fetch(`${API_URL}/api/expedientes`);
-        const expedientesData = await resExpedientes.json();
-        setExpedientes(expedientesData);
+        const token = localStorage.getItem('ss_token');
+        const resExpedientes = await fetch(`${API_URL}/api/expedientes`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+
+        if (!resExpedientes.ok) {
+          setExpedientes([]);
+        } else {
+          const expedientesData = await resExpedientes.json();
+          setExpedientes(Array.isArray(expedientesData) ? expedientesData : []);
+        }
         
       } catch (err) {
         setClientes([]);

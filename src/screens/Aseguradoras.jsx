@@ -5,6 +5,11 @@ import { obtenerTiposProductos } from '../services/tiposProductosService';
 // Base URL configurable por env Vite
 const API_URL = import.meta.env.VITE_API_URL || '';
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('ss_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 const useProductosDB = () => {
   const [productosDB, setProductosDB] = useState([]);
   useEffect(() => {
@@ -1086,7 +1091,9 @@ export default function Aseguradoras() {
   // Cargar aseguradoras desde la API
   const cargarAseguradoras = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/aseguradoras`);
+      const res = await fetch(`${API_URL}/api/aseguradoras`, {
+        headers: getAuthHeaders()
+      });
       const data = await res.json();
       const list = data?.data || data || [];
       setAseguradoras(Array.isArray(list) ? list : []);
@@ -1098,7 +1105,13 @@ export default function Aseguradoras() {
   // Opcional: cargar pólizas si existe endpoint
   const cargarPolizas = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/expedientes`);
+      const res = await fetch(`${API_URL}/api/expedientes`, {
+        headers: getAuthHeaders()
+      });
+      if (!res.ok) {
+        setPolizas([]);
+        return;
+      }
       const data = await res.json();
       const list = data?.data || data || [];
       setPolizas(Array.isArray(list) ? list : []);
@@ -1218,7 +1231,10 @@ export default function Aseguradoras() {
     if (!confirm('¿Está seguro de eliminar esta aseguradora?')) return;
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/aseguradoras/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${API_URL}/api/aseguradoras/${id}`, {
+          method: 'DELETE',
+          headers: getAuthHeaders()
+        });
         if (!res.ok) throw new Error('Error al eliminar');
         await cargarAseguradoras();
       } catch (err) {

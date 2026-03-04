@@ -134,7 +134,10 @@ const Formulario = React.memo(({
       
       console.log('🔍 Solicitando vendedores:', { url, agenteId, claveAgente, aseguradora });
       
-      const response = await fetch(url);
+      const token = localStorage.getItem('ss_token');
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (response.ok) {
         const data = await response.json();
         console.log('📋 Vendedores obtenidos del backend:', data);

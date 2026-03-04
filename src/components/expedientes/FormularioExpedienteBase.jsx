@@ -119,7 +119,10 @@ const FormularioExpedienteBase = React.memo(({
     try {
       const url = `${API_URL}/api/equipoDeTrabajo/vendedores-por-agente/${agenteId}`;
       
-      const response = await fetch(url);
+      const token = localStorage.getItem('ss_token');
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       if (response.ok) {
         const data = await response.json();
         const vendedoresArray = data.vendedores || [];

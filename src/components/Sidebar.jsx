@@ -26,6 +26,38 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
         return null;
     });
 
+    const sesionUsuario = useMemo(() => {
+        const fallback = {
+            nombre: 'Usuario',
+            promotoria: 'Sin promotoría'
+        };
+
+        try {
+            const rawUser = localStorage.getItem('ss_user');
+            if (rawUser) {
+                const parsed = JSON.parse(rawUser);
+                return {
+                    nombre: String(parsed.nombre || parsed.username || fallback.nombre).trim(),
+                    promotoria: String(parsed.promotoria || fallback.promotoria).trim() || fallback.promotoria
+                };
+            }
+
+            const token = localStorage.getItem('ss_token');
+            if (!token) return fallback;
+            const [, payload] = token.split('.');
+            if (!payload) return fallback;
+
+            const normalizedPayload = payload.replace(/-/g, '+').replace(/_/g, '/');
+            const decoded = JSON.parse(atob(normalizedPayload));
+            return {
+                nombre: String(decoded.nombre || decoded.usuario || fallback.nombre).trim(),
+                promotoria: String(decoded.promotoria || fallback.promotoria).trim() || fallback.promotoria
+            };
+        } catch (_) {
+            return fallback;
+        }
+    }, []);
+
     const modulos = useMemo(() => [
         { key: '/', nombre: 'Dashboard', icono: Home, activo: true },
         { key: '/clientes', nombre: 'Clientes', icono: Users, activo: true },
@@ -276,8 +308,8 @@ const Sidebar = ({ onLogout, colapsado = false, abierto = false, esMobile = fals
                     <div className="d-flex align-items-center mb-3">
                         <User size={20} className="me-2" />
                         <div>
-                            <small className="d-block">Admin Usuario</small>
-                            <small className="text-muted">Promotoria</small>
+                            <small className="d-block">{sesionUsuario.nombre}</small>
+                            <small className="d-block text-white-50">Promotoría: {sesionUsuario.promotoria || 'Sin promotoría'}</small>
                         </div>
                     </div>
                 )}

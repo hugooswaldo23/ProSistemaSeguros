@@ -26,6 +26,14 @@ const DashboardComponent = () => {
   const [modalEnviarEjecutivo, setModalEnviarEjecutivo] = useState(null); // Modal para enviar a ejecutivo
   const POLIZAS_POR_PAGINA = 20;
 
+  const getAuthHeaders = (includeJson = false) => {
+    const token = localStorage.getItem('ss_token');
+    const headers = {};
+    if (includeJson) headers['Content-Type'] = 'application/json';
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  };
+
   // Resolver monto TOTAL de la póliza (para panel financiero - emitidas, por vencer, etc.)
   // Prioridad: total > prima_pagada > prima > monto
   const resolverMonto = (p) => {
@@ -93,10 +101,10 @@ const DashboardComponent = () => {
     try {
       // 🔥 OPTIMIZACIÓN: Cargar expedientes, clientes, recibos y trámites en paralelo
       const [resExpedientes, resClientes, resRecibos, resTramites] = await Promise.all([
-        fetch(`${API_URL}/api/expedientes?t=${Date.now()}`),
-        fetch(`${API_URL}/api/clientes?t=${Date.now()}`),
-        fetch(`${API_URL}/api/recibos?t=${Date.now()}`),
-        fetch(`${API_URL}/api/tramites?t=${Date.now()}`) // Cargar trámites
+        fetch(`${API_URL}/api/expedientes?t=${Date.now()}`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/api/clientes?t=${Date.now()}`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/api/recibos?t=${Date.now()}`, { headers: getAuthHeaders() }),
+        fetch(`${API_URL}/api/tramites?t=${Date.now()}`, { headers: getAuthHeaders() }) // Cargar trámites
       ]);
       
       if (!resExpedientes.ok) {
@@ -939,7 +947,7 @@ const DashboardComponent = () => {
       
       const res = await fetch(`${API_URL}/api/tramites/${tramite.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify(payload)
       });
       
@@ -996,7 +1004,7 @@ const DashboardComponent = () => {
     if (ejecutivoNombre) {
       try {
         // Buscar el ejecutivo en equipo de trabajo por nombre
-        const resEquipo = await fetch(`${API_URL}/api/equipoDeTrabajo`);
+        const resEquipo = await fetch(`${API_URL}/api/equipoDeTrabajo`, { headers: getAuthHeaders() });
         if (resEquipo.ok) {
           const equipoData = await resEquipo.json();
           const equipoArray = Array.isArray(equipoData) ? equipoData : [];

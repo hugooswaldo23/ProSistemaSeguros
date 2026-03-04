@@ -1,10 +1,19 @@
 const BASE = import.meta.env.VITE_API_URL || '';
 const API_URL = `${BASE.replace(/\/$/, '')}/api/equipoDeTrabajo`;
+
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Obtener asignaciones de ejecutivos por producto
 export const obtenerEjecutivosPorProducto = async (usuarioId) => {
   try {
     console.log('Fetching ejecutivosPorProducto for usuarioId:', `${API_URL}/ejecutivosPorProducto/${usuarioId}`);
-    const res = await fetch(`${API_URL}/ejecutivosPorProducto/${usuarioId}`);
+    const res = await fetch(`${API_URL}/ejecutivosPorProducto/${usuarioId}`, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Error al obtener asignaciones');
     const data = await res.json();
     return { success: true, data };
@@ -18,7 +27,7 @@ export const guardarEjecutivosPorProducto = async (asignaciones) => {
   try {
     const res = await fetch(`${API_URL}/ejecutivosPorProducto`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(asignaciones)
     });
     if (!res.ok) {
@@ -39,7 +48,7 @@ export const guardarEjecutivosPorProducto = async (asignaciones) => {
 // Obtener solo los agentes del equipo de trabajo
 export const obtenerAgentesEquipo = async () => {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Error al obtener agentes');
     const data = await res.json();
     // Filtrar solo los que tengan perfil 'Agente' (mayúscula)
@@ -63,7 +72,7 @@ export const obtenerAgentesEquipo = async () => {
 
 export const obtenerEquipoDeTrabajo = async () => {
   try {
-    const res = await fetch(API_URL);
+    const res = await fetch(API_URL, { headers: getAuthHeaders() });
     if (!res.ok) throw new Error('Error al obtener equipo de trabajo');
     const data = await res.json();
     return { success: true, data };
@@ -76,7 +85,7 @@ export const crearMiembroEquipo = async (miembro) => {
   try {
     const res = await fetch(API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(miembro)
     });
     if (!res.ok) throw new Error('Error al crear miembro');
@@ -91,7 +100,7 @@ export const actualizarMiembroEquipo = async (id, miembro) => {
   try {
     const res = await fetch(`${API_URL}/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(miembro)
     });
     if (!res.ok) throw new Error('Error al actualizar miembro');
@@ -105,7 +114,8 @@ export const actualizarMiembroEquipo = async (id, miembro) => {
 export const eliminarMiembroEquipo = async (id) => {
   try {
     const res = await fetch(`${API_URL}/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
     if (!res.ok) throw new Error('Error al eliminar miembro');
     return { success: true };

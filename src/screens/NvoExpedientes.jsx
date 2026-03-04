@@ -26,6 +26,14 @@ import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Estado inicial del formulario
 const estadoInicialFormulario = {
   id: null,
@@ -177,16 +185,21 @@ const ModuloNvoExpedientes = () => {
       
       try {
         const [expRes, clientesRes, agentesRes, asegRes] = await Promise.all([
-          fetch(`${API_URL}/api/expedientes`),
-          fetch(`${API_URL}/api/clientes`),
-          fetch(`${API_URL}/api/equipoDeTrabajo`),
-          fetch(`${API_URL}/api/aseguradoras`)
+          fetch(`${API_URL}/api/expedientes`, { headers: getAuthHeaders() }),
+          fetch(`${API_URL}/api/clientes`, { headers: getAuthHeaders() }),
+          fetch(`${API_URL}/api/equipoDeTrabajo`, { headers: getAuthHeaders() }),
+          fetch(`${API_URL}/api/aseguradoras`, { headers: getAuthHeaders() })
         ]);
 
-        const expedientesData = await expRes.json();
-        const clientesData = await clientesRes.json();
-        const agentesData = await agentesRes.json();
-        const aseguradorasData = await asegRes.json();
+        const expedientesDataRaw = expRes.ok ? await expRes.json() : [];
+        const clientesDataRaw = clientesRes.ok ? await clientesRes.json() : [];
+        const agentesDataRaw = agentesRes.ok ? await agentesRes.json() : [];
+        const aseguradorasDataRaw = asegRes.ok ? await asegRes.json() : [];
+
+        const expedientesData = Array.isArray(expedientesDataRaw) ? expedientesDataRaw : [];
+        const clientesData = Array.isArray(clientesDataRaw) ? clientesDataRaw : [];
+        const agentesData = Array.isArray(agentesDataRaw) ? agentesDataRaw : [];
+        const aseguradorasData = Array.isArray(aseguradorasDataRaw) ? aseguradorasDataRaw : [];
 
         if (!mounted) return;
 
@@ -202,7 +215,10 @@ const ModuloNvoExpedientes = () => {
             if ((exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') && 
                 (exp.frecuenciaPago || exp.frecuencia_pago)) {
               try {
-                const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`);
+                const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`, {
+                  headers: getAuthHeaders()
+                });
+                
                 if (recibosResponse.ok) {
                   const recibosData = await recibosResponse.json();
                   const recibosArray = recibosData?.data || recibosData || [];
@@ -273,8 +289,16 @@ const ModuloNvoExpedientes = () => {
   const recargarClientes = useCallback(async () => {
     try {
       console.log('🔄 Recargando clientes tras evento...');
-      const resClientes = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`);
-      const clientesData = await resClientes.json();
+      const resClientes = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`, {
+        headers: getAuthHeaders()
+      });
+      if (!resClientes.ok) {
+        setClientes([]);
+        setClientesMap({});
+        return;
+      }
+      const clientesDataRaw = await resClientes.json();
+      const clientesData = Array.isArray(clientesDataRaw) ? clientesDataRaw : [];
       const mapa = {};
       clientesData.forEach(c => { mapa[c.id] = c; });
       setClientes(clientesData);
@@ -304,8 +328,15 @@ const ModuloNvoExpedientes = () => {
 
   const recargarExpedientes = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`);
-      const data = await response.json();
+      const response = await fetch(`${API_URL}/api/expedientes?t=${Date.now()}`, {
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) {
+        setExpedientes([]);
+        return;
+      }
+      const dataRaw = await response.json();
+      const data = Array.isArray(dataRaw) ? dataRaw : [];
       
       // 🔥 CARGAR SOLO EL PRIMER RECIBO PENDIENTE DE CADA EXPEDIENTE
       const datosConPrimerRecibo = await Promise.all(
@@ -314,7 +345,9 @@ const ModuloNvoExpedientes = () => {
           if ((exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') && 
               (exp.frecuenciaPago || exp.frecuencia_pago)) {
             try {
-              const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`);
+              const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`, {
+                headers: getAuthHeaders()
+              });
               if (recibosResponse.ok) {
                 const recibosData = await recibosResponse.json();
                 const recibosArray = recibosData?.data || recibosData || [];

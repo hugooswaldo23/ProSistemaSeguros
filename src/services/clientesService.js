@@ -1,9 +1,19 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+};
+
 // Obtener todos los clientes
 export const obtenerClientes = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/clientes`);
+    const response = await fetch(`${API_URL}/api/clientes`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status}`);
     }
@@ -18,7 +28,9 @@ export const obtenerClientes = async () => {
 // Obtener cliente por ID
 export const obtenerClientePorId = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/clientes/${id}`);
+    const response = await fetch(`${API_URL}/api/clientes/${id}`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error('Cliente no encontrado');
@@ -38,9 +50,7 @@ export const crearCliente = async (cliente) => {
   try {
     const response = await fetch(`${API_URL}/api/clientes`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(cliente),
     });
 
@@ -62,9 +72,7 @@ export const actualizarCliente = async (id, cliente) => {
   try {
     const response = await fetch(`${API_URL}/api/clientes/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(cliente),
     });
 
@@ -86,6 +94,7 @@ export const eliminarCliente = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/clientes/${id}`, {
       method: 'DELETE',
+      headers: getAuthHeaders()
     });
 
     if (!response.ok) {

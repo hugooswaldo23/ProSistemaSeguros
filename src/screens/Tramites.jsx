@@ -7,6 +7,14 @@ import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 import { useAseguradoras } from '../hooks/useAseguradoras';  // 🆕 Hook para aseguradoras
 import { obtenerTiposTramitesActivos } from '../services/tiposTramitesService';  // 🆕 Servicio para tipos de trámite
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Hook personalizado para paginación
 const usePaginacion = (items, itemsPorPagina = 10) => {
   const [paginaActual, setPaginaActual] = useState(1);
@@ -1202,8 +1210,9 @@ export const Tramites = () => {
   // 🆕 Estado para el conteo de pólizas por cliente
   const [todosExpedientes, setTodosExpedientes] = useState([]);
   const conteoPolizasPorCliente = useMemo(() => {
+    const listaExpedientes = Array.isArray(todosExpedientes) ? todosExpedientes : [];
     const conteo = {};
-    todosExpedientes.forEach(exp => {
+    listaExpedientes.forEach(exp => {
       const clienteId = exp.cliente_id;
       if (clienteId) {
         conteo[clienteId] = (conteo[clienteId] || 0) + 1;
@@ -1242,11 +1251,18 @@ export const Tramites = () => {
   useEffect(() => {
     const cargarTodosExpedientes = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/expedientes`);
+        const res = await fetch(`${API_URL}/api/expedientes`, {
+          headers: getAuthHeaders()
+        });
+        if (!res.ok) {
+          setTodosExpedientes([]);
+          return;
+        }
         const data = await res.json();
-        setTodosExpedientes(data);
+        setTodosExpedientes(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error('Error cargando expedientes:', e);
+        setTodosExpedientes([]);
       }
     };
     cargarTodosExpedientes();
@@ -1298,7 +1314,7 @@ export const Tramites = () => {
 
   // Cargar trámites desde el backend al montar el componente
   useEffect(() => {
-  fetch(`${API_URL}/api/tramites`)
+  fetch(`${API_URL}/api/tramites`, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setTramites(transformarTramites(data)))
       .catch(err => console.error('Error al cargar trámites:', err));
@@ -1306,7 +1322,7 @@ export const Tramites = () => {
 
   // Refrescar trámites tras operaciones CRUD
   const cargarTramites = useCallback(() => {
-  fetch(`${API_URL}/api/tramites`)
+  fetch(`${API_URL}/api/tramites`, { headers: getAuthHeaders() })
       .then(res => res.json())
       .then(data => setTramites(transformarTramites(data)))
       .catch(err => console.error('Error al cargar trámites:', err));

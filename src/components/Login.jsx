@@ -5,32 +5,29 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 const Login = ({ onLogin }) => {
   const [username, setUsername] = useState('');
+  const [promotoria, setPromotoria] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // 🚨 BYPASS TEMPORAL - SOLO DESARROLLO
-    // Descomentar estas líneas para entrar sin autenticación
-    
-    localStorage.setItem('ss_token', 'bypass-token-dev');
-    onLogin && onLogin({ username: 'admin', token: 'bypass-token-dev' });
-    return;
-    
-    /*
-    if (!username || !password) {
-      setError('Por favor ingresa usuario y contraseña');
+    const usernameTrim = username.trim();
+    const promotoriaTrim = promotoria.trim().replace(/\s+/g, ' ');
+
+    if (!usernameTrim || !password || !promotoriaTrim) {
+      setError('Por favor ingresa usuario, promotoría y contraseña');
       return;
     }
+
     setError('');
+    
     try {
-  const response = await fetch(`${API_URL}/api/auth/login`, {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ usuario: username, contrasena: password })
+        body: JSON.stringify({ usuario: usernameTrim, contrasena: password, promotoria: promotoriaTrim })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -38,11 +35,16 @@ const Login = ({ onLogin }) => {
         return;
       }
       localStorage.setItem('ss_token', data.token);
-      onLogin && onLogin({ username, token: data.token });
+      localStorage.setItem('ss_user', JSON.stringify({
+        username: data.usuario || usernameTrim,
+        nombre: data.nombre || usernameTrim,
+        promotoria: data.promotoria || promotoriaTrim,
+        promotoria_id: data.promotoria_id || null
+      }));
+      onLogin && onLogin({ username: usernameTrim, promotoria: data.promotoria || promotoriaTrim, token: data.token });
     } catch (err) {
       setError('Error de conexión con el servidor');
     }
-    */
   };
 
   return (
@@ -61,6 +63,16 @@ const Login = ({ onLogin }) => {
           />
         </div>
         <h2>Iniciar Sesión</h2>
+        <div className="ss-login-input-group">
+          <label htmlFor="promotoria">Promotoría</label>
+          <input
+            type="text"
+            id="promotoria"
+            value={promotoria}
+            onChange={(e) => setPromotoria(e.target.value)}
+            autoComplete="organization"
+          />
+        </div>
         <div className="ss-login-input-group">
           <label htmlFor="username">Usuario</label>
           <input

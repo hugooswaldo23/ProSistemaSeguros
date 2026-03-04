@@ -46,6 +46,7 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('ss_token');
+    localStorage.removeItem('ss_user');
     setIsAuthenticated(false);
   };
 

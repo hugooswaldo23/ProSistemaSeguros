@@ -78,6 +78,11 @@ const CalendarioAgenda = () => {
 
   const [citas, setCitas] = useState([]);
   const [cargando, setCargando] = useState(false);
+
+  const getAuthHeaders = useCallback(() => {
+    const token = localStorage.getItem('ss_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
   const [modalAbierto, setModalAbierto] = useState(false);
   const [citaActual, setCitaActual] = useState({ ...CITA_VACIA });
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -118,14 +123,18 @@ const CalendarioAgenda = () => {
 
   const cargarClientes = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`);
+      const res = await fetch(`${API_URL}/api/clientes?t=${Date.now()}`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) { const data = await res.json(); setClientes(Array.isArray(data) ? data : []); }
     } catch { /* silencioso */ }
-  }, []);
+  }, [getAuthHeaders]);
 
   const cargarEquipo = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/equipoDeTrabajo?t=${Date.now()}`);
+      const res = await fetch(`${API_URL}/api/equipoDeTrabajo?t=${Date.now()}`, {
+        headers: getAuthHeaders()
+      });
       if (res.ok) {
         const data = await res.json();
         const miembros = (Array.isArray(data) ? data : []).filter(m => m.activo !== false).map(m => ({
@@ -136,7 +145,7 @@ const CalendarioAgenda = () => {
         setEquipo(miembros);
       }
     } catch { /* silencioso */ }
-  }, []);
+    }, [getAuthHeaders]);
 
   // Obtener nombre del usuario actual
   const usuarioActualNombre = useMemo(() => {
