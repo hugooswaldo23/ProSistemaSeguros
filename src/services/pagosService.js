@@ -115,9 +115,14 @@ export async function aplicarPago(expediente, datosPago) {
     };
 
     // 5. Actualizar expediente en BD
+    const token = localStorage.getItem('ss_token');
+
     const response = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
       body: JSON.stringify(datosActualizacion)
     });
 
@@ -128,7 +133,9 @@ export async function aplicarPago(expediente, datosPago) {
     // 6. Obtener TODOS los recibos del expediente para tener montos exactos
     let recibos = [];
     try {
-      const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`);
+      const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
       
       if (responseRecibos.ok) {
         const recibosData = await responseRecibos.json();

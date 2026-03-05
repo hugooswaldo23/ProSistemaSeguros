@@ -86,8 +86,10 @@ export const useExpedientes = () => {
   // Eliminar expediente
   const eliminarExpediente = useCallback(async (id) => {
     try {
+      const token = localStorage.getItem('ss_token');
       const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
       });
       
       if (!response.ok) {

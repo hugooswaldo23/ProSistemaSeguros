@@ -2790,7 +2790,9 @@ const ModuloNvoExpedientes = () => {
   const editarExpediente = useCallback(async (expediente) => {
     try {
       console.log('🔍 Editando expediente:', expediente.id);
-      const response = await fetch(`${API_URL}/api/expedientes/${expediente.id}`);
+      const response = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+        headers: getAuthHeaders()
+      });
       if (!response.ok) throw new Error('Error al cargar expediente');
       
       const data = await response.json();
@@ -2803,7 +2805,9 @@ const ModuloNvoExpedientes = () => {
       if (expedienteCompleto.cliente_id) {
         try {
           console.log('🔍 Consultando cliente fresh desde API:', expedienteCompleto.cliente_id);
-          const clienteResponse = await fetch(`${API_URL}/api/clientes/${expedienteCompleto.cliente_id}`);
+          const clienteResponse = await fetch(`${API_URL}/api/clientes/${expedienteCompleto.cliente_id}`, {
+            headers: getAuthHeaders()
+          });
           if (clienteResponse.ok) {
             const clienteData = await clienteResponse.json();
             clienteEncontrado = clienteData?.data ?? clienteData;
