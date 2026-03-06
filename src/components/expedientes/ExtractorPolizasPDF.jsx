@@ -284,7 +284,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
           const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
           
-          const deteccion = detectarAseguradoraYProducto(textoPagina1);
+          const deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
           const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
           
           if (moduloExtractor && moduloExtractor.extraer) {
