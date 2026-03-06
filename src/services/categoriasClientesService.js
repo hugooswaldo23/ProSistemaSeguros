@@ -5,10 +5,18 @@
 
 import API_URL from '../constants/apiUrl.js';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Obtener todas las categorías de clientes
 export const obtenerCategoriasClientes = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener categorías de clientes');
@@ -33,7 +41,7 @@ export const obtenerCategoriasClientes = async () => {
 // Obtener solo categorías activas
 export const obtenerCategoriasClientesActivas = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes/activas`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes/activas`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener categorías activas');
@@ -50,7 +58,7 @@ export const obtenerCategoriasClientesActivas = async () => {
 // Obtener una categoría por ID
 export const obtenerCategoriaClientePorId = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes/${id}`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes/${id}`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener categoría de cliente');
@@ -67,7 +75,7 @@ export const obtenerCategoriaClientePorId = async (id) => {
 // Obtener una categoría por código
 export const obtenerCategoriaClientePorCodigo = async (codigo) => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes/codigo/${codigo}`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes/codigo/${codigo}`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener categoría por código');
@@ -86,9 +94,7 @@ export const crearCategoriaCliente = async (categoria) => {
   try {
     const response = await fetch(`${API_URL}/api/categorias-clientes`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(categoria)
     });
     
@@ -110,9 +116,7 @@ export const actualizarCategoriaCliente = async (id, categoria) => {
   try {
     const response = await fetch(`${API_URL}/api/categorias-clientes/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(categoria)
     });
     
@@ -133,7 +137,8 @@ export const actualizarCategoriaCliente = async (id, categoria) => {
 export const eliminarCategoriaCliente = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/categorias-clientes/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
     
     if (!response.ok) {
@@ -153,9 +158,7 @@ export const cambiarEstadoCategoriaCliente = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/categorias-clientes/${id}/toggle-activo`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers: getAuthHeaders(true)
     });
     
     if (!response.ok) {
@@ -174,7 +177,7 @@ export const cambiarEstadoCategoriaCliente = async (id) => {
 // Obtener estadísticas de categorías
 export const obtenerEstadisticasCategorias = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes/estadisticas`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes/estadisticas`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener estadísticas');

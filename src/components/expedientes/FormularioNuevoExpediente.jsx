@@ -18,6 +18,14 @@ import ExtractorPolizasPDF from './ExtractorPolizasPDF';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 const FormularioNuevoExpediente = ({ 
   // Props heredadas del padre
   setVistaActual,
@@ -83,7 +91,9 @@ const FormularioNuevoExpediente = ({
       
       if (datosExtraidos.cliente_id) {
         try {
-          const response = await fetch(`${API_URL}/api/clientes`);
+          const response = await fetch(`${API_URL}/api/clientes`, {
+            headers: getAuthHeaders()
+          });
           const clientes = await response.json();
           clienteSeleccionadoFinal = clientes.find(c => c.id === datosExtraidos.cliente_id);
           

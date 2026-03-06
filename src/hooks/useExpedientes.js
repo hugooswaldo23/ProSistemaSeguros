@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 /**
  * Hook personalizado para manejo de expedientes
  * Encapsula la lógica de carga, actualización y operaciones CRUD de expedientes
@@ -17,7 +25,9 @@ export const useExpedientes = () => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`${API_URL}/api/expedientes`);
+      const response = await fetch(`${API_URL}/api/expedientes`, {
+        headers: getAuthHeaders()
+      });
       if (!response.ok) {
         throw new Error('Error al cargar expedientes');
       }
@@ -86,10 +96,9 @@ export const useExpedientes = () => {
   // Eliminar expediente
   const eliminarExpediente = useCallback(async (id) => {
     try {
-      const token = localStorage.getItem('ss_token');
       const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
         method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers: getAuthHeaders()
       });
       
       if (!response.ok) {
@@ -144,7 +153,9 @@ export const useClientes = () => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`${API_URL}/api/clientes`);
+      const response = await fetch(`${API_URL}/api/clientes`, {
+        headers: getAuthHeaders()
+      });
       if (!response.ok) {
         throw new Error('Error al cargar clientes');
       }

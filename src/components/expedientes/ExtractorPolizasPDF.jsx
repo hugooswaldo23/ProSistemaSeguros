@@ -20,6 +20,14 @@ import * as estatusPagosUtils from '../../utils/estatusPagos';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Configurar worker de PDF.js
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/build/pdf.worker.min.mjs';
 
@@ -174,7 +182,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Buscar cliente por RFC, CURP o nombre en la base de datos
       const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
         try {
-          const response = await fetch(`${API_URL}/api/clientes`);
+          const response = await fetch(`${API_URL}/api/clientes`, {
+            headers: getAuthHeaders()
+          });
           if (!response.ok) {
             console.error('❌ Error al obtener clientes:', response.status);
             return null;
@@ -243,7 +253,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         const response = await fetch(`${API_URL}/api/expedientes/extract-pdf-ia`, {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json'
+            ...getAuthHeaders(true)
           },
           body: JSON.stringify({
             textoCompleto,

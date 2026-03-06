@@ -21,6 +21,14 @@
 
 import { API_URL } from '../constants/apiUrl';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 /**
  * Tipos de eventos predefinidos para mantener consistencia
  */
@@ -260,9 +268,7 @@ export const registrarEvento = async (datos) => {
     
     const response = await fetch(`${API_URL}/api/historial-expedientes`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(payload)
     });
     
@@ -495,7 +501,9 @@ export const obtenerHistorialExpediente = async (expedienteId) => {
   try {
     console.log('🔍 Obteniendo historial del expediente:', expedienteId);
     
-    const response = await fetch(`${API_URL}/api/historial-expedientes/expediente/${expedienteId}`);
+    const response = await fetch(`${API_URL}/api/historial-expedientes/expediente/${expedienteId}`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status}`);
@@ -523,7 +531,9 @@ export const obtenerHistorialCliente = async (clienteId) => {
   try {
     console.log('🔍 Obteniendo historial del cliente:', clienteId);
     
-    const response = await fetch(`${API_URL}/api/historial-expedientes/cliente/${clienteId}`);
+    const response = await fetch(`${API_URL}/api/historial-expedientes/cliente/${clienteId}`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status}`);
@@ -544,7 +554,9 @@ export const obtenerHistorialCliente = async (clienteId) => {
  */
 export const obtenerEventosPorTipo = async (expedienteId, tipoEvento) => {
   try {
-    const response = await fetch(`${API_URL}/api/historial-expedientes/expediente/${expedienteId}?tipo=${tipoEvento}`);
+    const response = await fetch(`${API_URL}/api/historial-expedientes/expediente/${expedienteId}?tipo=${tipoEvento}`, {
+      headers: getAuthHeaders()
+    });
     
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status}`);

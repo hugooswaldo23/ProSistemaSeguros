@@ -1417,7 +1417,7 @@ export const Tramites = () => {
       // Actualizar
   fetch(`${API_URL}/api/tramites/${formularioTramite.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
         body: JSON.stringify(payloadAPI)
       })
         .then(async (res) => {
@@ -1438,7 +1438,7 @@ export const Tramites = () => {
       // Crear
   fetch(`${API_URL}/api/tramites`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
         body: JSON.stringify(payloadAPI)
       })
         .then(async (res) => {
@@ -1469,7 +1469,8 @@ export const Tramites = () => {
   const eliminarTramite = useCallback((id) => {
     if (confirm('¿Está seguro de eliminar este trámite?')) {
   fetch(`${API_URL}/api/tramites/${id}`, {
-        method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
       })
         .then(() => cargarTramites())
         .catch(err => alert('Error al eliminar trámite'));

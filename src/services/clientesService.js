@@ -112,7 +112,9 @@ export const eliminarCliente = async (id) => {
 // Obtener categorías de clientes
 export const obtenerCategoriasClientes = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/categorias-clientes`);
+    const response = await fetch(`${API_URL}/api/categorias-clientes`, {
+      headers: getAuthHeaders()
+    });
     if (!response.ok) {
       throw new Error(`Error HTTP: ${response.status}`);
     }
@@ -138,9 +140,7 @@ export const crearCategoriaCliente = async (categoria) => {
   try {
     const response = await fetch(`${API_URL}/api/categorias-clientes`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(categoria),
     });
 

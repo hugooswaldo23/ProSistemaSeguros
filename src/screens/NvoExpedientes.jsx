@@ -417,7 +417,9 @@ const ModuloNvoExpedientes = () => {
         // Los recibos ya pagados conservan su estatus "Pagado"
         try {
           // Obtener recibos del expediente
-          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`, {
+            headers: getAuthHeaders()
+          });
           if (resRecibos.ok) {
             const dataRecibos = await resRecibos.json();
             const recibos = Array.isArray(dataRecibos) ? dataRecibos : (dataRecibos?.data || []);
@@ -432,7 +434,7 @@ const ModuloNvoExpedientes = () => {
             for (const recibo of recibosPendientes) {
               await fetch(`${API_URL}/api/recibos/${expedienteId}/${recibo.numero_recibo}/pago`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(true),
                 body: JSON.stringify({
                   estatus: 'Cancelado',
                   fecha_pago_real: null,
@@ -458,7 +460,7 @@ const ModuloNvoExpedientes = () => {
 
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify(datosActualizacion)
       });
 
@@ -777,7 +779,8 @@ const ModuloNvoExpedientes = () => {
       console.log('📝 Motivo:', motivoEliminacion || 'No especificado');
       
       const response = await fetch(`${API_URL}/api/recibos/${expedienteParaEliminarPago.id}/${pagoParaEliminar.numero}/pago`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       
       if (!response.ok) {
@@ -988,7 +991,7 @@ const ModuloNvoExpedientes = () => {
       // Actualizar expediente con nueva etapa
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteAnteriorParaRenovacion.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           etapa_activa: 'En Cotización - Renovación'
         })
@@ -1057,7 +1060,7 @@ const ModuloNvoExpedientes = () => {
       // Actualizar expediente con nueva etapa
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           etapa_activa: 'En Cotización - Renovación'
         })
@@ -1135,7 +1138,7 @@ const ModuloNvoExpedientes = () => {
       if (etapaActual === 'En Cotización - Renovación') {
         const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify({
             etapa_activa: 'Cotización Lista'
           })
@@ -1225,7 +1228,7 @@ const ModuloNvoExpedientes = () => {
       if (etapaActual === 'Cotización Lista') {
         await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify({ etapa_activa: 'Cotización Enviada' })
         });
         await recargarExpedientes();
@@ -1294,7 +1297,7 @@ const ModuloNvoExpedientes = () => {
       if (etapaActual === 'Cotización Lista') {
         await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify({ etapa_activa: 'Cotización Enviada' })
         });
         await recargarExpedientes();
@@ -1333,7 +1336,7 @@ const ModuloNvoExpedientes = () => {
       // Actualizar expediente con nueva etapa
       const response = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           etapa_activa: 'Por Emitir - Renovación'
         })
@@ -1442,7 +1445,7 @@ const ModuloNvoExpedientes = () => {
       // 1️⃣ CREAR el nuevo expediente
       const responseNuevo = await fetch(`${API_URL}/api/expedientes`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify(nuevoExpediente)
       });
       
@@ -1457,7 +1460,7 @@ const ModuloNvoExpedientes = () => {
       // 2️⃣ ACTUALIZAR el expediente anterior a "Renovada"
       const responseAnterior = await fetch(`${API_URL}/api/expedientes/${expedienteParaRenovacion.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(true),
         body: JSON.stringify({
           etapa_activa: 'Renovada',
           renovada_por: nuevoExpedienteCreado.id // Referencia bidireccional
@@ -1580,7 +1583,7 @@ const ModuloNvoExpedientes = () => {
 
         const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify(datosActualizacion)
         });
 
@@ -2200,7 +2203,7 @@ const ModuloNvoExpedientes = () => {
       if (modoEdicion) {
         response = await fetch(`${API_URL}/api/expedientes/${datos.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify(datos)
         });
       } else {
@@ -2219,7 +2222,7 @@ const ModuloNvoExpedientes = () => {
         
         response = await fetch(`${API_URL}/api/expedientes`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify(datos)
         });
       }
@@ -2268,7 +2271,9 @@ const ModuloNvoExpedientes = () => {
       
       if (!modoEdicion && !recibosParaLog && (datos.tipo_pago === 'Fraccionado' || datos.tipo_pago === 'Anual')) {
         try {
-          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`, {
+            headers: getAuthHeaders()
+          });
           if (resRecibos.ok) {
             const dataRecibos = await resRecibos.json();
             recibosParaLog = dataRecibos.data || dataRecibos || null;
@@ -2288,7 +2293,9 @@ const ModuloNvoExpedientes = () => {
       // 📋 Si es edición y se regeneraron recibos, obtener los nuevos para comparar
       if (modoEdicion && debeRegenerarRecibos) {
         try {
-          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`);
+          const resRecibos = await fetch(`${API_URL}/api/recibos/${expedienteId}`, {
+            headers: getAuthHeaders()
+          });
           if (resRecibos.ok) {
             const dataRecibos = await resRecibos.json();
             recibosParaLog = dataRecibos.data || dataRecibos || null;
@@ -2466,7 +2473,9 @@ const ModuloNvoExpedientes = () => {
           let agenteInfo = null;
           if (datos.agente_id) {
             try {
-              const agenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${datos.agente_id}`);
+              const agenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${datos.agente_id}`, {
+                headers: getAuthHeaders()
+              });
               if (agenteResponse.ok) {
                 const agenteData = await agenteResponse.json();
                 const agente = agenteData.data || agenteData;
@@ -2494,7 +2503,9 @@ const ModuloNvoExpedientes = () => {
           
           if (esIdValido) {
             try {
-              const subAgenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${subAgenteId}`);
+              const subAgenteResponse = await fetch(`${API_URL}/api/equipo-trabajo/${subAgenteId}`, {
+                headers: getAuthHeaders()
+              });
               if (subAgenteResponse.ok) {
                 const subAgenteData = await subAgenteResponse.json();
                 const subAgente = subAgenteData.data || subAgenteData;
@@ -2727,7 +2738,7 @@ const ModuloNvoExpedientes = () => {
           // Actualizar etapa del expediente anterior
           await fetch(`${API_URL}/api/expedientes/${expedienteAnteriorParaRenovacion.id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(true),
             body: JSON.stringify({
               etapa_activa: 'Renovada',
               renovada_por: resultado.data?.id || resultado.id
@@ -3029,7 +3040,7 @@ const ModuloNvoExpedientes = () => {
           try {
             const respRevert = await fetch(`${API_URL}/api/expedientes/${anterior.id}`, {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
+              headers: getAuthHeaders(true),
               body: JSON.stringify({
                 etapa_activa: nuevaEtapa,
                 renovada_por: null
@@ -3046,7 +3057,8 @@ const ModuloNvoExpedientes = () => {
       }
 
       const response = await fetch(`${API_URL}/api/expedientes/${id}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
 
       if (!response.ok) throw new Error('Error al eliminar');
@@ -3069,7 +3081,9 @@ const ModuloNvoExpedientes = () => {
     
     try {
       console.log('🔍 [VER] Cargando recibos con GET /api/recibos/:id...');
-      const recibosResponse = await fetch(`${API_URL}/api/recibos/${expediente.id}`);
+      const recibosResponse = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
+        headers: getAuthHeaders()
+      });
       if (recibosResponse.ok) {
         const recibosData = await recibosResponse.json();
         const recibosArray = recibosData?.data || recibosData || [];
@@ -3091,7 +3105,9 @@ const ModuloNvoExpedientes = () => {
     setHistorialExpediente([]);
     
     try {
-      const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`);
+      const response = await fetch(`${API_URL}/api/historial-expedientes/${expediente.id}`, {
+        headers: getAuthHeaders()
+      });
       if (response.ok) {
         const data = await response.json();
         const historial = data?.data || data || [];

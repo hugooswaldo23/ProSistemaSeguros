@@ -16,6 +16,14 @@ import toast from 'react-hot-toast';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 export function usePDFWorkflow({ agentes, aseguradoras, tiposProductos }) {
   const [estado, setEstado] = useState('idle'); // idle, processing, validating-client, validating-agent, complete, error
   const [datosExtraidos, setDatosExtraidos] = useState(null);
@@ -29,7 +37,9 @@ export function usePDFWorkflow({ agentes, aseguradoras, tiposProductos }) {
    */
   const buscarClienteExistente = useCallback(async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
     try {
-      const response = await fetch(`${API_URL}/api/clientes`);
+      const response = await fetch(`${API_URL}/api/clientes`, {
+        headers: getAuthHeaders()
+      });
       if (!response.ok) return null;
       
       const clientes = await response.json();

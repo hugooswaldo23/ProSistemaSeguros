@@ -1192,7 +1192,7 @@ export default function Aseguradoras() {
       try {
         const res = await fetch(`${API_URL}/api/aseguradoras/${formularioAseguradora.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error('Error al actualizar');
@@ -1207,7 +1207,7 @@ export default function Aseguradoras() {
       try {
         const res = await fetch(`${API_URL}/api/aseguradoras`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(true),
           body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error('Error al crear');

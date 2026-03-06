@@ -9,6 +9,11 @@
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('ss_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 /**
  * Subir PDF de póliza al servidor (S3)
  * @param {number} expedienteId - ID del expediente
@@ -43,6 +48,7 @@ export async function subirPDFPoliza(expedienteId, file) {
 
     const response = await fetch(url, {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData
     });
 
@@ -87,7 +93,8 @@ export async function obtenerURLFirmadaPDF(expedienteId, expiration = 3600) {
     const response = await fetch(
   `${API_URL}/api/expedientes/${expedienteId}/pdf-url?expiration=${expiration}`,
       {
-        method: 'GET'
+        method: 'GET',
+        headers: getAuthHeaders()
       }
     );
 
@@ -112,7 +119,8 @@ export async function obtenerURLFirmadaPDF(expedienteId, expiration = 3600) {
 export async function eliminarPDFPoliza(expedienteId) {
   try {
   const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
 
     if (!response.ok) {
@@ -200,6 +208,7 @@ export async function subirCotizacionPDF(expedienteId, file) {
 
     const response = await fetch(url, {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData
     });
 
@@ -242,7 +251,7 @@ export async function obtenerCotizaciones(expedienteId) {
   try {
     const response = await fetch(
       `${API_URL}/api/expedientes/${expedienteId}/documentos?tipo=cotizacion`,
-      { method: 'GET' }
+      { method: 'GET', headers: getAuthHeaders() }
     );
 
     if (!response.ok) {
@@ -301,6 +310,7 @@ export async function subirReciboPago(expedienteId, numeroRecibo, file) {
 
     const response = await fetch(url, {
       method: 'POST',
+      headers: getAuthHeaders(),
       body: formData
     });
 
@@ -337,7 +347,7 @@ export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiratio
   try {
     const response = await fetch(
       `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-pago-url?expiration=${expiration}`,
-      { method: 'GET' }
+      { method: 'GET', headers: getAuthHeaders() }
     );
 
     if (!response.ok) {
@@ -364,7 +374,7 @@ export async function obtenerURLCotizacion(expedienteId, documentoId, expiration
   try {
     const response = await fetch(
       `${API_URL}/api/expedientes/${expedienteId}/documentos/${documentoId}/url?expiration=${expiration}`,
-      { method: 'GET' }
+      { method: 'GET', headers: getAuthHeaders() }
     );
 
     if (!response.ok) {

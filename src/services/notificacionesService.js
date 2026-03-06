@@ -9,6 +9,14 @@
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 /**
  * Tipos de notificación soportados
  */
@@ -42,9 +50,7 @@ export async function registrarNotificacion(datos) {
   try {
     const response = await fetch(`${API_URL}/api/notificaciones`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(datos)
     });
 
@@ -68,7 +74,9 @@ export async function registrarNotificacion(datos) {
  */
 export async function obtenerNotificacionesPorExpediente(expedienteId) {
   try {
-    const response = await fetch(`${API_URL}/api/notificaciones/expediente/${expedienteId}`);
+    const response = await fetch(`${API_URL}/api/notificaciones/expediente/${expedienteId}`, {
+      headers: getAuthHeaders()
+    });
 
     if (!response.ok) {
       const error = await response.json();
@@ -90,7 +98,9 @@ export async function obtenerNotificacionesPorExpediente(expedienteId) {
  */
 export async function obtenerNotificacionesPorCliente(clienteId) {
   try {
-    const response = await fetch(`${API_URL}/api/notificaciones/cliente/${clienteId}`);
+    const response = await fetch(`${API_URL}/api/notificaciones/cliente/${clienteId}`, {
+      headers: getAuthHeaders()
+    });
 
     if (!response.ok) {
       const error = await response.json();

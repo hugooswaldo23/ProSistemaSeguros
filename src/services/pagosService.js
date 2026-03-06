@@ -12,6 +12,14 @@ import { API_URL } from '../constants/apiUrl';
 import * as historialService from './historialExpedienteService';
 import { CONSTANTS } from '../utils/expedientesConstants';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 /**
  * Aplicar un pago a un expediente
  * @param {Object} expediente - Expediente al que se aplicará el pago
@@ -74,7 +82,8 @@ export async function aplicarPago(expediente, datosPago) {
       // Calcular fecha del próximo vencimiento
       try {
         const responseProximoPago = await fetch(
-          `${API_URL}/api/expedientes/${expediente.id}/proximo-pago`
+          `${API_URL}/api/expedientes/${expediente.id}/proximo-pago`,
+          { headers: getAuthHeaders() }
         );
         
         if (responseProximoPago.ok) {
@@ -115,14 +124,9 @@ export async function aplicarPago(expediente, datosPago) {
     };
 
     // 5. Actualizar expediente en BD
-    const token = localStorage.getItem('ss_token');
-
     const response = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(datosActualizacion)
     });
 
@@ -134,7 +138,7 @@ export async function aplicarPago(expediente, datosPago) {
     let recibos = [];
     try {
       const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers: getAuthHeaders()
       });
       
       if (responseRecibos.ok) {

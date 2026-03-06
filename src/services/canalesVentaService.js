@@ -5,10 +5,18 @@
 
 import API_URL from '../constants/apiUrl.js';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Obtener todos los canales de venta
 export const obtenerCanalesVenta = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/canalesVenta`);
+    const response = await fetch(`${API_URL}/api/canalesVenta`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener canales de venta');
@@ -39,7 +47,7 @@ export const obtenerCanalesVenta = async () => {
 // Obtener solo canales activos
 export const obtenerCanalesVentaActivos = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/canalesVenta/activos`);
+    const response = await fetch(`${API_URL}/api/canalesVenta/activos`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener canales de venta activos');
@@ -56,7 +64,7 @@ export const obtenerCanalesVentaActivos = async () => {
 // Obtener un canal de venta por ID
 export const obtenerCanalVentaPorId = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/canalesVenta/${id}`);
+    const response = await fetch(`${API_URL}/api/canalesVenta/${id}`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener canal de venta');
@@ -75,9 +83,7 @@ export const crearCanalVenta = async (canalVenta) => {
   try {
     const response = await fetch(`${API_URL}/api/canalesVenta`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(canalVenta)
     });
     
@@ -99,9 +105,7 @@ export const actualizarCanalVenta = async (id, canalVenta) => {
   try {
     const response = await fetch(`${API_URL}/api/canalesVenta/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(canalVenta)
     });
     
@@ -123,9 +127,7 @@ export const eliminarCanalVenta = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/canalesVenta/${id}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers: getAuthHeaders(true)
     });
     
     if (!response.ok) {
@@ -146,9 +148,7 @@ export const cambiarEstadoCanalVenta = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/canalesVenta/${id}/toggle-activo`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers: getAuthHeaders(true)
     });
     
     if (!response.ok) {

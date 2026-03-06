@@ -1,6 +1,14 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const LOCAL_KEY = 'prosistema_citas';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // ── Helpers de localStorage (fallback mientras no exista API) ──
 const getLocal = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
 const setLocal = (citas) => localStorage.setItem(LOCAL_KEY, JSON.stringify(citas));
@@ -14,7 +22,9 @@ const normalizarCita = (c) => ({
 // Obtener todas las citas
 export const obtenerCitas = async () => {
   try {
-    const res = await fetch(`${API_URL}/api/citas?t=${Date.now()}`);
+    const res = await fetch(`${API_URL}/api/citas?t=${Date.now()}`, {
+      headers: getAuthHeaders()
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     const citas = (Array.isArray(data) ? data : []).map(normalizarCita);
@@ -37,7 +47,7 @@ export const crearCita = async (cita) => {
   try {
     const res = await fetch(`${API_URL}/api/citas`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(citaData)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -62,7 +72,7 @@ export const actualizarCita = async (id, cita) => {
   try {
     const res = await fetch(`${API_URL}/api/citas/${id}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(citaData)
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -81,7 +91,10 @@ export const actualizarCita = async (id, cita) => {
 // Eliminar cita
 export const eliminarCita = async (id) => {
   try {
-    const res = await fetch(`${API_URL}/api/citas/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_URL}/api/citas/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return { success: true };
   } catch {

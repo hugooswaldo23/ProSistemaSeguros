@@ -18,6 +18,14 @@ import * as estatusPagosUtils from '../../utils/estatusPagos';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Función helper para convertir fecha ISO a formato yyyy-MM-dd
 const formatearFechaParaInput = (fecha) => {
   if (!fecha) return '';
@@ -1125,7 +1133,9 @@ const FormularioExpedienteBase = React.memo(({
                     
                     if (modoEdicion && formulario.id && nuevaFecha) {
                       try {
-                        const recibosResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}`);
+                        const recibosResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}`, {
+                          headers: getAuthHeaders()
+                        });
                         
                         if (recibosResponse.ok) {
                           const recibosData = await recibosResponse.json();
@@ -1137,7 +1147,7 @@ const FormularioExpedienteBase = React.memo(({
                             if (primerRecibo) {
                               await fetch(`${API_URL}/api/recibos/${formulario.id}/${primerRecibo.numero_recibo}/fecha-vencimiento`, {
                                 method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: getAuthHeaders(true),
                                 body: JSON.stringify({ fecha_vencimiento: nuevaFecha })
                               });
                             }

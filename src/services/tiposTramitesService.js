@@ -5,10 +5,18 @@
 
 import API_URL from '../constants/apiUrl.js';
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Obtener todos los tipos de trámites
 export const obtenerTiposTramites = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposTramites`);
+    const response = await fetch(`${API_URL}/api/tiposTramites`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener tipos de trámites');
@@ -33,7 +41,7 @@ export const obtenerTiposTramites = async () => {
 // Obtener solo trámites activos
 export const obtenerTiposTramitesActivos = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposTramites/activos`);
+    const response = await fetch(`${API_URL}/api/tiposTramites/activos`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener tipos de trámites activos');
@@ -50,7 +58,7 @@ export const obtenerTiposTramitesActivos = async () => {
 // Obtener un tipo de trámite por ID
 export const obtenerTipoTramitePorId = async (id) => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposTramites/${id}`);
+    const response = await fetch(`${API_URL}/api/tiposTramites/${id}`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener tipo de trámite');
@@ -67,7 +75,7 @@ export const obtenerTipoTramitePorId = async (id) => {
 // Obtener un tipo de trámite por código
 export const obtenerTipoTramitePorCodigo = async (codigo) => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposTramites/codigo/${codigo}`);
+    const response = await fetch(`${API_URL}/api/tiposTramites/codigo/${codigo}`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener tipo de trámite por código');
@@ -86,9 +94,7 @@ export const crearTipoTramite = async (tipoTramite) => {
   try {
     const response = await fetch(`${API_URL}/api/tiposTramites`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(tipoTramite)
     });
     
@@ -110,9 +116,7 @@ export const actualizarTipoTramite = async (id, tipoTramite) => {
   try {
     const response = await fetch(`${API_URL}/api/tiposTramites/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: getAuthHeaders(true),
       body: JSON.stringify(tipoTramite)
     });
     
@@ -133,7 +137,8 @@ export const actualizarTipoTramite = async (id, tipoTramite) => {
 export const eliminarTipoTramite = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/tiposTramites/${id}`, {
-      method: 'DELETE'
+      method: 'DELETE',
+      headers: getAuthHeaders()
     });
     
     if (!response.ok) {
@@ -153,9 +158,7 @@ export const cambiarEstadoTipoTramite = async (id) => {
   try {
     const response = await fetch(`${API_URL}/api/tiposTramites/${id}/toggle-activo`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers: getAuthHeaders(true)
     });
     
     if (!response.ok) {
@@ -174,7 +177,7 @@ export const cambiarEstadoTipoTramite = async (id) => {
 // Obtener estadísticas de tipos de trámites
 export const obtenerEstadisticasTiposTramites = async () => {
   try {
-    const response = await fetch(`${API_URL}/api/tiposTramites/estadisticas`);
+    const response = await fetch(`${API_URL}/api/tiposTramites/estadisticas`, { headers: getAuthHeaders() });
     
     if (!response.ok) {
       throw new Error('Error al obtener estadísticas');

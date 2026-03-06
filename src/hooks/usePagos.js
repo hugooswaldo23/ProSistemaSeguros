@@ -17,6 +17,14 @@ import { CONSTANTS } from '../utils/expedientesConstants';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_aplicando_pago, onPagoAplicado, cambiarEstadoExpediente }) {
   // Estados del modal de pagos
   const [mostrarModalPago, setMostrarModalPago] = useState(false);
@@ -81,6 +89,7 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
             `${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`,
             {
               method: 'POST',
+              headers: getAuthHeaders(),
               body: formData
             }
           );
@@ -124,7 +133,7 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
           `${API_URL}/api/recibos/${expedienteParaPago.id}/${numeroReciboPago}/pago`,
           {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(true),
             body: JSON.stringify({
               fecha_pago_real: fechaUltimoPago,
               comprobante_nombre: comprobantePago?.name || null,

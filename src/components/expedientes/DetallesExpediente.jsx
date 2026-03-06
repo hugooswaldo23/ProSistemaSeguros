@@ -19,6 +19,14 @@ import utils from '../../utils/expedientesUtils';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 const DetallesExpediente = React.memo(({ 
   expedienteSeleccionado,
   setExpedienteSeleccionado,
@@ -103,7 +111,9 @@ const DetallesExpediente = React.memo(({
     const cargarCliente = async () => {
       if (expedienteSeleccionado?.cliente_id) {
         try {
-          const response = await fetch(`${API_URL}/api/clientes`);
+          const response = await fetch(`${API_URL}/api/clientes`, {
+            headers: getAuthHeaders()
+          });
           const clientes = await response.json();
           const cliente = clientes.find(c => c.id === expedienteSeleccionado.cliente_id);
           setClienteInfo(cliente);
@@ -124,7 +134,9 @@ const DetallesExpediente = React.memo(({
     
     console.log('🔄 Recargando historial después de acción...');
     try {
-      const response = await fetch(`${API_URL}/api/historial-expedientes/${expedienteSeleccionado.id}?_t=${Date.now()}`);
+      const response = await fetch(`${API_URL}/api/historial-expedientes/${expedienteSeleccionado.id}?_t=${Date.now()}`, {
+        headers: getAuthHeaders()
+      });
       if (response.ok) {
         const data = await response.json();
         const historialRaw = data?.data || data || [];

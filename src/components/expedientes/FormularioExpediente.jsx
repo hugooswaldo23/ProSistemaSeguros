@@ -21,6 +21,14 @@ import * as estatusPagosUtils from '../../utils/estatusPagos';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+const getAuthHeaders = (includeJson = false) => {
+  const token = localStorage.getItem('ss_token');
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+};
+
 // Función helper para convertir fecha ISO a formato yyyy-MM-dd
 const formatearFechaParaInput = (fecha) => {
   if (!fecha) return '';
@@ -269,7 +277,9 @@ const Formulario = React.memo(({
         // Buscar el cliente en la base de datos usando el cliente_id
         
         try {
-          const response = await fetch(`${API_URL}/api/clientes`);
+          const response = await fetch(`${API_URL}/api/clientes`, {
+            headers: getAuthHeaders()
+          });
           const clientes = await response.json();
           clienteSeleccionadoFinal = clientes.find(c => c.id === datosExtraidos.cliente_id);
           
@@ -1636,7 +1646,9 @@ const Formulario = React.memo(({
                         });
                         
                         // Obtener el recibo pendiente actual
-                        const recibosResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}`);
+                        const recibosResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}`, {
+                          headers: getAuthHeaders()
+                        });
                         console.log('📡 [FECHA MANUAL] Respuesta de recibos:', recibosResponse.status);
                         
                         if (recibosResponse.ok) {
@@ -1667,7 +1679,7 @@ const Formulario = React.memo(({
                               // Actualizar directamente en la tabla recibos_pago
                               const updateResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}/fecha-vencimiento`, {
                                 method: 'PUT',
-                                headers: { 'Content-Type': 'application/json' },
+                                headers: getAuthHeaders(true),
                                 body: JSON.stringify({ 
                                   fecha_vencimiento: nuevaFecha
                                 })
@@ -1682,7 +1694,9 @@ const Formulario = React.memo(({
                                 // Verificar que se actualizó correctamente
                                 setTimeout(async () => {
                                   try {
-                                    const verificarResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}`);
+                                    const verificarResponse = await fetch(`${API_URL}/api/recibos/${formulario.id}/${reciboPendiente.numero_recibo}`, {
+                                      headers: getAuthHeaders()
+                                    });
                                     if (verificarResponse.ok) {
                                       const reciboVerificado = await verificarResponse.json();
                                       console.log('🔍 [FECHA MANUAL] Verificación del recibo:', reciboVerificado);
