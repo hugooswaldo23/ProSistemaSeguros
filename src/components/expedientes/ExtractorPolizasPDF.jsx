@@ -1719,41 +1719,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                     </div>
                   </div>
 
-                  {/* Extractor con IA (Claude) */}
-                  <div className="col-md-6 col-lg-5">
-                    <div 
-                      className="card h-100 border-warning cursor-pointer shadow-sm" 
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setMetodoExtraccion('ia');
-                        setEstado('esperando');
-                      }}
-                    >
-                      <div className="card-body text-center p-3">
-                        <div className="bg-warning text-dark rounded-circle d-inline-flex align-items-center justify-content-center mb-2" 
-                             style={{ width: '55px', height: '55px' }}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.57-3.25 3.92L12 10V8a2 2 0 1 0-2 2H8.08A4 4 0 0 1 12 2z"></path>
-                            <path d="M12 22a4 4 0 0 0 4-4c0-1.95-1.4-3.57-3.25-3.92L12 14v2a2 2 0 1 1-2-2H8.08A4 4 0 0 0 12 22z"></path>
-                            <path d="M2 12a4 4 0 0 1 4-4c1.95 0 3.57 1.4 3.92 3.25L10 12H8a2 2 0 1 0 2 2v1.92A4 4 0 0 1 2 12z"></path>
-                            <path d="M22 12a4 4 0 0 0-4-4c-1.95 0-3.57 1.4-3.92 3.25L14 12h2a2 2 0 1 1-2 2v1.92A4 4 0 0 0 22 12z"></path>
-                          </svg>
-                        </div>
-                        <h6 className="card-title mb-2">Extraer con IA</h6>
-                        <p className="card-text text-muted small mb-2">
-                          Extracción inteligente con IA para cualquier aseguradora.
-                        </p>
-                        <div className="d-flex justify-content-center gap-1 flex-wrap mb-2">
-                          <span className="badge bg-warning text-dark" style={{ fontSize: '0.65rem' }}>🤖 IA</span>
-                          <span className="badge bg-info" style={{ fontSize: '0.65rem' }}>🌐 Universal</span>
-                        </div>
-                        <div className="text-muted" style={{ fontSize: '0.7rem' }}>
-                          <small>Cualquier aseguradora y ramo</small>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="col-md-6">
                     <div
                       className="card h-100 border-success cursor-pointer shadow-sm"
@@ -1774,10 +1739,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         </p>
                         <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
                           <span className="badge bg-info text-dark">🧠 Flexible</span>
-                          <span className="badge bg-warning text-dark">⚠️ Requiere API key</span>
-                        </div>
-                        <div className="text-muted mt-3" style={{ fontSize: '0.9rem' }}>
-                          <small>Modo beta para pruebas del equipo</small>
                         </div>
                       </div>
                     </div>
