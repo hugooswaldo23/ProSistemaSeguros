@@ -1,5 +1,4 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const LOCAL_KEY = 'prosistema_citas';
 
 const getAuthHeaders = (includeJson = false) => {
   const token = localStorage.getItem('ss_token');
@@ -8,10 +7,6 @@ const getAuthHeaders = (includeJson = false) => {
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 };
-
-// ── Helpers de localStorage (fallback mientras no exista API) ──
-const getLocal = () => JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
-const setLocal = (citas) => localStorage.setItem(LOCAL_KEY, JSON.stringify(citas));
 
 // Normalizar fecha ISO ("2026-02-20T06:00:00.000Z") a "YYYY-MM-DD"
 const normalizarCita = (c) => ({
@@ -29,9 +24,11 @@ export const obtenerCitas = async () => {
     const data = await res.json();
     const citas = (Array.isArray(data) ? data : []).map(normalizarCita);
     return { success: true, data: citas };
-  } catch {
-    // Fallback a localStorage
-    return { success: true, data: getLocal(), local: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || 'No se pudieron obtener las citas'
+    };
   }
 };
 
@@ -53,12 +50,11 @@ export const crearCita = async (cita) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return { success: true, data: normalizarCita(data || citaData) };
-  } catch {
-    // Fallback a localStorage
-    const local = getLocal();
-    local.push(citaData);
-    setLocal(local);
-    return { success: true, data: citaData, local: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || 'No se pudo crear la cita'
+    };
   }
 };
 
@@ -78,13 +74,11 @@ export const actualizarCita = async (id, cita) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return { success: true, data: normalizarCita(data || citaData) };
-  } catch {
-    // Fallback a localStorage
-    const local = getLocal();
-    const idx = local.findIndex(c => c.id === id);
-    if (idx >= 0) local[idx] = citaData;
-    setLocal(local);
-    return { success: true, data: citaData, local: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || 'No se pudo actualizar la cita'
+    };
   }
 };
 
@@ -97,10 +91,10 @@ export const eliminarCita = async (id) => {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return { success: true };
-  } catch {
-    // Fallback a localStorage
-    const local = getLocal().filter(c => c.id !== id);
-    setLocal(local);
-    return { success: true, local: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: error?.message || 'No se pudo eliminar la cita'
+    };
   }
 };
