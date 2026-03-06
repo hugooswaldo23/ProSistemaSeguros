@@ -279,14 +279,32 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             campos: Object.keys(datosExtraidos).length
           });
         } else {
-          console.error('❌ No se encontró extractor para:', deteccion);
-          setEstado('error');
-          setErrores([{
-            tipo: 'error',
-            mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
-            detalle: 'Selecciona el método "Leer PDF con IA" en el extractor correspondiente.'
-          }]);
-          return;
+          // ==================== EXTRACCIÓN AUTOMÁTICA (Regex) ====================
+          console.log('⚙️ Usando extractor automático (regex)...');
+          const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
+          const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
+
+          const deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
+          const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
+
+          if (moduloExtractor && moduloExtractor.extraer) {
+            datosExtraidos = await moduloExtractor.extraer({
+              textoCompleto,
+              textoPagina1,
+              textoPagina2: textoPaginaCaratula,
+              textoAvisoDeCobro,
+              todasLasPaginas
+            });
+          } else {
+            console.error('❌ No se encontró extractor para:', deteccion);
+            setEstado('error');
+            setErrores([{
+              tipo: 'error',
+              mensaje: `No hay extractor disponible para ${deteccion.aseguradora} - ${deteccion.producto}`,
+              detalle: 'Selecciona el método "Leer PDF con IA" en el extractor correspondiente.'
+            }]);
+            return;
+          }
         }
       } catch (error) {
         console.error('❌ Error en sistema de extracción:', error);

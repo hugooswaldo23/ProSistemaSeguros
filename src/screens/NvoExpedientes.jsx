@@ -2197,6 +2197,22 @@ const ModuloNvoExpedientes = () => {
       console.log('💾 Recibos en datos a guardar:', datos.recibos);
       console.log('💾 ===========================================');
       
+      // 🔗 MAPEAR compania (texto) → aseguradora_id (FK)
+      if (datos.compania && aseguradoras.length > 0) {
+        const normNombre = (n) => n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
+        const compNorm = normNombre(datos.compania);
+        const asegMatch = aseguradoras.find(a => {
+          const nombreNorm = normNombre(a.nombre || '');
+          return nombreNorm === compNorm || nombreNorm.includes(compNorm) || compNorm.includes(nombreNorm);
+        });
+        if (asegMatch) {
+          datos.aseguradora_id = asegMatch.id;
+          console.log(`🏢 Aseguradora mapeada: "${datos.compania}" → id: ${asegMatch.id}`);
+        } else {
+          console.warn(`⚠️ No se encontró aseguradora_id para "${datos.compania}"`);
+        }
+      }
+
       // Enviando al backend
 
       let response;
@@ -3453,7 +3469,7 @@ const ModuloNvoExpedientes = () => {
           // 🆕 Expediente anterior para renovación (si aplica)
           expedienteAnterior={expedienteAnteriorParaRenovacion}
           limpiarExpedienteAnterior={() => setExpedienteAnteriorParaRenovacion(null)}
-          companias={['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
+          companias={aseguradoras.length > 0 ? aseguradoras.map(a => a.nombre) : ['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
@@ -3482,7 +3498,7 @@ const ModuloNvoExpedientes = () => {
           setFormulario={setFormulario}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
           guardarExpediente={guardarExpediente}
-          companias={['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
+          companias={aseguradoras.length > 0 ? aseguradoras.map(a => a.nombre) : ['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
