@@ -4,15 +4,23 @@ const API_BASE_URL = import.meta.env.VITE_API_URL;
 // Helper function to make API requests
 const apiRequest = async (endpoint, options = {}) => {
   try {
+    const token = localStorage.getItem('ss_token');
+
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...options.headers,
       },
       ...options,
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        const authError = new Error('Sesion expirada. Inicia sesion nuevamente.');
+        authError.code = 401;
+        throw authError;
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
@@ -23,7 +31,9 @@ const apiRequest = async (endpoint, options = {}) => {
     let errorMessage = error.message;
     
     // Provide more specific error messages for common issues
-    if (error.message === 'Failed to fetch') {
+    if (error.code === 401) {
+      errorMessage = 'Sesion expirada. Inicia sesion nuevamente.';
+    } else if (error.message === 'Failed to fetch') {
       errorMessage = `No se puede conectar al servidor backend en ${API_BASE_URL}. Asegúrate de que el servidor esté ejecutándose.`;
     } else if (error.message.includes('NetworkError')) {
       errorMessage = `Error de red al conectar con el servidor backend. Verifica la URL: ${API_BASE_URL}`;
