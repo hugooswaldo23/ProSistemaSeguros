@@ -1708,10 +1708,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         <p className="card-text text-muted mb-4">
                           Extrae datos de pólizas de forma instantánea usando patrones específicos para cada aseguradora.
                         </p>
-                        <div className="d-flex justify-content-center gap-1 flex-wrap mb-2">
-                          <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>✓ Gratis</span>
-                          <span className="badge bg-success" style={{ fontSize: '0.65rem' }}>⚡ Instantáneo</span>
-                        </div>
                         <div className="text-muted" style={{ fontSize: '0.7rem' }}>
                           <small>Qualitas • Chubb • HDI • GNP • Zurich • Mapfre • El Potosí</small>
                         </div>
@@ -1737,9 +1733,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         <p className="card-text text-muted mb-4">
                           Útil cuando cambia el formato del PDF o no existe extractor específico.
                         </p>
-                        <div className="d-flex justify-content-center gap-2 flex-wrap mb-3">
-                          <span className="badge bg-info text-dark">🧠 Flexible</span>
-                        </div>
                       </div>
                     </div>
                   </div>
