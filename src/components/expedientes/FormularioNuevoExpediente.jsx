@@ -471,16 +471,6 @@ const FormularioNuevoExpediente = ({
                           <Upload size={16} className="me-1" />
                           Importar PDF
                         </button>
-                        <button
-                          className="btn btn-outline-success w-100 mt-2"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            window._extractorMetodo = 'openai';
-                            document.getElementById('pdfFileInputNuevo')?.click();
-                          }}
-                        >
-                          🤖 Leer PDF con IA
-                        </button>
                       </div>
                     </div>
                   </div>
@@ -491,7 +481,7 @@ const FormularioNuevoExpediente = ({
                       className="card h-100 border-warning text-center p-3" 
                       style={{ cursor: 'pointer', transition: 'all 0.3s' }}
                       onClick={() => {
-                        document.getElementById('pdfFileInputNuevoIA')?.click();
+                        document.getElementById('pdfFileInputNuevo')?.click();
                       }}
                       onMouseEnter={(e) => e.currentTarget.style.boxShadow = '0 4px 12px rgba(255,193,7,0.3)'}
                       onMouseLeave={(e) => e.currentTarget.style.boxShadow = 'none'}
@@ -504,14 +494,15 @@ const FormularioNuevoExpediente = ({
                         <p className="card-text text-muted small mb-2" style={{ fontSize: '0.7rem' }}>
                           IA para cualquier aseguradora
                         </p>
-                        <button 
-                          className="btn btn-warning btn-sm w-100"
+                        <button
+                          className="btn btn-outline-success w-100 mt-2"
                           onClick={(e) => {
                             e.stopPropagation();
-                            document.getElementById('pdfFileInputNuevoIA')?.click();
+                            window._extractorMetodo = 'openai';
+                            document.getElementById('pdfFileInputNuevo')?.click();
                           }}
                         >
-                          🤖 Extraer con IA
+                          🤖 Leer PDF con IA
                         </button>
                       </div>
                     </div>
