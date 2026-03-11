@@ -32,23 +32,29 @@ function App() {
     return Boolean(localStorage.getItem('ss_token'));
   });
 
-  useEffect(() => {
-    setIsAuthenticated(Boolean(localStorage.getItem('ss_token')));
-  }, []);
-
   const handleLogin = (credentials) => {
     setIsAuthenticated(true);
   };
-
-  if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
-  }
 
   const handleLogout = () => {
     localStorage.removeItem('ss_token');
     localStorage.removeItem('ss_user');
     setIsAuthenticated(false);
   };
+
+  useEffect(() => {
+    setIsAuthenticated(Boolean(localStorage.getItem('ss_token')));
+  }, []);
+
+  // Cerrar sesión automáticamente cuando cualquier petición devuelva 401
+  useEffect(() => {
+    window.addEventListener('auth:logout', handleLogout);
+    return () => window.removeEventListener('auth:logout', handleLogout);
+  }, []);
+
+  if (!isAuthenticated) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   return (
     <Router>

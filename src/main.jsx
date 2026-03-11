@@ -1,6 +1,16 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.jsx'
+
+// Interceptar 401 globalmente → forzar cierre de sesión automático
+const _originalFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+  const response = await _originalFetch(...args);
+  if (response.status === 401) {
+    window.dispatchEvent(new CustomEvent('auth:logout'));
+  }
+  return response;
+};
 import { Toaster } from 'react-hot-toast'
 
 createRoot(document.getElementById('root')).render(
