@@ -161,6 +161,9 @@ export async function extraer(ctx) {
 
   // Buscar la página FORMATO DE PAGO (última hoja, tiene casi todos los datos)
   const txtPago = encontrarPaginaFormatoPago(ctx);
+  
+  // Texto de la póliza SIN la página FORMATO DE PAGO (para montos anuales)
+  const txtPoliza = textoTotal.replace(txtPago, '').trim();
 
   // DEBUG: Mostrar textos para análisis
   console.log('📄 ========== TEXTO FORMATO DE PAGO HDI ==========');
@@ -339,16 +342,27 @@ export async function extraer(ctx) {
       || txtPago.match(/(?:No\.?\s*(?:Ext|Int)\.?\s*\d+\s+)([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{2,20})\s*(?:C\.?\s*P|,)/i);
     if (coloniaMatch) {
       colonia = coloniaMatch[1].trim();
+      // Quitar la colonia del domicilio para evitar duplicado en el preview (domicilio + colonia)
+      if (colonia && domicilio) {
+        domicilio = domicilio
+          .replace(new RegExp(',?\\s*' + colonia.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*,?', 'i'), ',')
+          .replace(/,\s*$/, '')
+          .replace(/^,\s*/, '')
+          .replace(/,\s*,/g, ',')
+          .trim();
+      }
     }
   }
 
-  // Fallback municipio: buscar ciudades conocidas en texto
+  // Fallback municipio: buscar ciudades conocidas PRIMERO en bloque dirección, luego en texto completo
   if (!municipio) {
-    const munMatch = textoTotal.match(/(?:LE[OÓ]N|LEON|GUADALAJARA|MONTERREY|M[EÉ]XICO|PUEBLA|QUER[EÉ]TARO|TIJUANA|CANCUN|MERIDA|CELAYA|IRAPUATO|SALAMANCA|AGUASCALIENTES|SAN\s+LUIS\s+POTOS[IÍ]|MORELIA)/i);
+    const patronMunicipio = /(?:ZAPOPAN|TLAQUEPAQUE|TONALA|TLAJOMULCO|EL\s+SALTO|LE[OÓ]N|LEON|GUADALAJARA|MONTERREY|M[EÉ]XICO|PUEBLA|QUER[EÉ]TARO|TIJUANA|CANCUN|MERIDA|CELAYA|IRAPUATO|SALAMANCA|AGUASCALIENTES|SAN\s+LUIS\s+POTOS[IÍ]|MORELIA|TOLUCA|NAUCALPAN|ECATEPEC|NEZAHUALCOYOTL|CUAUTITLAN)/i;
+    const munMatch = (domicilio && domicilio.match(patronMunicipio)) || textoTotal.match(patronMunicipio);
     if (munMatch) municipio = munMatch[0].toUpperCase();
   }
   if (!estado) {
-    const edoMatch = textoTotal.match(/(?:GUANAJUATO|JALISCO|NUEVO\s+LE[OÓ]N|ESTADO\s+DE\s+M[EÉ]XICO|CDMX|CIUDAD\s+DE\s+M[EÉ]XICO|PUEBLA|QUER[EÉ]TARO|BAJA\s+CALIFORNIA|QUINTANA\s+ROO|YUCAT[AÁ]N|CHIHUAHUA|SONORA|COAHUILA|TAMAULIPAS|MICHOACAN|MICHOAC[AÁ]N|TABASCO|VERACRUZ|OAXACA|CHIAPAS|GUERRERO|HIDALGO|TLAXCALA|MORELOS|NAYARIT|COLIMA|DURANGO|ZACATECAS|SAN\s+LUIS\s+POTOS[IÍ]|SINALOA|CAMPECHE|AGUASCALIENTES)/i);
+    const patronEstado = /(?:GUANAJUATO|JALISCO|NUEVO\s+LE[OÓ]N|ESTADO\s+DE\s+M[EÉ]XICO|CDMX|CIUDAD\s+DE\s+M[EÉ]XICO|PUEBLA|QUER[EÉ]TARO|BAJA\s+CALIFORNIA|QUINTANA\s+ROO|YUCAT[AÁ]N|CHIHUAHUA|SONORA|COAHUILA|TAMAULIPAS|MICHOACAN|MICHOAC[AÁ]N|TABASCO|VERACRUZ|OAXACA|CHIAPAS|GUERRERO|HIDALGO|TLAXCALA|MORELOS|NAYARIT|COLIMA|DURANGO|ZACATECAS|SAN\s+LUIS\s+POTOS[IÍ]|SINALOA|CAMPECHE|AGUASCALIENTES)/i;
+    const edoMatch = (domicilio && domicilio.match(patronEstado)) || textoTotal.match(patronEstado);
     if (edoMatch) estado = edoMatch[0].toUpperCase();
   }
 
@@ -364,14 +378,19 @@ export async function extraer(ctx) {
   // Patrón 1: "PÓLIZA INDIVIDUAL: 5-508523 Cert. 1"
   const polizaCertMatch = txtPago.match(/P[OÓ]LIZA\s+(?:INDIVIDUAL|FLOTILLA)[:\s]+([A-Z0-9\-]+)\s+Cert\.?\s*(\d+)/i);
   if (polizaCertMatch) {
-    numero_poliza = polizaCertMatch[1].trim();
+    numero_poliza = polizaCertMatch[1].trim() + '-' + polizaCertMatch[2];
     inciso = polizaCertMatch[2];
   }
 
   // Patrón 2: "Póliza: 5-508523-1"
   if (!numero_poliza) {
     const polizaMatch = textoTotal.match(/P[oó]liza[:\s]+([0-9][A-Z0-9\-]+)/i);
-    if (polizaMatch) numero_poliza = polizaMatch[1].trim();
+    if (polizaMatch) {
+      numero_poliza = polizaMatch[1].trim();
+      // Extraer inciso del sufijo si tiene formato X-NNNNNN-N
+      const incisoSufijo = numero_poliza.match(/-(\d+)$/);
+      if (incisoSufijo && !inciso) inciso = incisoSufijo[1];
+    }
   }
 
   // Endoso
@@ -399,27 +418,27 @@ export async function extraer(ctx) {
   console.log('🧑‍💼 Agente:', clave_agente, agente);
 
   // ==================== VIGENCIA ====================
-  // Formato FORMATO DE PAGO: fechas DD/Mmm/YYYY (02/Ene/2026 y 02/Ene/2027)
-  // Formato página 1: "Desde las 12:00 hrs. del 02/01/2026 Hasta 12:00 hrs. del 02/01/2027"
+  // PRIORIDAD: Página 1 de la póliza tiene la vigencia ANUAL real
+  // FORMATO DE PAGO puede tener la vigencia del RECIBO (semestral/trimestral)
   let inicio_vigencia = '';
   let termino_vigencia = '';
 
-  // Patrón 1: dos fechas DD/Mmm/YYYY juntas (FORMATO DE PAGO)
-  const fechasAbrev = txtPago.match(/(\d{1,2}\/[A-Za-z]{3,}\/\d{4})\s+(\d{1,2}\/[A-Za-z]{3,}\/\d{4})/i);
-  if (fechasAbrev) {
-    inicio_vigencia = normalizarFecha(fechasAbrev[1]);
-    termino_vigencia = normalizarFecha(fechasAbrev[2]);
-  }
+  // Patrón 1 (PRIORIDAD): "Desde las 12:00 hrs. del DD/MM/YYYY Hasta ... del DD/MM/YYYY" (página 1)
+  const desdeMatch = txtPoliza.match(/Desde\s+las?\s+\d{1,2}:\d{2}\s+hrs\.?\s+del\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
+  const hastaMatch = txtPoliza.match(/Hasta\s+(?:las?\s+)?\d{1,2}:\d{2}\s+hrs\.?\s+del\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
+  if (desdeMatch) inicio_vigencia = normalizarFecha(desdeMatch[1]);
+  if (hastaMatch) termino_vigencia = normalizarFecha(hastaMatch[1]);
 
-  // Patrón 2: "Desde las 12:00 hrs. del DD/MM/YYYY Hasta ... del DD/MM/YYYY" (página 1)
+  // Patrón 2: Vigencia + dos fechas DD/Mmm/YYYY en FORMATO DE PAGO (fallback)
   if (!inicio_vigencia) {
-    const desdeMatch = textoTotal.match(/Desde\s+las?\s+\d{1,2}:\d{2}\s+hrs\.?\s+del\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
-    const hastaMatch = textoTotal.match(/Hasta\s+(?:las?\s+)?\d{1,2}:\d{2}\s+hrs\.?\s+del\s+(\d{1,2}[\/-]\d{1,2}[\/-]\d{4})/i);
-    if (desdeMatch) inicio_vigencia = normalizarFecha(desdeMatch[1]);
-    if (hastaMatch) termino_vigencia = normalizarFecha(hastaMatch[1]);
+    const vigenciaAbrev = txtPago.match(/Vigencia[\s\S]*?(\d{1,2}\/[A-Za-z]{3,}\/\d{4})\s+(\d{1,2}\/[A-Za-z]{3,}\/\d{4})/i);
+    if (vigenciaAbrev) {
+      inicio_vigencia = normalizarFecha(vigenciaAbrev[1]);
+      termino_vigencia = normalizarFecha(vigenciaAbrev[2]);
+    }
   }
 
-  // Patrón 3: Fechas DD/MM/YYYY simples
+  // Patrón 3: Fechas DD/MM/YYYY simples en FORMATO DE PAGO (último fallback)
   if (!inicio_vigencia) {
     const fechasNum = txtPago.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
     if (fechasNum) {
@@ -701,43 +720,94 @@ export async function extraer(ctx) {
     return '';
   }
 
-  // Prima Neta
-  let prima_neta = limpiarMonto(buscarMonto('Prima\\s+Neta', txtPago))
-    || limpiarMonto(buscarMonto('Prima\\s+Neta', textoTotal));
-
-  // Recargo por Pago Fraccionado
-  let cargo_pago_fraccionado = limpiarMonto(buscarMonto('Recargo\\s+(?:Por|por)\\s+Pago\\s+Fraccionado', txtPago))
-    || limpiarMonto(buscarMonto('(?:Recargo|Cargo)\\s+(?:por\\s+)?(?:Pago\\s+)?Fraccionado', textoTotal));
-
-  // Derecho de Póliza / Gastos de Expedición
-  let gastos_expedicion = limpiarMonto(buscarMonto('Derecho\\s+de\\s+P[oó]liza', txtPago))
-    || limpiarMonto(buscarMonto('Gastos\\s+(?:de\\s+|por\\s+)?Expedici[oó]n', txtPago))
-    || limpiarMonto(buscarMonto('Derecho\\s+de\\s+P[oó]liza', textoTotal))
-    || limpiarMonto(buscarMonto('Gastos\\s+(?:de\\s+|por\\s+)?Expedici[oó]n', textoTotal));
-
-  // I.V.A. - El porcentaje puede estar entre "I.V.A." y el monto
+  // ==================== MONTOS FINANCIEROS ====================
+  // PRIORIDAD 1: Tabla "Condiciones Particulares" en página 1 de HDI
+  // El desglose tiene 8 columnas cuyos valores aparecen en UNA sola línea:
+  // Prima Neta | Descuento | Prima Módulos | Recargo Fraccionado | Reducción | Derecho Póliza | IVA | Total
+  // Ej: "18,201.99 -8,442.49   0.00 525.06 0.00 725.00 1,761.53   12,771.09"
+  let prima_neta = '';
+  let otros_servicios = '';
+  let cargo_pago_fraccionado = '';
+  let gastos_expedicion = '';
   let iva = '';
-  const ivaMatch = txtPago.match(/I\.?\s*V\.?\s*A\.?\s*(?:\d+[\.,]?\d*\s*%?\s*)?[\s\n]*\$?\s*([\d,]+\.\d{2})/i)
-    || textoTotal.match(/I\.?\s*V\.?\s*A\.?\s*(?:\d+[\.,]?\d*\s*%?\s*)?[\s\n]*\$?\s*([\d,]+\.\d{2})/i);
-  if (ivaMatch) iva = limpiarMonto(ivaMatch[1]);
+  let total = '';
 
-  // Total a pagar
-  let total = limpiarMonto(buscarMonto('Total\\s+a\\s+pagar', txtPago))
-    || limpiarMonto(buscarMonto('(?:Total|Importe\\s+Total|Prima\\s+Total)', textoTotal));
+  const tablaMontos = txtPoliza.match(
+    /^\s*(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s+(-?\d[\d,]*\.\d{2})\s*$/m
+  );
+
+  if (tablaMontos) {
+    const toNum = (s) => parseFloat(String(s).replace(/,/g, ''));
+    const primaBruta = toNum(tablaMontos[1]);
+    const descuento = Math.abs(toNum(tablaMontos[2]));
+    prima_neta = descuento > 0 ? (primaBruta - descuento).toFixed(2) : primaBruta.toFixed(2);
+    otros_servicios = descuento > 0 ? descuento.toFixed(2) : '';
+    cargo_pago_fraccionado = limpiarMonto(tablaMontos[4]);
+    gastos_expedicion = limpiarMonto(tablaMontos[6]);
+    iva = limpiarMonto(tablaMontos[7]);
+    total = limpiarMonto(tablaMontos[8]);
+    console.log('💰 Montos de tabla Condiciones Particulares (pág 1):', {
+      primaBruta, descuento, prima_neta, cargo_pago_fraccionado, gastos_expedicion, iva, total
+    });
+  }
+
+  // PRIORIDAD 2: buscarMonto individual (FORMATO DE PAGO u otras páginas)
+  if (!prima_neta) {
+    prima_neta = limpiarMonto(buscarMonto('Prima\\s+Neta', txtPoliza))
+      || limpiarMonto(buscarMonto('Prima\\s+Neta', txtPago));
+  }
+
+  if (!cargo_pago_fraccionado) {
+    cargo_pago_fraccionado = limpiarMonto(buscarMonto('(?:Recargo|Cargo)\\s+(?:por\\s+)?(?:Pago\\s+)?Fraccionado', txtPoliza))
+      || limpiarMonto(buscarMonto('Recargo', txtPoliza))
+      || limpiarMonto(buscarMonto('Recargo\\s+(?:Por|por)\\s+Pago\\s+Fraccionado', txtPago));
+  }
+
+  if (!gastos_expedicion) {
+    gastos_expedicion = limpiarMonto(buscarMonto('Derecho\\s+de\\s+P[oó]liza', txtPoliza))
+      || limpiarMonto(buscarMonto('Gastos\\s+(?:de\\s+|por\\s+)?Expedici[oó]n', txtPoliza))
+      || limpiarMonto(buscarMonto('Derecho\\s+de\\s+P[oó]liza', txtPago))
+      || limpiarMonto(buscarMonto('Gastos\\s+(?:de\\s+|por\\s+)?Expedici[oó]n', txtPago));
+  }
+
+  if (!iva) {
+    const ivaMatch = txtPoliza.match(/I\.?\s*V\.?\s*A\.?\s*(?:\d+[\.,]?\d*\s*%?\s*)?[\s\n]*\$?\s*([\d,]+\.\d{2})/i)
+      || txtPago.match(/I\.?\s*V\.?\s*A\.?\s*(?:\d+[\.,]?\d*\s*%?\s*)?[\s\n]*\$?\s*([\d,]+\.\d{2})/i);
+    if (ivaMatch) iva = limpiarMonto(ivaMatch[1]);
+  }
+
+  if (!total) {
+    total = limpiarMonto(buscarMonto('Total\\s+a\\s+pagar', txtPoliza))
+      || limpiarMonto(buscarMonto('(?:Total|Importe\\s+Total|Prima\\s+Total)', txtPoliza))
+      || limpiarMonto(buscarMonto('Total\\s+a\\s+pagar', txtPago));
+  }
 
   const subtotal = limpiarMonto(extraerDato(/(?:Sub\s*total|Subtotal)[:\s]+\$?\s*([\d,]+\.?\d*)/i, textoTotal));
 
-  // Si hay recibos extraídos y el pago es fraccionado, el "Total a pagar" del FORMATO DE PAGO
-  // puede ser solo el primer recibo. Calcular total real sumando todos los recibos.
-  if (recibosExtraidos.length > 1) {
+  // Fallback: Si montos vinieron del FORMATO DE PAGO (primer recibo) y hay múltiples recibos,
+  // recalcular para obtener montos anuales
+  if (recibosExtraidos.length > 1 && !tablaMontos) {
     const totalRecibos = recibosExtraidos.reduce((sum, r) => sum + parseFloat(r.importe), 0);
-    if (totalRecibos > 0) {
+    const primerReciboTotal = parseFloat(recibosExtraidos[0].importe);
+
+    if (totalRecibos > 0 && primerReciboTotal > 0) {
+      const totalActual = parseFloat(total) || 0;
+
+      // Detectar si total actual ≈ primer recibo (vino de FORMATO DE PAGO)
+      if (Math.abs(totalActual - primerReciboTotal) < 1) {
+        const factor = totalRecibos / primerReciboTotal;
+        if (prima_neta) prima_neta = (parseFloat(prima_neta) * factor).toFixed(2);
+        if (cargo_pago_fraccionado) cargo_pago_fraccionado = (parseFloat(cargo_pago_fraccionado) * factor).toFixed(2);
+        if (iva) iva = (parseFloat(iva) * factor).toFixed(2);
+        console.log('💰 Montos recalculados para póliza anual (factor:', factor.toFixed(2), ')');
+      }
+
       total = totalRecibos.toFixed(2);
       console.log('💰 Total recalculado desde recibos:', total, '(suma de', recibosExtraidos.length, 'recibos)');
     }
   }
 
-  console.log('💰 Montos extraídos:', { prima_neta, gastos_expedicion, iva, total, cargo_pago_fraccionado });
+  console.log('💰 Montos extraídos:', { prima_neta, otros_servicios, gastos_expedicion, iva, total, cargo_pago_fraccionado });
 
   // ==================== PLAN / PAQUETE ====================
   // "Paquete: HDI EN MI AUTO"
@@ -896,6 +966,7 @@ export async function extraer(ctx) {
     // Financiero
     prima_neta,
     prima_pagada: prima_neta,
+    otros_servicios,
     cargo_pago_fraccionado,
     gastos_expedicion,
     subtotal,

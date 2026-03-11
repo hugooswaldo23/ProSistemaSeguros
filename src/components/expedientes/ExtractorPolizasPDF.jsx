@@ -322,6 +322,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         'prima_pagada',
         'prima_neta',
         'otros_descuentos',
+        'otros_servicios',
         'cargo_pago_fraccionado',
         'gastos_expedicion',
         'iva',
@@ -1918,19 +1919,19 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                         </div>
                       </div>
                       
-                      {/* Email - SOLO si cliente existe en BD */}
-                      {clienteEncontrado && datosExtraidos.email && (
+                      {/* Email - SOLO si cliente existe en BD y tiene email */}
+                      {clienteEncontrado && clienteEncontrado.email && (
                         <div className="col-md-6 col-12">
                           <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.7rem' }}>Email:</small>
-                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>{datosExtraidos.email}</small>
+                          <small className="mb-0" style={{ fontSize: '0.7rem' }}>{clienteEncontrado.email}</small>
                         </div>
                       )}
                       
-                      {/* Teléfono - SOLO si cliente existe en BD */}
-                      {clienteEncontrado && datosExtraidos.telefono_movil && (
+                      {/* Teléfono - SOLO si cliente existe en BD y tiene teléfono */}
+                      {clienteEncontrado && (clienteEncontrado.telefonoMovil || clienteEncontrado.telefono_movil) && (
                         <div className="col-md-3">
                           <small className="d-block mb-0 fw-semibold" style={{ fontSize: '0.75rem' }}>Teléfono:</small>
-                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{datosExtraidos.telefono_movil}</small>
+                          <small className="mb-0" style={{ fontSize: '0.75rem' }}>{clienteEncontrado.telefonoMovil || clienteEncontrado.telefono_movil}</small>
                         </div>
                       )}
                     </div>

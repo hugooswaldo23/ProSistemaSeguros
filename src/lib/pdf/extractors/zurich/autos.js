@@ -120,20 +120,35 @@ export async function extraer(ctx) {
   // Buscar dirección después del nombre del asegurado
   // Formato visible en PDF: AV PASEO SOLARES \n COLONIA GIRASOLES \n ZAPOPAN JALISCO \n C.P. 45136
   
-  // Buscar después de BASURTO hasta antes de R.F.C o Producto
-  const bloqueDir = texto.match(/BASURTO([\s\S]{0,500})(?:R\.F\.C|Producto|Zurich Aseguradora)/i);
-  const textoDir = bloqueDir ? bloqueDir[1] : '';
+  // Estrategia genérica: buscar bloque entre el nombre del asegurado y R.F.C/Producto
+  // Usa el nombre extraído dinámicamente en vez de hardcodear un apellido
+  let textoDir = '';
+  
+  // Estrategia 1: Buscar después del nombre completo del asegurado hasta R.F.C
+  if (nombreMatch) {
+    const nombreCompleto = nombreMatch[1].trim();
+    const ultimaPalabra = nombreCompleto.split(/\s+/).pop();
+    const escapedNombre = ultimaPalabra.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const bloqueDir = texto.match(new RegExp(escapedNombre + '([\\s\\S]{0,500})(?:R\\.F\\.C|Producto|Zurich Aseguradora)', 'i'));
+    textoDir = bloqueDir ? bloqueDir[1] : '';
+  }
+  
+  // Estrategia 2 (fallback): Buscar entre "Datos del Asegurado" y "R.F.C"
+  if (!textoDir) {
+    const bloqueDirFallback = texto.match(/(?:Datos del Asegurado|Datos de la P[oó]liza)[\s\S]{0,800}?(?=R\.F\.C|Producto|Zurich Aseguradora)/i);
+    textoDir = bloqueDirFallback ? bloqueDirFallback[0] : '';
+  }
   
   // Extraer dirección (línea que empieza con AV, CALLE, etc)
-  const domicilioMatch = textoDir.match(/\n\s*((?:AV|AVENIDA|CALLE|BLVD|BOULEVARD|PRIVADA|ANDADOR|CALZADA)[A-Z0-9\s\.]+)/i);
+  const domicilioMatch = textoDir.match(/\n\s*((?:AV|AVENIDA|CALLE|BLVD|BOULEVARD|PRIVADA|ANDADOR|CALZADA|CERRADA|CIRCUITO|PASEO|PROLONGACION|PROL)[A-Z0-9\s\.\#\-]+)/i);
   const domicilio = domicilioMatch ? domicilioMatch[1].trim() : '';
   
   // Extraer colonia (generalmente viene después de la dirección)
-  const coloniaMatch = textoDir.match(/\n\s*(COLONIA[A-Z\s]+)/i);
+  const coloniaMatch = textoDir.match(/\n\s*(?:COLONIA\s+)?([A-ZÁÉÍÓÚÑ\s]+?)(?=\s*\n\s*[A-Z]+ [A-Z]+\s*\n|\s*C\.P\.)/i);
   const colonia = coloniaMatch ? coloniaMatch[1].trim() : '';
   
-  // Extraer ciudad y estado (patrón: CIUDAD ESTADO en la misma línea)
-  const ciudadEstadoMatch = textoDir.match(/\n\s*([A-ZÁÉÍÓÚÑ]+)\s+([A-ZÁÉÍÓÚÑ]+)\s*\n/);
+  // Extraer ciudad y estado (patrón: CIUDAD ESTADO en la misma línea antes de C.P.)
+  const ciudadEstadoMatch = textoDir.match(/\n\s*([A-ZÁÉÍÓÚÑ]+(?:\s[A-ZÁÉÍÓÚÑ]+)?)\s+([A-ZÁÉÍÓÚÑ]+)\s*\n\s*C\.P\./i);
   const ciudad = ciudadEstadoMatch ? ciudadEstadoMatch[1].trim() : '';
   const estado = ciudadEstadoMatch ? ciudadEstadoMatch[2].trim() : '';
   
@@ -447,6 +462,10 @@ export async function extraer(ctx) {
     uso,
     servicio,
     tipo_carga,
+    tipo_cobertura: '',
+    conductor_habitual: '',
+    movimiento: endoso && endoso !== '0' && endoso !== '' ? 'Endoso' : 'Emisión',
+    moneda: 'MXN',
     
     // Coberturas
     coberturas

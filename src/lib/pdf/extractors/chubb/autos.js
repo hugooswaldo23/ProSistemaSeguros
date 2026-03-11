@@ -362,63 +362,69 @@ export async function extraer(ctx) {
     console.log('💳 Fecha límite de pago: ❌ NO ENCONTRADO');
   }
 
-  // ==================== INFORMACIÓN FINANCIERA (Página 1 - Aviso de Cobro) ====================
-  // NOTA: "Desglose de pago" es solo el TÍTULO de la sección, NO es un campo
-  // Los campos reales son: Prima Neta, Otros descuentos, Financiamiento, Gastos, IVA, Total
-  // 
-  // 🎯 IMPORTANTE: En Chubb PDFs:
-  //    - Prima Neta e IVA: valor ANTES de etiqueta (línea anterior)
-  //    - Resto de campos: valor en misma línea o línea siguiente
-  
-  // Prima Neta: buscar en línea ANTERIOR primero (valor antes de etiqueta)
-  const primaNeta = obtenerMontoPorEtiqueta(textoFinanciero, [/Prima\s+Neta/i, /PRIMA\s+NETA/i], true) 
-    || extraerDato(/Prima\s+Neta[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero) 
-    || extraerDato(/PRIMA\s+NETA[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero);
-  
-  // Otros descuentos: buscar normal (misma línea o siguiente)
-  const otros_descuentos = obtenerMontoPorEtiqueta(textoFinanciero, [/Otros\s+descuentos?/i], false) 
-    || extraerDato(/Otros\s+descuentos?[\s\$]*([\d,]+\.?\d*)/i, textoFinanciero);
-  
-  // Financiamiento: buscar normal (misma línea o siguiente)
-  const financiamiento_fraccionado = obtenerMontoPorEtiqueta(textoFinanciero, [/Financiamiento\s+por\s+pago\s+fraccionado/i], false) 
-    || extraerDato(/Financiamiento\s+por\s+pago\s+fraccionado[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero);
-  
-  // IVA: buscar en línea ANTERIOR primero (valor antes de etiqueta)
-  // Variantes: "I.V.A.", "IVA", "I V A", "Impuesto al Valor Agregado"
-  console.log('🔍 Buscando IVA en texto financiero...');
-  console.log('   Longitud texto:', textoFinanciero?.length);
-  console.log('   Contiene "I.V.A."?', textoFinanciero?.includes('I.V.A.'));
-  console.log('   Contiene "IVA"?', textoFinanciero?.includes('IVA'));
-  
-  const ivaExtraido = obtenerMontoPorEtiqueta(textoFinanciero, [
-    /I\.V\.A\./i,  // Exacto: I.V.A.
-    /I\s*V\s*A/i,  // Con espacios opcionales
-    /\bIVA\b/i,    // Palabra completa
-    /Impuesto\s+al\s+Valor\s+Agregado/i
-  ], true) 
-    || extraerDato(/I\.V\.A\.[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero)
-    || extraerDato(/IVA[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero);
-  
-  console.log('   IVA extraído:', ivaExtraido || '❌ NO ENCONTRADO');
-  
-  // Gastos de expedición: buscar normal (misma línea o siguiente)
-  const derecho = obtenerMontoPorEtiqueta(textoFinanciero, [/Gastos\s+de\s+expedici[oó]n/i], false) 
-    || extraerDato(/Gastos\s+de\s+expedici[oó]n[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero);
-  
-  // Total: buscar normal (misma línea o siguiente)
-  const totalPagar = obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i], false) 
-    || (textoFinanciero.match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i)?.[1] || '');
+  // ==================== INFORMACIÓN FINANCIERA ====================
+  // En Chubb, las etiquetas están en UNA línea y los valores en OTRA:
+  // "Prima neta Otros descuentos Financiamiento... Gastos... I.V.A.  Prima total"
+  // "7,450.81 0.00 0.00 799.00 1,319.97  9,569.78"
+  // PRIORIDAD 1: Parsear la línea con 6 montos consecutivos
+  let prima_neta = '';
+  let otros_servicios = '';
+  let cargo_pago_fraccionado = '';
+  let gastos_expedicion = '';
+  let iva = '';
+  let total = '';
 
-  // Usar let para permitir fallback desde carátula si algo falta
-  let prima_pagada = primaNeta ? primaNeta.replace(/,/g, '') : '';
-  let gastos_expedicion = derecho ? derecho.replace(/,/g, '') : '';
-  let cargo_pago_fraccionado = financiamiento_fraccionado ? financiamiento_fraccionado.replace(/,/g, '') : '';
-  let iva = ivaExtraido ? ivaExtraido.replace(/,/g, '') : '';
-  let total = totalPagar ? totalPagar.replace(/,/g, '') : '';
+  // Buscar línea con 6 valores numéricos (formato Chubb desglose financiero)
+  const textosBusqueda = [textoAvisoDeCobro, textoCompleto].filter(Boolean);
+  for (const txtBusca of textosBusqueda) {
+    if (prima_neta) break;
+    const lineas = txtBusca.split(/\r?\n/);
+    for (let i = 0; i < lineas.length; i++) {
+      // Buscar línea con exactamente 6 montos separados por espacios
+      const montos = lineas[i].match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g);
+      if (montos && montos.length >= 6) {
+        // Verificar que una línea cercana tenga "Prima" para confirmar contexto
+        const contexto = lineas.slice(Math.max(0, i-5), i+1).join(' ');
+        if (/Prima/i.test(contexto)) {
+          const limpiar = (s) => s.replace(/,/g, '');
+          prima_neta = limpiar(montos[0]);
+          otros_servicios = limpiar(montos[1]);
+          cargo_pago_fraccionado = limpiar(montos[2]);
+          gastos_expedicion = limpiar(montos[3]);
+          iva = limpiar(montos[4]);
+          total = limpiar(montos[5]);
+          console.log('💰 Montos de tabla desglose Chubb (línea', i, '):', {
+            prima_neta, otros_servicios, cargo_pago_fraccionado, gastos_expedicion, iva, total
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  // PRIORIDAD 2: fallback con obtenerMontoPorEtiqueta si la tabla no se encontró
+  if (!prima_neta) {
+    prima_neta = (obtenerMontoPorEtiqueta(textoFinanciero, [/Prima\s+Neta/i], true)
+      || extraerDato(/Prima\s+Neta[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+  }
+  if (!gastos_expedicion) {
+    gastos_expedicion = (obtenerMontoPorEtiqueta(textoFinanciero, [/Gastos\s+de\s+expedici[oó]n/i], false)
+      || extraerDato(/Gastos\s+de\s+expedici[oó]n[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+  }
+  if (!iva) {
+    iva = (obtenerMontoPorEtiqueta(textoFinanciero, [/I\.V\.A\./i, /\bIVA\b/i], true)
+      || extraerDato(/I\.V\.A\.[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+  }
+  if (!total) {
+    total = (obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i], false)
+      || extraerDato(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+  }
+
+  let prima_pagada = prima_neta;
   
-  console.log('💰 INFORMACIÓN FINANCIERA (Página Aviso de Cobro):');
-  console.log('1. Prima Neta:', prima_pagada || '0.00');
-  console.log('2. Otros Descuentos:', otros_descuentos || '0.00');
+  console.log('💰 INFORMACIÓN FINANCIERA:');
+  console.log('1. Prima Neta:', prima_neta || '0.00');
+  console.log('2. Otros Descuentos:', otros_servicios || '0.00');
   console.log('3. Financiamiento:', cargo_pago_fraccionado || '0.00');
   console.log('4. Gastos de expedición:', gastos_expedicion || '0.00');
   console.log('5. IVA:', iva || '0.00');
@@ -599,12 +605,14 @@ export async function extraer(ctx) {
   }
   console.log('Placas:', placas || '(vacío)');
   
-  // 8. USO
-  const uso = extraerCampoLinea('Uso', textoCompleto);
+  // 8. USO - regex directo (extraerCampoLinea falla porque Strategy 3 salta a otras páginas)
+  const usoMatch = textoCompleto.match(/\bUso:\s+([A-ZÁÉÍÓÚÑ]+)/i);
+  const uso = usoMatch ? usoMatch[1].toUpperCase() : '';
   console.log('Uso:', uso || '❌');
   
-  // 9. SERVICIO
-  const servicio = extraerCampoLinea('Servicio', textoCompleto);
+  // 9. SERVICIO - regex directo
+  const servicioMatch = textoCompleto.match(/\bServicio:\s+([A-ZÁÉÍÓÚÑ]+)/i);
+  const servicio = servicioMatch ? servicioMatch[1].toUpperCase() : '';
   console.log('Servicio:', servicio || '❌');
   
   // 10. COLOR (si existe)
@@ -772,7 +780,7 @@ export async function extraer(ctx) {
   })();
 
   // Fallback financiero desde carátula si algún campo crítico falta
-  if ((!prima_pagada || !iva || !total) && bloqueFinancieroCaratula) {
+  if ((!prima_neta || !iva || !total) && bloqueFinancieroCaratula) {
     console.log('🔄 Fallback: intentando obtener montos desde bloque financiero en carátula');
     const linesFin = bloqueFinancieroCaratula.split(/\r?\n/);
     const extraeMontoLinea = (labelRegex) => {
@@ -784,16 +792,17 @@ export async function extraer(ctx) {
       }
       return '';
     };
-    prima_pagada = prima_pagada || extraeMontoLinea(/Prima\s+Neta/i);
+    prima_neta = prima_neta || extraeMontoLinea(/Prima\s+Neta/i);
+    prima_pagada = prima_neta;
     gastos_expedicion = gastos_expedicion || extraeMontoLinea(/Gastos\s+de\s+expedici/i);
     cargo_pago_fraccionado = cargo_pago_fraccionado || extraeMontoLinea(/Financiamiento\s+por\s+pago\s+fraccionado/i);
     iva = iva || extraeMontoLinea(/I\.V\.A\.|IVA/i);
     total = total || extraeMontoLinea(/Total\s+a\s+pagar/i);
-    console.log('🔄 Fallback resultados:', { prima_pagada, gastos_expedicion, cargo_pago_fraccionado, iva, total });
+    console.log('🔄 Fallback resultados:', { prima_neta, gastos_expedicion, cargo_pago_fraccionado, iva, total });
   }
   
-  console.log('Prima Neta:', prima_pagada || '0.00');
-  console.log('Otros Descuentos:', otros_descuentos || '0.00');
+  console.log('Prima Neta:', prima_neta || '0.00');
+  console.log('Otros Descuentos:', otros_servicios || '0.00');
   console.log('Cargo Fraccionado:', cargo_pago_fraccionado || '0.00');
   console.log('Gastos Expedición:', gastos_expedicion || '0.00');
   console.log('IVA:', iva || '0.00');
@@ -839,15 +848,16 @@ export async function extraer(ctx) {
     fecha_emision,
     fecha_captura,
     
-    // Financiero (Página 1 - Aviso de Cobro)
+    // Financiero
+    prima_neta,
     prima_pagada,
-    otros_descuentos: otros_descuentos ? otros_descuentos.replace(/,/g, '') : '',
+    otros_servicios,
     cargo_pago_fraccionado,
     gastos_expedicion,
     iva,
     total,
-    primer_pago: primer_pago || undefined,
-    pagos_subsecuentes: pagos_subsecuentes || undefined,
+    primer_pago: primer_pago || total || undefined,
+    pagos_subsecuentes: pagos_subsecuentes || (frecuenciaPago && frecuenciaPago !== 'Anual' ? total : '') || '',
     tipo_pago,
     frecuenciaPago,
     forma_pago, // Extraído de Serie del aviso
@@ -867,6 +877,11 @@ export async function extraer(ctx) {
     deducible,
     uso, // Extraído de página 2
     servicio, // Extraído de página 2
+    tipo_vehiculo: '',
+    conductor_habitual: '',
+    movimiento: endoso && endoso !== '000000' ? 'Endoso' : 'Emisión',
+    moneda: 'MXN',
+    periodo_gracia: '30',
     coberturas,
     
     // Metadata de validación

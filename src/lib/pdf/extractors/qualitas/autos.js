@@ -272,48 +272,41 @@ export async function extraer(ctx) {
   // Suele estar después de los montos (IMPORTE TOTAL) y antes del lugar (SAN JERONIMO, etc.)
   let fecha_emision = '';
   
-  // Patrón 1: "A ## DE NOMBRE_MES DE ####"
-  const emisionMatch1 = textoCompleto.match(/A\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
-  
-  if (emisionMatch1) {
-    const dia = emisionMatch1[1].padStart(2, '0');
-    const mesTexto = emisionMatch1[2].toUpperCase();
-    const anio = emisionMatch1[3];
-    
-    // Mapear nombre de mes completo a número
-    const mesesCompletos = {
-      'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
-      'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
-      'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
-    };
-    
+  // Mapa de meses completos para fecha de emisión
+  const mesesCompletos = {
+    'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
+    'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
+    'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+  };
+
+  // Patrón 1 (preferido): Ciudad + "A DD DE MES DE YYYY" (cerca de la firma, al fondo del PDF)
+  // Ejemplo: "GUADALAJARA JALISCO A 01 DE JULIO DE 2025"
+  const emisionCiudad = textoCompleto.match(/[A-ZÁÉÍÓÚÑ]{3,}(?:\s+[A-ZÁÉÍÓÚÑ]{2,})*\s+A\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
+
+  // Patrón 2: Después de "IMPORTE TOTAL" (la fecha suele aparecer justo abajo)
+  const emisionPostTotal = textoCompleto.match(/IMPORTE\s+TOTAL[\s\S]{0,300}?A\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
+
+  // Patrón 3 (fallback genérico): última aparición de "A DD DE MES DE YYYY" en el texto
+  let emisionUltima = null;
+  const allEmisionMatches = [...textoCompleto.matchAll(/A\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/gi)];
+  if (allEmisionMatches.length > 0) {
+    emisionUltima = allEmisionMatches[allEmisionMatches.length - 1];
+  }
+
+  // Elegir el mejor match en orden de prioridad
+  const emisionMatch = emisionCiudad || emisionPostTotal || emisionUltima;
+
+  if (emisionMatch) {
+    const dia = emisionMatch[1].padStart(2, '0');
+    const mesTexto = emisionMatch[2].toUpperCase();
+    const anio = emisionMatch[3];
     const mesNumero = mesesCompletos[mesTexto] || '01';
     fecha_emision = `${anio}-${mesNumero}-${dia}`;
     console.log('📅 Fecha de emisión encontrada:', fecha_emision, `(Original: "A ${dia} DE ${mesTexto} DE ${anio}")`);
   } else {
-    // Patrón 2: Fallback - buscar fecha después de "IMPORTE TOTAL"
-    const seccionDespuesTotal = textoCompleto.match(/IMPORTE\s+TOTAL[\s\S]{0,200}?(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚÑ]+)\s+DE\s+(\d{4})/i);
-    
-    if (seccionDespuesTotal) {
-      const dia = seccionDespuesTotal[1].padStart(2, '0');
-      const mesTexto = seccionDespuesTotal[2].toUpperCase();
-      const anio = seccionDespuesTotal[3];
-      
-      const mesesCompletos = {
-        'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
-        'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
-        'SEPTIEMBRE': '09', 'SETIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
-      };
-      
-      const mesNumero = mesesCompletos[mesTexto] || '01';
-      fecha_emision = `${anio}-${mesNumero}-${dia}`;
-      console.log('📅 Fecha de emisión encontrada (fallback):', fecha_emision);
-    } else {
-      console.warn('⚠️ Fecha de emisión no encontrada, usando fecha actual');
-      // Si no se encuentra, usar la fecha actual como fallback
-      const hoy = new Date();
-      fecha_emision = hoy.toISOString().split('T')[0];
-    }
+    console.warn('⚠️ Fecha de emisión no encontrada, usando fecha actual');
+    const hoy = new Date();
+    fecha_emision = hoy.toISOString().split('T')[0];
   }
   
   // ==================== PERIODO DE GRACIA ====================
@@ -517,7 +510,7 @@ export async function extraer(ctx) {
     fecha_captura: new Date().toISOString().split('T')[0],
     
     // Financiero
-    prima_pagada: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
+    prima_neta: primaMatch ? primaMatch[1].replace(/,/g, '') : '',
     cargo_pago_fraccionado: tasaFinanciamientoMatch ? tasaFinanciamientoMatch[1].replace(/,/g, '') : '',
     gastos_expedicion: gastosExpedicionMatch ? gastosExpedicionMatch[1].replace(/,/g, '') : '',
     subtotal: subtotalMatch ? subtotalMatch[1].replace(/,/g, '') : '',
@@ -527,7 +520,7 @@ export async function extraer(ctx) {
     tipo_pago: tipoPagoDetectado,
     frecuenciaPago: frecuenciaPagoDetectada,
     forma_pago: formaPagoDetectada || '',
-    primer_pago: primerPago,
+    primer_pago: primerPago || (tipoPagoDetectado === 'Anual' && totalMatch ? totalMatch[1].replace(/,/g, '') : ''),
     pagos_subsecuentes: pagosSubsecuentes,
     periodo_gracia: periodoGraciaExtraido,
     suma_asegurada: sumaMatch ? sumaMatch[1].replace(/,/g, '') : '',
