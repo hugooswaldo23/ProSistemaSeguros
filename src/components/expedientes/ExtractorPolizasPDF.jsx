@@ -1028,7 +1028,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 clave: datosExtraidos.clave_agente
               });
               
-              // Actualizar el agente con el nuevo productosAseguradoras
+              // MÉTODO 1: Actualizar productosAseguradoras del agente
               console.log('📡 [AUTO-CLAVE] PASO 1: Actualizando productosAseguradoras del agente...');
               const updateResult = await actualizarMiembroEquipo(agenteEncontrado.id, {
                 productosAseguradoras: productosActuales
@@ -1038,6 +1038,26 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
                 console.error('❌ [AUTO-CLAVE] Error al actualizar productosAseguradoras:', updateResult.error);
               } else {
                 console.log('✅ [AUTO-CLAVE] PASO 1 OK: productosAseguradoras actualizado');
+              }
+
+              // MÉTODO 2: También guardar via tabla normalizada (respaldo)
+              try {
+                const { guardarEjecutivosPorProducto } = await import('../../services/equipoDeTrabajoService');
+                const resAsig = await guardarEjecutivosPorProducto({
+                  usuarioId: agenteEncontrado.id,
+                  aseguradoraId: aseguradoraId,
+                  productoId: productoMatch.id,
+                  ejecutivoId: null,
+                  clave: datosExtraidos.clave_agente,
+                  comisionPersonalizada: productoMatch.comisionBase || 0
+                });
+                if (resAsig.success) {
+                  console.log('✅ [AUTO-CLAVE] PASO 2 OK: tabla normalizada actualizada');
+                } else {
+                  console.warn('⚠️ [AUTO-CLAVE] PASO 2 falló:', resAsig.error);
+                }
+              } catch (e2) {
+                console.warn('⚠️ [AUTO-CLAVE] PASO 2 error:', e2);
               }
             } else {
               console.log('ℹ️ [AUTO-CLAVE] Combo aseguradora+producto ya existe, solo falta la clave');
@@ -1311,6 +1331,52 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           const siguienteNumero = maxNumero + 1;
           const codigoConsecutivo = prefijo + String(siguienteNumero).padStart(3, '0'); // AG001, AG002, etc.
           
+          // Pre-buscar producto ANTES de crear el agente para incluirlo en productosAseguradoras
+          const productoExtraidoPre = datosExtraidos.producto;
+          let productoMatchPre = null;
+          
+          // Obtener productos REALES del API (con {id, nombre}) - el prop tiposProductos puede ser solo strings
+          let productosRealesAPI = [];
+          try {
+            const { obtenerTiposProductos } = await import('../../services/tiposProductosService');
+            const resProductos = await obtenerTiposProductos();
+            if (resProductos && resProductos.success && Array.isArray(resProductos.data)) {
+              productosRealesAPI = resProductos.data;
+            }
+          } catch (e) {
+            console.warn('⚠️ No se pudieron obtener productos del API:', e);
+          }
+          console.log('📦 Productos reales del API:', productosRealesAPI.map(p => `${p.id}:${p.nombre}`).join(', '));
+
+          if (productoExtraidoPre && productosRealesAPI.length > 0) {
+            productoMatchPre = productosRealesAPI.find(prod =>
+              prod.nombre && productoExtraidoPre.toLowerCase().includes(prod.nombre.toLowerCase())
+            );
+            if (!productoMatchPre) {
+              productoMatchPre = productosRealesAPI.find(prod =>
+                prod.nombre && prod.nombre.toLowerCase().includes(productoExtraidoPre.toLowerCase())
+              );
+            }
+            if (!productoMatchPre && productoExtraidoPre.toLowerCase().includes('auto')) {
+              productoMatchPre = productosRealesAPI.find(prod => 
+                prod.nombre && prod.nombre.toLowerCase().includes('auto')
+              );
+            }
+          }
+
+          // Construir productosAseguradoras inicial con la clave del PDF
+          const productosIniciales = [];
+          if (aseguradoraId && productoMatchPre) {
+            productosIniciales.push({
+              aseguradoraId: aseguradoraId,
+              productoId: productoMatchPre.id,
+              ejecutivoId: null,
+              comisionPersonalizada: 0,
+              clave: codigo
+            });
+            console.log(`🔗 [CREAR-AGENTE] Incluyendo asignación: aseg=${aseguradoraId}, prod=${productoMatchPre.nombre}, clave=${codigo}`);
+          }
+
           const nuevoAgente = {
             codigo: codigoConsecutivo, // Código del equipo, NO la clave de aseguradora
             nombre: nombre,
@@ -1319,7 +1385,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             perfil: 'Agente',
             activo: true,
             fechaIngreso: new Date().toISOString().split('T')[0],
-            productosAseguradoras: []
+            productosAseguradoras: productosIniciales
           };
           
           const { crearMiembroEquipo } = await import('../../services/equipoDeTrabajoService');
@@ -1330,7 +1396,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             setAgenteEncontrado(resultado.data);
             console.log('✅ Agente creado exitosamente:', resultado.data.nombre, 'ID:', resultado.data.id);
             const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno}`;
-            toast.success(`Agente creado: ${nombreMostrar}`);
+            toast.success(`Agente creado: ${nombreMostrar} — Configura comisión y ejecutivo en Equipo de Trabajo`, { duration: 6000 });
             
             // RECARGAR LISTA DE AGENTES para que aparezca en el componente principal
             try {
@@ -1357,23 +1423,26 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         console.log('   agenteId:', agenteId);
         console.log('   yaExisteAsignacion:', yaExisteAsignacion);
         
-        if (aseguradoraId && productoExtraido && tiposProductos.length > 0) {
+        if (aseguradoraId && productoExtraido) {
           // Ya tenemos la aseguradora identificada arriba
           console.log('🔗 Vinculando agente con aseguradora ID:', aseguradoraId);
           
+          // Usar productos reales del API (ya cargados arriba)
+          const productosParaVincular = productosRealesAPI.length > 0 ? productosRealesAPI : [];
+          
           // Buscar producto
-          let productoMatch = tiposProductos.find(prod =>
+          let productoMatch = productosParaVincular.find(prod =>
             prod.nombre && productoExtraido.toLowerCase().includes(prod.nombre.toLowerCase())
           );
           
           if (!productoMatch) {
-            productoMatch = tiposProductos.find(prod =>
+            productoMatch = productosParaVincular.find(prod =>
               prod.nombre && prod.nombre.toLowerCase().includes(productoExtraido.toLowerCase())
             );
           }
           
           if (!productoMatch && productoExtraido.toLowerCase().includes('auto')) {
-            productoMatch = tiposProductos.find(prod => 
+            productoMatch = productosParaVincular.find(prod => 
               prod.nombre && prod.nombre.toLowerCase().includes('auto')
             );
           }
@@ -1419,8 +1488,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       } catch (error) {
         console.error('❌ Error al procesar agente:', error);
-        const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno} ${apellidoMaterno}`;
-        toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
+        // Solo mostrar error de "crear" si realmente no se creó
+        if (!agenteId) {
+          const nombreMostrar = esPersonaMoral ? nombre : `${nombre} ${apellidoPaterno} ${apellidoMaterno}`;
+          toast(`⚠️ No se pudo crear el agente automáticamente. Agrega manualmente: Código ${codigo} - ${nombreMostrar}`);
+        } else {
+          // El agente SÍ se creó, el error fue al vincular la clave
+          console.warn('⚠️ Agente creado pero error al vincular clave:', error.message);
+          toast.info(`Agente creado correctamente. La clave ${codigo} se puede agregar manualmente en Equipo de Trabajo.`);
+        }
         // Continuar sin el agente
       }
     }
