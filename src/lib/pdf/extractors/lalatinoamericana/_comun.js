@@ -189,7 +189,7 @@ export function extraerCamposUniversales(ctx, productoLabel = '') {
   // ==================== FECHAS ====================
   const fechaEmisionRaw = extraerDato(/Fecha\s+de\s+emisi[oó]n:\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i, textoRecibo)
     || extraerDato(/Fecha\s+de\s+emisi[oó]n:\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i, textoCaratula);
-  const fechaEmision = normalizarFecha(fechaEmisionRaw) || new Date().toISOString().split('T')[0];
+  const fechaEmision = normalizarFecha(fechaEmisionRaw);
 
   const fechaLimitePagoRaw = extraerDato(/Fecha\s+l[ií]mite\s+de\s+pago:\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i, textoRecibo);
   const fechaLimitePago = normalizarFecha(fechaLimitePagoRaw);

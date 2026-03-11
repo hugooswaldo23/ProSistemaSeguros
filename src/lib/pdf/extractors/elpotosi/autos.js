@@ -26,14 +26,20 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
     email: '',
     telefono_movil: '',
     domicilio: '',
+    colonia: '',
     municipio: '',
     estado: '',
     codigo_postal: '',
+    pais: 'MEXICO',
     
     // Póliza
     numero_poliza: '',
+    endoso: '',
+    inciso: '',
+    plan: '',
     compania: 'El Potosí',
     producto: 'Autos',
+    etapa_activa: 'Emitida',
     tipo_cobertura: '',
     forma_pago: '',
     tipo_pago: '',
@@ -43,26 +49,23 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
     marca: '',
     modelo: '',
     anio: '',
-    descripcion: '',
     placas: '',
-    serie: '',
-    vin: '',
     numero_serie: '',
-    numero_motor: '',
-    motor_numero: '',
-    uso: '',
-    tipo_vehiculo: '',
-    transmision: '',
     motor: '',
-    ocupantes: '',
+    color: '',
+    uso: '',
+    servicio: '',
+    tipo_vehiculo: '',
+    capacidad: '',
     
     // Fechas
     fecha_emision: '',
     inicio_vigencia: '',
     termino_vigencia: '',
+    fecha_captura: new Date().toISOString().split('T')[0],
     
     // Montos
-    prima_pagada: '',
+    prima_neta: '',
     gastos_expedicion: '',
     cargo_pago_fraccionado: '',
     subtotal: '',
@@ -70,10 +73,17 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
     total: '',
     primer_pago: '',
     pagos_subsecuentes: '',
+    moneda: 'MXN',
+    periodo_gracia: '30',
+    fecha_limite_pago: '',
     
     // Agente
     clave_agente: '',
     agente: '',
+    
+    // Otros
+    conductor_habitual: '',
+    movimiento: 'Emisión',
     
     // Coberturas
     coberturas: []
@@ -387,7 +397,6 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
     const matchVehiculo = texto.match(/Veh[ií]culo:\s*([^\n]+)/i);
     if (matchVehiculo) {
       const lineaVehiculo = matchVehiculo[1];
-      datos.descripcion = lineaVehiculo;
       
       // Extraer año/marca/modelo
       const matchDetalles = lineaVehiculo.match(/Mod\.(\d{4})\/([A-Z\s]+?)(?:,|$)/i);
@@ -410,10 +419,8 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
     }
     
     if (matchSerie) {
-      datos.serie = matchSerie[1].toUpperCase();
-      datos.vin = matchSerie[1].toUpperCase(); // Agregar también como 'vin'
-      datos.numero_serie = matchSerie[1].toUpperCase(); // Y como 'numero_serie' por si acaso
-      console.log('🔢 Serie/VIN:', datos.serie);
+      datos.numero_serie = matchSerie[1].toUpperCase();
+      console.log('🔢 Serie/VIN:', datos.numero_serie);
     } else {
       console.warn('⚠️ No se encontró VIN/Serie en la sección del vehículo');
     }
@@ -428,17 +435,15 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
       const valor = matchNumMotor[1].trim();
       // Asegurar que no capture nombres de vehículos
       if (!valor.match(/CHRYSLER|JEEP|FORD|NISSAN|GLADIATOR|RUBICON/i)) {
-        datos.numero_motor = valor;
-        datos.motor_numero = valor; // Agregar también con otro nombre por si acaso
-        console.log('🔧 Número de motor:', datos.numero_motor);
+        datos.motor = valor;
+        console.log('🔧 Número de motor:', datos.motor);
       }
     }
     
     // Si no se encontró, buscar "HECHO EN USA" directamente
-    if (!datos.numero_motor && texto.match(/HECHO EN USA/i)) {
-      datos.numero_motor = 'HECHO EN USA';
-      datos.motor_numero = 'HECHO EN USA';
-      console.log('🔧 Número de motor (directo):', datos.numero_motor);
+    if (!datos.motor && texto.match(/HECHO EN USA/i)) {
+      datos.motor = 'HECHO EN USA';
+      console.log('🔧 Número de motor (directo):', datos.motor);
     }
     
     // Transmisión
@@ -448,25 +453,29 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
       datos.transmision = 'STANDARD';
     }
     
-    // Motor (cilindros)
-    const matchMotor = texto.match(/(\d+)\s*CIL/i);
-    if (matchMotor) {
-      datos.motor = matchMotor[1] + ' CIL';
+    // Motor (cilindros) — solo si no se extrajo el número de motor antes
+    if (!datos.motor) {
+      const matchMotor = texto.match(/(\d+)\s*CIL/i);
+      if (matchMotor) {
+        datos.motor = matchMotor[1] + ' CIL';
+      }
     }
     
-    // Ocupantes/Puertas
+    // Capacidad/Puertas
     const matchPuertas = texto.match(/(\d+)\s*PTAS/i);
     if (matchPuertas) {
-      datos.ocupantes = matchPuertas[1];
+      datos.capacidad = matchPuertas[1];
     }
     
     // Uso - buscar "PARTICULAR", "COMERCIAL", etc.
     const matchUso = texto.match(/\n\s*(PARTICULAR|COMERCIAL|FRONTERIZO)\s*\n/i);
     if (matchUso) {
       datos.uso = matchUso[1].toUpperCase();
+      datos.servicio = datos.uso === 'COMERCIAL' ? 'Público' : 'Particular';
       console.log('🚗 Uso:', datos.uso);
     } else {
       datos.uso = 'PARTICULAR';
+      datos.servicio = 'Particular';
     }
     
     // Tipo de vehículo
@@ -479,107 +488,17 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
   }
   
   // Si no se encontró el VIN en la sección del vehículo, buscar en todo el documento
-  if (!datos.serie) {
+  if (!datos.numero_serie) {
     const matchSerieGlobal = textoCompleto.match(/\b([A-HJ-NPR-Z0-9]{17})\b/);
     if (matchSerieGlobal) {
-      datos.serie = matchSerieGlobal[1].toUpperCase();
-      datos.vin = matchSerieGlobal[1].toUpperCase();
       datos.numero_serie = matchSerieGlobal[1].toUpperCase();
-      console.log('🔢 Serie/VIN (búsqueda global):', datos.serie);
+      console.log('🔢 Serie/VIN (búsqueda global):', datos.numero_serie);
     }
   }
 
   // ==================== COBERTURAS ====================
-  // Buscar tabla de coberturas después de "CONDICIONES DEL ASEGURAMIENTO"
-  // En El Potosí, las coberturas vienen en formato de tabla con estructura:
-  // Cobertura    Suma Asegurada    Prima    Deducible
-  // Los valores pueden estar en la misma línea o línea siguiente
-  
-  const seccionCoberturas = textoCompleto.match(/CONDICIONES\s+DEL\s+ASEGURAMIENTO[\s\S]{0,3000}?(?=CLAUSULAS|Art\.|Firma|$)/i);
-  
-  if (seccionCoberturas) {
-    const texto = seccionCoberturas[0];
-    
-    // Patrones de coberturas comunes en El Potosí
-    const patronesCoberturas = [
-      // Patrón 1: Nombre en una línea, valores en la siguiente
-      // "DAÑOS MATERIALES"
-      // "VALOR COMERCIAL 5,809.44* 3.00% VALOR COMERCIAL"
-      /([A-ZÁÉÍÓÚÑ\s]{5,})\n\s*([A-Z\s]+(?:COMERCIAL|FACTURA|AMPARADA)?)\s+([\d,]+\.?\d{0,2}[*]?)\s+([\d,]+\.?\d{0,2}%?)\s+([^\n]+)/gi,
-      
-      // Patrón 2: Todo en una línea
-      // "RESPONSABILIDAD CIVIL VALOR COMERCIAL 5,809.44 3.00% VALOR COMERCIAL"
-      /([A-ZÁÉÍÓÚÑ\s]{8,}?)\s+(VALOR\s+(?:COMERCIAL|FACTURA)|AMPARADA|\$[\d,]+\.?\d*)\s+([\d,]+\.?\d{0,2}[*]?)\s+([\d,]+\.?\d{0,2}%?)\s+([^\n]+)/gi,
-      
-      // Patrón 3: Líneas con coberturas estándar
-      /^([A-ZÁÉÍÓÚÑ\s]{5,})\s*$\n\s*([^\n]+)/gm
-    ];
-    
-    // Lista de nombres conocidos de coberturas
-    const coberturasConocidas = [
-      'DAÑOS MATERIALES',
-      'RESPONSABILIDAD CIVIL',
-      'ROBO TOTAL',
-      'ASISTENCIA VIAL',
-      'GASTOS MÉDICOS OCUPANTES',
-      'CRISTALES',
-      'EXTENSIÓN DE RESPONSABILIDAD CIVIL',
-      'ACCIDENTES AL CONDUCTOR',
-      'EQUIPO ESPECIAL',
-      'DEFENSA LEGAL',
-      'GASTOS DE TRANSPORTACIÓN',
-      'MUERTE ACCIDENTAL'
-    ];
-    
-    // Buscar por cada patrón
-    for (const patron of patronesCoberturas) {
-      let match;
-      while ((match = patron.exec(texto)) !== null) {
-        const nombreCobertura = match[1].trim();
-        
-        // Validar que sea un nombre de cobertura real (no headers ni labels)
-        if (nombreCobertura.length < 5 || /Cobertura|Suma|Prima|Deducible|Total/i.test(nombreCobertura)) {
-          continue;
-        }
-        
-        // Si tiene los valores en el match
-        if (match.length >= 5) {
-          const sumaAsegurada = match[2] ? match[2].trim() : '';
-          const prima = match[3] ? match[3].replace(/[,*]/g, '') : '0';
-          const deducible = match[4] ? match[4].trim() : '';
-          const deducibleDetalle = match[5] ? match[5].trim() : '';
-          
-          datos.coberturas.push({
-            nombre: nombreCobertura,
-            suma_asegurada: sumaAsegurada,
-            prima: prima,
-            deducible: deducible + (deducibleDetalle && deducibleDetalle !== sumaAsegurada ? ' ' + deducibleDetalle : '')
-          });
-          
-          console.log(`🛡️ Cobertura: ${nombreCobertura} - Suma: ${sumaAsegurada} - Prima: ${prima} - Deducible: ${deducible}`);
-        }
-      }
-    }
-    
-    // Si no se encontraron coberturas con los patrones, buscar por nombres conocidos
-    if (datos.coberturas.length === 0) {
-      for (const nombreCob of coberturasConocidas) {
-        const patron = new RegExp(nombreCob + '[\\s\\S]{0,200}?([\\d,]+\\.\\d{2})', 'i');
-        const match = texto.match(patron);
-        if (match) {
-          datos.coberturas.push({
-            nombre: nombreCob,
-            suma_asegurada: 'AMPARADA',
-            prima: match[1].replace(/,/g, ''),
-            deducible: 'Ver póliza'
-          });
-          console.log(`🛡️ Cobertura (fallback): ${nombreCob} - Prima: ${match[1]}`);
-        }
-      }
-    }
-    
-    console.log('📋 Total coberturas encontradas:', datos.coberturas.length);
-  }
+  // No se extraen coberturas por regex — se dejan para revisión manual
+  datos.coberturas = [];
 
   // ==================== MONTOS FINANCIEROS ====================
   // Buscar tabla "DETALLES DE MOVIMIENTO"
@@ -612,20 +531,26 @@ export async function extraer({ textoCompleto, textoPagina1, todasLasPaginas }) 
       // [6] = IVA (4,053.62)
       // [7] = Art. 101 (0.00)
       
-      datos.prima_pagada = numeros[0].replace(/,/g, '');
+      datos.prima_neta = numeros[0].replace(/,/g, '');
       datos.gastos_expedicion = numeros[1].replace(/,/g, '');
       datos.cargo_pago_fraccionado = numeros[4].replace(/,/g, '');
       datos.subtotal = numeros[5].replace(/,/g, '');
       datos.iva = numeros[6].replace(/,/g, '');
       datos.total = numeros[3].replace(/,/g, '');
       
-      console.log('💰 Prima:', datos.prima_pagada);
+      console.log('💰 Prima neta:', datos.prima_neta);
       console.log('📄 Gastos de expedición:', datos.gastos_expedicion);
       console.log('💳 Cargo por fraccionamiento:', datos.cargo_pago_fraccionado);
       console.log('📊 Subtotal:', datos.subtotal);
       console.log('💵 IVA:', datos.iva);
       console.log('💰 Total:', datos.total);
     }
+  }
+
+  // ==================== PRIMER PAGO (ANUAL) ====================
+  // En pago anual, el primer pago es el total
+  if (datos.tipo_pago === 'Anual' && datos.total && !datos.primer_pago) {
+    datos.primer_pago = datos.total;
   }
 
   // ==================== PAGOS FRACCIONADOS ====================
