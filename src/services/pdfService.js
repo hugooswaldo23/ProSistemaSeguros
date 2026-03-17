@@ -373,7 +373,7 @@ export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiratio
 export async function obtenerComprobantePagoURL(expedienteId, numeroRecibo, expiration = 3600) {
   try {
     const response = await fetch(
-      `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/comprobante-url?expiration=${expiration}`,
+      `${API_URL}/api/recibos/${expedienteId}/${numeroRecibo}/comprobante?expiration=${expiration}`,
       { method: 'GET', headers: getAuthHeaders() }
     );
 
