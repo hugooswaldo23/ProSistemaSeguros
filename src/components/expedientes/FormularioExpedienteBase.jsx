@@ -86,6 +86,7 @@ const FormularioExpedienteBase = React.memo(({
   
   // Props de callbacks
   onEliminarPago,
+  onRecibosArchivos, // 📎 Callback para recibir archivos de recibo pendientes (pre-guardado)
   
   // Contenido adicional (para cada modo)
   bannerSuperior,
@@ -1234,6 +1235,8 @@ const FormularioExpedienteBase = React.memo(({
                     calcularProximoPago={calcularProximoPago}
                     mostrarResumen={false}
                     onEliminarPago={onEliminarPago}
+                    modoPreGuardado={!modoEdicion}
+                    onRecibosArchivos={onRecibosArchivos}
                     onRecibosCalculados={(recibos) => {
                       // 📸 Guardar recibos calculados en el formulario
                       setFormulario(prev => ({

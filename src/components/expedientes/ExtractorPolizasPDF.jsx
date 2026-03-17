@@ -187,6 +187,9 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           });
           if (!response.ok) {
             console.error('❌ Error al obtener clientes:', response.status);
+            if (response.status === 401) {
+              throw new Error('Sesión expirada. Por favor cierra sesión e inicia sesión nuevamente.');
+            }
             return null;
           }
           
@@ -505,7 +508,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     } catch (error) {
       console.error('Error al procesar PDF:', error);
       setEstado('error');
-      setErrores(['❌ Error al procesar el archivo PDF: ' + error.message]);
+      if (error.message && error.message.includes('Sesión expirada')) {
+        setErrores(['🔒 ' + error.message]);
+      } else {
+        setErrores(['❌ Error al procesar el archivo PDF: ' + error.message]);
+      }
     }
   }, [metodoExtraccion]); // Agregar metodoExtraccion como dependencia
 
@@ -709,6 +716,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         }
       } else {
         console.error('❌ Error al crear cliente:', resultado.error);
+        
+        // ✅ CASO ESPECIAL: Si el error es de autenticación, mostrar mensaje claro
+        if (resultado.error && (resultado.error.includes('No autorizado') || resultado.error.includes('401'))) {
+          setErrores(['🔒 Sesión expirada. Por favor cierra sesión e inicia sesión nuevamente.']);
+          setEstado('error');
+          return;
+        }
         
         // ✅ CASO ESPECIAL: Si el error es por RFC faltante, mostrar modal de captura
         if (resultado.error && resultado.error.includes('RFC')) {

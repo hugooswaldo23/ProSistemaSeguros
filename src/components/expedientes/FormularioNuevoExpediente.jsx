@@ -51,6 +51,7 @@ const FormularioNuevoExpediente = ({
   handleClienteSeleccionado,
   clienteSeleccionado,
   onEliminarPago,
+  onRecibosArchivos, // 📎 Callback para recibos adjuntos pre-guardado
   // 🆕 Props para renovación
   expedienteAnterior = null,
   limpiarExpedienteAnterior = () => {}
@@ -153,7 +154,8 @@ const FormularioNuevoExpediente = ({
           moneda: aplicarSiVacio(datosPoliza.moneda, prev.moneda),
           
           // Fechas
-          fecha_emision: aplicarSiVacio(datosPoliza.fecha_emision, prev.fecha_emision),
+          // ⚠️ FORZAR fecha_emision desde PDF (el estado inicial tiene la fecha de hoy y aplicarSiVacio la bloquearía)
+          fecha_emision: datosPoliza.fecha_emision || prev.fecha_emision,
           inicio_vigencia: aplicarSiVacio(datosPoliza.inicio_vigencia, prev.inicio_vigencia),
           termino_vigencia: aplicarSiVacio(datosPoliza.termino_vigencia, prev.termino_vigencia),
           fecha_aviso_renovacion: aplicarSiVacio(datosPoliza.fecha_aviso_renovacion, prev.fecha_aviso_renovacion),
@@ -557,6 +559,7 @@ const FormularioNuevoExpediente = ({
           handleClienteSeleccionado={handleClienteSeleccionado}
           clienteSeleccionado={clienteSeleccionado}
           onEliminarPago={onEliminarPago}
+          onRecibosArchivos={onRecibosArchivos}
           bannerSuperior={bannerSuperior}
           seccionPDFInferior={null}
         />

@@ -364,6 +364,33 @@ export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiratio
 }
 
 /**
+ * Obtener URL firmada del comprobante de pago del cliente
+ * @param {number} expedienteId - ID del expediente
+ * @param {number} numeroRecibo - Número de recibo
+ * @param {number} expiration - Tiempo de expiración en segundos (default: 3600)
+ * @returns {Promise<Object>} URL firmada { url, expiresAt }
+ */
+export async function obtenerComprobantePagoURL(expedienteId, numeroRecibo, expiration = 3600) {
+  try {
+    const response = await fetch(
+      `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/comprobante-url?expiration=${expiration}`,
+      { method: 'GET', headers: getAuthHeaders() }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || 'Error al obtener URL del comprobante');
+    }
+
+    const data = await response.json();
+    return data.data;
+  } catch (error) {
+    console.error('Error en obtenerComprobantePagoURL:', error);
+    throw error;
+  }
+}
+
+/**
  * Obtener URL firmada de una cotización
  * @param {number} expedienteId - ID del expediente
  * @param {number} documentoId - ID del documento de cotización
