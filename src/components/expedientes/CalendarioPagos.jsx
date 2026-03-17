@@ -7,10 +7,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { FileText, Mail, Trash2, Upload, Download, Loader } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
 import * as estatusPagosUtils from '../../utils/estatusPagos';
-import { subirReciboPago, obtenerReciboPagoURL, obtenerURLFirmadaPDF } from '../../services/pdfService';
+import { subirReciboPago, obtenerReciboPagoURL, obtenerURLFirmadaPDF, obtenerComprobantePagoURL } from '../../services/pdfService';
 import { Badge } from './UIComponents';
 
 const CalendarioPagos = ({ 
@@ -21,6 +22,8 @@ const CalendarioPagos = ({
   onEnviarAviso, // Callback para enviar avisos de pago
   onEliminarPago, // Callback para eliminar un pago (abre modal de confirmación)
   onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
+  onRecibosArchivos, // 📎 Callback para entregar archivos de recibo seleccionados (pre-guardado)
+  modoPreGuardado = false, // true = expediente aún no guardado, no subir a S3
   historial = [] // Historial de eventos para encontrar comprobantes
 }) => {
   // === Estado para recibos de pago de aseguradora ===
@@ -326,12 +329,39 @@ const CalendarioPagos = ({
   };
 
   /**
-   * Procesa el archivo seleccionado y lo sube a S3
+   * Procesa el archivo seleccionado y lo sube a S3 (o lo guarda localmente si es pre-guardado)
    */
   const handleArchivoRecibo = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !reciboSeleccionado) return;
 
+    // === Modo pre-guardado: guardar archivo localmente, no subir a S3 ===
+    if (modoPreGuardado) {
+      setRecibosSubidos(prev => {
+        const nuevos = {
+          ...prev,
+          [reciboSeleccionado]: {
+            subido: true,
+            nombre: file.name,
+            archivo: file // Guardar referencia al File para subir después
+          }
+        };
+        // Notificar al padre los archivos pendientes
+        if (onRecibosArchivos) {
+          const archivos = {};
+          Object.entries(nuevos).forEach(([num, data]) => {
+            if (data.archivo) archivos[num] = data.archivo;
+          });
+          onRecibosArchivos(archivos);
+        }
+        return nuevos;
+      });
+      toast.success(`📎 Recibo #${reciboSeleccionado} adjuntado - se subirá al guardar`);
+      setReciboSeleccionado(null);
+      return;
+    }
+
+    // === Modo normal: subir directamente a S3 ===
     setSubiendoRecibo(reciboSeleccionado);
     try {
       const resultado = await subirReciboPago(expediente.id, reciboSeleccionado, file);
@@ -484,7 +514,7 @@ const CalendarioPagos = ({
                 <th width="150">Estado</th>
                 {expediente?.pdf_url && <th width="80" className="text-center">Póliza</th>}
                 <th width="100" className="text-center">Recibo</th>
-                <th width="150">Acciones</th>
+                {!modoPreGuardado && <th width="150">Acciones</th>}
               </tr>
             </thead>
             <tbody>
@@ -549,19 +579,27 @@ const CalendarioPagos = ({
                       </button>
                     ) : tieneReciboAseguradora(pago) ? (
                       <div className="d-flex gap-1 justify-content-center">
-                        <button
-                          className="btn btn-sm btn-outline-success"
-                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => handleVerRecibo(pago.numero)}
-                          title="Ver recibo de pago de aseguradora"
-                        >
-                          <Download size={12} />
-                        </button>
+                        {!modoPreGuardado && (
+                          <button
+                            className="btn btn-sm btn-outline-success"
+                            style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                            onClick={() => handleVerRecibo(pago.numero)}
+                            title="Ver recibo de pago de aseguradora"
+                          >
+                            <Download size={12} />
+                          </button>
+                        )}
+                        {modoPreGuardado && (
+                          <span className="badge bg-success" style={{ fontSize: '0.65rem' }}
+                            title={recibosSubidos[pago.numero]?.nombre}>
+                            ✓ {recibosSubidos[pago.numero]?.nombre?.substring(0, 15) || 'Adjunto'}
+                          </span>
+                        )}
                         <button
                           className="btn btn-sm btn-outline-warning"
                           style={{ padding: '0.2rem 0.4rem', fontSize: '0.65rem' }}
                           onClick={() => handleClickSubirRecibo(pago.numero)}
-                          title="Reemplazar recibo"
+                          title={modoPreGuardado ? 'Cambiar recibo adjunto' : 'Reemplazar recibo'}
                         >
                           <Upload size={10} />
                         </button>
@@ -571,12 +609,13 @@ const CalendarioPagos = ({
                         className="btn btn-sm btn-outline-primary"
                         style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                         onClick={() => handleClickSubirRecibo(pago.numero)}
-                        title="Subir recibo de pago de aseguradora"
+                        title={modoPreGuardado ? 'Adjuntar recibo de pago' : 'Subir recibo de pago de aseguradora'}
                       >
                         <Upload size={12} />
                       </button>
                     )}
                   </td>
+                  {!modoPreGuardado && (
                   <td>
                     <div className="d-flex gap-1">
                     {pago.pagado ? (
@@ -585,42 +624,36 @@ const CalendarioPagos = ({
                         <button 
                           className="btn btn-outline-success btn-sm"
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
-                          onClick={() => {
-                          // Normalizar fechas para comparación (solo YYYY-MM-DD)
-                          const normalizarFecha = (fecha) => {
-                            if (!fecha) return null;
-                            const d = new Date(fecha);
-                            return d.toISOString().split('T')[0]; // Solo YYYY-MM-DD
-                          };
-                          
-                          const fechaBuscada = normalizarFecha(pago.fecha);
-                          console.log('🔍 Buscando comprobante para fecha:', fechaBuscada);
-                          console.log('📋 Historial disponible:', historial?.length || 0, 'eventos');
-                          
-                          // Buscar en el historial el evento de pago correspondiente
-                          const eventoPago = historial.find(evento => {
-                            const fechaEvento = normalizarFecha(evento.datos_adicionales?.fecha_pago);
-                            const coincide = evento.tipo_evento === 'pago_registrado' &&
-                              fechaEvento === fechaBuscada &&
-                              evento.datos_adicionales?.comprobante_url;
-                            
-                            if (coincide) {
-                              console.log('✅ Comprobante encontrado:', evento.datos_adicionales.comprobante_url);
+                          onClick={async () => {
+                          try {
+                            // Intentar obtener URL firmada del backend
+                            const data = await obtenerComprobantePagoURL(expediente.id, pago.numero);
+                            if (data?.url || data?.signed_url) {
+                              window.open(data.url || data.signed_url, '_blank');
+                              return;
                             }
-                            return coincide;
+                          } catch (err) {
+                            console.warn('⚠️ No se pudo obtener URL firmada del comprobante:', err.message);
+                          }
+
+                          // Fallback: usar URL directa del recibo
+                          if (pago.comprobante_url) {
+                            console.log('📎 Usando URL directa del comprobante:', pago.comprobante_url);
+                            window.open(pago.comprobante_url, '_blank');
+                            return;
+                          }
+
+                          // Último fallback: buscar en historial por numero_recibo
+                          const eventoPago = historial.find(evento => {
+                            return evento.tipo_evento === 'pago_registrado' &&
+                              evento.datos_adicionales?.numero_recibo === pago.numero &&
+                              evento.datos_adicionales?.comprobante_url;
                           });
                           
                           if (eventoPago?.datos_adicionales?.comprobante_url) {
-                            // Abrir comprobante en nueva pestaña
                             window.open(eventoPago.datos_adicionales.comprobante_url, '_blank');
                           } else {
-                            console.warn('❌ No se encontró comprobante. Eventos de pago:', 
-                              historial.filter(e => e.tipo_evento === 'pago_registrado').map(e => ({
-                                fecha: e.datos_adicionales?.fecha_pago,
-                                tiene_url: !!e.datos_adicionales?.comprobante_url
-                              }))
-                            );
-                            alert('No se encontró el comprobante de pago para esta fecha');
+                            alert('No se encontró el comprobante de pago para este recibo');
                           }
                         }}
                         title="Ver comprobante de pago"
@@ -653,6 +686,7 @@ const CalendarioPagos = ({
                     )}
                     </div>
                   </td>
+                  )}
                 </tr>
                 );
               })}
@@ -661,7 +695,7 @@ const CalendarioPagos = ({
               <tfoot>
                 <tr className="table-info">
                   <td colSpan="3" className="text-end"><strong>Total Anual:</strong></td>
-                  <td colSpan="3"><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
+                  <td colSpan={modoPreGuardado ? 2 : 3}><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
                 </tr>
               </tfoot>
             )}

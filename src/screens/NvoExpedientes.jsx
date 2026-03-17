@@ -95,6 +95,7 @@ const ModuloNvoExpedientes = () => {
   const [modoEdicion, setModoEdicion] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [origenNavegacion, setOrigenNavegacion] = useState(null); // 'dashboard' o null
+  const [recibosArchivosPendientes, setRecibosArchivosPendientes] = useState({}); // {numero: File} - recibos adjuntos pre-guardado
   
   // Datos
   const [expedientes, setExpedientes] = useState([]);
@@ -2280,6 +2281,21 @@ const ModuloNvoExpedientes = () => {
         console.warn('⚠️ Fue extractor PDF pero window._selectedPDFFile está vacío');
       }
       
+      // 📎 SUBIR RECIBOS DE PAGO ADJUNTADOS ANTES DE GUARDAR
+      if (!modoEdicion && Object.keys(recibosArchivosPendientes).length > 0 && expedienteId) {
+        console.log('📎 Subiendo recibos de pago adjuntados...');
+        for (const [numRecibo, archivo] of Object.entries(recibosArchivosPendientes)) {
+          try {
+            await pdfService.subirReciboPago(expedienteId, parseInt(numRecibo), archivo);
+            console.log(`✅ Recibo #${numRecibo} subido correctamente`);
+          } catch (errorRecibo) {
+            console.error(`⚠️ Error al subir recibo #${numRecibo}:`, errorRecibo);
+            toast.error(`No se pudo subir recibo #${numRecibo}: ${errorRecibo.message}`);
+          }
+        }
+        setRecibosArchivosPendientes({});
+      }
+      
       // Si es creación y no vienen recibos, obtenerlos del backend o usar los que tenemos
       let recibosParaLog = resultado.data?.recibos || resultado.recibos || null;
       console.log('🔍 recibosParaLog inicial:', recibosParaLog);
@@ -2806,7 +2822,7 @@ const ModuloNvoExpedientes = () => {
     } finally {
       setGuardando(false);
     }
-  }, [formulario, modoEdicion, validarFormulario, limpiarFormulario, clienteSeleccionado]);
+  }, [formulario, modoEdicion, validarFormulario, limpiarFormulario, clienteSeleccionado, recibosArchivosPendientes]);
 
   const abrirNuevoExpediente = useCallback(() => {
     limpiarFormulario();
@@ -3487,6 +3503,7 @@ const ModuloNvoExpedientes = () => {
           handleClienteSeleccionado={handleClienteSeleccionado}
           clienteSeleccionado={clienteSeleccionado}
           onEliminarPago={abrirModalEliminarPago}
+          onRecibosArchivos={setRecibosArchivosPendientes}
         />
       )}
 
