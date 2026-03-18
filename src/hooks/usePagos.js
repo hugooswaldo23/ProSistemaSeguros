@@ -75,18 +75,19 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
 
     try {
       // 1. Subir comprobante a S3 (solo si existe)
+      // IMPORTANTE: Usar endpoint de recibos para NO sobrescribir el PDF de la póliza
       let comprobanteUrl = null;
       if (comprobantePago) {
         try {
-          console.log('📤 Subiendo comprobante a S3...');
+          console.log('📤 Subiendo comprobante de pago a S3 (vía recibos)...');
           
           const formData = new FormData();
           formData.append('file', comprobantePago);
           formData.append('tipo', 'comprobante-pago');
-          formData.append('expediente_id', expedienteParaPago.id);
+          formData.append('numero_recibo', numeroReciboPago);
           
           const uploadResponse = await fetch(
-            `${API_URL}/api/expedientes/${expedienteParaPago.id}/comprobante`,
+            `${API_URL}/api/recibos/${expedienteParaPago.id}/${numeroReciboPago}/comprobante-pago`,
             {
               method: 'POST',
               headers: getAuthHeaders(),
@@ -96,8 +97,8 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
           
           if (uploadResponse.ok) {
             const uploadData = await uploadResponse.json();
-            comprobanteUrl = uploadData.data?.pdf_url || uploadData.data?.url;
-            console.log('✅ Comprobante subido a S3:', comprobanteUrl);
+            comprobanteUrl = uploadData.data?.url || uploadData.data?.pdf_url;
+            console.log('✅ Comprobante subido a S3 (recibo):', comprobanteUrl);
           } else {
             console.warn('⚠️ No se pudo subir comprobante a S3, continuando sin URL');
           }

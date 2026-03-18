@@ -6,7 +6,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { FileText, Mail, Trash2, Upload, Download, Loader } from 'lucide-react';
+import { FileText, Mail, Trash2, Upload, Download, Loader, DollarSign } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import utils from '../../utils/expedientesUtils';
@@ -21,6 +21,7 @@ const CalendarioPagos = ({
   compacto = false,
   onEnviarAviso, // Callback para enviar avisos de pago
   onEliminarPago, // Callback para eliminar un pago (abre modal de confirmación)
+  onAplicarPago, // Callback para aplicar pago a un recibo específico
   onRecibosCalculados, // 📸 Callback para notificar que se calcularon recibos
   onRecibosArchivos, // 📎 Callback para entregar archivos de recibo seleccionados (pre-guardado)
   modoPreGuardado = false, // true = expediente aún no guardado, no subir a S3
@@ -230,8 +231,12 @@ const CalendarioPagos = ({
   let pagosRealizados = ultimoReciboPagado;
 
   const pagosProcesados = pagos.map((pago) => {
+    // 🔥 Regla maestra: si el número de recibo <= ultimo_recibo_pagado, SIEMPRE es pagado
+    // Esto prevalece sobre cualquier estatus del backend que pueda estar desactualizado
+    const forzarPagado = pago.numero <= ultimoReciboPagado;
+
     // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
-    if (pago.estatusBackend) {
+    if (pago.estatusBackend && !forzarPagado) {
       // console.log(`🔍 [RECIBO ${pago.numero}] Usando estatus del BACKEND: "${pago.estatusBackend}" | Fecha: ${pago.fecha}`);
       const estatusNorm = pago.estatusBackend.toLowerCase();
       const pagado = estatusNorm === 'pagado';
@@ -674,7 +679,19 @@ const CalendarioPagos = ({
                         )}
                       </>
                     ) : (
-                      // Botón para enviar aviso/recordatorio
+                      <>
+                      {/* Botón para aplicar pago */}
+                      {onAplicarPago && (
+                        <button 
+                          className="btn btn-success btn-sm"
+                          style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                          onClick={() => onAplicarPago(expediente.id, pago.numero)}
+                          title="Aplicar pago a este recibo"
+                        >
+                          <DollarSign size={12} />
+                        </button>
+                      )}
+                      {/* Botón para enviar aviso/recordatorio */}
                       <button 
                         className={`btn btn-sm ${pago.estado === 'Vencido' ? 'btn-danger' : 'btn-outline-info'}`}
                         style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
@@ -683,6 +700,7 @@ const CalendarioPagos = ({
                       >
                         <Mail size={12} />
                       </button>
+                      </>
                     )}
                     </div>
                   </td>

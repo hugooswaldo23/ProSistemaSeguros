@@ -79,34 +79,35 @@ export async function aplicarPago(expediente, datosPago) {
       // Hay más pagos pendientes - pero póliza está al corriente
       nuevoEstatusPago = 'Pendiente'; // El próximo recibo está pendiente
       
-      // Calcular fecha del próximo vencimiento
+      // Calcular fecha del próximo vencimiento localmente
+      // (usando inicio_vigencia + meses según frecuencia)
       try {
-        const responseProximoPago = await fetch(
-          `${API_URL}/api/expedientes/${expediente.id}/proximo-pago`,
-          { headers: getAuthHeaders() }
-        );
+        const frecuencia = expediente.frecuenciaPago || expediente.frecuencia_pago;
+        const mesesPorPago = CONSTANTS.MESES_POR_FRECUENCIA?.[frecuencia];
         
-        if (responseProximoPago.ok) {
-          const dataProximoPago = await responseProximoPago.json();
-          proximoPago = dataProximoPago.fecha_vencimiento || null;
+        if (mesesPorPago && expediente.inicio_vigencia) {
+          const [y, m, d] = expediente.inicio_vigencia.split('-');
+          const fechaInicio = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+          const siguienteNumero = numeroPago; // numeroPago ya es el que acabamos de pagar, el siguiente periodo = ese mismo índice
+          const fechaSiguiente = new Date(fechaInicio);
+          fechaSiguiente.setMonth(fechaSiguiente.getMonth() + siguienteNumero * mesesPorPago);
+          
+          proximoPago = fechaSiguiente.toISOString().split('T')[0];
           nuevaFechaVencimiento = proximoPago;
           
           // Verificar si el próximo recibo ya está por vencer (15 días o menos)
-          if (proximoPago) {
-            const fechaProximoVenc = new Date(proximoPago);
-            const hoy = new Date();
-            fechaProximoVenc.setHours(0, 0, 0, 0);
-            hoy.setHours(0, 0, 0, 0);
-            const diasRestantes = Math.ceil((fechaProximoVenc - hoy) / (1000 * 60 * 60 * 24));
-            
-            if (diasRestantes <= 15 && diasRestantes >= 0) {
-              nuevoEstatusPago = 'Por vencer';
-              etapaFinal = 'Por Vencer';
-            } else if (diasRestantes < 0) {
-              nuevoEstatusPago = 'Vencido';
-              etapaFinal = 'Vencida';
-            }
+          const hoy = new Date();
+          hoy.setHours(0, 0, 0, 0);
+          fechaSiguiente.setHours(0, 0, 0, 0);
+          const diasRestantes = Math.ceil((fechaSiguiente - hoy) / (1000 * 60 * 60 * 24));
+          
+          if (diasRestantes <= 15 && diasRestantes >= 0) {
+            nuevoEstatusPago = 'Por vencer';
+          } else if (diasRestantes < 0) {
+            nuevoEstatusPago = 'Vencido';
           }
+          
+          console.log(`📅 Próximo vencimiento calculado: ${proximoPago} (${diasRestantes} días)`);
         }
       } catch (error) {
         console.error('❌ Error al calcular próximo pago:', error);
