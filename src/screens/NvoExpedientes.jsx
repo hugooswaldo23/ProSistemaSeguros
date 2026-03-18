@@ -317,6 +317,16 @@ const ModuloNvoExpedientes = () => {
     return () => window.removeEventListener('clientes-actualizados', handler);
   }, [recargarClientes]);
 
+  // 🔄 Sincronizar expedienteSeleccionado cuando expedientes se recarguen (ej. después de aplicar pago)
+  useEffect(() => {
+    if (expedienteSeleccionado && expedientes.length > 0) {
+      const actualizado = expedientes.find(exp => exp.id === expedienteSeleccionado.id);
+      if (actualizado && JSON.stringify(actualizado) !== JSON.stringify(expedienteSeleccionado)) {
+        setExpedienteSeleccionado(actualizado);
+      }
+    }
+  }, [expedientes]);
+
   // 🔄 Listener para recargar expedientes cuando el usuario regresa de WhatsApp/Email
   useEffect(() => {
     const handleRecargarExpedientes = () => {
