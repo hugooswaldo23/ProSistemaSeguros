@@ -43,7 +43,7 @@ export async function subirPDFPoliza(expedienteId, file) {
     const formData = new FormData();
     formData.append('file', file);
 
-    const url = `${API_URL}/api/expedientes/${expedienteId}/pdf`;
+    const url = `${API_URL}/api/expedientes/${expedienteId}/poliza`;
     console.log('📍 URL del endpoint:', url);
 
     const response = await fetch(url, {
@@ -91,7 +91,7 @@ export async function subirPDFPoliza(expedienteId, file) {
 export async function obtenerURLFirmadaPDF(expedienteId, expiration = 3600) {
   try {
     const response = await fetch(
-  `${API_URL}/api/expedientes/${expedienteId}/pdf-url?expiration=${expiration}`,
+  `${API_URL}/api/expedientes/${expedienteId}/poliza/url?expiration=${expiration}`,
       {
         method: 'GET',
         headers: getAuthHeaders()
@@ -118,7 +118,7 @@ export async function obtenerURLFirmadaPDF(expedienteId, expiration = 3600) {
  */
 export async function eliminarPDFPoliza(expedienteId) {
   try {
-  const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/pdf`, {
+  const response = await fetch(`${API_URL}/api/expedientes/${expedienteId}/poliza`, {
       method: 'DELETE',
       headers: getAuthHeaders()
     });
@@ -305,7 +305,7 @@ export async function subirReciboPago(expedienteId, numeroRecibo, file) {
     formData.append('tipo', 'recibo-pago');
     formData.append('numero_recibo', numeroRecibo);
 
-    const url = `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-pago`;
+    const url = `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-aseguradora`;
     console.log('📍 URL del endpoint:', url);
 
     const response = await fetch(url, {
@@ -346,7 +346,7 @@ export async function subirReciboPago(expedienteId, numeroRecibo, file) {
 export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiration = 3600) {
   try {
     const response = await fetch(
-      `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-pago-url?expiration=${expiration}`,
+      `${API_URL}/api/expedientes/${expedienteId}/recibos/${numeroRecibo}/recibo-aseguradora/url?expiration=${expiration}`,
       { method: 'GET', headers: getAuthHeaders() }
     );
 
@@ -373,7 +373,7 @@ export async function obtenerReciboPagoURL(expedienteId, numeroRecibo, expiratio
 export async function obtenerComprobantePagoURL(expedienteId, numeroRecibo, expiration = 3600) {
   try {
     const response = await fetch(
-      `${API_URL}/api/recibos/${expedienteId}/${numeroRecibo}/comprobante?expiration=${expiration}`,
+      `${API_URL}/api/recibos/${expedienteId}/${numeroRecibo}/comprobante-pago/url?expiration=${expiration}`,
       { method: 'GET', headers: getAuthHeaders() }
     );
 

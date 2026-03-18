@@ -155,7 +155,7 @@ const DetallesExpediente = React.memo(({
       <h3 className="mb-0">Detalles del Expediente</h3>
       <div className="d-flex gap-3">
         {expedienteSeleccionado && 
-         ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida'].includes(expedienteSeleccionado.etapa_activa) && 
+         ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida', 'En Vigencia', 'Pagada'].includes(expedienteSeleccionado.etapa_activa) && 
          ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
           <button
             onClick={async () => {
@@ -255,6 +255,7 @@ const DetallesExpediente = React.memo(({
                     mostrarResumen={true}
                     onEnviarAviso={enviarAvisoPago}
                     onEliminarPago={onEliminarPago}
+                    onAplicarPago={(expId) => aplicarPago(expId)}
                     historial={historial}
                   />
                 </div>
