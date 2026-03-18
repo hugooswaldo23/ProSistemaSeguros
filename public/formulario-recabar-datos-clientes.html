@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Formulario de Datos de Cliente - ProSistema Seguros</title>
+    <style>
+        @page {
+            size: letter;
+            margin: 1.5cm;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 11pt;
+            color: #222;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .page {
+            background: white;
+            max-width: 800px;
+            margin: 0 auto 30px;
+            padding: 40px 45px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            border-bottom: 3px solid #1a5276;
+            padding-bottom: 15px;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 20pt;
+            color: #1a5276;
+            margin-bottom: 4px;
+            letter-spacing: 1px;
+        }
+
+        .header h2 {
+            font-size: 13pt;
+            color: #2980b9;
+            font-weight: 400;
+        }
+
+        .header .subtitle {
+            font-size: 9pt;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        /* Section titles */
+        .section-title {
+            background: #1a5276;
+            color: white;
+            padding: 6px 14px;
+            font-size: 11pt;
+            font-weight: 600;
+            margin: 20px 0 12px;
+            border-radius: 3px;
+        }
+
+        .section-subtitle {
+            background: #d5e8f0;
+            color: #1a5276;
+            padding: 5px 12px;
+            font-size: 10pt;
+            font-weight: 600;
+            margin: 14px 0 10px;
+            border-radius: 3px;
+            border-left: 4px solid #1a5276;
+        }
+
+        /* Form fields */
+        .field-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        .field {
+            flex: 1;
+            margin-bottom: 8px;
+        }
+
+        .field.full {
+            flex: 1 1 100%;
+        }
+
+        .field.half {
+            flex: 0 0 48%;
+        }
+
+        .field.third {
+            flex: 0 0 31%;
+        }
+
+        .field label {
+            display: block;
+            font-size: 8.5pt;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 3px;
+        }
+
+        .field .line {
+            border-bottom: 1.5px solid #bbb;
+            min-height: 22px;
+            padding: 2px 4px;
+            font-size: 10pt;
+        }
+
+        .field .line-tall {
+            border: 1.5px solid #bbb;
+            min-height: 50px;
+            padding: 4px 6px;
+            font-size: 10pt;
+            border-radius: 3px;
+        }
+
+        /* Checkboxes */
+        .checkbox-group {
+            display: flex;
+            gap: 25px;
+            align-items: center;
+            margin: 8px 0 12px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11pt;
+        }
+
+        .checkbox-box {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #1a5276;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        /* Info notes */
+        .info-note {
+            background: #fef9e7;
+            border-left: 4px solid #f1c40f;
+            padding: 6px 10px;
+            font-size: 8.5pt;
+            color: #7d6608;
+            margin: 8px 0;
+            border-radius: 0 3px 3px 0;
+        }
+
+        .required-note {
+            font-size: 8pt;
+            color: #e74c3c;
+            margin-bottom: 10px;
+        }
+
+        .required {
+            color: #e74c3c;
+        }
+
+        /* Footer */
+        .footer {
+            margin-top: 25px;
+            padding-top: 15px;
+            border-top: 2px solid #1a5276;
+            display: flex;
+            justify-content: space-between;
+            font-size: 9pt;
+            color: #888;
+        }
+
+        .signature-area {
+            display: flex;
+            gap: 40px;
+            margin-top: 30px;
+        }
+
+        .signature-block {
+            flex: 1;
+            text-align: center;
+        }
+
+        .signature-line {
+            border-top: 1.5px solid #555;
+            margin-top: 50px;
+            padding-top: 5px;
+            font-size: 9pt;
+            color: #555;
+        }
+
+        /* Conditional sections */
+        .persona-fisica-section,
+        .persona-moral-section {
+            border: 1px dashed #aaa;
+            padding: 12px 14px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+
+        .persona-fisica-section {
+            border-color: #27ae60;
+            background: #f8fdf9;
+        }
+
+        .persona-moral-section {
+            border-color: #2980b9;
+            background: #f5f9fc;
+        }
+
+        .section-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 10px;
+            font-size: 8pt;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .badge-fisica {
+            background: #27ae60;
+            color: white;
+        }
+
+        .badge-moral {
+            background: #2980b9;
+            color: white;
+        }
+
+        /* Print styles */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .page {
+                box-shadow: none;
+                padding: 20px 30px;
+                max-width: 100%;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+
+            .page-break {
+                page-break-before: always;
+            }
+        }
+
+        /* Print button */
+        .print-bar {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .btn-print {
+            background: #1a5276;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 13pt;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+
+        .btn-print:hover {
+            background: #2980b9;
+        }
+
+        .btn-secondary {
+            background: #27ae60;
+        }
+
+        .btn-secondary:hover {
+            background: #2ecc71;
+        }
+
+        /* Table for multiple entries */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        .data-table th {
+            background: #ecf0f1;
+            padding: 5px 8px;
+            font-size: 8.5pt;
+            text-align: left;
+            border: 1px solid #bbb;
+            color: #555;
+            text-transform: uppercase;
+        }
+
+        .data-table td {
+            padding: 8px;
+            border: 1px solid #bbb;
+            min-height: 25px;
+        }
+
+        .folio-box {
+            float: right;
+            border: 2px solid #1a5276;
+            padding: 5px 15px;
+            border-radius: 5px;
+        }
+
+        .folio-label {
+            font-size: 8pt;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        .folio-value {
+            font-size: 14pt;
+            color: #1a5276;
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Print bar -->
+    <div class="print-bar no-print">
+        <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Guardar PDF</button>
+        <button class="btn-print btn-secondary" onclick="printBlank()">📄 Imprimir Formato en Blanco</button>
+    </div>
+
+    <!-- PAGE 1: Main Data -->
+    <div class="page" id="page1">
+        <!-- Header -->
+        <div class="header">
+            <div class="folio-box">
+                <div class="folio-label">Folio</div>
+                <div class="folio-value">____</div>
+            </div>
+            <h1>ProSistema Seguros</h1>
+            <h2>Formulario de Alta de Cliente</h2>
+            <div class="subtitle">Formato para recabar datos de clientes del sistema</div>
+        </div>
+
+        <p class="required-note">Los campos marcados con <span class="required">*</span> son obligatorios.</p>
+
+        <!-- SECTION: Internal Use -->
+        <div class="section-title">📋 Datos de Control (Uso Interno)</div>
+        <div class="field-row">
+            <div class="field third">
+                <label>Fecha de Captura</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Código de Cliente</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Categoría</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Capturado por (nombre del agente)</label>
+                <div class="line"></div>
+            </div>
+        </div>
+
+        <!-- SECTION: Tipo de Persona -->
+        <div class="section-title">👤 Tipo de Persona <span class="required">*</span></div>
+        <div class="checkbox-group">
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Persona Física</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Persona Moral</span>
+            </div>
+        </div>
+
+        <!-- PERSONA FÍSICA -->
+        <div class="persona-fisica-section">
+            <span class="section-badge badge-fisica">PERSONA FÍSICA</span>
+
+            <div class="section-subtitle">Datos Personales del Cliente</div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Nombre(s) <span class="required">*</span></label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field half">
+                    <label>Apellido Paterno <span class="required">*</span></label>
+                    <div class="line"></div>
+                </div>
+                <div class="field half">
+                    <label>Apellido Materno</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field third">
+                    <label>RFC (13 caracteres)</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>CURP (18 caracteres)</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Fecha de Nacimiento</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+
+            <div class="info-note">
+                ℹ️ RFC persona física: 4 letras + 6 dígitos + 3 caracteres (13 total).  
+                CURP: 18 caracteres alfanuméricos. Fecha en formato: DD/MM/AAAA
+            </div>
+
+            <div class="section-subtitle">Datos del Gestor / Contacto (opcional)</div>
+            <div class="info-note">
+                ℹ️ Persona que gestiona o administra las pólizas del cliente (si es diferente al titular).
+            </div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Nombre del Gestor</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field third">
+                    <label>Apellido Paterno</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Apellido Materno</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Puesto</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field third">
+                    <label>Email del Gestor</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Tel. Fijo del Gestor</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Tel. Móvil del Gestor</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PERSONA MORAL -->
+        <div class="persona-moral-section">
+            <span class="section-badge badge-moral">PERSONA MORAL</span>
+
+            <div class="section-subtitle">Datos de la Empresa</div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Razón Social <span class="required">*</span></label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field half">
+                    <label>Nombre Comercial</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field half">
+                    <label>RFC (12 caracteres) <span class="required">*</span></label>
+                    <div class="line"></div>
+                </div>
+            </div>
+
+            <div class="info-note">
+                ℹ️ RFC persona moral: 3 letras + 6 dígitos + 3 caracteres (12 total).
+            </div>
+
+            <div class="section-subtitle">Datos del Contacto Principal (persona con quien se trata)</div>
+            <div class="field-row">
+                <div class="field">
+                    <label>Nombre(s) del Contacto</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field third">
+                    <label>Apellido Paterno</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Apellido Materno</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field third">
+                    <label>Puesto</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+
+            <div class="section-subtitle">Representante Legal</div>
+            <div class="field-row">
+                <div class="field half">
+                    <label>Nombre del Representante Legal</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field half">
+                    <label>Puesto / Cargo</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+            <div class="field-row">
+                <div class="field half">
+                    <label>Teléfono del Representante</label>
+                    <div class="line"></div>
+                </div>
+                <div class="field half">
+                    <label>Email del Representante</label>
+                    <div class="line"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGE 2: Contact & Address -->
+    <div class="page page-break" id="page2">
+        <div class="header">
+            <h1>ProSistema Seguros</h1>
+            <h2>Formulario de Alta de Cliente (continuación)</h2>
+        </div>
+
+        <!-- SECTION: Contact Info -->
+        <div class="section-title">📞 Datos de Contacto</div>
+        <div class="field-row">
+            <div class="field">
+                <label>Correo Electrónico</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field half">
+                <label>Teléfono Fijo (con lada)</label>
+                <div class="line"></div>
+            </div>
+            <div class="field half">
+                <label>Teléfono Móvil (10 dígitos)</label>
+                <div class="line"></div>
+            </div>
+        </div>
+
+        <div class="info-note">
+            ℹ️ El teléfono móvil es necesario para el envío de pólizas por WhatsApp. El correo electrónico para envío por email.
+        </div>
+
+        <!-- SECTION: Address -->
+        <div class="section-title">🏠 Domicilio</div>
+        <div class="field-row">
+            <div class="field">
+                <label>Calle y Número (exterior e interior)</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field half">
+                <label>Colonia</label>
+                <div class="line"></div>
+            </div>
+            <div class="field half">
+                <label>Código Postal</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field third">
+                <label>Ciudad / Municipio</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Estado</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>País</label>
+                <div class="line"></div>
+            </div>
+        </div>
+
+        <!-- SECTION: Vehicle (if applicable) -->
+        <div class="section-title">🚗 Datos del Vehículo (si aplica - Póliza de Autos)</div>
+        <div class="info-note">
+            ℹ️ Completar solo si el cliente requiere o tiene póliza de seguro de auto.
+        </div>
+        <div class="field-row">
+            <div class="field third">
+                <label>Marca</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Tipo / Modelo</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Año / Modelo</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field third">
+                <label>No. de Serie (VIN)</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Placas</label>
+                <div class="line"></div>
+            </div>
+            <div class="field third">
+                <label>Color</label>
+                <div class="line"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field half">
+                <label>No. de Motor</label>
+                <div class="line"></div>
+            </div>
+            <div class="field half">
+                <label>Uso del Vehículo (particular / comercial)</label>
+                <div class="line"></div>
+            </div>
+        </div>
+
+        <!-- SECTION: Insurance Products of Interest -->
+        <div class="section-title">📑 Productos de Seguro de Interés</div>
+        <div class="checkbox-group" style="flex-wrap: wrap;">
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Autos</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Gastos Médicos Mayores (GMM)</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Vida</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Daños</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Hogar / Casa Habitación</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Accidentes Personales</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Responsabilidad Civil</span>
+            </div>
+            <div class="checkbox-item">
+                <span class="checkbox-box"></span>
+                <span>Otro: __________________</span>
+            </div>
+        </div>
+
+        <!-- SECTION: Existing Insurance -->
+        <div class="section-title">📂 Pólizas Vigentes / Actuales (si tiene)</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 25%;">Aseguradora</th>
+                    <th style="width: 20%;">No. de Póliza</th>
+                    <th style="width: 15%;">Producto</th>
+                    <th style="width: 15%;">Vigencia Desde</th>
+                    <th style="width: 15%;">Vigencia Hasta</th>
+                    <th style="width: 10%;">Prima Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>&nbsp;<br>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+                <tr><td>&nbsp;<br>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+                <tr><td>&nbsp;<br>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+                <tr><td>&nbsp;<br>&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>
+            </tbody>
+        </table>
+
+        <!-- SECTION: Notes -->
+        <div class="section-title">📝 Observaciones / Notas</div>
+        <div class="field">
+            <div class="line-tall" style="min-height: 80px;"></div>
+        </div>
+
+        <!-- Signature Area -->
+        <div class="signature-area">
+            <div class="signature-block">
+                <div class="signature-line">Nombre y Firma del Cliente</div>
+            </div>
+            <div class="signature-block">
+                <div class="signature-line">Nombre y Firma del Agente</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <span>ProSistema Seguros - Formulario de Alta de Cliente</span>
+            <span>Confidencial - Uso interno</span>
+        </div>
+    </div>
+
+    <!-- OPTIONAL: Quick reference guide for the agent -->
+    <div class="page page-break no-print" id="page3">
+        <div class="header">
+            <h1>ProSistema Seguros</h1>
+            <h2>Guía Rápida para el Agente</h2>
+            <div class="subtitle">Esta página NO se imprime - Solo referencia en pantalla</div>
+        </div>
+
+        <div class="section-title">📖 Instrucciones de Llenado</div>
+
+        <div class="info-note" style="background: #eaf2f8; border-color: #2980b9; color: #1a5276;">
+            <strong>1. Tipo de Persona:</strong><br>
+            • <strong>Persona Física:</strong> Individuos (RFC de 13 caracteres)<br>
+            • <strong>Persona Moral:</strong> Empresas (RFC de 12 caracteres)<br>
+            Solo llenar la sección correspondiente al tipo de persona seleccionado.
+        </div>
+
+        <div class="info-note" style="background: #eaf2f8; border-color: #2980b9; color: #1a5276;">
+            <strong>2. Campos Obligatorios:</strong><br>
+            • <strong>Persona Física:</strong> Nombre y Apellido Paterno<br>
+            • <strong>Persona Moral:</strong> Razón Social y RFC<br>
+            • <strong>Ambos:</strong> Al menos un teléfono o email para comunicación
+        </div>
+
+        <div class="info-note" style="background: #eaf2f8; border-color: #2980b9; color: #1a5276;">
+            <strong>3. Formatos:</strong><br>
+            • <strong>RFC Física:</strong> AAAA999999AAA (4 letras + 6 dígitos + 3 alfanum.)<br>
+            • <strong>RFC Moral:</strong> AAA999999AAA (3 letras + 6 dígitos + 3 alfanum.)<br>
+            • <strong>CURP:</strong> 18 caracteres<br>
+            • <strong>Fechas:</strong> DD/MM/AAAA en el formulario → se captura como AAAA-MM-DD en sistema<br>
+            • <strong>Teléfonos:</strong> 10 dígitos sin espacios ni guiones
+        </div>
+
+        <div class="info-note" style="background: #eaf2f8; border-color: #2980b9; color: #1a5276;">
+            <strong>4. Persona Moral - Contactos:</strong><br>
+            • Los campos <em>Nombre / Apellidos</em> corresponden al <strong>contacto principal</strong> (la persona con quien se trata)<br>
+            • El <strong>Representante Legal</strong> es quien firma documentos legales<br>
+            • Los campos <em>contacto_*</em> NO se usan para Persona Moral
+        </div>
+
+        <div class="info-note" style="background: #eaf2f8; border-color: #2980b9; color: #1a5276;">
+            <strong>5. Persona Física - Gestor:</strong><br>
+            • Si el cliente tiene un gestor (alguien que maneja sus pólizas), llenar la sección de gestor<br>
+            • Ejemplo: Cliente es Álvaro González, pero su asistente Estefanía Esteban gestiona las pólizas
+        </div>
+
+        <div class="section-title">🔄 Mapeo de Campos al Sistema</div>
+        <table class="data-table" style="font-size: 9pt;">
+            <thead>
+                <tr>
+                    <th>Campo del Formulario</th>
+                    <th>Campo en Sistema</th>
+                    <th>Notas</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td>Código de Cliente</td><td>codigo</td><td>Se genera automáticamente si no se proporciona (CL001, CL002...)</td></tr>
+                <tr><td>Nombre</td><td>nombre</td><td></td></tr>
+                <tr><td>Apellido Paterno</td><td>apellidoPaterno</td><td></td></tr>
+                <tr><td>Apellido Materno</td><td>apellidoMaterno</td><td></td></tr>
+                <tr><td>RFC</td><td>rfc</td><td>13 chars (física) o 12 chars (moral)</td></tr>
+                <tr><td>CURP</td><td>curp</td><td>Solo persona física</td></tr>
+                <tr><td>Fecha de Nacimiento</td><td>fechaNacimiento</td><td>Formato YYYY-MM-DD en sistema</td></tr>
+                <tr><td>Razón Social</td><td>razonSocial</td><td>Solo persona moral</td></tr>
+                <tr><td>Nombre Comercial</td><td>nombreComercial</td><td>Solo persona moral</td></tr>
+                <tr><td>Email</td><td>email</td><td></td></tr>
+                <tr><td>Teléfono Fijo</td><td>telefonoFijo</td><td></td></tr>
+                <tr><td>Teléfono Móvil</td><td>telefonoMovil</td><td>Necesario para WhatsApp</td></tr>
+                <tr><td>Dirección</td><td>direccion</td><td></td></tr>
+                <tr><td>Ciudad</td><td>ciudad</td><td></td></tr>
+                <tr><td>Estado</td><td>estado</td><td></td></tr>
+                <tr><td>Código Postal</td><td>codigoPostal</td><td></td></tr>
+                <tr><td>País</td><td>pais</td><td>Default: México</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function printBlank() {
+            window.print();
+        }
+    </script>
+</body>
+</html>
