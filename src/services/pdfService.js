@@ -378,8 +378,8 @@ export async function obtenerComprobantePagoURL(expedienteId, numeroRecibo, expi
     );
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Error al obtener URL del comprobante');
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.message || error.error || 'Error al obtener URL del comprobante');
     }
 
     const data = await response.json();

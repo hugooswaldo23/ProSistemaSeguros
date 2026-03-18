@@ -94,17 +94,24 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
               body: formData
             }
           );
-          
-          if (uploadResponse.ok) {
-            const uploadData = await uploadResponse.json();
-            comprobanteUrl = uploadData.data?.url || uploadData.data?.pdf_url;
-            console.log('✅ Comprobante subido a S3 (recibo):', comprobanteUrl);
-          } else {
-            console.warn('⚠️ No se pudo subir comprobante a S3, continuando sin URL');
+
+          if (!uploadResponse.ok) {
+            const errorData = await uploadResponse.json().catch(() => ({}));
+            throw new Error(errorData.message || errorData.error || `Error subiendo comprobante (${uploadResponse.status})`);
           }
+
+          const uploadData = await uploadResponse.json();
+          comprobanteUrl = uploadData.data?.comprobante_url || null;
+
+          if (!comprobanteUrl) {
+            throw new Error('El backend no devolvió comprobante_url después de subir el archivo');
+          }
+
+          console.log('✅ Comprobante subido a S3 (recibo):', comprobanteUrl);
         } catch (errorUpload) {
           console.error('❌ Error al subir comprobante:', errorUpload);
-          toast.error('Error al subir el comprobante, pero el pago se aplicará');
+          toast.error(`No se pudo subir el comprobante: ${errorUpload.message}`);
+          throw errorUpload;
         }
       } else {
         console.log('ℹ️ No se proporcionó comprobante, aplicando pago sin archivo');
@@ -137,7 +144,7 @@ export function usePagos({ expedientes, setExpedientes, cargarExpedientes, set_a
             headers: getAuthHeaders(true),
             body: JSON.stringify({
               fecha_pago_real: fechaUltimoPago,
-              comprobante_nombre: comprobantePago?.name || null,
+              comprobante_nombre: comprobanteUrl ? (comprobantePago?.name || null) : null,
               comprobante_url: comprobanteUrl || null
             })
           }
