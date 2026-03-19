@@ -3,7 +3,9 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
 import { obtenerClientes, crearCliente, actualizarCliente, eliminarCliente } from '../services/clientesService';
+import { obtenerTiposDocumentos } from '../services/tiposDocumentosService';
 import * as pdfService from '../services/pdfService';
+import * as docClienteService from '../services/documentosClienteService';
 
 // Hook personalizado para paginación (reutilizado del código original)
 const usePaginacion = (items, itemsPorPagina = 10) => {
@@ -175,6 +177,14 @@ const ModuloClientes = () => {
         try { return JSON.parse(cliente.contactos); } catch { return []; }
       }
       return [];
+    })(),
+    documentos: (() => {
+      if (!cliente.documentos) return [];
+      if (Array.isArray(cliente.documentos)) return cliente.documentos;
+      if (typeof cliente.documentos === 'string') {
+        try { return JSON.parse(cliente.documentos); } catch { return []; }
+      }
+      return [];
     })()
   }), []);
   const navigate = useNavigate();
@@ -211,7 +221,23 @@ const ModuloClientes = () => {
           const expedientesData = await resExpedientes.json();
           setExpedientes(Array.isArray(expedientesData) ? expedientesData : []);
         }
-        
+
+        // Cargar tipos de documentos desde configuración
+        try {
+          const resDocs = await obtenerTiposDocumentos();
+          if (resDocs.success && Array.isArray(resDocs.data)) {
+            const activos = resDocs.data.filter(d => d.activo !== false && d.activo !== 0);
+            setTiposDocumentosPersonaFisica(
+              activos.filter(d => d.tipo_persona === 'Persona Física').sort((a, b) => (a.orden || 0) - (b.orden || 0)).map(d => d.nombre)
+            );
+            setTiposDocumentosPersonaMoral(
+              activos.filter(d => d.tipo_persona === 'Persona Moral').sort((a, b) => (a.orden || 0) - (b.orden || 0)).map(d => d.nombre)
+            );
+          }
+        } catch (errDocs) {
+          console.error('Error cargando tipos de documentos:', errDocs);
+        }
+
       } catch (err) {
         setClientes([]);
         setExpedientes([]);
@@ -227,6 +253,8 @@ const ModuloClientes = () => {
   const [modoEdicion, setModoEdicion] = useState(false);
   const [mostrarModalDocumento, setMostrarModalDocumento] = useState(false);
   const [tipoDocumentoASubir, setTipoDocumentoASubir] = useState('');
+  const [modoDocumentoGenerico, setModoDocumentoGenerico] = useState(false);
+  const [nombreDocumentoGenerico, setNombreDocumentoGenerico] = useState('');
   const [mostrarModalRelacionar, setMostrarModalRelacionar] = useState(false);
   const [mostrarModalVerDocumento, setMostrarModalVerDocumento] = useState(false);
   const [documentoAVer, setDocumentoAVer] = useState(null);
@@ -237,6 +265,10 @@ const ModuloClientes = () => {
   const [mostrarVisorPDF, setMostrarVisorPDF] = useState(false);
   const [pdfUrlActual, setPdfUrlActual] = useState(null);
   const [pdfNombreActual, setPdfNombreActual] = useState(null);
+  const [archivoSeleccionado, setArchivoSeleccionado] = useState(null);
+  const [documentosCliente, setDocumentosCliente] = useState([]);
+  const [cargandoDocumentos, setCargandoDocumentos] = useState(false);
+  const [subiendoDocumento, setSubiendoDocumento] = useState(false);
 
   // Subir PDF desde Clientes (modal/listado)
   const subirPDFDesdeClientes = useCallback(async (expedienteId, file) => {
@@ -319,30 +351,9 @@ const ModuloClientes = () => {
   const tiposCliente = useMemo(() => ['Persona Física', 'Persona Moral'], []);
   const segmentosCliente = useMemo(() => ['Premium', 'Estándar', 'Básico', 'VIP'], []);
   
-  // Tipos de documentos
-  const tiposDocumentosPersonaFisica = useMemo(() => [
-    'Identificación Oficial (INE/Pasaporte)',
-    'Comprobante de Domicilio',
-    'CURP',
-    'RFC',
-    'Comprobante de Ingresos',
-    'Estado de Cuenta Bancario',
-    'Referencias Comerciales',
-    'Carta de No Antecedentes Penales'
-  ], []);
-
-  const tiposDocumentosPersonaMoral = useMemo(() => [
-    'Acta Constitutiva',
-    'Poder Notarial',
-    'Identificación del Representante Legal',
-    'Comprobante de Domicilio Fiscal',
-    'RFC de la Empresa',
-    'Constancia de Situación Fiscal',
-    'Estados Financieros',
-    'Referencias Comerciales',
-    'Opinión de Cumplimiento',
-    'Registro Patronal IMSS'
-  ], []);
+  // Tipos de documentos (cargados desde ConfiguracionTablas)
+  const [tiposDocumentosPersonaFisica, setTiposDocumentosPersonaFisica] = useState([]);
+  const [tiposDocumentosPersonaMoral, setTiposDocumentosPersonaMoral] = useState([]);
 
   const tiposPolizas = useMemo(() => [
     'Póliza de Autos',
@@ -786,6 +797,30 @@ const ModuloClientes = () => {
     
     setClienteSeleccionado(clienteConContactos);
     setVistaActual('detalles-cliente');
+    // Cargar documentos reales desde API
+    cargarDocumentosCliente(cliente.id);
+  }, []);
+
+  // Cargar documentos del cliente desde la API (tabla documentos_clientes / S3)
+  const cargarDocumentosCliente = useCallback(async (clienteId) => {
+    setCargandoDocumentos(true);
+    try {
+      const docs = await docClienteService.obtenerDocumentosCliente(clienteId);
+      // Normalizar campos snake_case → camelCase para compatibilidad con la UI
+      const docsNormalizados = docs.map(doc => ({
+        ...doc,
+        fechaSubida: doc.fechaSubida || doc.fecha_subida || '',
+        tipoArchivo: doc.tipoArchivo || doc.tipo_archivo || '',
+        tamaño: doc.tamaño || doc.tamano || doc.size || '',
+        rutaArchivo: doc.rutaArchivo || doc.ruta_archivo || '',
+      }));
+      setDocumentosCliente(docsNormalizados);
+    } catch (err) {
+      console.error('Error al cargar documentos del cliente:', err);
+      setDocumentosCliente([]);
+    } finally {
+      setCargandoDocumentos(false);
+    }
   }, []);
 
   // Función para ver pólizas del cliente
@@ -807,121 +842,96 @@ const ModuloClientes = () => {
     setMostrarModalPolizas(true);
   }, [expedientes]);
 
-  // Función para agregar documento
-  const agregarDocumento = useCallback((tipoDocumento, nombreArchivo = null) => {
-    // Simular que siempre son PDFs para este ejemplo
-    // En un sistema real, esto vendría del input file
-    const extension = '.pdf';
-    const nombreBase = tipoDocumento.replace(/[^a-zA-Z0-9]/g, '_');
-    
-    const nuevoDocumento = {
-      id: Date.now() + Math.random(), // ID único más robusto
-      tipo: tipoDocumento,
-      nombre: nombreArchivo || `${nombreBase}_${new Date().toISOString().split('T')[0]}${extension}`,
-      fechaSubida: new Date().toISOString().split('T')[0],
-      estado: 'Vigente',
-      tipoArchivo: 'application/pdf', // En un sistema real vendría del file.type
-      tamaño: '2.5 MB' // Simulado
-    };
+  // Función para agregar documento (subida real a S3)
+  const agregarDocumento = useCallback(async (tipoDocumento) => {
+    if (!archivoSeleccionado) {
+      alert('❌ Selecciona un archivo antes de subir');
+      return;
+    }
+    if (!clienteSeleccionado) {
+      alert('❌ No hay cliente seleccionado');
+      return;
+    }
 
-    if (modoEdicion || clienteSeleccionado) {
-      const clienteActual = modoEdicion ? formularioCliente : clienteSeleccionado;
-      
-      // Verificar si ya existe un documento del mismo tipo
-      const documentosExistentes = clienteActual.documentos || [];
-      const indiceExistente = documentosExistentes.findIndex(doc => doc.tipo === tipoDocumento);
-      
-      let documentosActualizados;
-      let esActualizacion = false;
-      
-      if (indiceExistente !== -1) {
-        // Reemplazar el documento existente
-        documentosActualizados = [...documentosExistentes];
-        documentosActualizados[indiceExistente] = nuevoDocumento;
-        esActualizacion = true;
-      } else {
-        // Agregar nuevo documento
-        documentosActualizados = [...documentosExistentes, nuevoDocumento];
-      }
-      
-      if (modoEdicion) {
-        setFormularioCliente(prev => ({
-          ...prev,
-          documentos: documentosActualizados
-        }));
-      } else {
-        const clienteActualizado = {
-          ...clienteSeleccionado,
-          documentos: documentosActualizados
-        };
-        setClienteSeleccionado(clienteActualizado);
-        setClientes(prev => prev.map(c => 
-          c.id === clienteActualizado.id ? clienteActualizado : c
-        ));
-      }
-      
-      // Mensaje de confirmación
-      if (esActualizacion) {
+    const validacion = docClienteService.validarArchivo(archivoSeleccionado);
+    if (!validacion.valid) {
+      alert(`❌ ${validacion.error}`);
+      return;
+    }
+
+    setSubiendoDocumento(true);
+    try {
+      // Verificar si ya existe un documento del mismo tipo para decidir si es actualización
+      const existente = documentosCliente.find(doc => doc.tipo === tipoDocumento);
+
+      if (existente) {
+        await docClienteService.actualizarDocumentoCliente(clienteSeleccionado.id, existente.id, archivoSeleccionado);
         alert(`✅ Documento "${tipoDocumento}" actualizado correctamente`);
       } else {
-        alert(`✅ Documento "${tipoDocumento}" agregado correctamente`);
+        await docClienteService.subirDocumentoCliente(clienteSeleccionado.id, archivoSeleccionado, tipoDocumento);
+        alert(`✅ Documento "${tipoDocumento}" subido correctamente`);
       }
+
+      // Recargar documentos desde la API
+      await cargarDocumentosCliente(clienteSeleccionado.id);
+    } catch (err) {
+      console.error('Error al subir documento:', err);
+      alert(`❌ Error al subir documento: ${err.message}`);
+    } finally {
+      setSubiendoDocumento(false);
     }
     
     setMostrarModalDocumento(false);
     setTipoDocumentoASubir('');
-  }, [modoEdicion, clienteSeleccionado, formularioCliente]);
+    setArchivoSeleccionado(null);
+    setModoDocumentoGenerico(false);
+    setNombreDocumentoGenerico('');
+  }, [clienteSeleccionado, archivoSeleccionado, documentosCliente, cargarDocumentosCliente]);
 
-  // Función para eliminar documento
-  const eliminarDocumento = useCallback((documentoId) => {
+  // Función para eliminar documento (API real)
+  const eliminarDocumento = useCallback(async (documentoId) => {
     if (!clienteSeleccionado) {
       alert('❌ Error: No hay cliente seleccionado');
       return;
     }
     
-    if (!clienteSeleccionado.documentos || clienteSeleccionado.documentos.length === 0) {
-      alert('❌ Error: No hay documentos para eliminar');
-      return;
-    }
-    
-    const documentoAEliminar = clienteSeleccionado.documentos.find(doc => doc.id === documentoId);
-    if (!documentoAEliminar) {
+    const documentoAEliminarObj = documentosCliente.find(doc => doc.id === documentoId);
+    if (!documentoAEliminarObj) {
       alert('❌ Error: No se encontró el documento a eliminar');
       return;
     }
     
-    // Filtrar los documentos para eliminar el seleccionado
-    const documentosActualizados = clienteSeleccionado.documentos.filter(doc => doc.id !== documentoId);
+    try {
+      await docClienteService.eliminarDocumentoCliente(clienteSeleccionado.id, documentoId);
+      alert(`✅ Documento "${documentoAEliminarObj.tipo}" eliminado correctamente`);
+      // Recargar documentos desde la API
+      await cargarDocumentosCliente(clienteSeleccionado.id);
+    } catch (err) {
+      console.error('Error al eliminar documento:', err);
+      alert('❌ Error al eliminar documento: ' + err.message);
+    }
     
-    // Crear el cliente actualizado con los nuevos documentos
-    const clienteActualizado = {
-      ...clienteSeleccionado,
-      documentos: documentosActualizados
-    };
-    
-    // Actualizar el estado del cliente seleccionado
-    setClienteSeleccionado(clienteActualizado);
-    
-    // Actualizar la lista de clientes
-    setClientes(prevClientes => 
-      prevClientes.map(cliente => 
-        cliente.id === clienteActualizado.id ? clienteActualizado : cliente
-      )
-    );
-    
-    // Cerrar el modal si estaba abierto
     if (mostrarModalVerDocumento && documentoAVer?.id === documentoId) {
       setMostrarModalVerDocumento(false);
       setDocumentoAVer(null);
     }
     
-    // Cerrar modal de confirmación
     setMostrarModalConfirmarEliminar(false);
     setDocumentoAEliminar(null);
-    
-    // Mensaje de confirmación
-    alert(`✅ Documento "${documentoAEliminar.tipo}" eliminado correctamente`);
-  }, [clienteSeleccionado, mostrarModalVerDocumento, documentoAVer]);
+  }, [clienteSeleccionado, documentosCliente, mostrarModalVerDocumento, documentoAVer, cargarDocumentosCliente]);
+
+  // Función para ver/descargar documento (URL firmada)
+  const verDocumentoReal = useCallback(async (documento) => {
+    if (!clienteSeleccionado) return;
+    try {
+      const result = await docClienteService.obtenerURLDocumento(clienteSeleccionado.id, documento.id);
+      const url = result.signed_url || result.url || result;
+      window.open(url, '_blank');
+    } catch (err) {
+      console.error('Error al obtener URL del documento:', err);
+      alert('❌ Error al obtener el documento: ' + err.message);
+    }
+  }, [clienteSeleccionado]);
 
   // Función para mostrar modal de confirmación de eliminación
   const mostrarConfirmacionEliminar = useCallback((documento) => {
@@ -2373,13 +2383,6 @@ const ModuloClientes = () => {
                   <h5 className="card-title border-bottom pb-2">Acciones Rápidas</h5>
                   <div className="d-grid gap-2">
                     <button
-                      onClick={() => setMostrarModalDocumento(true)}
-                      className="btn btn-outline-primary"
-                    >
-                      <FileUp size={16} className="me-2" />
-                      Subir Documento
-                    </button>
-                    <button
                       onClick={() => setMostrarModalRelacionar(true)}
                       className="btn btn-outline-success"
                       disabled={expedientesNoRelacionados.length === 0}
@@ -2400,16 +2403,24 @@ const ModuloClientes = () => {
                     <FolderOpen size={20} className="me-2" />
                     Gestión Documental
                   </h5>
-                  <button
-                    onClick={() => setMostrarModalDocumento(true)}
-                    className="btn btn-sm btn-primary"
-                  >
-                    <FileUp size={14} className="me-1" />
-                    Subir Documento
-                  </button>
+                  <div className="d-flex gap-2">
+                    <button
+                      onClick={() => { setModoDocumentoGenerico(true); setTipoDocumentoASubir(''); setNombreDocumentoGenerico(''); setMostrarModalDocumento(true); }}
+                      className="btn btn-sm btn-outline-secondary"
+                    >
+                      <Plus size={14} className="me-1" />
+                      Otro Documento
+                    </button>
+                  </div>
                 </div>
                 <div className="card-body">
-                  {/* Checklist de Documentos */}
+                  {cargandoDocumentos ? (
+                    <div className="text-center py-4">
+                      <span className="spinner-border text-primary" />
+                      <p className="text-muted mt-2">Cargando documentos...</p>
+                    </div>
+                  ) : (
+                  /* Checklist de Documentos */
                   <div className="mb-4">
                     <h6 className="text-muted mb-3">
                       <FileCheck size={18} className="me-2" />
@@ -2421,7 +2432,7 @@ const ModuloClientes = () => {
                       <div className="d-flex justify-content-between mb-1">
                         <small className="text-muted">Documentos completados</small>
                         <small className="fw-bold text-primary">
-                          {clienteSeleccionado.documentos?.filter(doc => 
+                          {documentosCliente.filter(doc => 
                             tiposDocumentosDisponibles.includes(doc.tipo)
                           ).length || 0} de {tiposDocumentosDisponibles.length}
                         </small>
@@ -2431,9 +2442,9 @@ const ModuloClientes = () => {
                           className="progress-bar bg-success" 
                           role="progressbar" 
                           style={{ 
-                            width: `${((clienteSeleccionado.documentos?.filter(doc => 
+                            width: `${tiposDocumentosDisponibles.length ? ((documentosCliente.filter(doc => 
                               tiposDocumentosDisponibles.includes(doc.tipo)
-                            ).length || 0) / tiposDocumentosDisponibles.length) * 100}%` 
+                            ).length || 0) / tiposDocumentosDisponibles.length) * 100 : 0}%` 
                           }}
                         />
                       </div>
@@ -2452,7 +2463,7 @@ const ModuloClientes = () => {
                         </thead>
                         <tbody>
                           {tiposDocumentosDisponibles.map(tipoDoc => {
-                            const documentoCargado = clienteSeleccionado.documentos?.find(doc => doc.tipo === tipoDoc);
+                            const documentoCargado = documentosCliente.find(doc => doc.tipo === tipoDoc);
                             const estaCompleto = !!documentoCargado;
                             
                             return (
@@ -2530,10 +2541,7 @@ const ModuloClientes = () => {
                                         <button 
                                           className="btn btn-sm btn-outline-primary" 
                                           title="Ver documento"
-                                          onClick={() => {
-                                            setDocumentoAVer(documentoCargado);
-                                            setMostrarModalVerDocumento(true);
-                                          }}
+                                          onClick={() => verDocumentoReal(documentoCargado)}
                                         >
                                           <Eye size={14} />
                                         </button>
@@ -2581,6 +2589,69 @@ const ModuloClientes = () => {
                       </table>
                     </div>
                     
+                    {/* Otros documentos (genéricos, fuera del checklist) */}
+                    {(() => {
+                      const otrosDocumentos = documentosCliente.filter(
+                        doc => !tiposDocumentosDisponibles.includes(doc.tipo)
+                      );
+                      if (otrosDocumentos.length === 0) return null;
+                      return (
+                        <div className="mt-4">
+                          <h6 className="text-muted mb-3">
+                            <File size={16} className="me-2" />
+                            Otros Documentos
+                            <span className="badge bg-secondary ms-2">{otrosDocumentos.length}</span>
+                          </h6>
+                          <div className="table-responsive">
+                            <table className="table table-sm table-hover">
+                              <thead className="table-light">
+                                <tr>
+                                  <th>Documento</th>
+                                  <th>Archivo</th>
+                                  <th>Última Carga</th>
+                                  <th className="text-center" width="120">Acciones</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {otrosDocumentos.map(doc => (
+                                  <tr key={doc.id}>
+                                    <td className="fw-medium">{doc.tipo}</td>
+                                    <td><small className="text-muted">{doc.nombre}</small></td>
+                                    <td><small>{doc.fechaSubida || '-'}</small></td>
+                                    <td className="text-center">
+                                      <div className="btn-group btn-group-sm">
+                                        <button
+                                          className="btn btn-outline-primary"
+                                          onClick={() => verDocumentoReal(doc)}
+                                          title="Ver"
+                                        >
+                                          <Eye size={14} />
+                                        </button>
+                                        <button
+                                          className="btn btn-outline-warning"
+                                          onClick={() => { setTipoDocumentoASubir(doc.tipo); setModoDocumentoGenerico(false); setMostrarModalDocumento(true); }}
+                                          title="Actualizar"
+                                        >
+                                          <Upload size={14} />
+                                        </button>
+                                        <button
+                                          className="btn btn-outline-danger"
+                                          onClick={() => mostrarConfirmacionEliminar(doc)}
+                                          title="Eliminar"
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {/* Resumen de estado */}
                     <div className="mt-3 p-3 bg-light rounded">
                       <div className="row text-center">
@@ -2589,7 +2660,7 @@ const ModuloClientes = () => {
                             <CheckCircle2 size={20} className="text-success me-2" />
                             <div>
                               <div className="fw-bold text-success">
-                                {clienteSeleccionado.documentos?.filter(doc => 
+                                {documentosCliente.filter(doc => 
                                   tiposDocumentosDisponibles.includes(doc.tipo)
                                 ).length || 0}
                               </div>
@@ -2603,7 +2674,7 @@ const ModuloClientes = () => {
                             <div>
                               <div className="fw-bold text-warning">
                                 {tiposDocumentosDisponibles.length - 
-                                  (clienteSeleccionado.documentos?.filter(doc => 
+                                  (documentosCliente.filter(doc => 
                                     tiposDocumentosDisponibles.includes(doc.tipo)
                                   ).length || 0)}
                               </div>
@@ -2616,9 +2687,9 @@ const ModuloClientes = () => {
                             <FileCheck size={20} className="text-primary me-2" />
                             <div>
                               <div className="fw-bold text-primary">
-                                {Math.round(((clienteSeleccionado.documentos?.filter(doc => 
+                                {tiposDocumentosDisponibles.length ? Math.round(((documentosCliente.filter(doc => 
                                   tiposDocumentosDisponibles.includes(doc.tipo)
-                                ).length || 0) / tiposDocumentosDisponibles.length) * 100)}%
+                                ).length || 0) / tiposDocumentosDisponibles.length) * 100) : 0}%
                               </div>
                               <small className="text-muted">Completado</small>
                             </div>
@@ -2627,6 +2698,7 @@ const ModuloClientes = () => {
                       </div>
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -3230,10 +3302,7 @@ const ModuloClientes = () => {
                   <button 
                     type="button" 
                     className="btn btn-primary"
-                    onClick={() => {
-                      alert('Descargando documento: ' + documentoAVer.nombre);
-                      // Aquí iría la lógica real de descarga
-                    }}
+                    onClick={() => verDocumentoReal(documentoAVer)}
                   >
                     <Download size={16} className="me-2" />
                     Descargar
@@ -3251,7 +3320,8 @@ const ModuloClientes = () => {
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">
-                    {clienteSeleccionado?.documentos?.find(doc => doc.tipo === tipoDocumentoASubir) ? 
+                    {modoDocumentoGenerico ? 'Subir Otro Documento' :
+                      documentosCliente.find(doc => doc.tipo === tipoDocumentoASubir) ? 
                       'Actualizar Documento' : 'Subir Documento'}
                   </h5>
                   <button 
@@ -3260,40 +3330,51 @@ const ModuloClientes = () => {
                     onClick={() => {
                       setMostrarModalDocumento(false);
                       setTipoDocumentoASubir('');
+                      setModoDocumentoGenerico(false);
+                      setNombreDocumentoGenerico('');
+                      setArchivoSeleccionado(null);
                     }}
                   ></button>
                 </div>
                 <div className="modal-body">
-                  {clienteSeleccionado?.documentos?.find(doc => doc.tipo === tipoDocumentoASubir) && (
+                  {!modoDocumentoGenerico && documentosCliente.find(doc => doc.tipo === tipoDocumentoASubir) && (
                     <div className="alert alert-info mb-3">
                       <AlertCircle size={16} className="me-2" />
                       Este documento ya existe y será reemplazado con la nueva versión.
                     </div>
                   )}
                   
-                  <div className="mb-3">
-                    <label className="form-label">Tipo de Documento</label>
-                    <select 
-                      className="form-select"
-                      value={tipoDocumentoASubir}
-                      onChange={(e) => setTipoDocumentoASubir(e.target.value)}
-                    >
-                      <option value="">Seleccionar tipo de documento</option>
-                      <optgroup label="Documentos del Cliente">
-                        {(clienteSeleccionado?.tipoPersona === 'Persona Física' ? 
-                          tiposDocumentosPersonaFisica : 
-                          tiposDocumentosPersonaMoral
-                        ).map(tipo => (
-                          <option key={tipo} value={tipo}>{tipo}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Pólizas">
-                        {tiposPolizas.map(tipo => (
-                          <option key={tipo} value={tipo}>{tipo}</option>
-                        ))}
-                      </optgroup>
-                    </select>
-                  </div>
+                  {modoDocumentoGenerico ? (
+                    <div className="mb-3">
+                      <label className="form-label">Nombre del Documento</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Ej: Carta poder, Contrato de arrendamiento..."
+                        value={nombreDocumentoGenerico}
+                        onChange={(e) => setNombreDocumentoGenerico(e.target.value)}
+                      />
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <label className="form-label">Tipo de Documento</label>
+                      <select 
+                        className="form-select"
+                        value={tipoDocumentoASubir}
+                        onChange={(e) => setTipoDocumentoASubir(e.target.value)}
+                      >
+                        <option value="">Seleccionar tipo de documento</option>
+                        <optgroup label="Documentos del Cliente">
+                          {(clienteSeleccionado?.tipoPersona === 'Persona Física' ? 
+                            tiposDocumentosPersonaFisica : 
+                            tiposDocumentosPersonaMoral
+                          ).map(tipo => (
+                            <option key={tipo} value={tipo}>{tipo}</option>
+                          ))}
+                        </optgroup>
+                      </select>
+                    </div>
+                  )}
                   
                   <div className="mb-3">
                     <label className="form-label">Archivo</label>
@@ -3301,9 +3382,10 @@ const ModuloClientes = () => {
                       type="file" 
                       className="form-control"
                       accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={(e) => setArchivoSeleccionado(e.target.files?.[0] || null)}
                     />
                     <small className="text-muted">
-                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX
+                      Formatos aceptados: PDF, JPG, PNG, DOC, DOCX (máx. 10 MB)
                     </small>
                   </div>
                 </div>
@@ -3314,6 +3396,9 @@ const ModuloClientes = () => {
                     onClick={() => {
                       setMostrarModalDocumento(false);
                       setTipoDocumentoASubir('');
+                      setModoDocumentoGenerico(false);
+                      setNombreDocumentoGenerico('');
+                      setArchivoSeleccionado(null);
                     }}
                   >
                     Cancelar
@@ -3321,12 +3406,22 @@ const ModuloClientes = () => {
                   <button 
                     type="button" 
                     className="btn btn-primary"
-                    onClick={() => agregarDocumento(tipoDocumentoASubir)}
-                    disabled={!tipoDocumentoASubir}
+                    onClick={() => agregarDocumento(modoDocumentoGenerico ? nombreDocumentoGenerico.trim() : tipoDocumentoASubir)}
+                    disabled={subiendoDocumento || !archivoSeleccionado || (modoDocumentoGenerico ? !nombreDocumentoGenerico.trim() : !tipoDocumentoASubir)}
                   >
-                    <FileUp size={16} className="me-2" />
-                    {clienteSeleccionado?.documentos?.find(doc => doc.tipo === tipoDocumentoASubir) ? 
-                      'Actualizar Documento' : 'Subir Documento'}
+                    {subiendoDocumento ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-2" />
+                        Subiendo...
+                      </>
+                    ) : (
+                      <>
+                        <FileUp size={16} className="me-2" />
+                        {modoDocumentoGenerico ? 'Subir Documento' :
+                          documentosCliente.find(doc => doc.tipo === tipoDocumentoASubir) ? 
+                          'Actualizar Documento' : 'Subir Documento'}
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
