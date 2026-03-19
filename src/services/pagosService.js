@@ -114,9 +114,39 @@ export async function aplicarPago(expediente, datosPago) {
       }
     }
 
-    // 4. Preparar datos de actualización
+    // 4. Obtener recibos existentes para calcular ultimo_recibo_pagado correctamente
+    let recibosExistentes = [];
+    try {
+      const respRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
+        headers: getAuthHeaders()
+      });
+      if (respRecibos.ok) {
+        const recibosData = await respRecibos.json();
+        recibosExistentes = recibosData?.data || recibosData || [];
+      }
+    } catch (e) {
+      console.warn('⚠️ No se pudieron obtener recibos existentes:', e.message);
+    }
+
+    // Calcular el máximo recibo consecutivo pagado (considerando el pago actual)
+    const recibosPagadosSet = new Set();
+    recibosExistentes.forEach(r => {
+      if (r.fecha_pago_real) recibosPagadosSet.add(r.numero_recibo);
+    });
+    recibosPagadosSet.add(numeroPago); // Agregar el que estamos pagando ahora
+
+    let ultimoReciboPagadoConsecutivo = 0;
+    for (let i = 1; i <= totalRecibos; i++) {
+      if (recibosPagadosSet.has(i)) {
+        ultimoReciboPagadoConsecutivo = i;
+      } else {
+        break;
+      }
+    }
+
+    // 5. Preparar datos de actualización
     const datosActualizacion = {
-      ultimo_recibo_pagado: numeroPago,
+      ultimo_recibo_pagado: ultimoReciboPagadoConsecutivo,
       fecha_ultimo_pago: fechaUltimoPago,
       fecha_captura_ultimo_pago: new Date().toISOString(),
       estatus_pago: nuevoEstatusPago,
@@ -124,7 +154,7 @@ export async function aplicarPago(expediente, datosPago) {
       etapa_activa: etapaFinal
     };
 
-    // 5. Actualizar expediente en BD
+    // 6. Actualizar expediente en BD
     const response = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
       method: 'PUT',
       headers: getAuthHeaders(true),
@@ -136,19 +166,22 @@ export async function aplicarPago(expediente, datosPago) {
     }
 
     // 6. Obtener TODOS los recibos del expediente para tener montos exactos
-    let recibos = [];
-    try {
-      const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
-        headers: getAuthHeaders()
-      });
-      
-      if (responseRecibos.ok) {
-        const recibosData = await responseRecibos.json();
-        recibos = recibosData?.data || recibosData || [];
-        console.log('✅ Recibos obtenidos:', recibos.length);
+    // (reusar los que ya obtuvimos si están disponibles)
+    let recibos = recibosExistentes;
+    if (recibos.length === 0) {
+      try {
+        const responseRecibos = await fetch(`${API_URL}/api/recibos/${expediente.id}`, {
+          headers: getAuthHeaders()
+        });
+        
+        if (responseRecibos.ok) {
+          const recibosData = await responseRecibos.json();
+          recibos = recibosData?.data || recibosData || [];
+          console.log('✅ Recibos obtenidos:', recibos.length);
+        }
+      } catch (error) {
+        console.error('❌ Error al obtener recibos:', error);
       }
-    } catch (error) {
-      console.error('❌ Error al obtener recibos:', error);
     }
 
     // 7. Obtener monto del recibo que se está pagando
