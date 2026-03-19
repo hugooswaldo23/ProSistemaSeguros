@@ -262,6 +262,7 @@ const CobranzaEstadoFinanciero = () => {
                   <th>No. Póliza</th>
                   <th className="text-center">Recibo #</th>
                   <th>Vencimiento</th>
+                  <th>Fecha Pago</th>
                   <th className="text-end">Monto</th>
                   <th className="text-center">Estatus</th>
                 </tr>
@@ -282,6 +283,7 @@ const CobranzaEstadoFinanciero = () => {
                       )}
                       <td className="text-center">{r.numero_recibo}</td>
                       <td>{formatFecha(r.fecha_vencimiento)}</td>
+                      <td>{r.fecha_pago_real ? formatFecha(r.fecha_pago_real) : '—'}</td>
                       <td className="text-end fw-semibold">{formatMoney(parseFloat(r.monto) || 0)}</td>
                       <td className="text-center">
                         <span className={`badge ${

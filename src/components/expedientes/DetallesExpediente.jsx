@@ -158,20 +158,8 @@ const DetallesExpediente = React.memo(({
          ['Emitida', 'Renovada', 'Enviada al Cliente', 'Vencida', 'En Vigencia', 'Pagada'].includes(expedienteSeleccionado.etapa_activa) && 
          ((expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagado' && (expedienteSeleccionado.estatusPago || '').toLowerCase().trim() !== 'pagada') && (
           <button
-            onClick={async () => {
+            onClick={() => {
               aplicarPago(expedienteSeleccionado.id);
-              
-              // Después de aplicar pago, recargar expedientes y volver a lista
-              toast.success('Pago aplicado correctamente');
-              
-              setTimeout(async () => {
-                // Recargar expedientes
-                if (cargarExpedientes) {
-                  await cargarExpedientes();
-                }
-                // Volver a lista
-                setVistaActual('lista');
-              }, 1000);
             }}
             className="btn btn-success d-flex align-items-center"
           >

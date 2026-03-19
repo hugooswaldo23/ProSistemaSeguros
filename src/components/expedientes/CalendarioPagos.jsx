@@ -222,18 +222,23 @@ const CalendarioPagos = ({
     });
     return removidos;
   }, [historial]);
-  // �🔥 Usar ultimo_recibo_pagado en lugar de fecha_ultimo_pago
+  // 🔥 Determinar pagos usando fecha_pago_real de cada recibo (fuente de verdad)
+  // Fallback a ultimo_recibo_pagado solo si los recibos no vienen del backend
   const ultimoReciboPagado = expediente.ultimo_recibo_pagado || 0;
+  const tieneRecibosBackend = pagos.some(p => p.fecha_pago_real !== undefined);
   let totalPagado = 0;
   let totalPendiente = 0;
   let totalPorVencer = 0;
   let totalVencido = 0;
-  let pagosRealizados = ultimoReciboPagado;
+  let pagosRealizados = 0;
 
   const pagosProcesados = pagos.map((pago) => {
-    // 🔥 Regla maestra: si el número de recibo <= ultimo_recibo_pagado, SIEMPRE es pagado
-    // Esto prevalece sobre cualquier estatus del backend que pueda estar desactualizado
-    const forzarPagado = pago.numero <= ultimoReciboPagado;
+    // 🔥 Determinar si está pagado: preferir fecha_pago_real del recibo individual
+    // Solo usar ultimo_recibo_pagado como fallback cuando no hay datos de recibos del backend
+    const tieneFechaPagoReal = !!pago.fecha_pago_real;
+    const forzarPagado = tieneRecibosBackend
+      ? tieneFechaPagoReal
+      : pago.numero <= ultimoReciboPagado;
 
     // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
     if (pago.estatusBackend && !forzarPagado) {
@@ -271,14 +276,12 @@ const CalendarioPagos = ({
       return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
     }
     
-    // Fallback: Calcular estatus en el frontend (método antiguo)
-    // console.log(`🔍 [RECIBO ${pago.numero}] SIN estatus backend, calculando en FRONTEND | Fecha: ${pago.fecha} | ultimo_recibo_pagado: ${ultimoReciboPagado}`);
+    // Fallback: Calcular estatus en el frontend
     const [year, month, day] = pago.fecha.split('-');
     const fechaPago = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     const diasRestantes = utils.calcularDiasRestantes(pago.fecha);
-    // console.log(`🔍 [RECIBO ${pago.numero}] Días restantes calculados: ${diasRestantes}`);
     
-    let pagado = pago.numero <= ultimoReciboPagado;
+    let pagado = forzarPagado;
     
     if (pagado) {
       totalPagado += parseFloat(pago.monto) || 0;
@@ -318,6 +321,9 @@ const CalendarioPagos = ({
     return { ...pago, estado, badgeClass, pagado, totalPagos: numeroPagos };
   });
 
+  // Calcular pagosRealizados a partir de los recibos procesados
+  pagosRealizados = pagosProcesados.filter(p => p.pagado).length;
+
   // ====================================================================
   // HANDLERS: Recibo de pago de aseguradora (subir/ver)
   // ====================================================================
@@ -335,22 +341,31 @@ const CalendarioPagos = ({
 
   /**
    * Procesa el archivo seleccionado y lo sube a S3 (o lo guarda localmente si es pre-guardado)
+   * Para pólizas de Autos fraccionadas: replica el mismo archivo en todos los recibos
+   * (las aseguradoras emiten un solo PDF con todos los recibos)
    */
   const handleArchivoRecibo = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !reciboSeleccionado) return;
 
+    // En Autos fraccionado, las aseguradoras emiten un solo PDF con todos los recibos
+    const esAutos = (expediente.producto || expediente.ramo || '').toLowerCase().includes('auto');
+    const replicarEnTodos = esAutos && esFraccionado && numeroPagos > 1;
+    const recibosDestino = replicarEnTodos
+      ? Array.from({ length: numeroPagos }, (_, i) => i + 1)
+      : [reciboSeleccionado];
+
     // === Modo pre-guardado: guardar archivo localmente, no subir a S3 ===
     if (modoPreGuardado) {
       setRecibosSubidos(prev => {
-        const nuevos = {
-          ...prev,
-          [reciboSeleccionado]: {
+        const nuevos = { ...prev };
+        recibosDestino.forEach(num => {
+          nuevos[num] = {
             subido: true,
             nombre: file.name,
-            archivo: file // Guardar referencia al File para subir después
-          }
-        };
+            archivo: file
+          };
+        });
         // Notificar al padre los archivos pendientes
         if (onRecibosArchivos) {
           const archivos = {};
@@ -361,7 +376,11 @@ const CalendarioPagos = ({
         }
         return nuevos;
       });
-      toast.success(`📎 Recibo #${reciboSeleccionado} adjuntado - se subirá al guardar`);
+      if (replicarEnTodos) {
+        toast.success(`📎 Recibo adjuntado en los ${numeroPagos} recibos (Autos) - se subirá al guardar`);
+      } else {
+        toast.success(`📎 Recibo #${reciboSeleccionado} adjuntado - se subirá al guardar`);
+      }
       setReciboSeleccionado(null);
       return;
     }
@@ -369,30 +388,38 @@ const CalendarioPagos = ({
     // === Modo normal: subir directamente a S3 ===
     setSubiendoRecibo(reciboSeleccionado);
     try {
-      const resultado = await subirReciboPago(expediente.id, reciboSeleccionado, file);
-      
-      // Guardar referencia local del recibo subido (solo marcar como subido, NO guardar URL directa de S3)
-      setRecibosSubidos(prev => ({
-        ...prev,
-        [reciboSeleccionado]: {
-          subido: true,
-          nombre: file.name
-        }
-      }));
+      // Subir al recibo seleccionado primero
+      await subirReciboPago(expediente.id, reciboSeleccionado, file);
 
-      // Feedback visual
-      if (window.toast) {
-        window.toast.success(`✅ Recibo #${reciboSeleccionado} subido correctamente`);
+      // Si es Qualitas, replicar en los demás recibos
+      if (replicarEnTodos) {
+        const otrosRecibos = recibosDestino.filter(n => n !== reciboSeleccionado);
+        for (const num of otrosRecibos) {
+          try {
+            await subirReciboPago(expediente.id, num, file);
+          } catch (err) {
+            console.warn(`⚠️ Error replicando recibo #${num}:`, err.message);
+          }
+        }
+      }
+      
+      // Marcar todos los recibos destino como subidos
+      setRecibosSubidos(prev => {
+        const nuevos = { ...prev };
+        recibosDestino.forEach(num => {
+          nuevos[num] = { subido: true, nombre: file.name };
+        });
+        return nuevos;
+      });
+
+      if (replicarEnTodos) {
+        toast.success(`✅ Recibo subido en los ${numeroPagos} recibos (Autos)`);
       } else {
-        alert(`Recibo #${reciboSeleccionado} subido correctamente`);
+        toast.success(`✅ Recibo #${reciboSeleccionado} subido correctamente`);
       }
     } catch (error) {
       console.error('❌ Error al subir recibo:', error);
-      if (window.toast) {
-        window.toast.error(`Error al subir recibo: ${error.message}`);
-      } else {
-        alert(`Error al subir recibo: ${error.message}`);
-      }
+      toast.error(`Error al subir recibo: ${error.message}`);
     } finally {
       setSubiendoRecibo(null);
       setReciboSeleccionado(null);
@@ -514,6 +541,7 @@ const CalendarioPagos = ({
             <thead>
               <tr>
                 <th width="80">Pago #</th>
+                <th>Fecha de Vencimiento</th>
                 <th>Fecha de Pago</th>
                 <th>Monto</th>
                 <th width="150">Estado</th>
@@ -530,6 +558,7 @@ const CalendarioPagos = ({
                 <tr key={pago.numero} className={pago.pagado ? 'table-success' : ''}>
                   <td><strong>#{pago.numero}</strong></td>
                   <td>{utils.formatearFecha(pago.fecha, 'larga')}</td>
+                  <td>{pago.pagado && pago.fecha_pago_real ? utils.formatearFecha(pago.fecha_pago_real.split('T')[0], 'larga') : '—'}</td>
                   <td><strong>${pago.monto}</strong></td>
                   <td>
                     <div className="d-flex align-items-center gap-1">
@@ -626,12 +655,12 @@ const CalendarioPagos = ({
                     {pago.pagado ? (
                       <>
                         {/* Botón para ver comprobante de pago */}
+                        {pago.comprobante_url ? (
                         <button 
                           className="btn btn-outline-success btn-sm"
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
                           onClick={async () => {
                           try {
-                            // Intentar obtener URL firmada del backend
                             const data = await obtenerComprobantePagoURL(expediente.id, pago.numero);
                             if (data?.url || data?.signed_url) {
                               window.open(data.url || data.signed_url, '_blank');
@@ -641,14 +670,11 @@ const CalendarioPagos = ({
                             console.warn('⚠️ No se pudo obtener URL firmada del comprobante:', err.message);
                           }
 
-                          // Fallback: usar URL directa del recibo
                           if (pago.comprobante_url) {
-                            console.log('📎 Usando URL directa del comprobante:', pago.comprobante_url);
                             window.open(pago.comprobante_url, '_blank');
                             return;
                           }
 
-                          // Último fallback: buscar en historial por numero_recibo
                           const eventoPago = historial.find(evento => {
                             return evento.tipo_evento === 'pago_registrado' &&
                               evento.datos_adicionales?.numero_recibo === pago.numero &&
@@ -665,6 +691,15 @@ const CalendarioPagos = ({
                       >
                         <FileText size={12} />
                         </button>
+                        ) : (
+                        <span 
+                          className="badge bg-light text-muted border" 
+                          style={{ fontSize: '0.6rem', cursor: 'default', padding: '0.25rem 0.4rem' }}
+                          title="Pago sin comprobante adjunto"
+                        >
+                          Sin archivo
+                        </span>
+                        )}
                       
                         {/* Botón para eliminar pago */}
                         {onEliminarPago && (

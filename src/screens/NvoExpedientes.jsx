@@ -317,6 +317,16 @@ const ModuloNvoExpedientes = () => {
     return () => window.removeEventListener('clientes-actualizados', handler);
   }, [recargarClientes]);
 
+  // 🔄 Sincronizar expedienteSeleccionado cuando expedientes se recarguen (ej. después de aplicar pago)
+  useEffect(() => {
+    if (expedienteSeleccionado && expedientes.length > 0) {
+      const actualizado = expedientes.find(exp => exp.id === expedienteSeleccionado.id);
+      if (actualizado && JSON.stringify(actualizado) !== JSON.stringify(expedienteSeleccionado)) {
+        setExpedienteSeleccionado(actualizado);
+      }
+    }
+  }, [expedientes]);
+
   // 🔄 Listener para recargar expedientes cuando el usuario regresa de WhatsApp/Email
   useEffect(() => {
     const handleRecargarExpedientes = () => {
@@ -790,6 +800,48 @@ const ModuloNvoExpedientes = () => {
       }
       
       console.log('✅ Pago eliminado correctamente del recibo', pagoParaEliminar.numero);
+
+      // 🔥 Recalcular ultimo_recibo_pagado consultando los recibos reales
+      try {
+        const recibosResp = await fetch(`${API_URL}/api/recibos/${expedienteParaEliminarPago.id}`, {
+          headers: getAuthHeaders()
+        });
+        let nuevoUltimoRecibo = 0;
+        if (recibosResp.ok) {
+          const recibosData = await recibosResp.json();
+          const recibos = recibosData?.data || recibosData || [];
+          // Calcular el máximo recibo consecutivo pagado (excluyendo el que acabamos de eliminar)
+          const pagadosSet = new Set();
+          recibos.forEach(r => {
+            if (r.fecha_pago_real && r.numero_recibo !== pagoParaEliminar.numero) {
+              pagadosSet.add(r.numero_recibo);
+            }
+          });
+          for (let i = 1; i <= 12; i++) {
+            if (pagadosSet.has(i)) {
+              nuevoUltimoRecibo = i;
+            } else {
+              break;
+            }
+          }
+        }
+        const updateExp = await fetch(`${API_URL}/api/expedientes/${expedienteParaEliminarPago.id}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(true),
+          body: JSON.stringify({
+            ultimo_recibo_pagado: nuevoUltimoRecibo,
+            estatus_pago: 'Pendiente',
+            fecha_ultimo_pago: nuevoUltimoRecibo === 0 ? null : expedienteParaEliminarPago.fecha_ultimo_pago
+          })
+        });
+        if (updateExp.ok) {
+          console.log(`✅ Expediente actualizado: ultimo_recibo_pagado = ${nuevoUltimoRecibo}`);
+        } else {
+          console.error('⚠️ Error actualizando expediente al eliminar pago');
+        }
+      } catch (errExp) {
+        console.error('⚠️ Error actualizando expediente:', errExp);
+      }
       
       // 📝 Registrar en historial
       try {
@@ -3696,7 +3748,7 @@ const ModuloNvoExpedientes = () => {
                     <strong style={{ fontSize: '0.85rem' }}>Póliza:</strong> <span style={{ fontSize: '0.85rem' }}>{expedienteParaPago.numero_poliza || 'Sin número'}</span>
                   </div>
                   <div style={{ fontSize: '0.75rem' }}>
-                    <div><strong>Cliente:</strong> {expedienteParaPago.cliente_nombre || 'Sin nombre'}</div>
+                    <div><strong>Cliente:</strong> {expedienteParaPago.nombre ? `${expedienteParaPago.nombre} ${expedienteParaPago.apellido_paterno || ''} ${expedienteParaPago.apellido_materno || ''}`.trim() : (expedienteParaPago.asegurado || 'Sin nombre')}</div>
                     <div><strong>Aseguradora:</strong> {expedienteParaPago.compania || 'N/A'}</div>
                     <div><strong>Producto:</strong> {expedienteParaPago.producto || 'N/A'}</div>
                     {expedienteParaPago.importe_total && (
