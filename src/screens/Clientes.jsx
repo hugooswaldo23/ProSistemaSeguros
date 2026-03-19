@@ -1,7 +1,7 @@
 const API_URL = import.meta.env.VITE_API_URL;
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck, ExternalLink } from 'lucide-react';
-import DetalleExpediente from '../components/DetalleExpediente';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Edit, Trash2, Eye, FileText, Users, BarChart3, ArrowRight, X, CheckCircle, XCircle, Clock, DollarSign, AlertCircle, Home, UserCheck, Shield, Package, PieChart, Settings, User, Download, Upload, Save, ChevronLeft, ChevronRight, Search, Building2, UserCircle, FolderOpen, FileUp, File, Calendar, Phone, Mail, MapPin, CreditCard, Hash, AlertTriangle, CheckCircle2, FileCheck } from 'lucide-react';
 import { obtenerClientes, crearCliente, actualizarCliente, eliminarCliente } from '../services/clientesService';
 import * as pdfService from '../services/pdfService';
 
@@ -177,6 +177,7 @@ const ModuloClientes = () => {
       return [];
     })()
   }), []);
+  const navigate = useNavigate();
   // Estados principales del módulo de clientes
   const [clientes, setClientes] = useState([]);
   const [expedientes, setExpedientes] = useState([]);
@@ -236,8 +237,6 @@ const ModuloClientes = () => {
   const [mostrarVisorPDF, setMostrarVisorPDF] = useState(false);
   const [pdfUrlActual, setPdfUrlActual] = useState(null);
   const [pdfNombreActual, setPdfNombreActual] = useState(null);
-  const [mostrarDetallePoliza, setMostrarDetallePoliza] = useState(false);
-  const [polizaParaDetalle, setPolizaParaDetalle] = useState(null);
 
   // Subir PDF desde Clientes (modal/listado)
   const subirPDFDesdeClientes = useCallback(async (expedienteId, file) => {
@@ -2677,7 +2676,7 @@ const ModuloClientes = () => {
                               <th>Prima</th>
                               <th>Vigencia</th>
                               <th>Estado</th>
-                              <th style={{minWidth: '200px'}}>Acciones</th>
+                              <th>Acciones</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2754,11 +2753,8 @@ const ModuloClientes = () => {
                                   <div className="btn-group" role="group">
                                     <button
                                       className="btn btn-sm btn-outline-primary"
-                                      onClick={() => {
-                                        setPolizaParaDetalle(expediente);
-                                        setMostrarDetallePoliza(true);
-                                      }}
-                                      title="Ver expediente completo"
+                                      onClick={() => navigate(`/polizas?accion=ver&id=${expediente.id}&origen=clientes`)}
+                                      title="Ver detalle de póliza"
                                     >
                                       <Eye size={14} />
                                     </button>
@@ -2773,38 +2769,10 @@ const ModuloClientes = () => {
                                           alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
                                         }
                                       }}
-                                      title={'Abrir PDF en nueva pestaña'}
+                                      title="Descargar póliza PDF"
                                     >
                                       <Download size={14} />
                                     </button>
-                                    {/* Subir PDF */}
-                                    <button
-                                      className="btn btn-sm btn-outline-secondary"
-                                      onClick={() => document.getElementById(`file-exped-${expediente.id}`)?.click()}
-                                      title="Subir/Actualizar PDF"
-                                    >
-                                      <Upload size={14} />
-                                    </button>
-                                    <input
-                                      id={`file-exped-${expediente.id}`}
-                                      type="file"
-                                      accept=".pdf,application/pdf"
-                                      style={{ display: 'none' }}
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) subirPDFDesdeClientes(expediente.id, file);
-                                        e.target.value = '';
-                                      }}
-                                    />
-                                    {(clienteSeleccionado?.expedientesRelacionados || []).includes(expediente.id) && (
-                                      <button
-                                        onClick={() => desrelacionarExpediente(expediente.id)}
-                                        className="btn btn-sm btn-outline-danger"
-                                        title="Desrelacionar"
-                                      >
-                                        <X size={12} />
-                                      </button>
-                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -2825,7 +2793,7 @@ const ModuloClientes = () => {
                               <th>Prima</th>
                               <th>Vigencia</th>
                               <th>Estado</th>
-                              <th style={{minWidth: '200px'}}>Acciones</th>
+                              <th>Acciones</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2890,11 +2858,8 @@ const ModuloClientes = () => {
                                   <div className="btn-group" role="group">
                                     <button
                                       className="btn btn-sm btn-outline-primary"
-                                      onClick={() => {
-                                        setPolizaParaDetalle(expediente);
-                                        setMostrarDetallePoliza(true);
-                                      }}
-                                      title="Ver expediente completo"
+                                      onClick={() => navigate(`/polizas?accion=ver&id=${expediente.id}&origen=clientes`)}
+                                      title="Ver detalle de póliza"
                                     >
                                       <Eye size={14} />
                                     </button>
@@ -2909,29 +2874,10 @@ const ModuloClientes = () => {
                                           alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
                                         }
                                       }}
-                                      title="Abrir PDF en nueva pestaña"
+                                      title="Descargar póliza PDF"
                                     >
                                       <Download size={14} />
                                     </button>
-                                    {/* Subir PDF */}
-                                    <button
-                                      className="btn btn-sm btn-outline-secondary"
-                                      onClick={() => document.getElementById(`file-exped-ant-${expediente.id}`)?.click()}
-                                      title="Subir/Actualizar PDF"
-                                    >
-                                      <Upload size={14} />
-                                    </button>
-                                    <input
-                                      id={`file-exped-ant-${expediente.id}`}
-                                      type="file"
-                                      accept=".pdf,application/pdf"
-                                      style={{ display: 'none' }}
-                                      onChange={(e) => {
-                                        const file = e.target.files?.[0];
-                                        if (file) subirPDFDesdeClientes(expediente.id, file);
-                                        e.target.value = '';
-                                      }}
-                                    />
                                   </div>
                                 </td>
                             </tr>
@@ -3663,11 +3609,8 @@ const ModuloClientes = () => {
                               <div className="btn-group" role="group">
                                 <button
                                   className="btn btn-sm btn-outline-primary"
-                                  onClick={() => {
-                                    setPolizaParaDetalle(poliza);
-                                    setMostrarDetallePoliza(true);
-                                  }}
-                                  title="Ver expediente completo"
+                                  onClick={() => navigate(`/polizas?accion=ver&id=${poliza.id}&origen=clientes`)}
+                                  title="Ver detalle de póliza"
                                 >
                                   <Eye size={14} />
                                 </button>
@@ -3682,29 +3625,10 @@ const ModuloClientes = () => {
                                       alert('PDF no disponible o error al abrirlo: ' + (error?.message || 'desconocido'));
                                     }
                                   }}
-                                  title="Abrir PDF en nueva pestaña"
+                                  title="Descargar póliza PDF"
                                 >
                                   <Download size={14} />
                                 </button>
-                                {/* Subir PDF */}
-                                <button
-                                  className="btn btn-sm btn-outline-secondary"
-                                  onClick={() => document.getElementById(`file-poliza-${poliza.id}`)?.click()}
-                                  title="Subir/Actualizar PDF"
-                                >
-                                  <Upload size={14} />
-                                </button>
-                                <input
-                                  id={`file-poliza-${poliza.id}`}
-                                  type="file"
-                                  accept=".pdf,application/pdf"
-                                  style={{ display: 'none' }}
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) subirPDFDesdeClientes(poliza.id, file);
-                                    e.target.value = '';
-                                  }}
-                                />
                               </div>
                             </td>
                           </tr>
@@ -3785,62 +3709,6 @@ const ModuloClientes = () => {
         </div>
       )}
 
-      {/* Modal Detalle de Póliza */}
-      {mostrarDetallePoliza && polizaParaDetalle && (
-        <div className="modal fade show d-block" style={{backgroundColor: 'rgba(0,0,0,0.5)'}}>
-          <div className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  <FileText size={20} className="me-2" />
-                  Detalles del Expediente
-                </h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={() => {
-                    setMostrarDetallePoliza(false);
-                    setPolizaParaDetalle(null);
-                  }}
-                ></button>
-              </div>
-              <div className="modal-body">
-                {/* Vista unificada de detalles usando DetalleExpediente */}
-                <DetalleExpediente
-                  datos={polizaParaDetalle}
-                  modo="caratula"
-                  coberturas={(() => {
-                    try {
-                      if (!polizaParaDetalle.coberturas) return [];
-                      return typeof polizaParaDetalle.coberturas === 'string'
-                        ? JSON.parse(polizaParaDetalle.coberturas)
-                        : polizaParaDetalle.coberturas;
-                    } catch {
-                      return [];
-                    }
-                  })()}
-                  mensajes={polizaParaDetalle.mensajes || []}
-                  utils={{
-                    formatearMoneda: (valor) => new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(parseFloat(valor)),
-                  }}
-                />
-              </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setMostrarDetallePoliza(false);
-                    setPolizaParaDetalle(null);
-                  }}
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

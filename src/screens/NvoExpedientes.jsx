@@ -3593,7 +3593,14 @@ const ModuloNvoExpedientes = () => {
         <DetallesExpediente 
           expedienteSeleccionado={expedienteSeleccionado}
           setExpedienteSeleccionado={setExpedienteSeleccionado}
-          setVistaActual={setVistaActual}
+          setVistaActual={(vista) => {
+            if (vista === 'lista' && origenNavegacion === 'clientes') {
+              setOrigenNavegacion(null);
+              navigate('/clientes');
+              return;
+            }
+            setVistaActual(vista);
+          }}
           aplicarPago={abrirModalAplicarPago}
           cargarExpedientes={recargarExpedientes}
           editarExpediente={editarExpediente}
