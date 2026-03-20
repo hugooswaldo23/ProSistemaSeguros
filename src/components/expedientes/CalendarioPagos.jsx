@@ -104,17 +104,20 @@ const CalendarioPagos = ({
         });
     } else {
       // Fallback: Calcular recibos en el frontend (método antiguo)
+      const companiaSinAcentos = (expediente.compania || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
       const periodoGracia = expediente.periodo_gracia 
         ? parseInt(expediente.periodo_gracia, 10)
-        : (expediente.compania?.toLowerCase().includes('qualitas') ? 14 : 30);
+        : (companiaSinAcentos.includes('qualitas') ? 14 : 30);
       
       const primerPagoField = expediente.primer_pago || expediente.primerPago;
       const pagosSubsecuentesField = expediente.pagos_subsecuentes || expediente.pagosSubsecuentes;
       
+      // Limpiar comas de miles en montos (ej: "2,332.13" → "2332.13")
+      const limpiarMonto = (v) => typeof v === 'string' ? v.replace(/,/g, '') : v;
       const usarMontosExactos = primerPagoField && pagosSubsecuentesField;
-      const primerPagoMonto = usarMontosExactos ? parseFloat(primerPagoField) : null;
-      const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(pagosSubsecuentesField) : null;
-      const montoPorDefecto = expediente.total ? (parseFloat(expediente.total) / numeroPagos).toFixed(2) : '---';
+      const primerPagoMonto = usarMontosExactos ? parseFloat(limpiarMonto(primerPagoField)) : null;
+      const pagosSubsecuentesMonto = usarMontosExactos ? parseFloat(limpiarMonto(pagosSubsecuentesField)) : null;
+      const montoPorDefecto = expediente.total ? (parseFloat(limpiarMonto(expediente.total)) / numeroPagos).toFixed(2) : '---';
       
       for (let i = 1; i <= numeroPagos; i++) {
         const fechaPago = calcularProximoPago(

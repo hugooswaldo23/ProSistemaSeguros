@@ -103,14 +103,13 @@ export async function extraer(ctx) {
       const nombreCompleto = nombreMatch[1].trim();
       const palabras = nombreCompleto.split(/\s+/);
       
-      if (palabras.length === 4) {
-        nombre = `${palabras[0]} ${palabras[1]}`;
-        apellido_paterno = palabras[2];
-        apellido_materno = palabras[3];
-      } else if (palabras.length === 3) {
-        nombre = palabras[0];
-        apellido_paterno = palabras[1];
-        apellido_materno = palabras[2];
+      if (palabras.length >= 3) {
+        // Convención mexicana: últimas 2 palabras = apellidos, resto = nombre(s)
+        // Funciona para 3 palabras ("PEDRO GONZALEZ RAMIREZ"), 4 ("JUAN CARLOS HERNANDEZ LOPEZ")
+        // y 5+ ("MARIA DE LOS ANGELES ADRIANA VARGAS PORTILLO")
+        apellido_materno = palabras[palabras.length - 1];
+        apellido_paterno = palabras[palabras.length - 2];
+        nombre = palabras.slice(0, -2).join(' ');
       } else if (palabras.length === 2) {
         nombre = palabras[0];
         apellido_paterno = palabras[1];
