@@ -330,7 +330,12 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         'gastos_expedicion',
         'iva',
         'total',
-        'suma_asegurada'
+        'subtotal',
+        'suma_asegurada',
+        'primer_pago',
+        'pagos_subsecuentes',
+        'pago_unico',
+        'deducible'
       ];
       camposMontos.forEach(campo => {
         if (datosExtraidos[campo] !== undefined && datosExtraidos[campo] !== null && datosExtraidos[campo] !== '') {
@@ -339,6 +344,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           datosExtraidos[campo] = '0.00';
         }
       });
+      
+      // Mapear prima_pagada → prima_neta si la IA usó ese nombre de campo
+      if (datosExtraidos.prima_pagada && datosExtraidos.prima_pagada !== '0.00' && (!datosExtraidos.prima_neta || datosExtraidos.prima_neta === '0.00')) {
+        datosExtraidos.prima_neta = datosExtraidos.prima_pagada;
+      }
 
       // Buscar cliente existente
       const clienteExistente = await buscarClienteExistente(
@@ -1526,6 +1536,8 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Aplicando datos del cliente
       
       // Combinar los datos extraídos del PDF con los datos normalizados del cliente
+      // NOTA: Los montos ya fueron limpiados (sin comas) y prima_pagada→prima_neta
+      // mapeado en la etapa de procesamiento (antes del preview)
       const datosConCliente = {
         ...datosExtraidos,
         cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null,
@@ -1671,7 +1683,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // ================== PERÍODO DE GRACIA ==================
       // Si NO viene del PDF (no se pudo extraer), usar valores sugeridos por aseguradora
       if (!datosConCliente.periodo_gracia) {
-        const aseguradora = (datosConCliente.compania || '').toLowerCase();
+        const aseguradora = (datosConCliente.compania || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
         if (aseguradora.includes('qualitas')) {
           datosConCliente.periodo_gracia = 14; // Qualitas: 14 días por defecto cuando NO se extrae del PDF
         } else if (aseguradora) {

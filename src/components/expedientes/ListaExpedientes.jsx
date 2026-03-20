@@ -502,7 +502,14 @@ const ListaExpedientes = React.memo(({
     };
   }, [expedientes]);
   
-  const paginacion = usePaginacion(expedientesFiltrados, 10);
+  const paginacion = usePaginacion(expedientesFiltrados, 10, {
+    camposBusqueda: [
+      'numero_poliza', 'compania', 'producto', 'tipo_cobertura',
+      'marca', 'modelo', 'anio', 'numero_serie', 'placas',
+      'agente', 'sub_agente', 'endoso', 'inciso',
+      'contratante', 'asegurado', 'rfc'
+    ]
+  });
 
   // Detectar 3 tipos de duplicados (excluir Renovadas: es normal que compartan VIN con la nueva)
   const analisisDuplicados = React.useMemo(() => {
