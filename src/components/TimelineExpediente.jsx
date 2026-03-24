@@ -1269,6 +1269,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                         </div>
                       ) : (evento.tipo_evento === 'cotizacion_renovacion_iniciada' ||
                            evento.tipo_evento === 'COTIZACION_CARGADA' ||
+                           evento.tipo_evento === 'POLIZA_EMITIDA' ||
                            evento.tipo_evento === 'cotizacion_enviada' ||
                            evento.tipo_evento === 'renovacion_pendiente_emision' ||
                            evento.tipo_evento === 'renovacion_emitida' ||

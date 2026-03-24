@@ -9,7 +9,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Share2, Mail, DollarSign, Calendar, Upload, CheckCircle, X, AlertCircle, Loader, FileText, RefreshCw, Trash2 } from 'lucide-react';
+import { Plus, Share2, Mail, DollarSign, Calendar, Upload, CheckCircle, X, AlertCircle, Loader, FileText, RefreshCw, Trash2, FileSearch } from 'lucide-react';
 import toast from 'react-hot-toast';
 import FormularioNuevoExpediente from '../components/expedientes/FormularioNuevoExpediente';
 import FormularioEditarExpediente from '../components/expedientes/FormularioEditarExpediente';
@@ -23,6 +23,7 @@ import * as historialService from '../services/historialExpedienteService';
 import * as pdfService from '../services/pdfService';
 import utils from '../utils/expedientesUtils';
 import { CONSTANTS } from '../utils/expedientesConstants';
+import MulticotizadorExpediente from '../components/expedientes/Multicotizador/MulticotizadorExpediente';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -3484,6 +3485,15 @@ const ModuloNvoExpedientes = () => {
     return resultado;
   }, [calculartermino_vigencia]);
 
+  /**
+   * MULTICOTIZADOR
+   */
+  const verMulticotizador = () => {
+    setExpedienteParaRenovacion(expedienteParaRenovacion);
+    setMostrarModalCargarCotizacion(false);
+    setVistaActual('multicotizador');
+  };
+
   return (
     <div className="container-fluid py-3">
       {/* HEADER */}
@@ -3611,6 +3621,14 @@ const ModuloNvoExpedientes = () => {
           onEliminarPago={abrirModalEliminarPago}
           historial={historialExpediente}
           setHistorialExpediente={setHistorialExpediente}
+        />
+      )}
+
+      {/* VISTA MULTICOTIZADOR */}
+      {vistaActual === 'multicotizador' && expedienteParaRenovacion && (
+        <MulticotizadorExpediente 
+          expedienteRenovacion={expedienteParaRenovacion}
+          setVistaActual={setVistaActual}
         />
       )}
 
@@ -4297,6 +4315,18 @@ const ModuloNvoExpedientes = () => {
                   Al cargar la cotización, el expediente cambiará a etapa <strong>"Cotización Lista"</strong>.
                   Después podrás enviarla al cliente.
                 </p>
+
+                <button 
+                  type="button" 
+                  className="btn btn-info"
+                  onClick={() => verMulticotizador()}
+                  disabled={cargandoCotizacion}
+                >
+                  <>
+                    <FileSearch size={16} className="me-2" />
+                    Multicotizar
+                  </>
+                </button>
               </div>
               
               <div className="modal-footer">

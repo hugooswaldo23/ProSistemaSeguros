@@ -689,3 +689,34 @@ export const registrarEnvioDocumento = async (expedienteId, clienteId, canal, de
     }
   });
 };
+
+/* MULTICOTIZADOR */
+export const registrarEventoMulticotizador = async (expediente, action, description) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+
+  let tipoEvento;
+  switch(action){
+    case "cotizacion_generada":
+      tipoEvento = "COTIZACION_CARGADA";
+      break;
+    case "poliza_emitida":
+      tipoEvento = "POLIZA_EMITIDA";
+      break;
+    default:
+      break;
+  }
+  
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: tipoEvento,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    descripcion: description,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      vigencia_anterior: vigencia
+    }
+  });
+};
