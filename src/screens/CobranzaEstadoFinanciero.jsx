@@ -139,10 +139,13 @@ const CobranzaEstadoFinanciero = () => {
       // Excluir pólizas canceladas
       if (idsCancelSet.has(r.id)) return false;
       if (idsCancelados.has(String(r.expediente_id))) return false;
+      // Si el recibo individual está cancelado, no es vencido
+      const estRecibo = (r.estatus || '').toLowerCase();
+      if (estRecibo === 'cancelado' || estRecibo === 'cancelada') return false;
       const fv = r.fecha_vencimiento ? r.fecha_vencimiento.split('T')[0] : null;
       if (!fv) return false;
       // Vencido = fecha de vencimiento ya pasó (hasta la fecha de corte del filtro)
-      const estaVencido = (r.estatus || '').toLowerCase() === 'vencido';
+      const estaVencido = estRecibo === 'vencido';
       const vencioAntesDeFin = fv <= fechaFin;
       // Usar estatus del backend si dice Vencido, o si la fecha ya pasó y no está pagado
       return (estaVencido || fv < hoy) && vencioAntesDeFin;
