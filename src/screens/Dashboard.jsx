@@ -426,6 +426,10 @@ const DashboardComponent = () => {
           );
           
           const recibosVencidos = expedientes.flatMap(p => {
+            // Excluir pólizas canceladas (esas van en la tarjeta de Canceladas)
+            const etapa = (p.etapa_activa || p.etapaActiva || '').toLowerCase();
+            if (etapa === 'cancelada') return [];
+
             if (!Array.isArray(p.recibos) || p.recibos.length === 0) {
               // Póliza sin recibos: verificar estatus de la póliza
               const estatus = (p.estatus_pago || p.estatusPago || '').toLowerCase();
@@ -446,6 +450,8 @@ const DashboardComponent = () => {
                 if (r.fecha_pago_real) return false;
                 
                 const estatus = (r.estatus_pago || r.estatus || '').toLowerCase();
+                // Si está cancelado, no es vencido
+                if (estatus === 'cancelado' || estatus === 'cancelada') return false;
                 if (estatus === 'vencido') return true;
                 
                 // Fallback: calcular por fecha si no tiene estatus o estatus no es claro

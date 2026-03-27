@@ -216,14 +216,9 @@ const ListaExpedientes = React.memo(({
       
       case 'vigentes':
         // Pólizas con próximo recibo pendiente a MÁS de 15 días de vencer
-        // O pólizas canceladas pero con vigencia aún activa
         return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
-          
-          // 🔥 Póliza cancelada pero con vigencia activa → mostrar en vigentes
-          if (exp.etapa_activa === 'Cancelada') {
-            return tieneVigenciaActiva(exp);
-          }
           
           // Si está en proceso de renovación (cotización), no mostrar en vigentes
           if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
@@ -342,13 +337,8 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'canceladas':
-        // Pólizas canceladas SOLO cuando su vigencia ya terminó
-        return expedientes.filter(exp => {
-          if (exp.etapa_activa !== 'Cancelada') return false;
-          
-          // Solo mostrar en canceladas si la vigencia ya terminó
-          return !tieneVigenciaActiva(exp);
-        });
+        // Todas las pólizas canceladas
+        return expedientes.filter(exp => exp.etapa_activa === 'Cancelada');
       
       case 'todas':
       default:
@@ -381,14 +371,9 @@ const ListaExpedientes = React.memo(({
       }).length,
       
       // Pólizas con próximo recibo pendiente a MÁS de 15 días de vencer
-      // O pólizas canceladas pero con vigencia aún activa
       vigentes: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
-        
-        // 🔥 Póliza cancelada pero con vigencia activa → contar en vigentes
-        if (exp.etapa_activa === 'Cancelada') {
-          return tieneVigenciaActiva(exp);
-        }
         
         // Si está en proceso de renovación (cotización), no contar en vigentes
         if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
@@ -494,11 +479,8 @@ const ListaExpedientes = React.memo(({
         return estatusPago === 'vencido' || estatusPago === 'vencida';
       }).length,
       
-      // Pólizas canceladas SOLO cuando su vigencia ya terminó
-      canceladas: expedientes.filter(exp => {
-        if (exp.etapa_activa !== 'Cancelada') return false;
-        return !tieneVigenciaActiva(exp);
-      }).length
+      // Pólizas canceladas
+      canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
     };
   }, [expedientes]);
   

@@ -5,9 +5,11 @@ import { obtenerTiposProductos } from '../services/tiposProductosService';
 // Base URL configurable por env Vite
 const API_URL = import.meta.env.VITE_API_URL || '';
 
-const getAuthHeaders = () => {
+const getAuthHeaders = (withContentType = false) => {
   const token = localStorage.getItem('ss_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  if (withContentType) headers['Content-Type'] = 'application/json';
+  return headers;
 };
 
 const useProductosDB = () => {

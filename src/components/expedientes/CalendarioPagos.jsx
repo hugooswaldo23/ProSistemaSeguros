@@ -344,16 +344,15 @@ const CalendarioPagos = ({
 
   /**
    * Procesa el archivo seleccionado y lo sube a S3 (o lo guarda localmente si es pre-guardado)
-   * Para pólizas de Autos fraccionadas: replica el mismo archivo en todos los recibos
-   * (las aseguradoras emiten un solo PDF con todos los recibos)
+   * Para pólizas fraccionadas: replica el mismo archivo en todos los recibos
+   * (las aseguradoras emiten un solo PDF con todos los recibos de todas las fracciones)
    */
   const handleArchivoRecibo = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !reciboSeleccionado) return;
 
-    // En Autos fraccionado, las aseguradoras emiten un solo PDF con todos los recibos
-    const esAutos = (expediente.producto || expediente.ramo || '').toLowerCase().includes('auto');
-    const replicarEnTodos = esAutos && esFraccionado && numeroPagos > 1;
+    // En pólizas fraccionadas, las aseguradoras emiten un solo PDF con todos los recibos
+    const replicarEnTodos = esFraccionado && numeroPagos > 1;
     const recibosDestino = replicarEnTodos
       ? Array.from({ length: numeroPagos }, (_, i) => i + 1)
       : [reciboSeleccionado];
@@ -380,7 +379,7 @@ const CalendarioPagos = ({
         return nuevos;
       });
       if (replicarEnTodos) {
-        toast.success(`📎 Recibo adjuntado en los ${numeroPagos} recibos (Autos) - se subirá al guardar`);
+        toast.success(`📎 Recibo adjuntado en los ${numeroPagos} recibos - se subirá al guardar`);
       } else {
         toast.success(`📎 Recibo #${reciboSeleccionado} adjuntado - se subirá al guardar`);
       }
@@ -394,7 +393,7 @@ const CalendarioPagos = ({
       // Subir al recibo seleccionado primero
       await subirReciboPago(expediente.id, reciboSeleccionado, file);
 
-      // Si es Qualitas, replicar en los demás recibos
+      // Si es fraccionado, replicar en los demás recibos
       if (replicarEnTodos) {
         const otrosRecibos = recibosDestino.filter(n => n !== reciboSeleccionado);
         for (const num of otrosRecibos) {
@@ -416,7 +415,7 @@ const CalendarioPagos = ({
       });
 
       if (replicarEnTodos) {
-        toast.success(`✅ Recibo subido en los ${numeroPagos} recibos (Autos)`);
+        toast.success(`✅ Recibo subido en los ${numeroPagos} recibos`);
       } else {
         toast.success(`✅ Recibo #${reciboSeleccionado} subido correctamente`);
       }

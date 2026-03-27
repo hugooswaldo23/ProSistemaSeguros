@@ -42,7 +42,8 @@ const FormularioEditarExpediente = ({
   calcularProximoPago,
   handleClienteSeleccionado,
   clienteSeleccionado,
-  onEliminarPago
+  onEliminarPago,
+  guardando = false
 }) => {
   // 📸 SNAPSHOT: Estado original para detectar cambios
   const [formularioOriginal, setFormularioOriginal] = useState(null);
@@ -629,6 +630,7 @@ const FormularioEditarExpediente = ({
       modoEdicion={true}
       titulo={`Editar Expediente #${formulario.id || ''}`}
       textoBotónGuardar="Actualizar Expediente"
+      guardando={guardando}
       setVistaActual={setVistaActual}
       formulario={formulario}
       setFormulario={setFormulario}
