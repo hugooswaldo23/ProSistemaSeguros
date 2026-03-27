@@ -45,6 +45,7 @@ const FormularioExpedienteBase = React.memo(({
   modoEdicion,
   titulo,
   textoBotónGuardar = 'Guardar',
+  guardando = false,
   
   // Props de vista y navegación
   setVistaActual,
@@ -1265,8 +1266,11 @@ const FormularioExpedienteBase = React.memo(({
               type="button"
               onClick={guardarExpediente}
               className="btn btn-primary btn-sm"
+              disabled={guardando}
             >
-              {textoBotónGuardar}
+              {guardando ? (
+                <><span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Guardando...</>
+              ) : textoBotónGuardar}
             </button>
           </div>
         </div>

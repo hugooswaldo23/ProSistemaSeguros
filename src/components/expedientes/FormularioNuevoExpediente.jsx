@@ -52,6 +52,7 @@ const FormularioNuevoExpediente = ({
   clienteSeleccionado,
   onEliminarPago,
   onRecibosArchivos, // 📎 Callback para recibos adjuntos pre-guardado
+  guardando = false, // Estado de guardado en progreso
   // 🆕 Props para renovación
   expedienteAnterior = null,
   limpiarExpedienteAnterior = () => {}
@@ -529,6 +530,7 @@ const FormularioNuevoExpediente = ({
           modoEdicion={false}
           titulo={modoCaptura === 'pdf' ? 'Nuevo Expediente (desde PDF)' : 'Nuevo Expediente (Captura Manual)'}
           textoBotónGuardar="Guardar Expediente"
+          guardando={guardando}
           setVistaActual={setVistaActual}
           formulario={formulario}
           setFormulario={setFormularioConDeteccion}

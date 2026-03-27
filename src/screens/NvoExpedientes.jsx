@@ -3544,6 +3544,7 @@ const ModuloNvoExpedientes = () => {
           setFormulario={setFormulario}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
           guardarExpediente={guardarExpediente}
+          guardando={guardando}
           // 🆕 Expediente anterior para renovación (si aplica)
           expedienteAnterior={expedienteAnteriorParaRenovacion}
           limpiarExpedienteAnterior={() => setExpedienteAnteriorParaRenovacion(null)}
@@ -3577,6 +3578,7 @@ const ModuloNvoExpedientes = () => {
           setFormulario={setFormulario}
           actualizarCalculosAutomaticos={actualizarCalculosAutomaticos}
           guardarExpediente={guardarExpediente}
+          guardando={guardando}
           companias={aseguradoras.length > 0 ? aseguradoras.map(a => a.nombre) : ['HDI', 'Qualitas', 'GNP', 'AXA', 'Zurich']}
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
@@ -3614,6 +3616,7 @@ const ModuloNvoExpedientes = () => {
           aplicarPago={abrirModalAplicarPago}
           cargarExpedientes={recargarExpedientes}
           editarExpediente={editarExpediente}
+          iniciarCancelacion={iniciarCancelacion}
           calculartermino_vigencia={calculartermino_vigencia}
           calcularProximoPago={calcularProximoPago}
           abrirModalCompartir={abrirModalCompartir}
