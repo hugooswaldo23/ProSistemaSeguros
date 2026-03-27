@@ -214,9 +214,14 @@ const Nomina = () => {
               
               const fechaPago = new Date(recibo.fecha_pago_real);
               if (fechaPago >= inicio && fechaPago <= fin) {
-                let primaBase = parseFloat(exp.prima_neta) || parseFloat(exp.subtotal) || 0;
-                if (primaBase === 0 && exp.total) {
-                  primaBase = parseFloat(exp.total) / 1.16;
+                // Usar el monto del recibo individual, no la prima total de la póliza
+                let primaBase = parseFloat(recibo.monto) || 0;
+                // Fallback a prima de póliza solo si el recibo no tiene monto
+                if (primaBase === 0) {
+                  primaBase = parseFloat(exp.prima_neta) || parseFloat(exp.subtotal) || 0;
+                  if (primaBase === 0 && exp.total) {
+                    primaBase = parseFloat(exp.total) / 1.16;
+                  }
                 }
                 
                 recibosPagadosEnPeriodo.push({
@@ -281,7 +286,9 @@ const Nomina = () => {
           nombreVendedorCompleto = `${vendedor.nombre || ''} ${vendedor.apellidoPaterno || ''}`.trim();
           vendedorId = vendedor.id;
           if (vendedor.comisionesCompartidas && Array.isArray(vendedor.comisionesCompartidas)) {
-            const configComision = vendedor.comisionesCompartidas.find(cc => cc.clave === claveAgente);
+            // Buscar config de comisión: primero por clave exacta, luego por agenteId
+            const configComision = vendedor.comisionesCompartidas.find(cc => cc.clave === claveAgente)
+              || vendedor.comisionesCompartidas.find(cc => String(cc.agenteId) === String(agente.id));
             if (configComision) {
               porcentajeVendedorSugerido = parseFloat(configComision.porcentajeVendedor) || 0;
             }
@@ -587,7 +594,6 @@ const Nomina = () => {
     try {
       const nominaData = {
         fecha_inicio: fechaInicio, fecha_fin: fechaFin, tipo_periodo: 'Quincenal',
-        tipo_nomina: tipoNomina,
         detalles: datosNomina.map(emp => ({
           empleado_id: emp.empleado_id, sueldo: emp.sueldo, comisiones: emp.comisiones,
           descuentos: emp.descuentos, motivo_descuento: emp.motivo_descuento,
@@ -628,10 +634,20 @@ const Nomina = () => {
         setNominaId(result.id);
         setNominaGuardada(true);
         toast.success(`Nómina guardada con código: ${result.codigo}`);
+        await cargarHistorialNominas();
         return result.id;
       } else {
-        const error = await response.json();
-        throw new Error(error.message || 'Error al guardar la nómina');
+        let errorMsg = `Error ${response.status}: `;
+        try {
+          const errorData = await response.json();
+          console.error('Error response del backend:', errorData);
+          errorMsg += errorData.message || errorData.error || errorData.detail || JSON.stringify(errorData);
+        } catch {
+          const text = await response.text();
+          console.error('Error response (text):', text);
+          errorMsg += text || response.statusText;
+        }
+        throw new Error(errorMsg);
       }
     } catch (error) {
       console.error('Error al guardar nómina:', error);

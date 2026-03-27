@@ -15,6 +15,16 @@ import {
 
 // Las listas de aseguradoras y tipos de producto se cargan desde el backend
 
+// Helper: obtener comisión que la aseguradora paga por un producto específico
+const obtenerComisionAseguradora = (aseguradoraId, productoId, aseguradoras = []) => {
+  const aseguradora = aseguradoras.find(a => String(a.id) === String(aseguradoraId));
+  if (!aseguradora?.productos_disponibles) return 0;
+  const prod = aseguradora.productos_disponibles.find(
+    p => String(typeof p === 'object' ? p.producto_id : p) === String(productoId)
+  );
+  return prod && typeof prod === 'object' ? parseFloat(prod.comision) || 0 : 0;
+};
+
 // Componente para mostrar tabla de comisiones
 const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido = 0, aseguradoras = [], tiposProductos = [] }) => {
   if (!productosAseguradoras || productosAseguradoras.length === 0) {
@@ -42,7 +52,8 @@ const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido 
           {productosAseguradoras.map((item, index) => {
             const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
             const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
-            const comisionBase = item.comisionPersonalizada || producto?.comisionBase || 0;
+            const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
+            const comisionBase = item.comisionPersonalizada || comisionDeAseguradora || 0;
             const comisionAgente = (comisionBase * porcentajeCompartido) / 100;
             
             return (
@@ -81,7 +92,7 @@ const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido 
   );
 };
 
-// Componente para asignar ejecutivo por producto-aseguradora
+// Componente para asignar producto-aseguradora con comisiones
 const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecutivosDisponibles, onChange, onComisionChange, usuarioId, onAsignarEjecutivo, aseguradoras = [], tiposProductos = [] }) => {
   if (!productosAseguradoras || productosAseguradoras.length === 0) {
     return <span className="text-muted">No hay productos seleccionados</span>;
@@ -92,21 +103,18 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
       <table className="table table-bordered align-middle">
         <thead className="table-light">
           <tr>
-            <th width="20%">Aseguradora</th>
-            <th width="10%">Clave</th>
-            <th width="20%">Producto</th>
-            <th width="10%">Comisión Base</th>
-            <th width="10%">Comisión Personalizada</th>
-            <th width="20%">Ejecutivo Asignado</th>
+            <th width="25%">Aseguradora</th>
+            <th width="15%">Clave</th>
+            <th width="25%">Producto</th>
+            <th width="15%">Comisión Base</th>
+            <th width="20%">Comisión Personalizada</th>
           </tr>
         </thead>
         <tbody>
           {productosAseguradoras.map((item, index) => {
             const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
             const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
-            console.log('DEBUG item.aseguradoraId:', item.aseguradoraId);
-            console.log('DEBUG aseguradora encontrada:', aseguradora);
-            console.log('DEBUG aseguradoras disponibles:', aseguradoras.map(a => ({id: a.id, nombre: a.nombre})));
+            const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
             return (
               <tr key={index}>
                   <td>
@@ -135,14 +143,14 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
                     </div>
                   </td>
                   <td className="text-center">
-                    <span className="badge bg-secondary">{producto?.comisionBase || 0}%</span>
+                    <span className="badge bg-secondary">{comisionDeAseguradora}%</span>
                   </td>
                   <td>
                     <div className="input-group input-group-sm">
                       <input
                         type="number"
                         className="form-control"
-                        value={item.comisionPersonalizada || producto?.comisionBase || 0}
+                        value={item.comisionPersonalizada || comisionDeAseguradora || 0}
                         onChange={e => onComisionChange(index, parseFloat(e.target.value) || 0)}
                         min="0"
                         max="100"
@@ -150,30 +158,6 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
                       />
                       <span className="input-group-text">%</span>
                     </div>
-                  </td>
-                  <td>
-                    <select
-                      className="form-select form-select-sm"
-                      value={item.ejecutivoId || ''}
-                      onChange={async (e) => {
-                        const val = e.target.value;
-                        onChange(index, 'ejecutivoId', val);
-                        if (onAsignarEjecutivo && usuarioId) {
-                          try {
-                            await onAsignarEjecutivo({ usuarioId, productoId: item.productoId, ejecutivoId: val, comisionPersonalizada: item.comisionPersonalizada || 0, clave: item.clave || null });
-                          } catch (err) {
-                            console.error('Error al asignar ejecutivo por producto:', err);
-                          }
-                        }
-                      }}
-                    >
-                      <option value="">Sin asignar</option>
-                      {ejecutivosDisponibles.map(ejecutivo => (
-                        <option key={ejecutivo.id} value={ejecutivo.id}>
-                          {ejecutivo.codigo} - {ejecutivo.nombre} {ejecutivo.apellidoPaterno}
-                        </option>
-                      ))}
-                    </select>
                   </td>
                 </tr>
             );
@@ -231,12 +215,12 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
     }
 
     const nuevosProductos = productosSeleccionados.map(productoId => {
-      const producto = tiposProductos.find(p => p.id === productoId);
+      const comisionAseg = obtenerComisionAseguradora(aseguradoraSeleccionada, productoId, aseguradoras);
       return {
         aseguradoraId: aseguradoraSeleccionada,
         productoId: productoId,
         ejecutivoId: null,
-        comisionPersonalizada: producto?.comisionBase || 0
+        comisionPersonalizada: comisionAseg || 0
       };
     });
 
@@ -340,9 +324,14 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
                                 <h6 className="text-muted mb-2">{categoria}</h6>
                                 <div className="row g-2">
                                   {productos.map(producto => {
-                                    const yaExiste = productosTemporales.some(
+                                    const yaExisteTemp = productosTemporales.some(
                                       p => p.aseguradoraId === aseguradoraSeleccionada && p.productoId === producto.id
                                     );
+                                    const yaExisteGuardado = (productosAseguradoras || []).some(
+                                      p => String(p.aseguradoraId) === String(aseguradoraSeleccionada) && String(p.productoId) === String(producto.id)
+                                    );
+                                    const yaExiste = yaExisteTemp || yaExisteGuardado;
+                                    const comisionAseg = obtenerComisionAseguradora(aseguradoraSeleccionada, producto.id, aseguradoras);
 
                                     return (
                                       <div key={producto.id} className="col-md-6">
@@ -363,7 +352,7 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
                                               <label className="form-check-label w-100">
                                                 <span className="badge bg-secondary me-1">{producto.codigo}</span>
                                                 <small>{producto.nombre}</small>
-                                                <span className="badge bg-primary ms-2">{producto.comisionBase}%</span>
+                                                <span className="badge bg-primary ms-2">{comisionAseg}%</span>
                                                 {yaExiste && <span className="badge bg-warning ms-2">Ya agregado</span>}
                                               </label>
                                             </div>
@@ -409,6 +398,7 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
                         {productosTemporales.map((item, index) => {
                           const aseguradora = aseguradoras.find(a => a.id === item.aseguradoraId);
                           const producto = tiposProductos.find(p => p.id === item.productoId);
+                          const comisionAseg = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
                           
                           return (
                             <div key={index} className="list-group-item">
@@ -421,7 +411,7 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
                                   <div className="text-success">
                                     <Package size={14} className="me-1" />
                                     {producto?.nombre}
-                                    <span className="badge bg-primary ms-2">{producto?.comisionBase}%</span>
+                                    <span className="badge bg-primary ms-2">{comisionAseg}%</span>
                                   </div>
                                 </div>
                                 <button
@@ -492,6 +482,7 @@ const SistemaGestionPersonal = () => {
   const [mostrarModalVendedor, setMostrarModalVendedor] = useState(false);
   const [vendedorSeleccionadoTemp, setVendedorSeleccionadoTemp] = useState('');
   const [porcentajeVendedorTemp, setPorcentajeVendedorTemp] = useState(50);
+  const [productosSeleccionadosTemp, setProductosSeleccionadosTemp] = useState([]);
 
   // Estado del formulario con campos de compensación
   const [formulario, setFormulario] = useState({
@@ -673,6 +664,7 @@ const SistemaGestionPersonal = () => {
   const agregarVendedorAutorizado = () => {
     setVendedorSeleccionadoTemp('');
     setPorcentajeVendedorTemp(50);
+    setProductosSeleccionadosTemp([]);
     setMostrarModalVendedor(true);
   };
 
@@ -682,22 +674,40 @@ const SistemaGestionPersonal = () => {
       return;
     }
 
-    // Verificar si ya está agregado
-    const yaExiste = vendedoresAutorizados.some(v => String(v.vendedorId) === String(vendedorSeleccionadoTemp));
-    if (yaExiste) {
-      mostrarAlertaTemp('Este vendedor ya está autorizado', 'warning');
+    // Generar una fila por cada producto/aseguradora del agente (solo los que no estén ya asignados)
+    const productosAgente = formulario.productosAseguradoras || [];
+    if (productosAgente.length === 0) {
+      mostrarAlertaTemp('Primero agrega claves y aseguradoras al agente', 'warning');
       return;
     }
 
-    const nuevaAutorizacion = {
-      id: Date.now() + Math.random(),
-      vendedorId: vendedorSeleccionadoTemp,
-      porcentajeVendedor: porcentajeVendedorTemp || 50,
-      ejecutivoId: '',
-      activo: true
-    };
+    if (productosSeleccionadosTemp.length === 0) {
+      mostrarAlertaTemp('Selecciona al menos un producto para asignar', 'warning');
+      return;
+    }
 
-    setVendedoresAutorizados([...vendedoresAutorizados, nuevaAutorizacion]);
+    const nuevasAutorizaciones = productosSeleccionadosTemp.map(key => {
+      const [aseguradoraId, productoId] = key.split('|');
+      // Buscar la clave del agente para esta aseguradora/producto
+      const prodAseg = (formulario.productosAseguradoras || []).find(
+        pa => String(pa.aseguradoraId) === String(aseguradoraId) && String(pa.productoId) === String(productoId)
+      );
+      const comisionBase = obtenerComisionAseguradora(aseguradoraId, productoId, aseguradoras);
+      return {
+        id: Date.now() + Math.random(),
+        vendedorId: vendedorSeleccionadoTemp,
+        agenteId: String(formulario.id),
+        aseguradoraId,
+        productoId,
+        clave: prodAseg?.clave || '',
+        comisionBase: comisionBase || 0,
+        porcentajeVendedor: porcentajeVendedorTemp || 50,
+        ejecutivoId: '',
+        activo: true
+      };
+    });
+
+    setVendedoresAutorizados([...vendedoresAutorizados, ...nuevasAutorizaciones]);
     setMostrarModalVendedor(false);
     setVendedorSeleccionadoTemp('');
   };
@@ -854,8 +864,15 @@ const SistemaGestionPersonal = () => {
       return;
     }
     
-    if (!formulario.usuario) {
+    // Usuario obligatorio solo al crear; al editar es opcional (ya tiene uno en BD)
+    if (!modoEdicion && !formulario.usuario) {
       mostrarAlertaTemp('Por favor ingrese un nombre de usuario', 'error');
+      return;
+    }
+
+    // Contraseña obligatoria solo al crear
+    if (!modoEdicion && !formulario.contrasena) {
+      mostrarAlertaTemp('Por favor ingrese una contraseña', 'error');
       return;
     }
 
@@ -867,6 +884,10 @@ const SistemaGestionPersonal = () => {
     // No enviar campos auxiliares ni el mapping legacy de ejecutivosPorProducto
     delete payload.confirmarContrasena;
     delete payload.ejecutivosPorProducto;
+    // Al editar, no enviar contraseña vacía (para no sobreescribir la existente)
+    if (modoEdicion && !payload.contrasena) {
+      delete payload.contrasena;
+    }
 
     console.log('=== GUARDANDO USUARIO ===');
     console.log('Perfil:', payload.perfil);
@@ -1012,21 +1033,48 @@ const SistemaGestionPersonal = () => {
             c => String(c.agenteId) === String(usuario.id)
           );
           
-          // Asignar vendedorId desde el usuario iterado (fix para vendedores creados con id null)
-          const comisionesConVendedor = comisionesDeEsteAgente.map(c => ({
-            ...c,
-            vendedorId: u.id
-          }));
-          
-          vendedores.push(...comisionesConVendedor);
+          // Normalizar campos del backend
+          comisionesDeEsteAgente.forEach(c => {
+            vendedores.push({
+              ...c,
+              vendedorId: u.id,
+              aseguradoraId: String(c.aseguradoraId || c.aseguradora_id || ''),
+              productoId: String(c.productoId || c.producto_id || ''),
+              porcentajeVendedor: c.porcentajeVendedor || 50,
+              activo: c.activo !== undefined ? c.activo : true
+            });
+          });
         }
       });
     }
-    setVendedoresAutorizados(vendedores);
+    // Deduplicar: si hay entradas CON productoId, descartar las sin productoId para el mismo vendedor+aseguradora
+    const conProducto = vendedores.filter(v => v.productoId && v.productoId !== '' && v.productoId !== 'undefined');
+    const sinProducto = vendedores.filter(v => !v.productoId || v.productoId === '' || v.productoId === 'undefined');
+    
+    // Solo mantener entradas sin productoId si no hay ninguna con productoId para esa combinación
+    const vendedoresLimpios = [...conProducto];
+    sinProducto.forEach(v => {
+      const tieneConProducto = conProducto.some(
+        cp => String(cp.vendedorId) === String(v.vendedorId) && String(cp.aseguradoraId) === String(v.aseguradoraId)
+      );
+      if (!tieneConProducto) {
+        vendedoresLimpios.push(v);
+      }
+    });
+    
+    // Deduplicar por key única
+    const vistos = new Set();
+    const vendedoresUnicos = [];
+    vendedoresLimpios.forEach(v => {
+      const key = `${v.vendedorId}|${v.aseguradoraId}|${v.productoId}`;
+      if (!vistos.has(key)) {
+        vistos.add(key);
+        vendedoresUnicos.push(v);
+      }
+    });
+    setVendedoresAutorizados(vendedoresUnicos);
 
-    console.log('Usuario completo:', usuario);
-    console.log('Comisiones compartidas cargadas:', comisiones);
-    console.log('Vendedores autorizados cargados:', vendedores);
+    console.log('Vendedores autorizados cargados (dedup):', vendedoresUnicos);
   };
 
   // Cargar y mostrar detalles (incluye registros de ejecutivos_por_producto)
@@ -1617,18 +1665,17 @@ const SistemaGestionPersonal = () => {
                                 <table className="table table-bordered">
                                   <thead className="table-light">
                                     <tr>
-                                      <th width="20%">Aseguradora</th>
-                                      <th width="20%">Clave</th>
+                                      <th width="25%">Aseguradora</th>
+                                      <th width="25%">Clave</th>
                                       <th width="25%">Producto</th>
-                                      <th width="15%">Comisión Base</th>
-                                      <th width="20%">Ejecutivo</th>
+                                      <th width="25%">Comisión Base</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {formulario.productosAseguradoras.map((item, index) => {
                                       const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
                                       const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
-                                      const ejecutivo = usuarios.filter(u => u.perfil === 'Ejecutivo' && u.activo);
+                                      const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
                                       
                                       return (
                                         <tr key={index}>
@@ -1658,7 +1705,7 @@ const SistemaGestionPersonal = () => {
                                               <input
                                                 type="number"
                                                 className="form-control"
-                                                value={item.comisionPersonalizada || 0}
+                                                value={item.comisionPersonalizada || comisionDeAseguradora || 0}
                                                 onChange={(e) => {
                                                   const nuevosProductos = [...formulario.productosAseguradoras];
                                                   nuevosProductos[index].comisionPersonalizada = parseFloat(e.target.value) || 0;
@@ -1670,24 +1717,6 @@ const SistemaGestionPersonal = () => {
                                               />
                                               <span className="input-group-text">%</span>
                                             </div>
-                                          </td>
-                                          <td>
-                                            <select
-                                              className="form-select form-select-sm"
-                                              value={item.ejecutivoId || ''}
-                                              onChange={(e) => {
-                                                const nuevosProductos = [...formulario.productosAseguradoras];
-                                                nuevosProductos[index].ejecutivoId = e.target.value;
-                                                setFormulario({...formulario, productosAseguradoras: nuevosProductos});
-                                              }}
-                                            >
-                                              <option value="">Sin ejecutivo</option>
-                                              {ejecutivo.map(u => (
-                                                <option key={u.id} value={u.id}>
-                                                  {u.codigo} - {u.nombre} {u.apellidoPaterno}
-                                                </option>
-                                              ))}
-                                            </select>
                                           </td>
                                         </tr>
                                       );
@@ -1727,21 +1756,44 @@ const SistemaGestionPersonal = () => {
                                 <table className="table table-bordered">
                                   <thead className="table-light">
                                     <tr>
-                                      <th width="35%">Vendedor</th>
-                                      <th width="20%">Comisión Vendedor</th>
-                                      <th width="20%">Ejecutivo</th>
-                                      <th width="10%" className="text-center">Estado</th>
-                                      <th width="6%" className="text-center">Acciones</th>
+                                      <th width="18%">Vendedor</th>
+                                      <th width="13%">Aseguradora</th>
+                                      <th width="10%">Clave</th>
+                                      <th width="13%">Producto</th>
+                                      <th width="16%">Comisión Vendedor</th>
+                                      <th width="16%">Ejecutivo</th>
+                                      <th width="7%" className="text-center">Estado</th>
+                                      <th width="7%" className="text-center">Acciones</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {vendedoresAutorizados.map((autorizacion, index) => {
                                       const vendedor = usuarios.find(u => String(u.id) === String(autorizacion.vendedorId));
+                                      const aseguradora = aseguradoras.find(a => String(a.id) === String(autorizacion.aseguradoraId));
+                                      const tieneProductoId = autorizacion.productoId && autorizacion.productoId !== '' && autorizacion.productoId !== 'undefined';
+                                      const producto = tieneProductoId ? tiposProductos.find(p => String(p.id) === String(autorizacion.productoId)) : null;
+                                      const comisionDeAseguradora = tieneProductoId ? obtenerComisionAseguradora(autorizacion.aseguradoraId, autorizacion.productoId, aseguradoras) : 0;
+                                      // Buscar la clave del agente para esta aseguradora/producto
+                                      const claveAgente = (formulario.productosAseguradoras || []).find(
+                                        pa => String(pa.aseguradoraId) === String(autorizacion.aseguradoraId) && (!tieneProductoId || String(pa.productoId) === String(autorizacion.productoId))
+                                      );
                                       
                                       return (
                                         <tr key={index}>
                                           <td>
                                             <strong>{vendedor ? `${vendedor.codigo} - ${vendedor.nombre} ${vendedor.apellidoPaterno}` : 'N/A'}</strong>
+                                          </td>
+                                          <td>
+                                            <span className={`badge bg-${aseguradora?.nombre?.toLowerCase() === 'qualitas' ? 'primary' : aseguradora?.nombre?.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
+                                              {aseguradora?.nombre || 'N/A'}
+                                            </span>
+                                          </td>
+                                          <td>
+                                            <small className="fw-semibold">{claveAgente?.clave || '-'}</small>
+                                          </td>
+                                          <td>
+                                            <small>{producto?.nombre || (tieneProductoId ? 'N/A' : 'Todos los productos')}</small>
+                                            {tieneProductoId && <div><small className="text-muted">Base: {comisionDeAseguradora}%</small></div>}
                                           </td>
                                           <td>
                                             <div className="input-group input-group-sm">
@@ -1756,7 +1808,7 @@ const SistemaGestionPersonal = () => {
                                               />
                                               <span className="input-group-text">%</span>
                                             </div>
-                                            <small className="text-muted">% de la comisión base que recibe el vendedor</small>
+                                            <small className="text-muted">% de la comisión base</small>
                                           </td>
                                           <td>
                                             <select
@@ -1919,6 +1971,7 @@ const SistemaGestionPersonal = () => {
                           <input
                             type="text"
                             className="form-control"
+                            autoComplete="off"
                             value={formulario.usuario}
                             onChange={(e) => setFormulario({...formulario, usuario: e.target.value})}
                             placeholder="Nombre de usuario único"
@@ -1929,6 +1982,7 @@ const SistemaGestionPersonal = () => {
                           <input
                             type="password"
                             className="form-control"
+                            autoComplete="new-password"
                             value={formulario.contrasena}
                             onChange={(e) => setFormulario({...formulario, contrasena: e.target.value})}
                             placeholder="Mínimo 6 caracteres"
@@ -1939,6 +1993,7 @@ const SistemaGestionPersonal = () => {
                           <input
                             type="password"
                             className="form-control"
+                            autoComplete="new-password"
                             value={formulario.confirmarContrasena}
                             onChange={(e) => setFormulario({...formulario, confirmarContrasena: e.target.value})}
                             placeholder="Repetir contraseña"
@@ -2073,37 +2128,106 @@ const SistemaGestionPersonal = () => {
                     <select
                       className="form-select"
                       value={vendedorSeleccionadoTemp}
-                      onChange={(e) => setVendedorSeleccionadoTemp(e.target.value)}
+                      onChange={(e) => {
+                        const nuevoVendedorId = e.target.value;
+                        setVendedorSeleccionadoTemp(nuevoVendedorId);
+                        // Auto-seleccionar productos disponibles (no ya asignados)
+                        if (nuevoVendedorId) {
+                          const disponibles = (formulario.productosAseguradoras || [])
+                            .filter(prod => !vendedoresAutorizados.some(v => 
+                              String(v.vendedorId) === String(nuevoVendedorId) && 
+                              String(v.aseguradoraId) === String(prod.aseguradoraId) && 
+                              (String(v.productoId) === String(prod.productoId) || !v.productoId || v.productoId === '' || v.productoId === 'undefined')
+                            ))
+                            .map(prod => `${prod.aseguradoraId}|${prod.productoId}`);
+                          setProductosSeleccionadosTemp(disponibles);
+                        } else {
+                          setProductosSeleccionadosTemp([]);
+                        }
+                      }}
                     >
                       <option value="">Seleccionar vendedor...</option>
-                      {usuarios.filter(u => u.perfil === 'Vendedor' && u.activo && !vendedoresAutorizados.some(v => String(v.vendedorId) === String(u.id))).map(vendedor => (
-                        <option key={vendedor.id} value={vendedor.id}>
-                          {vendedor.codigo} - {vendedor.nombre} {vendedor.apellidoPaterno}
-                        </option>
-                      ))}
+                      {usuarios.filter(u => u.perfil === 'Vendedor' && u.activo).map(vendedor => {
+                        // Verificar si ya tiene TODOS los productos asignados
+                        const productosAgente = formulario.productosAseguradoras || [];
+                        const productosYaAsignados = vendedoresAutorizados.filter(v => String(v.vendedorId) === String(vendedor.id));
+                        const todosAsignados = productosAgente.length > 0 && productosAgente.every(pa => 
+                          productosYaAsignados.some(v => String(v.aseguradoraId) === String(pa.aseguradoraId) && (String(v.productoId) === String(pa.productoId) || !v.productoId || v.productoId === '' || v.productoId === 'undefined'))
+                        );
+                        return (
+                          <option key={vendedor.id} value={vendedor.id} disabled={todosAsignados}>
+                            {vendedor.codigo} - {vendedor.nombre} {vendedor.apellidoPaterno} {todosAsignados ? '(todos los productos asignados)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   
                   {vendedorSeleccionadoTemp && (
-                    <div className="col-12 mt-3">
-                      <label className="form-label fw-semibold">Porcentaje de comisión para el vendedor</label>
-                      <div className="input-group" style={{ maxWidth: '200px' }}>
-                        <input
-                          type="number"
-                          className="form-control"
-                          value={porcentajeVendedorTemp}
-                          onChange={(e) => setPorcentajeVendedorTemp(Math.min(Math.max(Number(e.target.value) || 0, 0), 100))}
-                          min="0"
-                          max="100"
-                          step="1"
-                        />
-                        <span className="input-group-text">%</span>
+                    <>
+                      <div className="col-12 mt-3">
+                        <label className="form-label fw-semibold">Porcentaje de comisión inicial para el vendedor</label>
+                        <div className="input-group" style={{ maxWidth: '200px' }}>
+                          <input
+                            type="number"
+                            className="form-control"
+                            value={porcentajeVendedorTemp}
+                            onChange={(e) => setPorcentajeVendedorTemp(Math.min(Math.max(Number(e.target.value) || 0, 0), 100))}
+                            min="0"
+                            max="100"
+                            step="1"
+                          />
+                          <span className="input-group-text">%</span>
+                        </div>
+                        <small className="text-muted d-block mt-1">
+                          Se asignará este porcentaje a todos los productos. Podrás ajustar por producto después.
+                        </small>
                       </div>
-                      <small className="text-muted d-block mt-1">
-                        El vendedor recibirá este porcentaje de la comisión base de cada póliza que venda.
-                        El vendedor podrá vender con cualquier clave del agente.
-                      </small>
-                    </div>
+                      <div className="col-12 mt-2">
+                        <label className="form-label fw-semibold">Productos que se asignarán</label>
+                        <div className="list-group">
+                          {(formulario.productosAseguradoras || []).map((prod, i) => {
+                            const aseg = aseguradoras.find(a => String(a.id) === String(prod.aseguradoraId));
+                            const tipo = tiposProductos.find(p => String(p.id) === String(prod.productoId));
+                            const yaAsignado = vendedoresAutorizados.some(v => 
+                              String(v.vendedorId) === String(vendedorSeleccionadoTemp) && 
+                              String(v.aseguradoraId) === String(prod.aseguradoraId) && 
+                              (String(v.productoId) === String(prod.productoId) || !v.productoId || v.productoId === '' || v.productoId === 'undefined')
+                            );
+                            const prodKey = `${prod.aseguradoraId}|${prod.productoId}`;
+                            const isChecked = productosSeleccionadosTemp.includes(prodKey);
+                            return (
+                              <div key={i} className={`list-group-item d-flex justify-content-between align-items-center ${yaAsignado ? 'opacity-50' : ''}`}>
+                                <div className="d-flex align-items-center">
+                                  <input
+                                    type="checkbox"
+                                    className="form-check-input me-2"
+                                    checked={yaAsignado || isChecked}
+                                    disabled={yaAsignado}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setProductosSeleccionadosTemp(prev => [...prev, prodKey]);
+                                      } else {
+                                        setProductosSeleccionadosTemp(prev => prev.filter(k => k !== prodKey));
+                                      }
+                                    }}
+                                  />
+                                  <span className="badge bg-info me-2">{aseg?.nombre}</span>
+                                  <span>{tipo?.nombre}</span>
+                                </div>
+                                {yaAsignado ? (
+                                  <span className="badge bg-warning">Ya asignado</span>
+                                ) : isChecked ? (
+                                  <span className="badge bg-success">Se asignará</span>
+                                ) : (
+                                  <span className="badge bg-secondary">No seleccionado</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               </div>
