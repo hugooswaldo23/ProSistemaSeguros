@@ -96,7 +96,9 @@ export const PAGOS_POR_FRECUENCIA = {
 
 export const MESES_POR_FRECUENCIA = {
   'Mensual': 1,
+  'Bimestral': 2,
   'Trimestral': 3,
+  'Cuatrimestral': 4,
   'Semestral': 6,
   'Anual': 12
 };

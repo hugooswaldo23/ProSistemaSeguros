@@ -55,7 +55,9 @@ const FormularioNuevoExpediente = ({
   guardando = false, // Estado de guardado en progreso
   // 🆕 Props para renovación
   expedienteAnterior = null,
-  limpiarExpedienteAnterior = () => {}
+  limpiarExpedienteAnterior = () => {},
+  // 🆕 Callback para crear agente nuevo desde modo manual
+  onCrearAgenteNuevo
 }) => {
   // Estados específicos para modo agregar
   const [mostrarModalSeleccion, setMostrarModalSeleccion] = useState(true);
@@ -562,6 +564,7 @@ const FormularioNuevoExpediente = ({
           clienteSeleccionado={clienteSeleccionado}
           onEliminarPago={onEliminarPago}
           onRecibosArchivos={onRecibosArchivos}
+          onCrearAgenteNuevo={onCrearAgenteNuevo}
           bannerSuperior={bannerSuperior}
           seccionPDFInferior={null}
         />

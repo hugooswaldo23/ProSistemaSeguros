@@ -7,7 +7,7 @@
  * NO incluye lógica de PDF ni snapshots (eso va en los wrappers)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Save, X, CheckCircle, AlertCircle, FileText, Eye, Trash2 } from 'lucide-react';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import { CampoFechaCalculada } from './UIComponents';
@@ -24,6 +24,13 @@ const getAuthHeaders = (includeJson = false) => {
   if (includeJson) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
+};
+
+// Función helper para verificar si el producto es de tipo auto/automóvil
+const esProductoAuto = (producto) => {
+  if (!producto) return false;
+  const normalizado = producto.toLowerCase().trim();
+  return ['automóvil', 'automovil', 'autos', 'auto'].includes(normalizado);
 };
 
 // Función helper para convertir fecha ISO a formato yyyy-MM-dd
@@ -88,6 +95,7 @@ const FormularioExpedienteBase = React.memo(({
   // Props de callbacks
   onEliminarPago,
   onRecibosArchivos, // 📎 Callback para recibir archivos de recibo pendientes (pre-guardado)
+  onCrearAgenteNuevo, // 🆕 Callback para abrir modal de crear agente nuevo
   
   // Contenido adicional (para cada modo)
   bannerSuperior,
@@ -179,6 +187,126 @@ const FormularioExpedienteBase = React.memo(({
   };
 
   // Efecto para cargar vendedores cuando cambia el agente
+  // Auto-calcular subtotal y total cuando cambien los montos
+  useEffect(() => {
+    const primaNeta = parseFloat(formulario.prima_neta) || 0;
+    const recargo = parseFloat(formulario.cargo_pago_fraccionado) || 0;
+    const gastosExp = parseFloat(formulario.gastos_expedicion) || 0;
+    const iva = parseFloat(formulario.iva) || 0;
+
+    const nuevoSubtotal = primaNeta + recargo + gastosExp;
+    const nuevoTotal = nuevoSubtotal + iva;
+
+    const subtotalStr = nuevoSubtotal > 0 ? nuevoSubtotal.toFixed(2) : '';
+    const totalStr = nuevoTotal > 0 ? nuevoTotal.toFixed(2) : '';
+
+    if (formulario.subtotal !== subtotalStr || formulario.total !== totalStr) {
+      setFormulario(prev => ({
+        ...prev,
+        subtotal: subtotalStr,
+        total: totalStr,
+        _total_changed: true
+      }));
+    }
+  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion, formulario.iva]);
+
+  // 🧾 Ref para evitar regenerar recibos en la carga inicial del modo edición
+  const frecuenciaInicialRef = useRef(null);
+  const tipoPagoInicialRef = useRef(null);
+  const primeraRenderizacionRef = useRef(true);
+
+  // 🧾 Auto-generar recibos con montos y fechas calculados (manual + edición)
+  useEffect(() => {
+    const esManual = formulario._metodo_captura === 'manual';
+    
+    // En modo edición sin _metodo_captura: permitir recalcular solo si el usuario cambió frecuencia o tipo_pago
+    if (modoEdicion && !esManual) {
+      if (primeraRenderizacionRef.current) {
+        // Primera renderización en edición: guardar valores iniciales, no regenerar
+        primeraRenderizacionRef.current = false;
+        frecuenciaInicialRef.current = formulario.frecuenciaPago;
+        tipoPagoInicialRef.current = formulario.tipo_pago;
+        return;
+      }
+      // Solo regenerar si el usuario cambió frecuencia o tipo_pago
+      const frecuenciaCambio = formulario.frecuenciaPago !== frecuenciaInicialRef.current;
+      const tipoPagoCambio = formulario.tipo_pago !== tipoPagoInicialRef.current;
+      if (!frecuenciaCambio && !tipoPagoCambio) return;
+    }
+    
+    if (!esManual && !modoEdicion) return;
+    
+    const tipoPago = formulario.tipo_pago;
+    const frecuencia = formulario.frecuenciaPago;
+    const esAnual = tipoPago === 'Anual';
+    const esFraccionado = tipoPago === 'Fraccionado';
+    
+    if (!esAnual && !esFraccionado) return;
+    
+    const numRecibos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
+    if (numRecibos === 0) return;
+    
+    // Calcular montos
+    const total = parseFloat(formulario.total) || 0;
+    const gastos = parseFloat(formulario.gastos_expedicion) || 0;
+    
+    let montoPrimerRecibo = '';
+    let montoSubsecuente = '';
+    
+    if (total > 0) {
+      if (numRecibos === 1) {
+        // Pago anual: un solo recibo con el total
+        montoPrimerRecibo = total.toFixed(2);
+      } else {
+        // Fraccionado: repartir (total - gastos) entre N recibos, gastos van en el primero
+        const baseRepartible = total - gastos;
+        montoSubsecuente = (baseRepartible / numRecibos).toFixed(2);
+        montoPrimerRecibo = (parseFloat(montoSubsecuente) + gastos).toFixed(2);
+      }
+    }
+    
+    // Calcular fechas a partir de inicio_vigencia
+    const fechaBase = formulario.inicio_vigencia;
+    const mesesPorFrecuencia = CONSTANTS.MESES_POR_FRECUENCIA[frecuencia] || 0;
+    
+    const calcularFecha = (indice) => {
+      if (!fechaBase) return '';
+      try {
+        const [year, month, day] = fechaBase.split('-').map(Number);
+        const fecha = new Date(year, month - 1 + (indice * mesesPorFrecuencia), day);
+        // Formato YYYY-MM-DD
+        const y = fecha.getFullYear();
+        const m = String(fecha.getMonth() + 1).padStart(2, '0');
+        const d = String(fecha.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      } catch {
+        return '';
+      }
+    };
+    
+    // Fecha del primer recibo: usar fecha_vencimiento_pago (emisión + periodo gracia) si existe
+    const fechaPrimerRecibo = formulario.fecha_vencimiento_pago || fechaBase || '';
+    
+    const nuevosRecibos = [];
+    for (let i = 0; i < numRecibos; i++) {
+      let fechaRecibo;
+      if (i === 0) {
+        // Primer recibo: usa la fecha de pago calculada con periodo de gracia
+        fechaRecibo = esAnual ? fechaPrimerRecibo : fechaPrimerRecibo;
+      } else {
+        // Subsecuentes: calculan desde inicio_vigencia + (i * meses)
+        fechaRecibo = calcularFecha(i);
+      }
+      nuevosRecibos.push({
+        numero_recibo: i + 1,
+        monto: i === 0 ? montoPrimerRecibo : montoSubsecuente,
+        fecha_vencimiento: fechaRecibo
+      });
+    }
+    
+    setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+  }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, modoEdicion]);
+
   useEffect(() => {
     if (formulario.agente && agentes.length > 0) {
       const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
@@ -528,8 +656,8 @@ const FormularioExpedienteBase = React.memo(({
                   value={formulario.producto}
                   onChange={(e) => {
                     const nuevoProducto = e.target.value;
-                    // Limpiar campos de vehículo si cambia de Automóvil a otro producto
-                    if (nuevoProducto !== 'Automóvil' && formulario.producto === 'Automóvil') {
+                    // Limpiar campos de vehículo si cambia de Auto a otro producto
+                    if (!esProductoAuto(nuevoProducto) && esProductoAuto(formulario.producto)) {
                       setFormulario(prev => ({
                         ...prev,
                         producto: nuevoProducto,
@@ -574,8 +702,8 @@ const FormularioExpedienteBase = React.memo(({
             </div>
           </div>
 
-          {/* Datos del Vehículo - Solo para Automóvil */}
-          {formulario.producto === 'Automóvil' && (
+          {/* Datos del Vehículo - Solo para Autos/Automóvil */}
+          {esProductoAuto(formulario.producto) && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
               <div className="row g-3">
@@ -748,28 +876,77 @@ const FormularioExpedienteBase = React.memo(({
                   {agenteIdSeleccionado && <span className="text-success ms-2">✅ Detectado</span>}
                   {formulario._datos_desde_pdf && <span className="text-info ms-2">🔒 Del PDF</span>}
                 </label>
-                <input
-                  type="text"
-                  className={`form-control ${formulario._datos_desde_pdf ? 'bg-light' : ''} ${agenteIdSeleccionado ? 'is-valid' : formulario.agente ? 'is-invalid' : ''}`}
-                  value={formulario.agente ?? ''}
-                  onChange={(e) => {
-                    const nuevoAgente = e.target.value;
-                    setFormulario(prev => ({ ...prev, agente: nuevoAgente }));
-                  }}
-                  placeholder="Nombre del agente"
-                  readOnly={formulario._datos_desde_pdf}
-                  disabled={formulario._datos_desde_pdf}
-                  style={formulario._datos_desde_pdf ? { cursor: 'not-allowed' } : {}}
-                />
-                {!agenteIdSeleccionado && formulario.agente && !formulario._datos_desde_pdf && (
-                  <small className="text-danger">
-                    ⚠️ Agente no encontrado en el catálogo - no se podrán asignar vendedores
-                  </small>
-                )}
-                {formulario._datos_desde_pdf && (
-                  <small className="text-muted">
-                    Agente extraído del PDF (no editable)
-                  </small>
+                {formulario._datos_desde_pdf ? (
+                  // Modo PDF: input de solo lectura con valor extraído
+                  <>
+                    <input
+                      type="text"
+                      className="form-control bg-light"
+                      value={formulario.agente ?? ''}
+                      readOnly
+                      disabled
+                      style={{ cursor: 'not-allowed' }}
+                    />
+                    <small className="text-muted">
+                      Agente extraído del PDF (no editable)
+                    </small>
+                  </>
+                ) : (
+                  // Modo Manual: select dropdown con lista de agentes
+                  <>
+                    <div className="d-flex gap-2">
+                      <select
+                        className={`form-select ${agenteIdSeleccionado ? 'is-valid' : ''}`}
+                        value={formulario.agente ?? ''}
+                        onChange={(e) => {
+                          const valorSeleccionado = e.target.value;
+                          // Encontrar el agente seleccionado para setear agente_id
+                          const agenteSeleccionado = agentes.find(a => {
+                            const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
+                            const codigo = a.codigoAgente || '';
+                            const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+                            return displayText === valorSeleccionado;
+                          });
+                          setFormulario(prev => ({ 
+                            ...prev, 
+                            agente: valorSeleccionado,
+                            agente_id: agenteSeleccionado?.id || null,
+                            clave_agente: agenteSeleccionado?.codigoAgente || ''
+                          }));
+                        }}
+                      >
+                        <option value="">Seleccionar agente</option>
+                        {agentes
+                          .filter(a => a.perfil === 'Agente')
+                          .map(a => {
+                            const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
+                            const codigo = a.codigoAgente || '';
+                            const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+                            return (
+                              <option key={a.id} value={displayText}>
+                                {displayText}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      {onCrearAgenteNuevo && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-success btn-sm"
+                          onClick={onCrearAgenteNuevo}
+                          title="Crear nuevo agente"
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          + Nuevo
+                        </button>
+                      )}
+                    </div>
+                    {!formulario.agente && (
+                      <small className="text-muted">
+                        Selecciona el agente asignado a esta póliza
+                      </small>
+                    )}
+                  </>
                 )}
               </div>
               
@@ -826,17 +1003,37 @@ const FormularioExpedienteBase = React.memo(({
                   placeholder="Ej: 001, 002, etc."
                 />
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
+                <label className="form-label">Movimiento</label>
+                <select
+                  className="form-select"
+                  value={formulario.movimiento ?? 'Emisión'}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, movimiento: e.target.value }))}
+                >
+                  <option value="Emisión">Emisión</option>
+                  <option value="Endoso">Endoso</option>
+                  <option value="Renovación">Renovación</option>
+                </select>
+              </div>
+              <div className="col-md-4">
                 <label className="form-label">Forma de Pago</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={formulario.forma_pago ?? ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, forma_pago: e.target.value }))}
-                  placeholder="Ej: Transferencia, Efectivo, etc."
-                />
+                >
+                  <option value="">Seleccionar forma de pago</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Domiciliación">Domiciliación</option>
+                  <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+                  <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Cargo Automático">Cargo Automático</option>
+                  <option value="Depósito Bancario">Depósito Bancario</option>
+                </select>
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label">Moneda</label>
                 <select
                   className="form-select"
@@ -920,7 +1117,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control"
                     value={formulario.subtotal ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, subtotal: e.target.value }))}
+                    readOnly
+                    style={{ backgroundColor: '#f0f0f0' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -934,11 +1132,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control fw-bold"
                     value={formulario.total ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      total: e.target.value,
-                      _total_changed: true // Marcar cambio para forzar recálculo de recibos
-                    }))}
+                    readOnly
+                    style={{ backgroundColor: '#e8f5e9' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -1225,8 +1420,89 @@ const FormularioExpedienteBase = React.memo(({
                 </div>
               )}
 
-              {/* Calendario de Pagos */}
-              {formulario.inicio_vigencia && (
+              {/* Editor de Recibos Manual / Edición */}
+              {(formulario._metodo_captura === 'manual' || modoEdicion) && 
+               formulario.recibos && formulario.recibos.length > 0 && (
+                <div className="col-12 mt-3">
+                  <h6 className="border-bottom pb-2 mb-3">
+                    🧾 Recibos de Pago 
+                    <span className="badge bg-info ms-2">{formulario.recibos.length}</span>
+                  </h6>
+                  <div className="table-responsive">
+                    <table className="table table-sm table-bordered align-middle">
+                      <thead className="table-light">
+                        <tr>
+                          <th style={{ width: '60px' }} className="text-center">#</th>
+                          <th>Monto ($)</th>
+                          <th>Fecha de Vencimiento</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {formulario.recibos.map((recibo, idx) => (
+                          <tr key={recibo.numero_recibo || idx}>
+                            <td className="text-center fw-bold">{recibo.numero_recibo || idx + 1}</td>
+                            <td>
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text">$</span>
+                                <input
+                                  type="number"
+                                  className="form-control form-control-sm"
+                                  placeholder="0.00"
+                                  step="0.01"
+                                  min="0"
+                                  value={recibo.monto || ''}
+                                  onChange={(e) => {
+                                    const nuevosRecibos = [...formulario.recibos];
+                                    nuevosRecibos[idx] = { ...nuevosRecibos[idx], monto: e.target.value };
+                                    setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td>
+                              <input
+                                type="date"
+                                className="form-control form-control-sm"
+                                value={recibo.fecha_vencimiento || ''}
+                                onChange={(e) => {
+                                  const nuevosRecibos = [...formulario.recibos];
+                                  nuevosRecibos[idx] = { ...nuevosRecibos[idx], fecha_vencimiento: e.target.value };
+                                  setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="table-light">
+                          <td className="text-center fw-bold">Σ</td>
+                          <td>
+                            <div className="input-group input-group-sm">
+                              <span className="input-group-text">$</span>
+                              <input
+                                type="text"
+                                className="form-control form-control-sm fw-bold"
+                                readOnly
+                                style={{ backgroundColor: '#e8f5e9' }}
+                                value={formulario.recibos.reduce((sum, r) => sum + (parseFloat(r.monto) || 0), 0).toFixed(2)}
+                              />
+                            </div>
+                          </td>
+                          <td className="text-muted small align-middle">Suma de recibos</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  <small className="text-muted">
+                    💡 Montos y fechas se calculan automáticamente. El primer recibo incluye los gastos de expedición.
+                    Puedes editar cualquier valor si es necesario.
+                  </small>
+                </div>
+              )}
+
+              {/* Calendario de Pagos (solo para Regex/IA en modo nuevo, no en manual ni edición) */}
+              {formulario._metodo_captura !== 'manual' && !modoEdicion && formulario.inicio_vigencia && (
                 (formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago) || 
                 formulario.tipo_pago === 'Anual'
               ) && (
