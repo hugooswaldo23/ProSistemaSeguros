@@ -7,8 +7,9 @@
  * NO incluye lógica de PDF ni snapshots (eso va en los wrappers)
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Save, X, CheckCircle, AlertCircle, FileText, Eye, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Save, X, CheckCircle, AlertCircle, FileText, Eye, Trash2, Upload } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { CONSTANTS } from '../../utils/expedientesConstants';
 import { CampoFechaCalculada } from './UIComponents';
 import BuscadorCliente from '../BuscadorCliente';
@@ -24,6 +25,13 @@ const getAuthHeaders = (includeJson = false) => {
   if (includeJson) headers['Content-Type'] = 'application/json';
   if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
+};
+
+// Función helper para verificar si el producto es de tipo auto/automóvil
+const esProductoAuto = (producto) => {
+  if (!producto) return false;
+  const normalizado = producto.toLowerCase().trim();
+  return ['automóvil', 'automovil', 'autos', 'auto'].includes(normalizado);
 };
 
 // Función helper para convertir fecha ISO a formato yyyy-MM-dd
@@ -88,6 +96,7 @@ const FormularioExpedienteBase = React.memo(({
   // Props de callbacks
   onEliminarPago,
   onRecibosArchivos, // 📎 Callback para recibir archivos de recibo pendientes (pre-guardado)
+  onCrearAgenteNuevo, // 🆕 Callback para abrir modal de crear agente nuevo
   
   // Contenido adicional (para cada modo)
   bannerSuperior,
@@ -118,6 +127,74 @@ const FormularioExpedienteBase = React.memo(({
   // Estados locales para vendedores
   const [vendedores, setVendedores] = useState([]);
   const [agenteIdSeleccionado, setAgenteIdSeleccionado] = useState(null);
+
+  // Estados para archivos adjuntos en modo manual
+  const [recibosAdjuntos, setRecibosAdjuntos] = useState({}); // {numero: {nombre, archivo}}
+  const [polizaPDFManual, setPolizaPDFManual] = useState(null); // {nombre, archivo}
+  const fileInputReciboRef = useRef(null);
+  const fileInputPolizaRef = useRef(null);
+  const [reciboSeleccionadoManual, setReciboSeleccionadoManual] = useState(null);
+
+  // Handlers para subir archivos en modo manual
+  const handleClickSubirReciboManual = (numRecibo) => {
+    setReciboSeleccionadoManual(numRecibo);
+    if (fileInputReciboRef.current) {
+      fileInputReciboRef.current.value = '';
+      fileInputReciboRef.current.click();
+    }
+  };
+
+  const handleArchivoReciboManual = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !reciboSeleccionadoManual) return;
+
+    // En fraccionado, replicar en todos los recibos (aseguradoras emiten un solo PDF)
+    const esFraccionado = formulario.tipo_pago === 'Fraccionado';
+    const numRecibos = formulario.recibos?.length || 1;
+    const replicarEnTodos = esFraccionado && numRecibos > 1;
+
+    const nuevosAdjuntos = { ...recibosAdjuntos };
+    if (replicarEnTodos) {
+      for (let i = 1; i <= numRecibos; i++) {
+        nuevosAdjuntos[i] = { nombre: file.name, archivo: file };
+      }
+    } else {
+      nuevosAdjuntos[reciboSeleccionadoManual] = { nombre: file.name, archivo: file };
+    }
+    setRecibosAdjuntos(nuevosAdjuntos);
+
+    // Notificar al padre los archivos pendientes
+    if (onRecibosArchivos) {
+      const archivos = {};
+      Object.entries(nuevosAdjuntos).forEach(([num, data]) => {
+        if (data.archivo) archivos[num] = data.archivo;
+      });
+      onRecibosArchivos(archivos);
+    }
+
+    if (replicarEnTodos) {
+      toast.success(`📎 Recibo adjuntado en los ${numRecibos} recibos — se subirá al guardar`);
+    } else {
+      toast.success(`📎 Recibo #${reciboSeleccionadoManual} adjuntado — se subirá al guardar`);
+    }
+    setReciboSeleccionadoManual(null);
+  };
+
+  const handleSeleccionarPolizaManual = () => {
+    if (fileInputPolizaRef.current) {
+      fileInputPolizaRef.current.value = '';
+      fileInputPolizaRef.current.click();
+    }
+  };
+
+  const handleArchivoPolizaManual = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPolizaPDFManual({ nombre: file.name, archivo: file });
+    // Guardar en window para que el flujo post-guardado lo suba
+    window._selectedPDFFile = file;
+    toast.success(`📎 Póliza "${file.name}" seleccionada — se subirá al guardar`);
+  };
 
   // Función para obtener vendedores del agente
   const obtenerVendedoresPorAgente = async (agenteId) => {
@@ -179,6 +256,143 @@ const FormularioExpedienteBase = React.memo(({
   };
 
   // Efecto para cargar vendedores cuando cambia el agente
+  // Auto-calcular IVA, subtotal y total cuando cambien los montos
+  useEffect(() => {
+    const primaNeta = parseFloat(formulario.prima_neta) || 0;
+    const recargo = parseFloat(formulario.cargo_pago_fraccionado) || 0;
+    const gastosExp = parseFloat(formulario.gastos_expedicion) || 0;
+
+    const nuevoSubtotal = primaNeta + recargo + gastosExp;
+    const nuevoIva = nuevoSubtotal * 0.16;
+    const nuevoTotal = nuevoSubtotal + nuevoIva;
+
+    const subtotalStr = nuevoSubtotal > 0 ? nuevoSubtotal.toFixed(2) : '';
+    const ivaStr = nuevoIva > 0 ? nuevoIva.toFixed(2) : '';
+    const totalStr = nuevoTotal > 0 ? nuevoTotal.toFixed(2) : '';
+
+    if (formulario.subtotal !== subtotalStr || formulario.total !== totalStr || formulario.iva !== ivaStr) {
+      setFormulario(prev => ({
+        ...prev,
+        iva: ivaStr,
+        subtotal: subtotalStr,
+        total: totalStr,
+        _total_changed: true
+      }));
+    }
+  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion]);
+
+  // 🧾 Ref para evitar regenerar recibos en la carga inicial del modo edición
+  const frecuenciaInicialRef = useRef(null);
+  const tipoPagoInicialRef = useRef(null);
+  const totalInicialRef = useRef(null);
+  const gastosInicialRef = useRef(null);
+  const fechaInicialRef = useRef(null);
+  const primeraRenderizacionRef = useRef(true);
+
+  // 🧾 Auto-generar recibos con montos y fechas calculados (manual + edición)
+  useEffect(() => {
+    const esManual = formulario._metodo_captura === 'manual';
+    
+    // En modo edición sin _metodo_captura: permitir recalcular solo si el usuario cambió frecuencia o tipo_pago
+    if (modoEdicion && !esManual) {
+      if (primeraRenderizacionRef.current) {
+        // Primera renderización en edición: guardar valores iniciales, no regenerar
+        primeraRenderizacionRef.current = false;
+        frecuenciaInicialRef.current = formulario.frecuenciaPago;
+        tipoPagoInicialRef.current = formulario.tipo_pago;
+        totalInicialRef.current = formulario.total;
+        gastosInicialRef.current = formulario.gastos_expedicion;
+        fechaInicialRef.current = formulario.inicio_vigencia;
+        return;
+      }
+      // Regenerar si el usuario cambió frecuencia, tipo_pago, montos o fechas
+      const algoCambio = formulario.frecuenciaPago !== frecuenciaInicialRef.current ||
+        formulario.tipo_pago !== tipoPagoInicialRef.current ||
+        formulario.total !== totalInicialRef.current ||
+        formulario.gastos_expedicion !== gastosInicialRef.current ||
+        formulario.inicio_vigencia !== fechaInicialRef.current;
+      if (!algoCambio) return;
+    }
+    
+    if (!esManual && !modoEdicion) return;
+    
+    const tipoPago = formulario.tipo_pago;
+    const frecuencia = formulario.frecuenciaPago;
+    const esAnual = tipoPago === 'Anual';
+    const esFraccionado = tipoPago === 'Fraccionado';
+    
+    if (!esAnual && !esFraccionado) return;
+    
+    const numRecibos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
+    if (numRecibos === 0) return;
+    
+    // Calcular montos
+    const total = parseFloat(formulario.total) || 0;
+    const gastos = parseFloat(formulario.gastos_expedicion) || 0;
+    
+    let montoPrimerRecibo = '';
+    let montoSubsecuente = '';
+    
+    if (total > 0) {
+      if (numRecibos === 1) {
+        // Pago anual: un solo recibo con el total
+        montoPrimerRecibo = total.toFixed(2);
+      } else {
+        // Fraccionado: repartir (total - gastos) entre N recibos, gastos van en el primero
+        const baseRepartible = total - gastos;
+        montoSubsecuente = (baseRepartible / numRecibos).toFixed(2);
+        montoPrimerRecibo = (parseFloat(montoSubsecuente) + gastos).toFixed(2);
+      }
+    }
+    
+    // Calcular fechas a partir de inicio_vigencia
+    const fechaBase = formulario.inicio_vigencia;
+    const mesesPorFrecuencia = CONSTANTS.MESES_POR_FRECUENCIA[frecuencia] || 0;
+    
+    const calcularFecha = (indice) => {
+      if (!fechaBase) return '';
+      try {
+        const [year, month, day] = fechaBase.split('-').map(Number);
+        const fecha = new Date(year, month - 1 + (indice * mesesPorFrecuencia), day);
+        // Formato YYYY-MM-DD
+        const y = fecha.getFullYear();
+        const m = String(fecha.getMonth() + 1).padStart(2, '0');
+        const d = String(fecha.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      } catch {
+        return '';
+      }
+    };
+    
+    // Fecha del primer recibo: usar fecha_vencimiento_pago (emisión + periodo gracia) si existe
+    const fechaPrimerRecibo = formulario.fecha_vencimiento_pago || fechaBase || '';
+    
+    const nuevosRecibos = [];
+    for (let i = 0; i < numRecibos; i++) {
+      let fechaRecibo;
+      if (i === 0) {
+        // Primer recibo: usa la fecha de pago calculada con periodo de gracia
+        fechaRecibo = esAnual ? fechaPrimerRecibo : fechaPrimerRecibo;
+      } else {
+        // Subsecuentes: calculan desde inicio_vigencia + (i * meses)
+        fechaRecibo = calcularFecha(i);
+      }
+      nuevosRecibos.push({
+        numero_recibo: i + 1,
+        monto: i === 0 ? montoPrimerRecibo : montoSubsecuente,
+        fecha_vencimiento: fechaRecibo
+      });
+    }
+    
+    // Sincronizar primer_pago y pagos_subsecuentes para que el backend calcule correctamente
+    setFormulario(prev => ({ 
+      ...prev, 
+      recibos: nuevosRecibos,
+      primer_pago: montoPrimerRecibo || '',
+      pagos_subsecuentes: montoSubsecuente || montoPrimerRecibo || ''
+    }));
+  }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, modoEdicion]);
+
   useEffect(() => {
     if (formulario.agente && agentes.length > 0) {
       const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
@@ -528,8 +742,8 @@ const FormularioExpedienteBase = React.memo(({
                   value={formulario.producto}
                   onChange={(e) => {
                     const nuevoProducto = e.target.value;
-                    // Limpiar campos de vehículo si cambia de Automóvil a otro producto
-                    if (nuevoProducto !== 'Automóvil' && formulario.producto === 'Automóvil') {
+                    // Limpiar campos de vehículo si cambia de Auto a otro producto
+                    if (!esProductoAuto(nuevoProducto) && esProductoAuto(formulario.producto)) {
                       setFormulario(prev => ({
                         ...prev,
                         producto: nuevoProducto,
@@ -547,6 +761,9 @@ const FormularioExpedienteBase = React.memo(({
                         edad_conductor: '',
                         licencia_conducir: ''
                       }));
+                    } else if (esProductoAuto(nuevoProducto) && !esProductoAuto(formulario.producto)) {
+                      // Limpiar asegurados si cambia de otro producto a Auto
+                      setFormulario(prev => ({ ...prev, producto: nuevoProducto, asegurados: [] }));
                     } else {
                       setFormulario(prev => ({ ...prev, producto: nuevoProducto }));
                     }
@@ -574,8 +791,8 @@ const FormularioExpedienteBase = React.memo(({
             </div>
           </div>
 
-          {/* Datos del Vehículo - Solo para Automóvil */}
-          {formulario.producto === 'Automóvil' && (
+          {/* Datos del Vehículo - Solo para Autos/Automóvil */}
+          {esProductoAuto(formulario.producto) && (
             <div className="mb-4">
               <h5 className="card-title border-bottom pb-2">Datos del Vehículo</h5>
               <div className="row g-3">
@@ -738,6 +955,205 @@ const FormularioExpedienteBase = React.memo(({
             </div>
           )}
 
+          {/* Asegurados - Solo para productos que NO son auto */}
+          {formulario.producto && !esProductoAuto(formulario.producto) && (
+            <div className="mb-4">
+              <h5 className="card-title border-bottom pb-2">
+                👥 Asegurados
+                <span className="badge bg-info ms-2" style={{ fontSize: '0.7rem' }}>
+                  {(formulario.asegurados?.length || 0) + 1}
+                </span>
+              </h5>
+              
+              {/* Asegurado principal (contratante) */}
+              <div className="card bg-light mb-2">
+                <div className="card-body py-2 px-3">
+                  <div className="d-flex align-items-center">
+                    <span className="badge bg-primary me-2">Titular</span>
+                    <strong style={{ fontSize: '0.85rem' }}>
+                      {formulario.nombre || formulario.razon_social || 'Sin cliente seleccionado'}{' '}
+                      {formulario.apellido_paterno || ''} {formulario.apellido_materno || ''}
+                    </strong>
+                    <span className="text-muted ms-2" style={{ fontSize: '0.75rem' }}>
+                      (Contratante = Asegurado principal)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de asegurados adicionales */}
+              {(formulario.asegurados || []).map((aseg, index) => (
+                <div key={index} className="card mb-2 border-start border-3 border-info">
+                  <div className="card-body py-2 px-3">
+                    <div className="d-flex justify-content-between align-items-center mb-2">
+                      <span className="badge bg-secondary">Asegurado {index + 2}</span>
+                      <button
+                        type="button"
+                        className="btn btn-outline-danger btn-sm"
+                        style={{ fontSize: '0.7rem', padding: '1px 6px' }}
+                        onClick={() => {
+                          const nuevos = formulario.asegurados.filter((_, i) => i !== index);
+                          setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                        }}
+                        title="Eliminar asegurado"
+                      >
+                        ✕ Quitar
+                      </button>
+                    </div>
+                    <div className="row g-2">
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Nombre(s)</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value={aseg.nombre || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], nombre: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                          placeholder="Nombre(s)"
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Apellido Paterno</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value={aseg.apellido_paterno || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], apellido_paterno: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                          placeholder="Apellido Paterno"
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Apellido Materno</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value={aseg.apellido_materno || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], apellido_materno: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                          placeholder="Apellido Materno"
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Parentesco</label>
+                        <select
+                          className="form-select form-select-sm"
+                          value={aseg.parentesco || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], parentesco: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                        >
+                          <option value="">Seleccionar...</option>
+                          <option value="Cónyuge">Cónyuge</option>
+                          <option value="Hijo(a)">Hijo(a)</option>
+                          <option value="Padre/Madre">Padre/Madre</option>
+                          <option value="Hermano(a)">Hermano(a)</option>
+                          <option value="Dependiente económico">Dependiente económico</option>
+                          <option value="Otro">Otro</option>
+                        </select>
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Fecha Nacimiento</label>
+                        <input
+                          type="date"
+                          className="form-control form-control-sm"
+                          value={aseg.fecha_nacimiento || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], fecha_nacimiento: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>RFC</label>
+                        <input
+                          type="text"
+                          className="form-control form-control-sm"
+                          value={aseg.rfc || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], rfc: e.target.value.toUpperCase() };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                          placeholder="RFC"
+                          maxLength={13}
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Edad</label>
+                        <input
+                          type="number"
+                          className="form-control form-control-sm"
+                          value={aseg.edad || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], edad: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                          placeholder="Edad"
+                          min="0"
+                          max="120"
+                        />
+                      </div>
+                      <div className="col-md-3">
+                        <label className="form-label mb-0" style={{ fontSize: '0.75rem' }}>Sexo</label>
+                        <select
+                          className="form-select form-select-sm"
+                          value={aseg.sexo || ''}
+                          onChange={(e) => {
+                            const nuevos = [...formulario.asegurados];
+                            nuevos[index] = { ...nuevos[index], sexo: e.target.value };
+                            setFormulario(prev => ({ ...prev, asegurados: nuevos }));
+                          }}
+                        >
+                          <option value="">Seleccionar...</option>
+                          <option value="Masculino">Masculino</option>
+                          <option value="Femenino">Femenino</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Botón agregar asegurado */}
+              <button
+                type="button"
+                className="btn btn-outline-info btn-sm"
+                onClick={() => {
+                  const nuevoAsegurado = {
+                    nombre: '',
+                    apellido_paterno: '',
+                    apellido_materno: '',
+                    parentesco: '',
+                    fecha_nacimiento: '',
+                    rfc: '',
+                    edad: '',
+                    sexo: ''
+                  };
+                  setFormulario(prev => ({
+                    ...prev,
+                    asegurados: [...(prev.asegurados || []), nuevoAsegurado]
+                  }));
+                }}
+              >
+                ➕ Agregar Asegurado
+              </button>
+            </div>
+          )}
+
           {/* Datos Adicionales */}
           <div className="mb-4">
             <h5 className="card-title border-bottom pb-2">Datos Adicionales</h5>
@@ -748,28 +1164,77 @@ const FormularioExpedienteBase = React.memo(({
                   {agenteIdSeleccionado && <span className="text-success ms-2">✅ Detectado</span>}
                   {formulario._datos_desde_pdf && <span className="text-info ms-2">🔒 Del PDF</span>}
                 </label>
-                <input
-                  type="text"
-                  className={`form-control ${formulario._datos_desde_pdf ? 'bg-light' : ''} ${agenteIdSeleccionado ? 'is-valid' : formulario.agente ? 'is-invalid' : ''}`}
-                  value={formulario.agente ?? ''}
-                  onChange={(e) => {
-                    const nuevoAgente = e.target.value;
-                    setFormulario(prev => ({ ...prev, agente: nuevoAgente }));
-                  }}
-                  placeholder="Nombre del agente"
-                  readOnly={formulario._datos_desde_pdf}
-                  disabled={formulario._datos_desde_pdf}
-                  style={formulario._datos_desde_pdf ? { cursor: 'not-allowed' } : {}}
-                />
-                {!agenteIdSeleccionado && formulario.agente && !formulario._datos_desde_pdf && (
-                  <small className="text-danger">
-                    ⚠️ Agente no encontrado en el catálogo - no se podrán asignar vendedores
-                  </small>
-                )}
-                {formulario._datos_desde_pdf && (
-                  <small className="text-muted">
-                    Agente extraído del PDF (no editable)
-                  </small>
+                {formulario._datos_desde_pdf ? (
+                  // Modo PDF: input de solo lectura con valor extraído
+                  <>
+                    <input
+                      type="text"
+                      className="form-control bg-light"
+                      value={formulario.agente ?? ''}
+                      readOnly
+                      disabled
+                      style={{ cursor: 'not-allowed' }}
+                    />
+                    <small className="text-muted">
+                      Agente extraído del PDF (no editable)
+                    </small>
+                  </>
+                ) : (
+                  // Modo Manual: select dropdown con lista de agentes
+                  <>
+                    <div className="d-flex gap-2">
+                      <select
+                        className={`form-select ${agenteIdSeleccionado ? 'is-valid' : ''}`}
+                        value={formulario.agente ?? ''}
+                        onChange={(e) => {
+                          const valorSeleccionado = e.target.value;
+                          // Encontrar el agente seleccionado para setear agente_id
+                          const agenteSeleccionado = agentes.find(a => {
+                            const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
+                            const codigo = a.codigoAgente || '';
+                            const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+                            return displayText === valorSeleccionado;
+                          });
+                          setFormulario(prev => ({ 
+                            ...prev, 
+                            agente: valorSeleccionado,
+                            agente_id: agenteSeleccionado?.id || null,
+                            clave_agente: agenteSeleccionado?.codigoAgente || ''
+                          }));
+                        }}
+                      >
+                        <option value="">Seleccionar agente</option>
+                        {agentes
+                          .filter(a => a.perfil === 'Agente')
+                          .map(a => {
+                            const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
+                            const codigo = a.codigoAgente || '';
+                            const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+                            return (
+                              <option key={a.id} value={displayText}>
+                                {displayText}
+                              </option>
+                            );
+                          })}
+                      </select>
+                      {onCrearAgenteNuevo && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-success btn-sm"
+                          onClick={onCrearAgenteNuevo}
+                          title="Crear nuevo agente"
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          + Nuevo
+                        </button>
+                      )}
+                    </div>
+                    {!formulario.agente && (
+                      <small className="text-muted">
+                        Selecciona el agente asignado a esta póliza
+                      </small>
+                    )}
+                  </>
                 )}
               </div>
               
@@ -826,17 +1291,37 @@ const FormularioExpedienteBase = React.memo(({
                   placeholder="Ej: 001, 002, etc."
                 />
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
+                <label className="form-label">Movimiento</label>
+                <select
+                  className="form-select"
+                  value={formulario.movimiento ?? 'Emisión'}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, movimiento: e.target.value }))}
+                >
+                  <option value="Emisión">Emisión</option>
+                  <option value="Endoso">Endoso</option>
+                  <option value="Renovación">Renovación</option>
+                </select>
+              </div>
+              <div className="col-md-4">
                 <label className="form-label">Forma de Pago</label>
-                <input
-                  type="text"
-                  className="form-control"
+                <select
+                  className="form-select"
                   value={formulario.forma_pago ?? ''}
                   onChange={(e) => setFormulario(prev => ({ ...prev, forma_pago: e.target.value }))}
-                  placeholder="Ej: Transferencia, Efectivo, etc."
-                />
+                >
+                  <option value="">Seleccionar forma de pago</option>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Domiciliación">Domiciliación</option>
+                  <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
+                  <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                  <option value="Efectivo">Efectivo</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Cargo Automático">Cargo Automático</option>
+                  <option value="Depósito Bancario">Depósito Bancario</option>
+                </select>
               </div>
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label">Moneda</label>
                 <select
                   className="form-select"
@@ -898,7 +1383,7 @@ const FormularioExpedienteBase = React.memo(({
                 </div>
               </div>
               <div className="col-md-6">
-                <label className="form-label">IVA</label>
+                <label className="form-label">IVA (16%)</label>
                 <div className="input-group">
                   <span className="input-group-text">$</span>
                   <input
@@ -906,7 +1391,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control"
                     value={formulario.iva ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, iva: e.target.value }))}
+                    readOnly
+                    style={{ backgroundColor: '#f8f9fa' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -920,7 +1406,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control"
                     value={formulario.subtotal ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, subtotal: e.target.value }))}
+                    readOnly
+                    style={{ backgroundColor: '#f0f0f0' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -934,11 +1421,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control fw-bold"
                     value={formulario.total ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ 
-                      ...prev, 
-                      total: e.target.value,
-                      _total_changed: true // Marcar cambio para forzar recálculo de recibos
-                    }))}
+                    readOnly
+                    style={{ backgroundColor: '#e8f5e9' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -1225,8 +1709,183 @@ const FormularioExpedienteBase = React.memo(({
                 </div>
               )}
 
-              {/* Calendario de Pagos */}
-              {formulario.inicio_vigencia && (
+              {/* Editor de Recibos Manual / Edición */}
+              {(formulario._metodo_captura === 'manual' || modoEdicion) && 
+               formulario.recibos && formulario.recibos.length > 0 && (
+                <div className="col-12 mt-3">
+                  <h6 className="border-bottom pb-2 mb-3">
+                    🧾 Recibos de Pago 
+                    <span className="badge bg-info ms-2">{formulario.recibos.length}</span>
+                  </h6>
+                  <div className="table-responsive">
+                    <table className="table table-sm table-bordered align-middle">
+                      <thead className="table-light">
+                        <tr>
+                          <th style={{ width: '60px' }} className="text-center">#</th>
+                          <th>Monto ($)</th>
+                          <th>Fecha de Vencimiento</th>
+                          <th style={{ width: '120px' }} className="text-center">Recibo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {formulario.recibos.map((recibo, idx) => (
+                          <tr key={recibo.numero_recibo || idx}>
+                            <td className="text-center fw-bold">{recibo.numero_recibo || idx + 1}</td>
+                            <td>
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text">$</span>
+                                <input
+                                  type="number"
+                                  className="form-control form-control-sm"
+                                  placeholder="0.00"
+                                  step="0.01"
+                                  min="0"
+                                  value={recibo.monto || ''}
+                                  onChange={(e) => {
+                                    const nuevosRecibos = [...formulario.recibos];
+                                    nuevosRecibos[idx] = { ...nuevosRecibos[idx], monto: e.target.value };
+                                    // Sincronizar primer_pago y pagos_subsecuentes
+                                    const primerPago = idx === 0 ? e.target.value : nuevosRecibos[0]?.monto || '';
+                                    const subsecuente = nuevosRecibos.length > 1 
+                                      ? (idx === 1 ? e.target.value : nuevosRecibos[1]?.monto || '') 
+                                      : primerPago;
+                                    setFormulario(prev => ({ 
+                                      ...prev, 
+                                      recibos: nuevosRecibos,
+                                      primer_pago: primerPago,
+                                      pagos_subsecuentes: subsecuente
+                                    }));
+                                  }}
+                                />
+                              </div>
+                            </td>
+                            <td>
+                              <input
+                                type="date"
+                                className="form-control form-control-sm"
+                                value={recibo.fecha_vencimiento || ''}
+                                onChange={(e) => {
+                                  const nuevosRecibos = [...formulario.recibos];
+                                  nuevosRecibos[idx] = { ...nuevosRecibos[idx], fecha_vencimiento: e.target.value };
+                                  setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+                                }}
+                              />
+                            </td>
+                            <td className="text-center">
+                              {recibosAdjuntos[recibo.numero_recibo || idx + 1] ? (
+                                <div className="d-flex align-items-center gap-1 justify-content-center">
+                                  <span className="badge bg-success" style={{ fontSize: '0.65rem' }}
+                                    title={recibosAdjuntos[recibo.numero_recibo || idx + 1]?.nombre}>
+                                    ✓ {recibosAdjuntos[recibo.numero_recibo || idx + 1]?.nombre?.substring(0, 10) || 'Adjunto'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-warning"
+                                    style={{ padding: '0.1rem 0.3rem', fontSize: '0.6rem' }}
+                                    onClick={() => handleClickSubirReciboManual(recibo.numero_recibo || idx + 1)}
+                                    title="Cambiar recibo"
+                                  >
+                                    <Upload size={10} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn-sm btn-outline-primary"
+                                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}
+                                  onClick={() => handleClickSubirReciboManual(recibo.numero_recibo || idx + 1)}
+                                  title="Adjuntar recibo de pago"
+                                >
+                                  <Upload size={12} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="table-light">
+                          <td className="text-center fw-bold">Σ</td>
+                          <td>
+                            <div className="input-group input-group-sm">
+                              <span className="input-group-text">$</span>
+                              <input
+                                type="text"
+                                className="form-control form-control-sm fw-bold"
+                                readOnly
+                                style={{ backgroundColor: '#e8f5e9' }}
+                                value={formulario.recibos.reduce((sum, r) => sum + (parseFloat(r.monto) || 0), 0).toFixed(2)}
+                              />
+                            </div>
+                          </td>
+                          <td className="text-muted small align-middle">Suma de recibos</td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {/* Input oculto para subir recibos */}
+                  <input
+                    type="file"
+                    ref={fileInputReciboRef}
+                    style={{ display: 'none' }}
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={handleArchivoReciboManual}
+                  />
+                  <small className="text-muted">
+                    💡 Montos y fechas se calculan automáticamente. El primer recibo incluye los gastos de expedición.
+                    Puedes editar cualquier valor si es necesario.
+                  </small>
+                </div>
+              )}
+
+              {/* Sección de Documento de Póliza (PDF) - Solo modo manual */}
+              {formulario._metodo_captura === 'manual' && (
+                <div className="col-12 mt-4">
+                  <h5 className="border-bottom pb-2 mb-3">📄 Documento de Póliza (PDF)</h5>
+                  <div className="d-flex align-items-center gap-3">
+                    <button
+                      type="button"
+                      className={`btn ${polizaPDFManual ? 'btn-outline-success' : 'btn-outline-primary'}`}
+                      onClick={handleSeleccionarPolizaManual}
+                    >
+                      <Upload size={16} className="me-2" />
+                      {polizaPDFManual ? 'Cambiar Póliza' : 'Seleccionar Póliza PDF'}
+                    </button>
+                    {polizaPDFManual && (
+                      <div className="d-flex align-items-center gap-2">
+                        <span className="badge bg-success">
+                          📎 {polizaPDFManual.nombre}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => {
+                            setPolizaPDFManual(null);
+                            window._selectedPDFFile = null;
+                          }}
+                          title="Quitar archivo"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
+                    {!polizaPDFManual && (
+                      <small className="text-muted">Opcional — puedes subir el PDF de la póliza</small>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    ref={fileInputPolizaRef}
+                    style={{ display: 'none' }}
+                    accept=".pdf"
+                    onChange={handleArchivoPolizaManual}
+                  />
+                </div>
+              )}
+
+              {/* Calendario de Pagos (solo para Regex/IA en modo nuevo, no en manual ni edición) */}
+              {formulario._metodo_captura !== 'manual' && !modoEdicion && formulario.inicio_vigencia && (
                 (formulario.tipo_pago === 'Fraccionado' && formulario.frecuenciaPago) || 
                 formulario.tipo_pago === 'Anual'
               ) && (

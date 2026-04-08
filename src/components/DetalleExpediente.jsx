@@ -24,6 +24,16 @@ const DetalleExpediente = ({
   const [openHistorial, setOpenHistorial] = useState(false);
 
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
+  
+  // Parsear asegurados adicionales (pueden venir como JSON string o array)
+  const aseguradosAdicionales = useMemo(() => {
+    if (!datos?.asegurados) return [];
+    try {
+      const parsed = typeof datos.asegurados === 'string' ? JSON.parse(datos.asegurados) : datos.asegurados;
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  }, [datos?.asegurados]);
+
   const tipoRiesgo = useMemo(() => {
     const texto = `${datos?.producto || ''} ${datos?.tipo_de_poliza || ''}`.toLowerCase();
     if (/auto|veh|moto|camion|camión|pickup|remolque/.test(texto)) return 'vehiculo';
@@ -131,10 +141,10 @@ const DetalleExpediente = ({
         </div>
       </div>
       <div className="card-body py-2 px-2">
-        {/* Asegurado */}
+        {/* Contratante / Asegurado */}
         <div className="seccion-bloque seccion-asegurado">
           <h6 className="text-primary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-            👤 Información del {datos?.tipo_persona === 'Moral' ? 'Asegurado (Persona Moral)' : 'Asegurado'}
+            👤 {datos?.tipo_persona === 'Moral' ? 'Contratante (Persona Moral)' : 'Contratante / Asegurado Titular'}
           </h6>
           <div className="row g-1">
             {datos?.tipo_persona === 'Moral' ? (
@@ -142,8 +152,40 @@ const DetalleExpediente = ({
             ) : (
               renderCampo('Nombre Completo', `${datos?.nombre || ''} ${datos?.apellido_paterno || ''} ${datos?.apellido_materno || ''}`.trim())
             )}
-            {renderCampo('Conductor Habitual', datos?.conductor_habitual || 'Mismo que asegurado')}
+            {esAutos && renderCampo('Conductor Habitual', datos?.conductor_habitual || 'Mismo que asegurado')}
           </div>
+          {/* Asegurados adicionales (solo no-auto) */}
+          {!esAutos && aseguradosAdicionales.length > 0 && (
+            <div className="mt-1">
+              <small className="text-muted fw-bold" style={{ fontSize: '0.65rem' }}>
+                👥 Asegurados ({aseguradosAdicionales.length + 1} en total, incluye titular)
+              </small>
+              <table className="table table-sm table-bordered mt-1 mb-0" style={{ fontSize: '0.65rem' }}>
+                <thead className="table-light">
+                  <tr>
+                    <th>#</th>
+                    <th>Nombre</th>
+                    <th>Parentesco</th>
+                    <th>Fecha Nac.</th>
+                    <th>RFC</th>
+                    <th>Sexo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aseguradosAdicionales.map((aseg, idx) => (
+                    <tr key={idx}>
+                      <td>{idx + 1}</td>
+                      <td>{`${aseg.nombre || ''} ${aseg.apellido_paterno || ''} ${aseg.apellido_materno || ''}`.trim() || '-'}</td>
+                      <td>{aseg.parentesco || '-'}</td>
+                      <td>{aseg.fecha_nacimiento ? utils.formatearFecha?.(aseg.fecha_nacimiento, 'cortaY') || aseg.fecha_nacimiento : '-'}</td>
+                      <td>{aseg.rfc || '-'}</td>
+                      <td>{aseg.sexo || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Póliza */}
@@ -254,10 +296,10 @@ const DetalleExpediente = ({
             aria-labelledby="headingDatosGeneralesPoliza"
           >
             <div className="accordion-body py-1 px-2">
-              {/* INFORMACIÓN DEL ASEGURADO */}
+              {/* INFORMACIÓN DEL CONTRATANTE / ASEGURADO */}
               <div className="p-1 bg-light rounded mb-1">
                 <h6 className="text-primary mb-1" style={{ fontSize: '0.7rem', fontWeight: '600' }}>
-                  👤 INFORMACIÓN DEL {datos.tipo_persona === 'Moral' ? 'ASEGURADO (PERSONA MORAL)' : 'ASEGURADO'}
+                  👤 {datos.tipo_persona === 'Moral' ? 'CONTRATANTE (PERSONA MORAL)' : 'CONTRATANTE / ASEGURADO TITULAR'}
                 </h6>
                 <div className="row g-1">
                   {datos?.tipo_persona === 'Moral' ? (
@@ -271,11 +313,45 @@ const DetalleExpediente = ({
                       <div><strong style={{ fontSize: '0.7rem' }}>{datos.nombre} {datos.apellido_paterno} {datos.apellido_materno}</strong></div>
                     </div>
                   )}
-                  <div className="col-md-6">
-                    <small className="text-muted" style={{ fontSize: '0.6rem' }}>Conductor Habitual:</small>
-                    <div><strong style={{ fontSize: '0.7rem' }}>{datos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
-                  </div>
+                  {esAutos && (
+                    <div className="col-md-6">
+                      <small className="text-muted" style={{ fontSize: '0.6rem' }}>Conductor Habitual:</small>
+                      <div><strong style={{ fontSize: '0.7rem' }}>{datos.conductor_habitual || 'Mismo que asegurado'}</strong></div>
+                    </div>
+                  )}
                 </div>
+                {/* Asegurados adicionales (solo no-auto) */}
+                {!esAutos && aseguradosAdicionales.length > 0 && (
+                  <div className="mt-1">
+                    <small className="text-muted fw-bold" style={{ fontSize: '0.65rem' }}>
+                      👥 Asegurados ({aseguradosAdicionales.length + 1} en total, incluye titular)
+                    </small>
+                    <table className="table table-sm table-bordered mt-1 mb-0" style={{ fontSize: '0.65rem' }}>
+                      <thead className="table-light">
+                        <tr>
+                          <th>#</th>
+                          <th>Nombre</th>
+                          <th>Parentesco</th>
+                          <th>Fecha Nac.</th>
+                          <th>RFC</th>
+                          <th>Sexo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {aseguradosAdicionales.map((aseg, idx) => (
+                          <tr key={idx}>
+                            <td>{idx + 1}</td>
+                            <td>{`${aseg.nombre || ''} ${aseg.apellido_paterno || ''} ${aseg.apellido_materno || ''}`.trim() || '-'}</td>
+                            <td>{aseg.parentesco || '-'}</td>
+                            <td>{aseg.fecha_nacimiento ? utils.formatearFecha?.(aseg.fecha_nacimiento, 'cortaY') || aseg.fecha_nacimiento : '-'}</td>
+                            <td>{aseg.rfc || '-'}</td>
+                            <td>{aseg.sexo || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
               {/* DATOS DE LA PÓLIZA */}
               <div className="p-1 bg-primary bg-opacity-10 rounded mb-1">

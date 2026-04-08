@@ -43,6 +43,7 @@ const FormularioEditarExpediente = ({
   handleClienteSeleccionado,
   clienteSeleccionado,
   onEliminarPago,
+  onCrearAgenteNuevo,
   guardando = false
 }) => {
   // 📸 SNAPSHOT: Estado original para detectar cambios
@@ -658,6 +659,7 @@ const FormularioEditarExpediente = ({
       subiendoPDF={subiendoPDF}
       subirPDFPoliza={subirPDFPoliza}
       onEliminarPago={onEliminarPago}
+      onCrearAgenteNuevo={onCrearAgenteNuevo}
       bannerSuperior={null}
       seccionPDFInferior={seccionPDFInferior}
     />

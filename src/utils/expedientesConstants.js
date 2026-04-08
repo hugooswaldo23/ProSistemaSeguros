@@ -11,12 +11,16 @@ export const CONSTANTS = {
   DIAS_EN_AÑO: 365,
   PAGOS_POR_FRECUENCIA: {
     'Mensual': 12,
+    'Bimestral': 6,
     'Trimestral': 4,
+    'Cuatrimestral': 3,
     'Semestral': 2
   },
   MESES_POR_FRECUENCIA: {
     'Mensual': 1,
+    'Bimestral': 2,
     'Trimestral': 3,
+    'Cuatrimestral': 4,
     'Semestral': 6
   }
 };

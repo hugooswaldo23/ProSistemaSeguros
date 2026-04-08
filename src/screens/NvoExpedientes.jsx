@@ -19,6 +19,8 @@ import ModalCapturarContacto from '../components/ModalCapturarContacto';
 import { usePagos } from '../hooks/usePagos';
 import { useCompartirExpediente } from '../hooks/useCompartirExpediente';
 import * as clientesService from '../services/clientesService';
+import { crearCliente as crearClienteService } from '../services/clientesService';
+import { crearMiembroEquipo } from '../services/equipoDeTrabajoService';
 import * as historialService from '../services/historialExpedienteService';
 import * as pdfService from '../services/pdfService';
 import utils from '../utils/expedientesUtils';
@@ -50,11 +52,15 @@ const estadoInicialFormulario = {
   email: '',
   compania: '',
   producto: '',
-  etapa_activa: 'Captura',
+  etapa_activa: 'Emitida',
+  movimiento: 'Emisión',
   agente: '',
+  agente_id: null,
   sub_agente: '',
   numero_poliza: '',
   numero_endoso: '',
+  forma_pago: '',
+  moneda: 'MXN',
   inicio_vigencia: '',
   termino_vigencia: '',
   fecha_emision: new Date().toISOString().split('T')[0],
@@ -83,7 +89,8 @@ const estadoInicialFormulario = {
   edad_conductor: '',
   licencia_conducir: '',
   coberturas: [],
-  recibos: []
+  recibos: [],
+  asegurados: []
 };
 
 const ModuloNvoExpedientes = () => {
@@ -159,6 +166,24 @@ const ModuloNvoExpedientes = () => {
   
   // 🆕 Modal para cargar archivo de cotización
   const [mostrarModalCargarCotizacion, setMostrarModalCargarCotizacion] = useState(false);
+
+  // 🆕 Modal para crear cliente nuevo desde formulario manual
+  const [mostrarModalNuevoCliente, setMostrarModalNuevoCliente] = useState(false);
+  const [formularioNuevoCliente, setFormularioNuevoCliente] = useState({
+    tipoPersona: 'Persona Física',
+    nombre: '', apellido_paterno: '', apellido_materno: '',
+    razon_social: '', nombre_comercial: '',
+    rfc: '', email: '', telefono_movil: ''
+  });
+  const [creandoCliente, setCreandoCliente] = useState(false);
+
+  // 🆕 Modal para crear agente nuevo desde formulario manual
+  const [mostrarModalNuevoAgente, setMostrarModalNuevoAgente] = useState(false);
+  const [formularioNuevoAgente, setFormularioNuevoAgente] = useState({
+    nombre: '', apellidoPaterno: '', apellidoMaterno: '',
+    codigoAgente: '', email: '', telefonoMovil: ''
+  });
+  const [creandoAgente, setCreandoAgente] = useState(false);
   const [archivoCotizacion, setArchivoCotizacion] = useState(null);
   const [cargandoCotizacion, setCargandoCotizacion] = useState(false);
   
@@ -2187,6 +2212,11 @@ const ModuloNvoExpedientes = () => {
         datos.coberturas = JSON.stringify(datos.coberturas);
       }
 
+      // Serializar asegurados
+      if (datos.asegurados && Array.isArray(datos.asegurados)) {
+        datos.asegurados = JSON.stringify(datos.asegurados);
+      }
+
       // 🔥 IMPORTANTE: Sincronizar campos entre camelCase y snake_case
       // para que el backend y frontend siempre estén compatibles
       
@@ -3267,6 +3297,18 @@ const ModuloNvoExpedientes = () => {
   }, [location.search, navigate, expedientes, abrirModalCompartir, abrirModalAplicarPago, verDetalles, limpiarFormulario]);
 
   const handleClienteSeleccionado = useCallback(async (cliente) => {
+    // 🆕 Si el usuario eligió "Crear Nuevo Cliente" desde el buscador
+    if (cliente === 'CREAR_NUEVO') {
+      setFormularioNuevoCliente({
+        tipoPersona: 'Persona Física',
+        nombre: '', apellido_paterno: '', apellido_materno: '',
+        razon_social: '', nombre_comercial: '',
+        rfc: '', email: '', telefono_movil: ''
+      });
+      setMostrarModalNuevoCliente(true);
+      return;
+    }
+
     if (!cliente) {
       setClienteSeleccionado(null);
       setFormulario(prev => ({
@@ -3355,6 +3397,132 @@ const ModuloNvoExpedientes = () => {
       }
     }
   }, [formulario.id]);
+
+  // ==================== CREAR CLIENTE NUEVO (DESDE MODAL) ====================
+  const handleCrearClienteNuevo = useCallback(async () => {
+    const f = formularioNuevoCliente;
+    // Validación básica
+    if (f.tipoPersona === 'Persona Física' && !f.nombre) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+    if (f.tipoPersona === 'Persona Moral' && !f.razon_social) {
+      toast.error('La razón social es obligatoria');
+      return;
+    }
+
+    setCreandoCliente(true);
+    try {
+      const datosCliente = {
+        tipoPersona: f.tipoPersona,
+        nombre: f.nombre || '',
+        apellidoPaterno: f.apellido_paterno || '',
+        apellidoMaterno: f.apellido_materno || '',
+        razonSocial: f.razon_social || '',
+        nombreComercial: f.nombre_comercial || '',
+        rfc: f.rfc || '',
+        email: f.email || '',
+        telefonoMovil: f.telefono_movil || ''
+      };
+
+      const resultado = await crearClienteService(datosCliente);
+      if (resultado.success) {
+        const clienteCreado = resultado.data;
+        // Normalizar al formato que espera handleClienteSeleccionado
+        const clienteNormalizado = {
+          id: clienteCreado.id,
+          tipoPersona: clienteCreado.tipoPersona || clienteCreado.tipo_persona || f.tipoPersona,
+          nombre: clienteCreado.nombre || f.nombre,
+          apellidoPaterno: clienteCreado.apellidoPaterno || clienteCreado.apellido_paterno || f.apellido_paterno,
+          apellidoMaterno: clienteCreado.apellidoMaterno || clienteCreado.apellido_materno || f.apellido_materno,
+          razonSocial: clienteCreado.razonSocial || clienteCreado.razon_social || f.razon_social,
+          nombreComercial: clienteCreado.nombreComercial || clienteCreado.nombre_comercial || f.nombre_comercial,
+          rfc: clienteCreado.rfc || f.rfc,
+          email: clienteCreado.email || f.email,
+          telefonoMovil: clienteCreado.telefonoMovil || clienteCreado.telefono_movil || f.telefono_movil,
+          codigo: clienteCreado.codigo || ''
+        };
+
+        // Seleccionar automáticamente el cliente recién creado
+        handleClienteSeleccionado(clienteNormalizado);
+        setMostrarModalNuevoCliente(false);
+        toast.success('Cliente creado y seleccionado correctamente');
+
+        // Refrescar lista de clientes
+        try {
+          const res = await fetch(`${API_URL}/api/clientes`, { headers: getAuthHeaders() });
+          if (res.ok) {
+            const clientesData = await res.json();
+            setClientes(Array.isArray(clientesData) ? clientesData : []);
+          }
+        } catch (e) { console.warn('No se pudo refrescar lista de clientes:', e); }
+      } else {
+        toast.error(resultado.error || 'Error al crear cliente');
+      }
+    } catch (error) {
+      console.error('Error al crear cliente:', error);
+      toast.error('Error al crear cliente');
+    } finally {
+      setCreandoCliente(false);
+    }
+  }, [formularioNuevoCliente, handleClienteSeleccionado]);
+
+  // ==================== CREAR AGENTE NUEVO (DESDE MODAL) ====================
+  const handleCrearAgenteNuevo = useCallback(async () => {
+    const f = formularioNuevoAgente;
+    if (!f.nombre) {
+      toast.error('El nombre del agente es obligatorio');
+      return;
+    }
+
+    setCreandoAgente(true);
+    try {
+      const nuevoAgente = {
+        nombre: f.nombre,
+        apellidoPaterno: f.apellidoPaterno || '',
+        apellidoMaterno: f.apellidoMaterno || '',
+        codigoAgente: f.codigoAgente || '',
+        email: f.email || '',
+        telefonoMovil: f.telefonoMovil || '',
+        perfil: 'Agente'
+      };
+
+      const resultado = await crearMiembroEquipo(nuevoAgente);
+      if (resultado.success) {
+        const agenteCreado = resultado.data;
+        // Seleccionar automáticamente en el formulario
+        const nombre = `${agenteCreado.nombre || f.nombre} ${agenteCreado.apellidoPaterno || f.apellidoPaterno} ${agenteCreado.apellidoMaterno || f.apellidoMaterno}`.trim();
+        const codigo = agenteCreado.codigoAgente || f.codigoAgente || '';
+        const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+
+        setFormulario(prev => ({
+          ...prev,
+          agente: displayText,
+          agente_id: agenteCreado.id || null,
+          clave_agente: codigo
+        }));
+
+        setMostrarModalNuevoAgente(false);
+        toast.success('Agente creado y seleccionado correctamente');
+
+        // Refrescar lista de agentes
+        try {
+          const res = await fetch(`${API_URL}/api/equipoDeTrabajo`, { headers: getAuthHeaders() });
+          if (res.ok) {
+            const agentesData = await res.json();
+            setAgentes(Array.isArray(agentesData) ? agentesData : []);
+          }
+        } catch (e) { console.warn('No se pudo refrescar lista de agentes:', e); }
+      } else {
+        toast.error(resultado.error || 'Error al crear agente');
+      }
+    } catch (error) {
+      console.error('Error al crear agente:', error);
+      toast.error('Error al crear agente');
+    } finally {
+      setCreandoAgente(false);
+    }
+  }, [formularioNuevoAgente]);
 
   // ==================== FUNCIONES DE CÁLCULO ====================
   
@@ -3552,10 +3720,10 @@ const ModuloNvoExpedientes = () => {
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
-          etapasActivas={['Emitida', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
+          etapasActivas={['Emitida', 'Captura', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
           agentes={agentes}
           tiposPago={['Anual', 'Fraccionado', 'Pago Único']}
-          frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Semestral', 'Anual']}
+          frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Cuatrimestral', 'Semestral']}
           periodosGracia={[0, 7, 14, 30]}
           estatusPago={['Pendiente', 'Por Vencer', 'Vencido', 'Pagado']}
           marcasVehiculo={['Nissan', 'Volkswagen', 'Chevrolet', 'Toyota', 'Honda', 'Mazda', 'Ford']}
@@ -3567,6 +3735,10 @@ const ModuloNvoExpedientes = () => {
           clienteSeleccionado={clienteSeleccionado}
           onEliminarPago={abrirModalEliminarPago}
           onRecibosArchivos={setRecibosArchivosPendientes}
+          onCrearAgenteNuevo={() => {
+            setFormularioNuevoAgente({ nombre: '', apellidoPaterno: '', apellidoMaterno: '', codigoAgente: '', email: '', telefonoMovil: '' });
+            setMostrarModalNuevoAgente(true);
+          }}
         />
       )}
 
@@ -3583,10 +3755,10 @@ const ModuloNvoExpedientes = () => {
           productos={tiposProductos.map(p => p.nombre || p)}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
-          etapasActivas={['Emitida', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
+          etapasActivas={['Emitida', 'Captura', 'Enviada al Cliente', 'Pagada', 'Por Renovar', 'Renovación Emitida', 'Renovación Enviada', 'Renovación Pagada', 'Cancelada']}
           agentes={agentes}
           tiposPago={['Anual', 'Fraccionado', 'Pago Único']}
-          frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Semestral', 'Anual']}
+          frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Cuatrimestral', 'Semestral']}
           periodosGracia={[0, 7, 14, 30]}
           estatusPago={['Pendiente', 'Por Vencer', 'Vencido', 'Pagado']}
           marcasVehiculo={['Nissan', 'Volkswagen', 'Chevrolet', 'Toyota', 'Honda', 'Mazda', 'Ford']}
@@ -3597,6 +3769,10 @@ const ModuloNvoExpedientes = () => {
           handleClienteSeleccionado={handleClienteSeleccionado}
           clienteSeleccionado={clienteSeleccionado}
           onEliminarPago={abrirModalEliminarPago}
+          onCrearAgenteNuevo={() => {
+            setFormularioNuevoAgente({ nombre: '', apellidoPaterno: '', apellidoMaterno: '', codigoAgente: '', email: '', telefonoMovil: '' });
+            setMostrarModalNuevoAgente(true);
+          }}
         />
       )}
 
@@ -4742,6 +4918,190 @@ const ModuloNvoExpedientes = () => {
                 >
                   <RefreshCw size={16} className="me-2" />
                   Registrar Renovación
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: CREAR CLIENTE NUEVO ==================== */}
+      {mostrarModalNuevoCliente && (
+        <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1060 }}>
+          <div className="modal-dialog modal-lg">
+            <div className="modal-content">
+              <div className="modal-header bg-primary text-white">
+                <h5 className="modal-title">👤 Crear Nuevo Cliente</h5>
+                <button className="btn-close btn-close-white" onClick={() => setMostrarModalNuevoCliente(false)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="row g-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Tipo de Persona <span className="text-danger">*</span></label>
+                    <select
+                      className="form-select"
+                      value={formularioNuevoCliente.tipoPersona}
+                      onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, tipoPersona: e.target.value }))}
+                    >
+                      <option value="Persona Física">Persona Física</option>
+                      <option value="Persona Moral">Persona Moral</option>
+                    </select>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">RFC</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={formularioNuevoCliente.rfc}
+                      onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, rfc: e.target.value.toUpperCase() }))}
+                      placeholder="RFC del cliente"
+                      maxLength={13}
+                    />
+                  </div>
+
+                  {formularioNuevoCliente.tipoPersona === 'Persona Física' ? (
+                    <>
+                      <div className="col-md-4">
+                        <label className="form-label">Nombre <span className="text-danger">*</span></label>
+                        <input type="text" className="form-control"
+                          value={formularioNuevoCliente.nombre}
+                          onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, nombre: e.target.value }))}
+                          placeholder="Nombre(s)" />
+                      </div>
+                      <div className="col-md-4">
+                        <label className="form-label">Apellido Paterno</label>
+                        <input type="text" className="form-control"
+                          value={formularioNuevoCliente.apellido_paterno}
+                          onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, apellido_paterno: e.target.value }))}
+                          placeholder="Apellido Paterno" />
+                      </div>
+                      <div className="col-md-4">
+                        <label className="form-label">Apellido Materno</label>
+                        <input type="text" className="form-control"
+                          value={formularioNuevoCliente.apellido_materno}
+                          onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, apellido_materno: e.target.value }))}
+                          placeholder="Apellido Materno" />
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="col-md-6">
+                        <label className="form-label">Razón Social <span className="text-danger">*</span></label>
+                        <input type="text" className="form-control"
+                          value={formularioNuevoCliente.razon_social}
+                          onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, razon_social: e.target.value }))}
+                          placeholder="Razón social de la empresa" />
+                      </div>
+                      <div className="col-md-6">
+                        <label className="form-label">Nombre Comercial</label>
+                        <input type="text" className="form-control"
+                          value={formularioNuevoCliente.nombre_comercial}
+                          onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, nombre_comercial: e.target.value }))}
+                          placeholder="Nombre comercial" />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="col-md-6">
+                    <label className="form-label">Email</label>
+                    <input type="email" className="form-control"
+                      value={formularioNuevoCliente.email}
+                      onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="correo@ejemplo.com" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Teléfono Móvil</label>
+                    <input type="tel" className="form-control"
+                      value={formularioNuevoCliente.telefono_movil}
+                      onChange={(e) => setFormularioNuevoCliente(prev => ({ ...prev, telefono_movil: e.target.value }))}
+                      placeholder="10 dígitos"
+                      maxLength={10} />
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setMostrarModalNuevoCliente(false)} disabled={creandoCliente}>
+                  Cancelar
+                </button>
+                <button className="btn btn-primary" onClick={handleCrearClienteNuevo} disabled={creandoCliente}>
+                  {creandoCliente ? (
+                    <><span className="spinner-border spinner-border-sm me-2"></span>Creando...</>
+                  ) : (
+                    <>👤 Crear y Seleccionar Cliente</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL: CREAR AGENTE NUEVO ==================== */}
+      {mostrarModalNuevoAgente && (
+        <div className="modal fade show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1060 }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header bg-success text-white">
+                <h5 className="modal-title">🧑‍💼 Crear Nuevo Agente</h5>
+                <button className="btn-close btn-close-white" onClick={() => setMostrarModalNuevoAgente(false)}></button>
+              </div>
+              <div className="modal-body">
+                <div className="row g-3">
+                  <div className="col-md-4">
+                    <label className="form-label">Nombre <span className="text-danger">*</span></label>
+                    <input type="text" className="form-control"
+                      value={formularioNuevoAgente.nombre}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, nombre: e.target.value }))}
+                      placeholder="Nombre" />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Paterno</label>
+                    <input type="text" className="form-control"
+                      value={formularioNuevoAgente.apellidoPaterno}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, apellidoPaterno: e.target.value }))}
+                      placeholder="Apellido Paterno" />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Apellido Materno</label>
+                    <input type="text" className="form-control"
+                      value={formularioNuevoAgente.apellidoMaterno}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, apellidoMaterno: e.target.value }))}
+                      placeholder="Apellido Materno" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Código de Agente</label>
+                    <input type="text" className="form-control"
+                      value={formularioNuevoAgente.codigoAgente}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, codigoAgente: e.target.value }))}
+                      placeholder="Ej: 12345" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Email</label>
+                    <input type="email" className="form-control"
+                      value={formularioNuevoAgente.email}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="correo@ejemplo.com" />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Teléfono Móvil</label>
+                    <input type="tel" className="form-control"
+                      value={formularioNuevoAgente.telefonoMovil}
+                      onChange={(e) => setFormularioNuevoAgente(prev => ({ ...prev, telefonoMovil: e.target.value }))}
+                      placeholder="10 dígitos"
+                      maxLength={10} />
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setMostrarModalNuevoAgente(false)} disabled={creandoAgente}>
+                  Cancelar
+                </button>
+                <button className="btn btn-success" onClick={handleCrearAgenteNuevo} disabled={creandoAgente}>
+                  {creandoAgente ? (
+                    <><span className="spinner-border spinner-border-sm me-2"></span>Creando...</>
+                  ) : (
+                    <>🧑‍💼 Crear y Seleccionar Agente</>
+                  )}
                 </button>
               </div>
             </div>
