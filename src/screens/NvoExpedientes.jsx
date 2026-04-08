@@ -89,7 +89,8 @@ const estadoInicialFormulario = {
   edad_conductor: '',
   licencia_conducir: '',
   coberturas: [],
-  recibos: []
+  recibos: [],
+  asegurados: []
 };
 
 const ModuloNvoExpedientes = () => {
@@ -2209,6 +2210,11 @@ const ModuloNvoExpedientes = () => {
       // Serializar coberturas
       if (datos.coberturas && Array.isArray(datos.coberturas)) {
         datos.coberturas = JSON.stringify(datos.coberturas);
+      }
+
+      // Serializar asegurados
+      if (datos.asegurados && Array.isArray(datos.asegurados)) {
+        datos.asegurados = JSON.stringify(datos.asegurados);
       }
 
       // 🔥 IMPORTANTE: Sincronizar campos entre camelCase y snake_case
