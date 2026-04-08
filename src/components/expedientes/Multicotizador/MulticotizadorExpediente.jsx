@@ -14,7 +14,7 @@ import { Loader, FileSymlink } from 'lucide-react';
 import * as multicotizadorService from '../../../services/multicotizadorService';
 import * as historialService from '../../../services/historialExpedienteService';
 import IssuanceFormQualitas from './FormulariosEmision/IssuanceFormQualitas';
-import IssuanceFormHDI from './FormulariosEmision/issuanceFormHDI';
+import IssuanceFormHDI from './FormulariosEmision/IssuanceFormHDI';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
