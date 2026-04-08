@@ -2984,6 +2984,21 @@ const ModuloNvoExpedientes = () => {
         }
       }
 
+      // Parsear asegurados si vienen como string JSON
+      let aseguradosParseados = [];
+      if (expedienteCompleto.asegurados) {
+        if (typeof expedienteCompleto.asegurados === 'string') {
+          try {
+            aseguradosParseados = JSON.parse(expedienteCompleto.asegurados);
+          } catch (e) {
+            console.warn('⚠️ Error al parsear asegurados:', e);
+            aseguradosParseados = [];
+          }
+        } else if (Array.isArray(expedienteCompleto.asegurados)) {
+          aseguradosParseados = expedienteCompleto.asegurados;
+        }
+      }
+
       // Parsear recibos si vienen como string JSON Y formatear fechas dentro
       let recibosParseados = [];
       if (expedienteCompleto.recibos) {
@@ -3044,6 +3059,7 @@ const ModuloNvoExpedientes = () => {
         frecuenciaPago: frecuenciaPagoNormalizada,
         // Arrays parseados
         coberturas: coberturasParseadas,
+        asegurados: aseguradosParseados,
         recibos: recibosParseados,
         // Asegurar valores por defecto para campos numéricos
         periodo_gracia: expedienteCompleto.periodo_gracia ?? 14,

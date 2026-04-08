@@ -34,6 +34,13 @@ const esProductoAuto = (producto) => {
   return ['automóvil', 'automovil', 'autos', 'auto'].includes(normalizado);
 };
 
+// Productos personales donde el asegurado puede ser distinto al contratante
+const esProductoVida = (producto) => {
+  if (!producto) return false;
+  const normalizado = producto.toLowerCase().trim();
+  return /vida|ahorro|educativo|accidentes|ap/.test(normalizado);
+};
+
 // Función helper para convertir fecha ISO a formato yyyy-MM-dd
 const formatearFechaParaInput = (fecha) => {
   if (!fecha) return '';
@@ -964,6 +971,12 @@ const FormularioExpedienteBase = React.memo(({
                   {(formulario.asegurados?.length || 0) + 1}
                 </span>
               </h5>
+
+              {esProductoVida(formulario.producto) && (
+                <div className="alert alert-info py-2 px-3 mb-2" style={{ fontSize: '0.8rem' }}>
+                  En pólizas de vida, si el asegurado es distinto al contratante, agrégalo aquí para que quede guardado en el expediente.
+                </div>
+              )}
               
               {/* Asegurado principal (contratante) */}
               <div className="card bg-light mb-2">
@@ -975,7 +988,9 @@ const FormularioExpedienteBase = React.memo(({
                       {formulario.apellido_paterno || ''} {formulario.apellido_materno || ''}
                     </strong>
                     <span className="text-muted ms-2" style={{ fontSize: '0.75rem' }}>
-                      (Contratante = Asegurado principal)
+                      {esProductoVida(formulario.producto)
+                        ? '(Contratante; si el asegurado titular es distinto, agrégalo abajo)'
+                        : '(Contratante = Asegurado principal)'}
                     </span>
                   </div>
                 </div>
