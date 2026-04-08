@@ -1812,10 +1812,7 @@ DCPRO Administración`;
                               <th>Fechas</th>
                               <th>Póliza</th>
                               <th>Cliente</th>
-                              {/* Columna de Vehículo solo para productos de Autos */}
-                              {producto.toLowerCase().includes('auto') && (
-                                <th>Vehículo</th>
-                              )}
+                              <th>{producto.toLowerCase().includes('auto') ? 'Vehículo' : 'Producto'}</th>
                               <th style={{ textAlign: 'center' }}>Aseguradora</th>
                               <th style={{ textAlign: 'center' }}>
                                 <div>Estatus Pago</div>
@@ -1944,12 +1941,10 @@ DCPRO Administración`;
                                     </div>
                                   </div>
                                 </td>
-                                {/* Columna de Vehículo solo para productos de Autos */}
-                                {producto.toLowerCase().includes('auto') && (
-                                  <td style={{ maxWidth: '180px' }}>
-                                    <div style={{ fontSize: '11px' }}>
-                                      {(() => {
-                                        // Construir descripción del vehículo
+                                <td style={{ maxWidth: '180px' }}>
+                                  <div style={{ fontSize: '11px' }}>
+                                    {producto.toLowerCase().includes('auto') ? (
+                                      (() => {
                                         const descripcion = poliza.descripcion_vehiculo || 
                                           `${poliza.marca || ''} ${poliza.modelo || ''}`.trim();
                                         
@@ -1957,7 +1952,6 @@ DCPRO Administración`;
                                           return <span className="text-muted">Sin datos</span>;
                                         }
                                         
-                                        // Limitar a 35 caracteres la primera línea
                                         const linea1 = descripcion.substring(0, 35);
                                         const linea2 = descripcion.length > 35 ? descripcion.substring(35) : '';
                                         
@@ -1978,10 +1972,14 @@ DCPRO Administración`;
                                             </div>
                                           </>
                                         );
-                                      })()}
-                                    </div>
-                                  </td>
-                                )}
+                                      })()
+                                    ) : (
+                                      <span className="badge bg-info bg-opacity-10 text-info fw-medium" style={{ fontSize: '11px' }}>
+                                        {producto}
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td style={{ textAlign: 'center', fontSize: '0.75rem', lineHeight: '1.3' }}>
                                   {/* Aseguradora + Agente + Vendedor */}
                                   {(() => {
