@@ -187,32 +187,37 @@ const FormularioExpedienteBase = React.memo(({
   };
 
   // Efecto para cargar vendedores cuando cambia el agente
-  // Auto-calcular subtotal y total cuando cambien los montos
+  // Auto-calcular IVA, subtotal y total cuando cambien los montos
   useEffect(() => {
     const primaNeta = parseFloat(formulario.prima_neta) || 0;
     const recargo = parseFloat(formulario.cargo_pago_fraccionado) || 0;
     const gastosExp = parseFloat(formulario.gastos_expedicion) || 0;
-    const iva = parseFloat(formulario.iva) || 0;
 
     const nuevoSubtotal = primaNeta + recargo + gastosExp;
-    const nuevoTotal = nuevoSubtotal + iva;
+    const nuevoIva = nuevoSubtotal * 0.16;
+    const nuevoTotal = nuevoSubtotal + nuevoIva;
 
     const subtotalStr = nuevoSubtotal > 0 ? nuevoSubtotal.toFixed(2) : '';
+    const ivaStr = nuevoIva > 0 ? nuevoIva.toFixed(2) : '';
     const totalStr = nuevoTotal > 0 ? nuevoTotal.toFixed(2) : '';
 
-    if (formulario.subtotal !== subtotalStr || formulario.total !== totalStr) {
+    if (formulario.subtotal !== subtotalStr || formulario.total !== totalStr || formulario.iva !== ivaStr) {
       setFormulario(prev => ({
         ...prev,
+        iva: ivaStr,
         subtotal: subtotalStr,
         total: totalStr,
         _total_changed: true
       }));
     }
-  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion, formulario.iva]);
+  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion]);
 
   // 🧾 Ref para evitar regenerar recibos en la carga inicial del modo edición
   const frecuenciaInicialRef = useRef(null);
   const tipoPagoInicialRef = useRef(null);
+  const totalInicialRef = useRef(null);
+  const gastosInicialRef = useRef(null);
+  const fechaInicialRef = useRef(null);
   const primeraRenderizacionRef = useRef(true);
 
   // 🧾 Auto-generar recibos con montos y fechas calculados (manual + edición)
@@ -226,12 +231,18 @@ const FormularioExpedienteBase = React.memo(({
         primeraRenderizacionRef.current = false;
         frecuenciaInicialRef.current = formulario.frecuenciaPago;
         tipoPagoInicialRef.current = formulario.tipo_pago;
+        totalInicialRef.current = formulario.total;
+        gastosInicialRef.current = formulario.gastos_expedicion;
+        fechaInicialRef.current = formulario.inicio_vigencia;
         return;
       }
-      // Solo regenerar si el usuario cambió frecuencia o tipo_pago
-      const frecuenciaCambio = formulario.frecuenciaPago !== frecuenciaInicialRef.current;
-      const tipoPagoCambio = formulario.tipo_pago !== tipoPagoInicialRef.current;
-      if (!frecuenciaCambio && !tipoPagoCambio) return;
+      // Regenerar si el usuario cambió frecuencia, tipo_pago, montos o fechas
+      const algoCambio = formulario.frecuenciaPago !== frecuenciaInicialRef.current ||
+        formulario.tipo_pago !== tipoPagoInicialRef.current ||
+        formulario.total !== totalInicialRef.current ||
+        formulario.gastos_expedicion !== gastosInicialRef.current ||
+        formulario.inicio_vigencia !== fechaInicialRef.current;
+      if (!algoCambio) return;
     }
     
     if (!esManual && !modoEdicion) return;
@@ -304,7 +315,13 @@ const FormularioExpedienteBase = React.memo(({
       });
     }
     
-    setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+    // Sincronizar primer_pago y pagos_subsecuentes para que el backend calcule correctamente
+    setFormulario(prev => ({ 
+      ...prev, 
+      recibos: nuevosRecibos,
+      primer_pago: montoPrimerRecibo || '',
+      pagos_subsecuentes: montoSubsecuente || montoPrimerRecibo || ''
+    }));
   }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, modoEdicion]);
 
   useEffect(() => {
@@ -1095,7 +1112,7 @@ const FormularioExpedienteBase = React.memo(({
                 </div>
               </div>
               <div className="col-md-6">
-                <label className="form-label">IVA</label>
+                <label className="form-label">IVA (16%)</label>
                 <div className="input-group">
                   <span className="input-group-text">$</span>
                   <input
@@ -1103,7 +1120,8 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control"
                     value={formulario.iva ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, iva: e.target.value }))}
+                    readOnly
+                    style={{ backgroundColor: '#f8f9fa' }}
                     placeholder="0.00"
                   />
                 </div>
@@ -1454,7 +1472,17 @@ const FormularioExpedienteBase = React.memo(({
                                   onChange={(e) => {
                                     const nuevosRecibos = [...formulario.recibos];
                                     nuevosRecibos[idx] = { ...nuevosRecibos[idx], monto: e.target.value };
-                                    setFormulario(prev => ({ ...prev, recibos: nuevosRecibos }));
+                                    // Sincronizar primer_pago y pagos_subsecuentes
+                                    const primerPago = idx === 0 ? e.target.value : nuevosRecibos[0]?.monto || '';
+                                    const subsecuente = nuevosRecibos.length > 1 
+                                      ? (idx === 1 ? e.target.value : nuevosRecibos[1]?.monto || '') 
+                                      : primerPago;
+                                    setFormulario(prev => ({ 
+                                      ...prev, 
+                                      recibos: nuevosRecibos,
+                                      primer_pago: primerPago,
+                                      pagos_subsecuentes: subsecuente
+                                    }));
                                   }}
                                 />
                               </div>
