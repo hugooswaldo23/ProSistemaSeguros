@@ -416,8 +416,8 @@ export async function extraer(ctx) {
       || extraerDato(/I\.V\.A\.[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
   }
   if (!total) {
-    total = (obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i], false)
-      || extraerDato(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+    total = (obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i, /Prima\s+total/i], false)
+      || extraerDato(/(?:Total\s+a\s+pagar|Prima\s+total)[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
   }
 
   let prima_pagada = prima_neta;
@@ -779,26 +779,102 @@ export async function extraer(ctx) {
     }
   })();
 
-  // Fallback financiero desde carátula si algún campo crítico falta
-  if ((!prima_neta || !iva || !total) && bloqueFinancieroCaratula) {
-    console.log('🔄 Fallback: intentando obtener montos desde bloque financiero en carátula');
-    const linesFin = bloqueFinancieroCaratula.split(/\r?\n/);
-    const extraeMontoLinea = (labelRegex) => {
-      for (const ln of linesFin) {
-        if (labelRegex.test(ln)) {
-          const m = ln.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2}))/g);
-          if (m && m.length) return m[m.length - 1].replace(/,/g, '');
+  // ═══════════════════════════════════════════════════════════════
+  // DETECCIÓN DE MONTOS ANUALES: "Prima total" (carátula) vs "Total a pagar" (aviso)
+  // ═══════════════════════════════════════════════════════════════
+  // En Chubb:
+  //   - Carátula (pág 1): total ANUAL etiquetado como "Prima total"
+  //   - Aviso de Cobro (pág 2): monto POR RECIBO etiquetado como "Total a pagar"
+  // PRIORIDAD 1 pudo haber encontrado los montos del aviso (per-recibo).
+  // Aquí buscamos "Prima total" para obtener el total anual real.
+  {
+    const lineasCompletas = textoCompleto.split(/\r?\n/);
+    let totalAnualEncontrado = '';
+    let lineaPrimaTotal = -1;
+
+    for (let i = 0; i < lineasCompletas.length; i++) {
+      if (!/Prima\s+total/i.test(lineasCompletas[i])) continue;
+      // Ignorar si la línea también dice "Total a pagar" (sería un match ambiguo)
+      if (/Total\s+a\s+pagar/i.test(lineasCompletas[i])) continue;
+      lineaPrimaTotal = i;
+      console.log(`🔍 "Prima total" encontrado en línea ${i}: "${lineasCompletas[i].substring(0, 100)}"`);
+
+      // Caso 1: Formato vertical — "Prima total 6,355.43" (etiqueta + monto en misma línea)
+      const montoMismaLinea = lineasCompletas[i].match(/Prima\s+total[\s:]*\$?\s*([\d,]+\.\d{2})/i);
+      if (montoMismaLinea) {
+        totalAnualEncontrado = montoMismaLinea[1].replace(/,/g, '');
+        console.log(`  ✅ Caso 1 (vertical): total anual = $${totalAnualEncontrado}`);
+        break;
+      }
+
+      // Caso 2: Formato horizontal (6 columnas) — etiquetas en línea i, valores en línea i+1
+      if (i + 1 < lineasCompletas.length) {
+        const valoresLinea = lineasCompletas[i + 1].match(/(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})/g);
+        if (valoresLinea && valoresLinea.length >= 5) {
+          // "Prima total" es la última columna → el último monto
+          totalAnualEncontrado = valoresLinea[valoresLinea.length - 1].replace(/,/g, '');
+          console.log(`  ✅ Caso 2 (horizontal ${valoresLinea.length}-col): total anual = $${totalAnualEncontrado}`);
+          // Extraer también los otros campos de la misma línea de valores
+          if (valoresLinea.length >= 6) {
+            const limpiar = (s) => s.replace(/,/g, '');
+            prima_neta = limpiar(valoresLinea[0]);
+            otros_servicios = limpiar(valoresLinea[1]);
+            cargo_pago_fraccionado = limpiar(valoresLinea[2]);
+            gastos_expedicion = limpiar(valoresLinea[3]);
+            iva = limpiar(valoresLinea[4]);
+          }
+          break;
+        }
+
+        // Caso 3: Monto solo en la siguiente línea (label/value separados)
+        const siguienteMatch = lineasCompletas[i + 1].match(/([\d,]+\.\d{2})/);
+        if (siguienteMatch) {
+          totalAnualEncontrado = siguienteMatch[1].replace(/,/g, '');
+          console.log(`  ✅ Caso 3 (siguiente línea): total anual = $${totalAnualEncontrado}`);
+          break;
         }
       }
-      return '';
-    };
-    prima_neta = prima_neta || extraeMontoLinea(/Prima\s+Neta/i);
-    prima_pagada = prima_neta;
-    gastos_expedicion = gastos_expedicion || extraeMontoLinea(/Gastos\s+de\s+expedici/i);
-    cargo_pago_fraccionado = cargo_pago_fraccionado || extraeMontoLinea(/Financiamiento\s+por\s+pago\s+fraccionado/i);
-    iva = iva || extraeMontoLinea(/I\.V\.A\.|IVA/i);
-    total = total || extraeMontoLinea(/Total\s+a\s+pagar/i);
-    console.log('🔄 Fallback resultados:', { prima_neta, gastos_expedicion, cargo_pago_fraccionado, iva, total });
+      break; // Solo procesar el primer "Prima total"
+    }
+
+    // Aplicar total anual si es mayor que el actual (confirma que el actual era per-recibo)
+    const anualNum = parseFloat(totalAnualEncontrado) || 0;
+    const actualNum = parseFloat(total) || 0;
+
+    if (anualNum > actualNum) {
+      console.log(`🔄 Total ANUAL ($${totalAnualEncontrado}) > total actual ($${total}) → corrigiendo`);
+      total = totalAnualEncontrado;
+
+      // Para formato vertical, buscar otros montos anuales en las líneas cercanas
+      if (lineaPrimaTotal > 0) {
+        const zonaAnual = lineasCompletas.slice(Math.max(0, lineaPrimaTotal - 10), lineaPrimaTotal + 1);
+        for (const ln of zonaAnual) {
+          if (/Prima\s+neta/i.test(ln)) {
+            const m = ln.match(/([\d,]+\.\d{2})/);
+            if (m) prima_neta = m[1].replace(/,/g, '');
+          }
+          if (/Gastos\s+de\s+expedici/i.test(ln)) {
+            const m = ln.match(/([\d,]+\.\d{2})/);
+            if (m) gastos_expedicion = m[1].replace(/,/g, '');
+          }
+          if (/Financiamiento/i.test(ln)) {
+            const m = ln.match(/([\d,]+\.\d{2})/);
+            if (m) cargo_pago_fraccionado = m[1].replace(/,/g, '');
+          }
+          if (/I\.V\.A\./i.test(ln)) {
+            const m = ln.match(/([\d,]+\.\d{2})/);
+            if (m) iva = m[1].replace(/,/g, '');
+          }
+        }
+      }
+
+      prima_pagada = prima_neta;
+      console.log('✅ Montos ANUALES corregidos:', { prima_neta, gastos_expedicion, cargo_pago_fraccionado, iva, total });
+    } else if (totalAnualEncontrado) {
+      console.log(`ℹ️ "Prima total" ($${totalAnualEncontrado}) ≤ total actual ($${total}), no se requiere corrección`);
+    } else {
+      console.log('ℹ️ "Prima total" no encontrado en el texto, usando montos actuales');
+    }
   }
   
   console.log('Prima Neta:', prima_neta || '0.00');
@@ -818,35 +894,67 @@ export async function extraer(ctx) {
   if (tipo_pago === 'Fraccionado' && textoAvisoDeCobro) {
     console.log('\n📋 PASO 5B: EXTRAER MONTOS DE RECIBO DESDE AVISO DE COBRO');
     console.log('─────────────────────────────────────────────────────────');
-    
-    // Extraer "Total a pagar" del Aviso de Cobro (monto del primer recibo)
-    const totalPagarAvisoMatch = textoAvisoDeCobro.match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i);
-    if (totalPagarAvisoMatch) {
-      const totalPrimerRecibo = totalPagarAvisoMatch[1].replace(/,/g, '');
+
+    // Buscar "Total a pagar" línea por línea (maneja formatos vertical y horizontal)
+    const lineasAviso = textoAvisoDeCobro.split(/\r?\n/);
+    let totalPrimerRecibo = '';
+
+    for (let i = 0; i < lineasAviso.length; i++) {
+      if (!/Total\s+a\s+pagar/i.test(lineasAviso[i])) continue;
+      console.log(`🔍 "Total a pagar" en aviso línea ${i}: "${lineasAviso[i].substring(0, 80)}"`);
+
+      // Caso 1: Monto en la misma línea (ej: "Total a pagar $ 2,461.57")
+      const mismaLinea = lineasAviso[i].match(/Total\s+a\s+pagar[\s:]*\$?\s*([\d,]+\.\d{2})/i);
+      if (mismaLinea) {
+        totalPrimerRecibo = mismaLinea[1].replace(/,/g, '');
+        console.log(`  ✅ Caso 1 (misma línea): primer recibo = $${totalPrimerRecibo}`);
+        break;
+      }
+
+      // Caso 2: Formato 6 columnas — valores en la siguiente línea, "Total a pagar" es la última columna
+      if (i + 1 < lineasAviso.length) {
+        const valoresLinea = lineasAviso[i + 1].match(/(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})/g);
+        if (valoresLinea && valoresLinea.length >= 5) {
+          totalPrimerRecibo = valoresLinea[valoresLinea.length - 1].replace(/,/g, '');
+          console.log(`  ✅ Caso 2 (horizontal ${valoresLinea.length}-col): primer recibo = $${totalPrimerRecibo}`);
+          break;
+        }
+        // Caso 3: Monto solo en siguiente línea
+        const siguiente = lineasAviso[i + 1].match(/([\d,]+\.\d{2})/);
+        if (siguiente) {
+          totalPrimerRecibo = siguiente[1].replace(/,/g, '');
+          console.log(`  ✅ Caso 3 (siguiente línea): primer recibo = $${totalPrimerRecibo}`);
+          break;
+        }
+      }
+      break;
+    }
+
+    if (totalPrimerRecibo) {
       console.log('💰 Total a pagar del Aviso de Cobro (primer recibo):', totalPrimerRecibo);
-      
-      // Solo usar si es diferente al total anual (confirma que es un recibo parcial)
+
+      // Solo usar si es menor al total anual (confirma que es un recibo parcial)
       const totalAnual = parseFloat(total) || 0;
       const totalRecibo = parseFloat(totalPrimerRecibo) || 0;
-      
+
       if (totalRecibo > 0 && totalRecibo < totalAnual) {
         primer_pago = totalPrimerRecibo;
-        
+
         // Calcular pagos subsecuentes: (total anual - primer recibo) / (num_recibos - 1)
         const serieMatch = textoAvisoDeCobro.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
         const numRecibos = serieMatch ? parseInt(serieMatch[2]) : 0;
-        
+
         if (numRecibos > 1) {
           const montoRestante = totalAnual - totalRecibo;
           const montoSubsecuente = (montoRestante / (numRecibos - 1)).toFixed(2);
           pagos_subsecuentes = montoSubsecuente;
-          console.log(`💰 Pagos subsecuentes calculados: (${totalAnual} - ${totalRecibo}) / ${numRecibos - 1} = ${montoSubsecuente}`);
+          console.log(`💰 Pagos subsecuentes: ($${totalAnual} - $${totalRecibo}) / ${numRecibos - 1} = $${montoSubsecuente}`);
         }
-        
+
         console.log('✅ primer_pago:', primer_pago);
         console.log('✅ pagos_subsecuentes:', pagos_subsecuentes);
       } else {
-        console.log('⚠️ Total del aviso igual o mayor al anual, no se usa como primer_pago');
+        console.log(`⚠️ Total del aviso ($${totalPrimerRecibo}) ≥ total anual ($${total}), no se usa como primer_pago`);
       }
     } else {
       console.log('⚠️ No se encontró "Total a pagar" en el Aviso de Cobro');
@@ -897,8 +1005,29 @@ export async function extraer(ctx) {
     gastos_expedicion,
     iva,
     total,
-    primer_pago: primer_pago || total || undefined,
-    pagos_subsecuentes: pagos_subsecuentes || (frecuenciaPago && frecuenciaPago !== 'Anual' ? total : '') || '',
+    primer_pago: (() => {
+      if (primer_pago) return primer_pago;
+      if (!total || tipo_pago === 'Anual' || tipo_pago === 'Contado') return total || undefined;
+      // Fraccionado sin primer_pago explícito: calcular a partir del total anual
+      const totalNum = parseFloat(total) || 0;
+      const gastosNum = parseFloat(gastos_expedicion) || 0;
+      const frecMap = { Mensual: 12, Bimestral: 6, Trimestral: 4, Cuatrimestral: 3, Semestral: 2 };
+      const numRecibos = frecMap[frecuenciaPago] || 4;
+      const baseRepartible = totalNum - gastosNum;
+      const montoSubsec = baseRepartible / numRecibos;
+      return (montoSubsec + gastosNum).toFixed(2);
+    })(),
+    pagos_subsecuentes: (() => {
+      if (pagos_subsecuentes) return pagos_subsecuentes;
+      if (!total || tipo_pago === 'Anual' || tipo_pago === 'Contado') return '';
+      // Fraccionado sin pagos_subsecuentes explícito: calcular
+      const totalNum = parseFloat(total) || 0;
+      const gastosNum = parseFloat(gastos_expedicion) || 0;
+      const frecMap = { Mensual: 12, Bimestral: 6, Trimestral: 4, Cuatrimestral: 3, Semestral: 2 };
+      const numRecibos = frecMap[frecuenciaPago] || 4;
+      const baseRepartible = totalNum - gastosNum;
+      return (baseRepartible / numRecibos).toFixed(2);
+    })(),
     tipo_pago,
     frecuenciaPago,
     forma_pago, // Extraído de Serie del aviso
