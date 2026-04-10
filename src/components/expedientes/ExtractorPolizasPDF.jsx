@@ -475,17 +475,36 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       let agenteEncontradoEnBD = null;
       let claveYaExisteEnBD = false;
       
-      if (datosExtraidos.clave_agente && datosExtraidos.agente && agentes.length > 0) {
-        // Buscar por nombre completo
-        const nombreExtraido = datosExtraidos.agente.trim().toUpperCase();
-        agenteEncontradoEnBD = agentes.find(miembro => {
-          if (miembro.perfil !== 'Agente' || !miembro.activo) return false;
-          
-          const nombreBD = (miembro.nombre || '').trim().toUpperCase();
-          const nombreCompleto = `${miembro.nombre || ''} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.trim().toUpperCase();
-          
-          return nombreBD === nombreExtraido || nombreCompleto === nombreExtraido;
-        });
+      if (datosExtraidos.clave_agente && datosExtraidos.agente) {
+        const nombreExtraido = datosExtraidos.agente.replace(/\s+/g, ' ').trim().toUpperCase();
+        
+        // Buscar primero en el prop agentes (rápido)
+        const buscarEnLista = (lista) => {
+          return lista.find(miembro => {
+            if (String(miembro.perfil || '').toLowerCase() !== 'agente') return false;
+            const nombreBD = (miembro.nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
+            const nombreCompleto = `${miembro.nombre || ''} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.replace(/\s+/g, ' ').trim().toUpperCase();
+            return nombreBD === nombreExtraido || nombreCompleto === nombreExtraido;
+          });
+        };
+        
+        agenteEncontradoEnBD = agentes.length > 0 ? buscarEnLista(agentes) : null;
+        
+        // Si no se encontró en el prop, consultar la API directamente (el prop puede estar desactualizado)
+        if (!agenteEncontradoEnBD) {
+          try {
+            const { obtenerEquipoDeTrabajo } = await import('../../services/equipoDeTrabajoService');
+            const equipoFresco = await obtenerEquipoDeTrabajo();
+            if (equipoFresco.success && equipoFresco.data) {
+              agenteEncontradoEnBD = buscarEnLista(equipoFresco.data);
+              if (agenteEncontradoEnBD) {
+                console.log('🔄 Agente encontrado vía API (prop desactualizado):', agenteEncontradoEnBD.nombre);
+              }
+            }
+          } catch (e) {
+            console.warn('⚠️ Error al buscar agente en API:', e);
+          }
+        }
         
         // Si encontramos el agente, verificar si ya tiene esta clave
         if (agenteEncontradoEnBD) {
