@@ -26,12 +26,18 @@ const DetalleExpediente = ({
   const esAutos = useMemo(() => (datos?.producto || '').toLowerCase().includes('auto'), [datos?.producto]);
   
   // Parsear asegurados adicionales (pueden venir como JSON string o array)
-  const aseguradosAdicionales = useMemo(() => {
-    if (!datos?.asegurados) return [];
+  const { aseguradosAdicionales, contratanteEsAsegurado } = useMemo(() => {
+    if (!datos?.asegurados) return { aseguradosAdicionales: [], contratanteEsAsegurado: true };
     try {
       const parsed = typeof datos.asegurados === 'string' ? JSON.parse(datos.asegurados) : datos.asegurados;
-      return Array.isArray(parsed) ? parsed : [];
-    } catch { return []; }
+      if (parsed && !Array.isArray(parsed) && parsed.lista) {
+        return {
+          aseguradosAdicionales: Array.isArray(parsed.lista) ? parsed.lista : [],
+          contratanteEsAsegurado: parsed.contratante_es_asegurado !== false
+        };
+      }
+      return { aseguradosAdicionales: Array.isArray(parsed) ? parsed : [], contratanteEsAsegurado: true };
+    } catch { return { aseguradosAdicionales: [], contratanteEsAsegurado: true }; }
   }, [datos?.asegurados]);
 
   const tipoRiesgo = useMemo(() => {
@@ -144,7 +150,7 @@ const DetalleExpediente = ({
         {/* Contratante / Asegurado */}
         <div className="seccion-bloque seccion-asegurado">
           <h6 className="text-primary mb-1" style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-            👤 {datos?.tipo_persona === 'Moral' ? 'Contratante (Persona Moral)' : 'Contratante / Asegurado Titular'}
+            👤 {datos?.tipo_persona === 'Moral' ? 'Contratante (Persona Moral)' : (contratanteEsAsegurado ? 'Contratante / Asegurado Titular' : 'Contratante')}
           </h6>
           <div className="row g-1">
             {datos?.tipo_persona === 'Moral' ? (
@@ -158,7 +164,7 @@ const DetalleExpediente = ({
           {!esAutos && aseguradosAdicionales.length > 0 && (
             <div className="mt-1">
               <small className="text-muted fw-bold" style={{ fontSize: '0.65rem' }}>
-                👥 Asegurados ({aseguradosAdicionales.length + 1} en total, incluye titular)
+                👥 Asegurados ({aseguradosAdicionales.length + (contratanteEsAsegurado ? 1 : 0)} en total{contratanteEsAsegurado ? ', incluye titular' : ''})
               </small>
               <table className="table table-sm table-bordered mt-1 mb-0" style={{ fontSize: '0.65rem' }}>
                 <thead className="table-light">

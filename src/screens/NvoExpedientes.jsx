@@ -90,6 +90,7 @@ const estadoInicialFormulario = {
   licencia_conducir: '',
   coberturas: [],
   recibos: [],
+  contratante_es_asegurado: true,
   asegurados: []
 };
 
@@ -2096,6 +2097,37 @@ const ModuloNvoExpedientes = () => {
     try {
       const datos = { ...formulario };
       
+      // 🔄 NORMALIZAR AGENTE: asegurar formato "CÓDIGO - Nombre" antes de guardar
+      if (datos.agente && agentes.length > 0) {
+        // Intentar encontrar el agente por agente_id o por texto
+        let agenteMatch = null;
+        if (datos.agente_id) {
+          agenteMatch = agentes.find(a => a.id === datos.agente_id);
+        }
+        if (!agenteMatch) {
+          // Buscar por código (primer token del texto)
+          const primerToken = datos.agente.trim().split(/[\s-]/)[0];
+          agenteMatch = agentes.find(a => a.codigoAgente && a.codigoAgente.toString() === primerToken);
+        }
+        if (!agenteMatch) {
+          // Buscar por nombre parcial
+          const textoLimpio = datos.agente.toLowerCase().trim().replace(/^\d+\s*-?\s*/, '');
+          agenteMatch = agentes.find(a => {
+            if (a.perfil !== 'Agente') return false;
+            const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase().trim();
+            return textoLimpio === nombreCompleto || nombreCompleto.includes(textoLimpio) || textoLimpio.includes(nombreCompleto);
+          });
+        }
+        if (agenteMatch) {
+          const nombre = `${agenteMatch.nombre || ''} ${agenteMatch.apellidoPaterno || ''} ${agenteMatch.apellidoMaterno || ''}`.trim();
+          // Usar codigoAgente del catálogo, o preservar clave_agente original del formulario/extractor
+          const codigo = agenteMatch.codigoAgente || datos.clave_agente || '';
+          datos.agente = codigo ? `${codigo} - ${nombre}` : nombre;
+          datos.agente_id = agenteMatch.id;
+          datos.clave_agente = codigo;
+        }
+      }
+      
       // 🔄 PASO 1: ACTUALIZAR CLIENTE EN BD (si cambió)
       console.log('🔍 Actualizando cliente si cambió...');
       const cambiosClienteDetectados = await actualizarClienteSiCambio(datos);
@@ -2212,10 +2244,15 @@ const ModuloNvoExpedientes = () => {
         datos.coberturas = JSON.stringify(datos.coberturas);
       }
 
-      // Serializar asegurados
+      // Serializar asegurados (incluir flag contratante_es_asegurado dentro del JSON)
       if (datos.asegurados && Array.isArray(datos.asegurados)) {
-        datos.asegurados = JSON.stringify(datos.asegurados);
+        const aseguradosConMeta = {
+          contratante_es_asegurado: datos.contratante_es_asegurado !== false,
+          lista: datos.asegurados
+        };
+        datos.asegurados = JSON.stringify(aseguradosConMeta);
       }
+      delete datos.contratante_es_asegurado;
 
       // 🔥 IMPORTANTE: Sincronizar campos entre camelCase y snake_case
       // para que el backend y frontend siempre estén compatibles
@@ -2984,18 +3021,21 @@ const ModuloNvoExpedientes = () => {
         }
       }
 
-      // Parsear asegurados si vienen como string JSON
+      // Parsear asegurados y extraer flag contratante_es_asegurado
       let aseguradosParseados = [];
+      let contratanteEsAsegurado = true; // default
       if (expedienteCompleto.asegurados) {
-        if (typeof expedienteCompleto.asegurados === 'string') {
-          try {
-            aseguradosParseados = JSON.parse(expedienteCompleto.asegurados);
-          } catch (e) {
-            console.warn('⚠️ Error al parsear asegurados:', e);
-            aseguradosParseados = [];
-          }
-        } else if (Array.isArray(expedienteCompleto.asegurados)) {
-          aseguradosParseados = expedienteCompleto.asegurados;
+        let parsed = expedienteCompleto.asegurados;
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch (e) { parsed = []; }
+        }
+        if (parsed && !Array.isArray(parsed) && parsed.lista) {
+          // Nuevo formato con metadata
+          contratanteEsAsegurado = parsed.contratante_es_asegurado !== false;
+          aseguradosParseados = Array.isArray(parsed.lista) ? parsed.lista : [];
+        } else if (Array.isArray(parsed)) {
+          // Formato legacy (solo array)
+          aseguradosParseados = parsed;
         }
       }
 
@@ -3061,12 +3101,16 @@ const ModuloNvoExpedientes = () => {
         coberturas: coberturasParseadas,
         asegurados: aseguradosParseados,
         recibos: recibosParseados,
+        asegurados: aseguradosParseados,
+        contratante_es_asegurado: contratanteEsAsegurado,
         // Asegurar valores por defecto para campos numéricos
         periodo_gracia: expedienteCompleto.periodo_gracia ?? 14,
         // Asegurar strings vacíos en lugar de null para campos de texto
         numero_poliza: expedienteCompleto.numero_poliza || '',
         numero_endoso: expedienteCompleto.numero_endoso || '',
         agente: expedienteCompleto.agente || '',
+        agente_id: expedienteCompleto.agente_id || null,
+        clave_agente: expedienteCompleto.clave_agente || '',
         sub_agente: expedienteCompleto.sub_agente || '',
         // Campos de vehículo
         marca: expedienteCompleto.marca || '',

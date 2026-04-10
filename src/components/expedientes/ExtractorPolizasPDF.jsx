@@ -155,9 +155,11 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           textoPagina1 = textoPagina;
         }
         
-        // Buscar página con "AVISO DE COBRO" o "Prima Neta"
-        if (textoPagina.match(/AVISO\s+DE\s+COBRO|Prima\s+Neta|PRIMA\s+NETA/i)) {
-          textoAvisoDeCobro = textoPagina;
+        // Buscar página con "AVISO DE COBRO" (prioridad) o "Prima Neta" (fallback)
+        if (textoPagina.match(/AVISO\s+DE\s+COBRO/i)) {
+          textoAvisoDeCobro = textoPagina; // Prioridad: página explícita de aviso
+        } else if (!textoAvisoDeCobro && textoPagina.match(/Prima\s+Neta|PRIMA\s+NETA/i) && !textoPagina.match(/CARÁTULA|CAR[AÁ]TULA|FACTURA|CFDI/i)) {
+          textoAvisoDeCobro = textoPagina; // Fallback: solo si no es carátula ni factura
         }
         
         // Buscar página con "CARÁTULA" o datos del vehículo

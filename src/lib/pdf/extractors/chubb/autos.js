@@ -811,6 +811,47 @@ export async function extraer(ctx) {
   console.log('Frecuencia:', frecuenciaPago);
   if (primer_pago) console.log('Primer pago:', primer_pago);
   if (pagos_subsecuentes) console.log('Pagos subsecuentes:', pagos_subsecuentes);
+
+  // ==================== PASO 5B: RECIBOS FRACCIONADOS DESDE AVISO DE COBRO ====================
+  // Chubb: La carátula tiene montos ANUALES, el Aviso de Cobro tiene montos POR RECIBO.
+  // Si es fraccionado, extraer "Total a pagar" del Aviso de Cobro como primer_pago.
+  if (tipo_pago === 'Fraccionado' && textoAvisoDeCobro) {
+    console.log('\n📋 PASO 5B: EXTRAER MONTOS DE RECIBO DESDE AVISO DE COBRO');
+    console.log('─────────────────────────────────────────────────────────');
+    
+    // Extraer "Total a pagar" del Aviso de Cobro (monto del primer recibo)
+    const totalPagarAvisoMatch = textoAvisoDeCobro.match(/Total\s+a\s+pagar[:\s]*\$?\s*([\d,]+\.?\d*)/i);
+    if (totalPagarAvisoMatch) {
+      const totalPrimerRecibo = totalPagarAvisoMatch[1].replace(/,/g, '');
+      console.log('💰 Total a pagar del Aviso de Cobro (primer recibo):', totalPrimerRecibo);
+      
+      // Solo usar si es diferente al total anual (confirma que es un recibo parcial)
+      const totalAnual = parseFloat(total) || 0;
+      const totalRecibo = parseFloat(totalPrimerRecibo) || 0;
+      
+      if (totalRecibo > 0 && totalRecibo < totalAnual) {
+        primer_pago = totalPrimerRecibo;
+        
+        // Calcular pagos subsecuentes: (total anual - primer recibo) / (num_recibos - 1)
+        const serieMatch = textoAvisoDeCobro.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
+        const numRecibos = serieMatch ? parseInt(serieMatch[2]) : 0;
+        
+        if (numRecibos > 1) {
+          const montoRestante = totalAnual - totalRecibo;
+          const montoSubsecuente = (montoRestante / (numRecibos - 1)).toFixed(2);
+          pagos_subsecuentes = montoSubsecuente;
+          console.log(`💰 Pagos subsecuentes calculados: (${totalAnual} - ${totalRecibo}) / ${numRecibos - 1} = ${montoSubsecuente}`);
+        }
+        
+        console.log('✅ primer_pago:', primer_pago);
+        console.log('✅ pagos_subsecuentes:', pagos_subsecuentes);
+      } else {
+        console.log('⚠️ Total del aviso igual o mayor al anual, no se usa como primer_pago');
+      }
+    } else {
+      console.log('⚠️ No se encontró "Total a pagar" en el Aviso de Cobro');
+    }
+  }
   
   // ==================== PASO 6: COBERTURAS ====================
   console.log('\n📋 PASO 6: EXTRACCIÓN DE COBERTURAS');

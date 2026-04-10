@@ -402,20 +402,43 @@ const FormularioExpedienteBase = React.memo(({
 
   useEffect(() => {
     if (formulario.agente && agentes.length > 0) {
-      const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
+      // Intentar resolver por agente_id directo (viene del backend) o por texto
+      const agenteId = formulario.agente_id || extraerAgenteIdDelFormulario(formulario.agente);
       
       if (agenteId && agenteId !== agenteIdSeleccionado) {
         setAgenteIdSeleccionado(agenteId);
         obtenerVendedoresPorAgente(agenteId);
+        // Sincronizar el texto del dropdown para que coincida con el formato de las opciones
+        const agenteEncontrado = agentes.find(a => a.id === agenteId);
+        if (agenteEncontrado) {
+          const nombre = `${agenteEncontrado.nombre || ''} ${agenteEncontrado.apellidoPaterno || ''} ${agenteEncontrado.apellidoMaterno || ''}`.trim();
+          // Usar codigoAgente del catálogo, o preservar clave_agente que ya trae el formulario (del extractor/BD)
+          const codigo = agenteEncontrado.codigoAgente || formulario.clave_agente || '';
+          const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+          if (formulario.agente !== displayText) {
+            setFormulario(prev => ({ ...prev, agente: displayText, agente_id: agenteId, clave_agente: codigo }));
+          }
+        }
       } else if (!agenteId) {
         setAgenteIdSeleccionado(null);
         setVendedores([]);
+      }
+    } else if (formulario.agente_id && agentes.length > 0) {
+      // Solo tenemos agente_id sin texto (caso edge)
+      const agenteEncontrado = agentes.find(a => a.id === formulario.agente_id);
+      if (agenteEncontrado) {
+        const nombre = `${agenteEncontrado.nombre || ''} ${agenteEncontrado.apellidoPaterno || ''} ${agenteEncontrado.apellidoMaterno || ''}`.trim();
+        const codigo = agenteEncontrado.codigoAgente || formulario.clave_agente || '';
+        const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
+        setAgenteIdSeleccionado(agenteEncontrado.id);
+        obtenerVendedoresPorAgente(agenteEncontrado.id);
+        setFormulario(prev => ({ ...prev, agente: displayText, agente_id: agenteEncontrado.id, clave_agente: codigo }));
       }
     } else {
       setAgenteIdSeleccionado(null);
       setVendedores([]);
     }
-  }, [formulario.agente, agentes]);
+  }, [formulario.agente, formulario.agente_id, agentes]);
 
   return (
     <div className="p-3">
@@ -968,7 +991,7 @@ const FormularioExpedienteBase = React.memo(({
               <h5 className="card-title border-bottom pb-2">
                 👥 Asegurados
                 <span className="badge bg-info ms-2" style={{ fontSize: '0.7rem' }}>
-                  {(formulario.asegurados?.length || 0) + 1}
+                  {(formulario.asegurados?.length || 0) + (formulario.contratante_es_asegurado !== false ? 1 : 0)}
                 </span>
               </h5>
 
@@ -977,8 +1000,23 @@ const FormularioExpedienteBase = React.memo(({
                   En pólizas de vida, si el asegurado es distinto al contratante, agrégalo aquí para que quede guardado en el expediente.
                 </div>
               )}
+
+              {/* Check: ¿El contratante es también asegurado? */}
+              <div className="form-check mb-3">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="contratante_es_asegurado"
+                  checked={formulario.contratante_es_asegurado !== false}
+                  onChange={(e) => setFormulario(prev => ({ ...prev, contratante_es_asegurado: e.target.checked }))}
+                />
+                <label className="form-check-label" htmlFor="contratante_es_asegurado" style={{ fontSize: '0.85rem' }}>
+                  El contratante también es asegurado (titular)
+                </label>
+              </div>
               
-              {/* Asegurado principal (contratante) */}
+              {/* Asegurado principal (contratante) - solo si es asegurado */}
+              {formulario.contratante_es_asegurado !== false && (
               <div className="card bg-light mb-2">
                 <div className="card-body py-2 px-3">
                   <div className="d-flex align-items-center">
@@ -995,6 +1033,7 @@ const FormularioExpedienteBase = React.memo(({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Lista de asegurados adicionales */}
               {(formulario.asegurados || []).map((aseg, index) => (
