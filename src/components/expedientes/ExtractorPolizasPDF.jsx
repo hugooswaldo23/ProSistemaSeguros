@@ -1237,7 +1237,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           console.log('🔎 Buscando por ASEGURADORA + CLAVE:', aseguradoraId, '+', codigo);
           // PASO 1A: Buscar por ASEGURADORA + CLAVE (la clave solo es única dentro de cada aseguradora)
           for (const miembro of equipoResult.data) {
-            if (miembro.perfil !== 'Agente' || !miembro.activo) continue;
+            if (String(miembro.perfil).toLowerCase() !== 'agente' || !miembro.activo) continue;
             
             const asignacionesResult = await obtenerEjecutivosPorProducto(miembro.id);
             if (asignacionesResult.success && asignacionesResult.data) {
@@ -1261,28 +1261,28 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           }
         }
         
-        // PASO 1B: Si no se encontró por aseguradora+clave, buscar por NOMBRE
+        // PASO 1B: Si no se encontró por aseguradora+clave, buscar por NOMBRE (case-insensitive, flexible)
         if (!agenteExistente && equipoResult.success && equipoResult.data) {
-          console.log('🔎 No encontrado por aseg+clave. Buscando por NOMBRE:', `${nombre} ${apellidoPaterno} ${apellidoMaterno}`);
+          const nombreBuscado = `${nombre} ${apellidoPaterno} ${apellidoMaterno}`.replace(/\s+/g, ' ').trim().toUpperCase();
+          console.log('🔎 No encontrado por aseg+clave. Buscando por NOMBRE:', nombreBuscado);
+          
           agenteExistente = equipoResult.data.find(miembro => {
-            if (miembro.perfil !== 'Agente' || !miembro.activo) return false;
+            // Comparación flexible de perfil (case-insensitive)
+            if (String(miembro.perfil || '').toLowerCase() !== 'agente') return false;
+            // No filtrar por activo aquí para evitar crear duplicados de agentes inactivos
             
-            // Opción 1: Nombre compuesto desde campos separados (apellidoPaterno, apellidoMaterno)
-            const nombreCompleto1 = `${miembro.nombre} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.trim().toUpperCase();
-            const nombreCompleto2 = `${nombre} ${apellidoPaterno} ${apellidoMaterno}`.trim().toUpperCase();
+            const nombreCompleto1 = `${miembro.nombre || ''} ${miembro.apellidoPaterno || miembro.apellido_paterno || ''} ${miembro.apellidoMaterno || miembro.apellido_materno || ''}`.replace(/\s+/g, ' ').trim().toUpperCase();
+            const nombreSoloCampo = (miembro.nombre || '').replace(/\s+/g, ' ').trim().toUpperCase();
             
-            // Opción 2: Nombre completo todo en un solo campo (para agentes guardados con nombre completo)
-            const nombreSoloCampo = (miembro.nombre || '').trim().toUpperCase();
-            const nombreExtraido = nombreCompleto2;
-            
-            console.log(`  Comparando opción 1: "${nombreCompleto1}" === "${nombreCompleto2}"`, nombreCompleto1 === nombreCompleto2);
-            console.log(`  Comparando opción 2: "${nombreSoloCampo}" === "${nombreExtraido}"`, nombreSoloCampo === nombreExtraido);
-            
-            return nombreCompleto1 === nombreCompleto2 || nombreSoloCampo === nombreExtraido;
+            const match = nombreCompleto1 === nombreBuscado || nombreSoloCampo === nombreBuscado;
+            if (match) {
+              console.log(`  ✅ MATCH por nombre: "${nombreCompleto1}" === "${nombreBuscado}"`);
+            }
+            return match;
           });
           
           if (agenteExistente) {
-            console.log('✅ Agente encontrado por NOMBRE:', agenteExistente.nombre);
+            console.log('✅ Agente encontrado por NOMBRE:', agenteExistente.nombre, 'ID:', agenteExistente.id);
           } else {
             console.log('❌ No se encontró agente por nombre');
           }
@@ -1404,6 +1404,20 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
             console.log(`🔗 [CREAR-AGENTE] Incluyendo asignación: aseg=${aseguradoraId}, prod=${productoMatchPre.nombre}, clave=${codigo}`);
           }
 
+          // 🛡️ GUARD FINAL: última verificación anti-duplicados antes de crear
+          const nombreParaGuard = `${nombre} ${apellidoPaterno} ${apellidoMaterno}`.replace(/\s+/g, ' ').trim().toUpperCase();
+          const duplicado = equipoResult.data.find(m => {
+            const n = `${m.nombre || ''} ${m.apellidoPaterno || m.apellido_paterno || ''} ${m.apellidoMaterno || m.apellido_materno || ''}`.replace(/\s+/g, ' ').trim().toUpperCase();
+            return n === nombreParaGuard || (m.nombre || '').replace(/\s+/g, ' ').trim().toUpperCase() === nombreParaGuard;
+          });
+          
+          if (duplicado) {
+            console.log('🛡️ GUARD: Agente ya existe en BD, NO se crea duplicado:', duplicado.nombre, 'ID:', duplicado.id);
+            agenteId = duplicado.id;
+            agenteExistente = duplicado;
+            setAgenteEncontrado(duplicado);
+            toast.info(`Agente ya existe: ${nombreCompleto}. Agregando clave ${codigo}...`);
+          } else {
           const nuevoAgente = {
             codigo: codigoConsecutivo, // Código del equipo, NO la clave de aseguradora
             nombre: nombre,
@@ -1439,6 +1453,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
           } else {
             throw new Error(resultado.error);
           }
+          } // cierre del else del guard anti-duplicados
         }
         
         // VINCULAR AGENTE CON ASEGURADORA Y PRODUCTO
