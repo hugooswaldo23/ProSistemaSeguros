@@ -824,9 +824,20 @@ const ListaExpedientes = React.memo(({
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
-                    // Extraer clave del agente del campo expediente.agente
+                    // Buscar agente: por agente_id, por clave extraída del texto, o por nombre
                     const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
-                    const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                    const agenteInfo = (expediente.agente_id && agentes.find(a => a.id === expediente.agente_id))
+                      || agentes.find(a => a.codigoAgente && a.codigoAgente === claveAgenteExpediente)
+                      || (() => {
+                        // Fallback: buscar por nombre cuando el texto no tiene formato "código - nombre"
+                        if (!expediente.agente || expediente.agente.includes('-')) return null;
+                        const textoLimpio = expediente.agente.toLowerCase().trim();
+                        return agentes.find(a => {
+                          if (a.perfil !== 'Agente') return false;
+                          const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase().trim();
+                          return textoLimpio === nombreCompleto || nombreCompleto.includes(textoLimpio) || textoLimpio.includes(nombreCompleto);
+                        });
+                      })();
                     
                     // Detectar tipo de duplicado para este expediente
                     const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);

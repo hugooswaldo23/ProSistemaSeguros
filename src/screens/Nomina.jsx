@@ -257,10 +257,13 @@ const Nomina = () => {
         const nombreAgente = recibo.agente ? recibo.agente.split(' - ')[1]?.trim().toLowerCase() : null;
         const nombreSubAgente = recibo.sub_agente ? recibo.sub_agente.trim().toLowerCase() : null;
         
-        const agente = nombreAgente ? empleados.find(emp => {
+        // Buscar agente: por nombre después del dash, o por texto completo si no tiene dash
+        const textoAgenteFallback = (!nombreAgente && recibo.agente) ? recibo.agente.trim().toLowerCase() : null;
+        const agente = (nombreAgente || textoAgenteFallback) ? empleados.find(emp => {
           if (emp.perfil !== 'Agente') return false;
           const nombreCompleto = `${emp.nombre || ''} ${emp.apellidoPaterno || ''} ${emp.apellidoMaterno || ''}`.trim().toLowerCase();
-          return nombreCompleto === nombreAgente || nombreAgente.includes(nombreCompleto) || nombreCompleto.includes(nombreAgente);
+          const textoABuscar = nombreAgente || textoAgenteFallback;
+          return nombreCompleto === textoABuscar || textoABuscar.includes(nombreCompleto) || nombreCompleto.includes(textoABuscar);
         }) : null;
         
         if (!agente) return;

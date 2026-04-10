@@ -1293,14 +1293,15 @@ DCPRO Administración`;
             font-size: 13px;
           }
           .compact-table th {
-            background: #F9FAFB;
-            font-weight: 600;
+            background: #D1D5DB;
+            font-weight: 700;
             font-size: 11px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
-            color: #6B7280;
-            padding: 8px 12px;
-            border-bottom: 2px solid #E5E7EB;
+            color: #1F2937;
+            padding: 10px 12px;
+            border-bottom: 2px solid #9CA3AF;
+            border-top: 3px solid #6B7280;
           }
           .compact-table td {
             padding: 10px 12px;
