@@ -316,7 +316,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         setEstado('error');
         setErrores([{
           tipo: 'error',
-          mensaje: metodoActual === 'ia' ? 'Error al extraer con IA' : 'Error al procesar el PDF',
+          mensaje: metodoActivo === 'openai' ? 'Error al extraer con IA' : 'Error al procesar el PDF',
           detalle: error.message
         }]);
         return;

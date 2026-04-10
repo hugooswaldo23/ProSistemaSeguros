@@ -100,7 +100,7 @@ export async function extraer(ctx) {
   console.log('═══════════════════════════════════════════════════════════');
   console.log('📄 TEXTO COMPLETO DEL PDF (primeros 3000 caracteres):');
   console.log('═══════════════════════════════════════════════════════════');
-  console.log(textoCompleto.substring(0, 3000));
+  console.log(textoCompleto.substring(0, 4000));
   console.log('═══════════════════════════════════════════════════════════');
   console.log(`📊 Total caracteres: ${textoCompleto.length}`);
   console.log('═══════════════════════════════════════════════════════════\n');
@@ -373,36 +373,134 @@ export async function extraer(ctx) {
   let gastos_expedicion = '';
   let iva = '';
   let total = '';
+  let primer_pago = '';
+  let pagos_subsecuentes = '';
 
-  // Buscar línea con 6 valores numéricos (formato Chubb desglose financiero)
-  const textosBusqueda = [textoAvisoDeCobro, textoCompleto].filter(Boolean);
-  for (const txtBusca of textosBusqueda) {
-    if (prima_neta) break;
-    const lineas = txtBusca.split(/\r?\n/);
+  // ═══════════════════════════════════════════════════════════════════════
+  // CHUBB: Extraer montos financieros usando las dos etiquetas clave:
+  // - "Prima total" = total ANUAL de la póliza (carátula)
+  // - "Total a pagar" = monto del PRIMER RECIBO (aviso de cobro)
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // 🔍 DEBUG: Mostrar resumen de cada página del PDF
+  console.log('\n📋 ESCANEO POR PÁGINA:');
+  for (const pag of (todasLasPaginas || [])) {
+    const tiene = [];
+    if (/Prima\s+total/i.test(pag.texto)) tiene.push('"Prima total"');
+    if (/Total\s+a\s+pagar/i.test(pag.texto)) tiene.push('"Total a pagar"');
+    if (/AVISO\s+DE\s+COBRO/i.test(pag.texto)) tiene.push('"AVISO DE COBRO"');
+    if (/Serie\s+del\s+aviso/i.test(pag.texto)) tiene.push('"Serie del aviso"');
+    console.log(`  Pág ${pag.numero} (${pag.texto.length} chars): ${tiene.length ? tiene.join(', ') : '(sin keywords financieros)'}`);
+  }
+
+  // Helper: buscar un monto específico por etiqueta en el texto, línea por línea
+  const buscarMontoPorEtiquetaExacta = (texto, etiquetaRegex, nombre) => {
+    const lineas = texto.split(/\r?\n/);
     for (let i = 0; i < lineas.length; i++) {
-      // Buscar línea con exactamente 6 montos separados por espacios
-      const montos = lineas[i].match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/g);
-      if (montos && montos.length >= 6) {
-        // Verificar que una línea cercana tenga "Prima" para confirmar contexto
-        const contexto = lineas.slice(Math.max(0, i-5), i+1).join(' ');
-        if (/Prima/i.test(contexto)) {
-          const limpiar = (s) => s.replace(/,/g, '');
-          prima_neta = limpiar(montos[0]);
-          otros_servicios = limpiar(montos[1]);
-          cargo_pago_fraccionado = limpiar(montos[2]);
-          gastos_expedicion = limpiar(montos[3]);
-          iva = limpiar(montos[4]);
-          total = limpiar(montos[5]);
-          console.log('💰 Montos de tabla desglose Chubb (línea', i, '):', {
-            prima_neta, otros_servicios, cargo_pago_fraccionado, gastos_expedicion, iva, total
-          });
-          break;
+      if (!etiquetaRegex.test(lineas[i])) continue;
+      // Ignorar encabezados bilingües tipo "Prima Total / Total Premium" sin valor real
+      if (/Total\s+Premium/i.test(lineas[i]) || /\$\s*0\.00/.test(lineas[i])) {
+        console.log(`  ⏭️ Línea ${i} ignorada (header bilingüe o $0.00): "${lineas[i].substring(0, 80)}"`);
+        continue;
+      }
+      console.log(`🔍 "${nombre}" en línea ${i}: "${lineas[i].substring(0, 100)}"`);
+
+      // Caso 1: Monto en la misma línea (ej: "Prima total 6,355.43" o "Total a pagar $ 2,461.57")
+      const montoEnLinea = lineas[i].match(new RegExp(etiquetaRegex.source + '[\\s:]*\\$?\\s*([\\d,]+\\.\\d{2})', 'i'));
+      if (montoEnLinea) {
+        const val = parseFloat(montoEnLinea[1].replace(/,/g, ''));
+        if (val > 0) {
+          console.log(`  ✅ Monto en misma línea: $${montoEnLinea[1]}`);
+          return montoEnLinea[1].replace(/,/g, '');
+        }
+      }
+
+      // Caso 2: Monto en LÍNEAS ANTERIORES (formato Chubb: valor ANTES de etiqueta)
+      // Buscar hasta 3 líneas arriba por un monto (saltando posibles refs alfanuméricas)
+      for (let back = 1; back <= 3 && i - back >= 0; back++) {
+        const lineaAnterior = lineas[i - back].trim();
+        const montoAnterior = lineaAnterior.match(/^[\$\s]*([\d,]+\.\d{2})$/);
+        if (montoAnterior) {
+          const val = parseFloat(montoAnterior[1].replace(/,/g, ''));
+          if (val > 0) {
+            console.log(`  ✅ Monto en línea anterior (i-${back}): $${montoAnterior[1]}`);
+            return montoAnterior[1].replace(/,/g, '');
+          }
+        }
+      }
+
+      // Caso 3: Formato tabular — etiquetas en esta línea, montos en la siguiente
+      if (i + 1 < lineas.length) {
+        const valoresSig = lineas[i + 1].match(/(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})/g);
+        if (valoresSig && valoresSig.length >= 1) {
+          const monto = valoresSig[valoresSig.length - 1].replace(/,/g, '');
+          if (parseFloat(monto) > 0) {
+            console.log(`  ✅ Monto en siguiente línea (col ${valoresSig.length}): $${monto}`);
+            return monto;
+          }
         }
       }
     }
+    console.log(`  ❌ "${nombre}" no encontrado`);
+    return '';
+  };
+
+  // PASO A: Buscar "Prima total" → total ANUAL
+  const totalAnualStr = buscarMontoPorEtiquetaExacta(textoCompleto, /Prima\s+total/i, 'Prima total (anual)');
+  
+  // PASO B: Buscar "Total a pagar" → primer recibo (buscar en aviso de cobro primero, luego completo)
+  const textoBuscarRecibo = textoAvisoDeCobro || textoCompleto;
+  const totalPrimerReciboStr = buscarMontoPorEtiquetaExacta(textoBuscarRecibo, /Total\s+a\s+pagar/i, 'Total a pagar (recibo)');
+
+  console.log(`\n📊 RESULTADOS CLAVE:`);
+  console.log(`  Prima total (anual): $${totalAnualStr || 'NO ENCONTRADO'}`);
+  console.log(`  Total a pagar (1er recibo): $${totalPrimerReciboStr || 'NO ENCONTRADO'}`);
+
+  // Decidir qué usar como `total` de la póliza
+  const totalAnualNum = parseFloat(totalAnualStr) || 0;
+  const totalReciboNum = parseFloat(totalPrimerReciboStr) || 0;
+
+  if (totalAnualNum > 0 && totalAnualNum > totalReciboNum) {
+    // Tenemos el total anual real → usarlo
+    total = totalAnualStr;
+    console.log(`✅ Total ANUAL aplicado: $${total}`);
+    
+    // Buscar los demás montos anuales en la PÁGINA que contiene "Prima total"
+    // Usar buscarMontoPorEtiquetaExacta que maneja el formato Chubb (valor ANTES de etiqueta)
+    const paginaConPrimaTotal = (todasLasPaginas || []).find(p => 
+      /Prima\s+total/i.test(p.texto) && !/Total\s+Premium/i.test(p.texto)
+    );
+    const textoCaratula = paginaConPrimaTotal ? paginaConPrimaTotal.texto : textoCompleto;
+    
+    prima_neta = buscarMontoPorEtiquetaExacta(textoCaratula, /Prima\s+neta/i, 'Prima neta (anual)');
+    otros_servicios = buscarMontoPorEtiquetaExacta(textoCaratula, /Otros\s+descuentos/i, 'Otros descuentos (anual)');
+    cargo_pago_fraccionado = buscarMontoPorEtiquetaExacta(textoCaratula, /Financiamiento/i, 'Financiamiento (anual)');
+    gastos_expedicion = buscarMontoPorEtiquetaExacta(textoCaratula, /Gastos\s+de\s+expedici/i, 'Gastos expedición (anual)');
+    iva = buscarMontoPorEtiquetaExacta(textoCaratula, /I\.V\.A\./i, 'IVA (anual)');
+    
+    console.log('✅ Desglose anual:', { prima_neta, otros_servicios, cargo_pago_fraccionado, gastos_expedicion, iva, total });
+  } else if (totalReciboNum > 0) {
+    // Solo tenemos "Total a pagar" — podría ser pago único
+    total = totalPrimerReciboStr;
+    console.log(`⚠️ Solo "Total a pagar" encontrado, usando como total: $${total}`);
   }
 
-  // PRIORIDAD 2: fallback con obtenerMontoPorEtiqueta si la tabla no se encontró
+  // Si es fraccionado y tenemos ambos montos, establecer primer_pago y subsecuentes
+  if (totalAnualNum > totalReciboNum && totalReciboNum > 0) {
+    primer_pago = totalPrimerReciboStr;
+    // Calcular pagos subsecuentes
+    const serieMatch = textoCompleto.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
+    const numRecibos = serieMatch ? parseInt(serieMatch[2]) : 0;
+    if (numRecibos > 1) {
+      const montoSubsecuente = ((totalAnualNum - totalReciboNum) / (numRecibos - 1)).toFixed(2);
+      pagos_subsecuentes = montoSubsecuente;
+      console.log(`✅ primer_pago: $${primer_pago}`);
+      console.log(`✅ pagos_subsecuentes: ($${totalAnualNum} - $${totalReciboNum}) / ${numRecibos - 1} = $${montoSubsecuente}`);
+    }
+  }
+
+
+  // PRIORIDAD 2: fallback con obtenerMontoPorEtiqueta si aún faltan datos
   if (!prima_neta) {
     prima_neta = (obtenerMontoPorEtiqueta(textoFinanciero, [/Prima\s+Neta/i], true)
       || extraerDato(/Prima\s+Neta[\s\$]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
@@ -416,8 +514,8 @@ export async function extraer(ctx) {
       || extraerDato(/I\.V\.A\.[\s\$:]+([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
   }
   if (!total) {
-    total = (obtenerMontoPorEtiqueta(textoFinanciero, [/Total\s+a\s+pagar/i, /Prima\s+total/i], false)
-      || extraerDato(/(?:Total\s+a\s+pagar|Prima\s+total)[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
+    total = (obtenerMontoPorEtiqueta(textoFinanciero, [/Prima\s+total/i, /Total\s+a\s+pagar/i], false)
+      || extraerDato(/(?:Prima\s+total|Total\s+a\s+pagar)[:\s]*\$?\s*([\d,]+\.?\d*)/i, textoFinanciero) || '').replace(/,/g, '');
   }
 
   let prima_pagada = prima_neta;
@@ -648,8 +746,6 @@ export async function extraer(ctx) {
     }
     return '';
   };
-  let primer_pago = '';
-  let pagos_subsecuentes = '';
   try {
     const lineasFin = textoPagos.split(/\r?\n/);
     for (let i = 0; i < lineasFin.length; i++) {
