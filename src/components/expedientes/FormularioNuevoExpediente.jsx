@@ -144,7 +144,13 @@ const FormularioNuevoExpediente = ({
           ...prev,
           // Datos de la póliza (aplicar si vacío)
           numero_poliza: aplicarSiVacio(datosPoliza.numero_poliza, prev.numero_poliza),
-          compania: aplicarSiVacio(datosPoliza.compania, prev.compania),
+          compania: (() => {
+            const val = aplicarSiVacio(datosPoliza.compania, prev.compania);
+            if (!val) return '';
+            const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+            const match = companias.find(c => norm(c) === norm(val) || norm(c).includes(norm(val)) || norm(val).includes(norm(c)));
+            return match || val;
+          })(),
           producto: aplicarSiVacio(datosPoliza.producto, prev.producto),
           numero_endoso: aplicarSiVacio(datosPoliza.numero_endoso, prev.numero_endoso),
           
@@ -192,8 +198,13 @@ const FormularioNuevoExpediente = ({
           servicio: aplicarSiVacio(datosPoliza.servicio, prev.servicio),
           movimiento: aplicarSiVacio(datosPoliza.movimiento, prev.movimiento),
           
-          // Vehículo (si aplica)
-          marca: aplicarSiVacio(datosPoliza.marca, prev.marca),
+          // Vehículo (si aplica) — normalizar marca para coincidir con dropdown
+          marca: (() => {
+            const val = aplicarSiVacio(datosPoliza.marca, prev.marca);
+            if (!val) return '';
+            const match = marcasVehiculo.find(m => m.toLowerCase() === val.toLowerCase());
+            return match || val;
+          })(),
           modelo: aplicarSiVacio(datosPoliza.modelo, prev.modelo),
           anio: aplicarSiVacio(datosPoliza.anio, prev.anio),
           numero_serie: aplicarSiVacio(datosPoliza.numero_serie, prev.numero_serie),
