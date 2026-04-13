@@ -27,11 +27,14 @@ const obtenerComisionAseguradora = (aseguradoraId, productoId, aseguradoras = []
 
 // Componente para mostrar tabla de comisiones
 const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido = 0, aseguradoras = [], tiposProductos = [] }) => {
-  if (!productosAseguradoras || productosAseguradoras.length === 0) {
+  // Filtrar solo entradas con productoId definido (las auto-detectadas de pólizas)
+  const conProducto = (productosAseguradoras || []).filter(item => item.productoId);
+  
+  if (conProducto.length === 0) {
     return (
       <div className="alert alert-info">
         <AlertCircle size={20} className="me-2" />
-        No hay productos asignados aún. Asigne productos en la pestaña "Perfil y Asignaciones".
+        No hay productos asignados aún. Los productos se agregarán automáticamente al capturar pólizas.
       </div>
     );
   }
@@ -49,7 +52,7 @@ const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido 
           </tr>
         </thead>
         <tbody>
-          {productosAseguradoras.map((item, index) => {
+          {conProducto.map((item, index) => {
             const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
             const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
             const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
@@ -94,8 +97,10 @@ const TablaComisionesProductos = ({ productosAseguradoras, porcentajeCompartido 
 
 // Componente para asignar producto-aseguradora con comisiones
 const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecutivosDisponibles, onChange, onComisionChange, usuarioId, onAsignarEjecutivo, aseguradoras = [], tiposProductos = [] }) => {
-  if (!productosAseguradoras || productosAseguradoras.length === 0) {
-    return <span className="text-muted">No hay productos seleccionados</span>;
+  const conProducto = (productosAseguradoras || []).filter(item => item.productoId);
+  
+  if (conProducto.length === 0) {
+    return <span className="text-muted">No hay productos asignados aún. Se agregarán al capturar pólizas.</span>;
   }
 
   return (
@@ -111,7 +116,7 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
           </tr>
         </thead>
         <tbody>
-          {productosAseguradoras.map((item, index) => {
+          {conProducto.map((item, index) => {
             const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
             const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
             const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
@@ -171,235 +176,159 @@ const AsignarEjecutivoPorProductoAseguradora = ({ productosAseguradoras, ejecuti
 // Modal para seleccionar aseguradora y productos
 const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAseguradoras, aseguradoras = [], tiposProductos = [] }) => {
   const [aseguradoraSeleccionada, setAseguradoraSeleccionada] = useState(null);
-  const [productosSeleccionados, setProductosSeleccionados] = useState([]);
-  const [productosTemporales, setProductosTemporales] = useState([]);
+  const [claveInput, setClaveInput] = useState('');
+  const [clavesTemporales, setClavesTemporales] = useState([]);
 
-  // Productos permitidos por la aseguradora seleccionada (normaliza diferentes formatos)
-  const productosPermitidos = useMemo(() => {
-    if (!aseguradoraSeleccionada) return null;
-    const aseguradora = aseguradoras.find(a => String(a.id) === String(aseguradoraSeleccionada));
-    if (!aseguradora) return [];
-    const lista = aseguradora.productos_disponibles || [];
-    // elementos pueden ser ids (number|string) o objetos { producto_id }
-    const ids = lista.map(item => {
-      if (item && typeof item === 'object') return Number(item.producto_id || item.productoId || item.id);
-      return Number(item);
-    }).filter(n => !isNaN(n));
-    return ids;
-  }, [aseguradoraSeleccionada, aseguradoras]);
-
-  // Agrupar productos por categoría, filtrando por los permitidos si aplica
-  const productosPorCategoria = useMemo(() => {
-    const grupos = {};
-    // Normalizar set de permitidos como strings para comparación robusta
-    const permitidosSet = Array.isArray(productosPermitidos) ? new Set(productosPermitidos.map(id => String(id))) : null;
-    tiposProductos.forEach(producto => {
-      // Si hay un filtro de aseguradora, excluir productos no permitidos (comparando como strings)
-      if (permitidosSet && permitidosSet.size > 0 && !permitidosSet.has(String(producto.id))) {
-        return;
-      }
-
-      const categoriaKey = producto.categoria || 'General';
-      if (!grupos[categoriaKey]) {
-        grupos[categoriaKey] = [];
-      }
-      grupos[categoriaKey].push(producto);
-    });
-    return grupos;
-  }, [tiposProductos, productosPermitidos]);
-
-  const handleAgregarProductos = () => {
-    if (!aseguradoraSeleccionada || productosSeleccionados.length === 0) {
-      alert('Seleccione una aseguradora y al menos un producto');
+  const handleAgregarClave = () => {
+    if (!aseguradoraSeleccionada) {
+      alert('Seleccione una aseguradora');
+      return;
+    }
+    if (!claveInput.trim()) {
+      alert('Ingrese la clave del agente');
       return;
     }
 
-    const nuevosProductos = productosSeleccionados.map(productoId => {
-      const comisionAseg = obtenerComisionAseguradora(aseguradoraSeleccionada, productoId, aseguradoras);
-      return {
-        aseguradoraId: aseguradoraSeleccionada,
-        productoId: productoId,
-        ejecutivoId: null,
-        comisionPersonalizada: comisionAseg || 0
-      };
-    });
+    // Verificar duplicado: misma aseguradora ya en temporales o guardados
+    const yaExisteTemp = clavesTemporales.some(
+      p => String(p.aseguradoraId) === String(aseguradoraSeleccionada)
+    );
+    const yaExisteGuardado = (productosAseguradoras || []).some(
+      p => String(p.aseguradoraId) === String(aseguradoraSeleccionada)
+    );
+    if (yaExisteTemp || yaExisteGuardado) {
+      alert('Ya existe una clave para esta aseguradora');
+      return;
+    }
 
-    setProductosTemporales([...productosTemporales, ...nuevosProductos]);
-    setProductosSeleccionados([]);
+    setClavesTemporales([...clavesTemporales, {
+      aseguradoraId: aseguradoraSeleccionada,
+      productoId: null,
+      ejecutivoId: null,
+      comisionPersonalizada: 0,
+      clave: claveInput.trim()
+    }]);
+    setClaveInput('');
     setAseguradoraSeleccionada(null);
   };
 
-  const handleEliminarProducto = (index) => {
-    setProductosTemporales(productosTemporales.filter((_, i) => i !== index));
+  const handleEliminarClave = (index) => {
+    setClavesTemporales(clavesTemporales.filter((_, i) => i !== index));
   };
 
   const handleGuardar = () => {
-    onSave(productosTemporales);
-    setProductosTemporales([]);
+    onSave(clavesTemporales);
+    setClavesTemporales([]);
     setAseguradoraSeleccionada(null);
-    setProductosSeleccionados([]);
-  };
-
-  const toggleProducto = (productoId) => {
-    if (productosSeleccionados.includes(productoId)) {
-      setProductosSeleccionados(productosSeleccionados.filter(id => id !== productoId));
-    } else {
-      setProductosSeleccionados([...productosSeleccionados, productoId]);
-    }
+    setClaveInput('');
   };
 
   if (!show) return null;
 
+  // Aseguradoras que ya tienen clave (guardadas o temporales)
+  const aseguradorasConClave = new Set([
+    ...(productosAseguradoras || []).map(p => String(p.aseguradoraId)),
+    ...clavesTemporales.map(p => String(p.aseguradoraId))
+  ]);
+
   return (
     <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="modal-dialog modal-xl">
+      <div className="modal-dialog modal-lg">
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title">
               <Building2 size={24} className="me-2" />
-              Seleccionar Aseguradora y Productos
+              Agregar Clave por Aseguradora
             </h5>
             <button type="button" className="btn-close" onClick={onClose}></button>
           </div>
           <div className="modal-body">
+            <div className="alert alert-info mb-3">
+              <AlertCircle size={16} className="me-2" />
+              Selecciona la aseguradora e ingresa la clave del agente. Los productos se agregarán automáticamente al capturar pólizas.
+            </div>
             <div className="row">
               {/* Panel izquierdo - Selección */}
               <div className="col-md-7">
-                {/* Paso 1: Seleccionar Aseguradora */}
-                <div className="card mb-3">
+                <div className="card">
                   <div className="card-header bg-primary text-white">
-                    <h6 className="mb-0">Paso 1: Seleccionar Aseguradora</h6>
+                    <h6 className="mb-0">Aseguradora y Clave</h6>
                   </div>
                   <div className="card-body">
-                    <div className="row g-2">
-                      {aseguradoras.map(aseguradora => (
-                        <div key={aseguradora.id} className="col-md-4">
-                          <div 
-                            className={`card border-2 cursor-pointer ${aseguradoraSeleccionada === aseguradora.id ? 'border-primary bg-primary bg-opacity-10' : 'border-light'}`}
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => setAseguradoraSeleccionada(aseguradora.id)}
-                          >
-                            <div className="card-body p-2 text-center">
-                              <input
-                                type="radio"
-                                className="form-check-input me-2"
-                                checked={aseguradoraSeleccionada === aseguradora.id}
-                                onChange={() => setAseguradoraSeleccionada(aseguradora.id)}
-                              />
-                              <div>
-                                <small className="fw-bold">{aseguradora.nombre}</small>
-                                <div className="mt-1">
-                                  <span className="badge bg-light text-dark">Productos: {(aseguradora.productos_disponibles || []).length}</span>
+                    {/* Seleccionar Aseguradora */}
+                    <label className="form-label fw-semibold mb-2">Aseguradora</label>
+                    <div className="row g-2 mb-3">
+                      {aseguradoras.map(aseguradora => {
+                        const yaRegistrada = aseguradorasConClave.has(String(aseguradora.id));
+                        return (
+                          <div key={aseguradora.id} className="col-md-4">
+                            <div 
+                              className={`card border-2 ${yaRegistrada ? 'opacity-50' : 'cursor-pointer'} ${aseguradoraSeleccionada === aseguradora.id ? 'border-primary bg-primary bg-opacity-10' : 'border-light'}`}
+                              style={{ cursor: yaRegistrada ? 'not-allowed' : 'pointer' }}
+                              onClick={() => !yaRegistrada && setAseguradoraSeleccionada(aseguradora.id)}
+                            >
+                              <div className="card-body p-2 text-center">
+                                <input
+                                  type="radio"
+                                  className="form-check-input me-2"
+                                  checked={aseguradoraSeleccionada === aseguradora.id}
+                                  onChange={() => !yaRegistrada && setAseguradoraSeleccionada(aseguradora.id)}
+                                  disabled={yaRegistrada}
+                                />
+                                <div>
+                                  <small className="fw-bold">{aseguradora.nombre}</small>
+                                  {yaRegistrada && <div><span className="badge bg-warning mt-1">Ya registrada</span></div>}
                                 </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
-                  </div>
-                </div>
 
-                {/* Paso 2: Seleccionar Productos */}
-                <div className="card">
-                  <div className="card-header bg-success text-white">
-                    <h6 className="mb-0">Paso 2: Seleccionar Productos</h6>
-                  </div>
-                  <div className="card-body">
-                    {!aseguradoraSeleccionada ? (
-                      <div className="text-center text-muted py-3">
-                        <Package size={48} className="mb-2 opacity-50" />
-                        <p>Primero seleccione una aseguradora</p>
-                      </div>
-                    ) : (
-                      <div>
-                        {Object.keys(productosPorCategoria).length === 0 ? (
-                          <div className="text-center py-4 text-muted">
-                            <p>No se encontraron productos para la aseguradora seleccionada.</p>
-                          </div>
-                        ) : (
-                          Object.entries(productosPorCategoria).map(([categoria, productos]) => {
-                            return (
-                              <div key={categoria} className="mb-3">
-                                <h6 className="text-muted mb-2">{categoria}</h6>
-                                <div className="row g-2">
-                                  {productos.map(producto => {
-                                    const yaExisteTemp = productosTemporales.some(
-                                      p => p.aseguradoraId === aseguradoraSeleccionada && p.productoId === producto.id
-                                    );
-                                    const yaExisteGuardado = (productosAseguradoras || []).some(
-                                      p => String(p.aseguradoraId) === String(aseguradoraSeleccionada) && String(p.productoId) === String(producto.id)
-                                    );
-                                    const yaExiste = yaExisteTemp || yaExisteGuardado;
-                                    const comisionAseg = obtenerComisionAseguradora(aseguradoraSeleccionada, producto.id, aseguradoras);
+                    {/* Clave del agente */}
+                    <label className="form-label fw-semibold">Clave del Agente</label>
+                    <div className="input-group mb-3">
+                      <span className="input-group-text"><Hash size={16} /></span>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="Ej: 12345, AG-001"
+                        value={claveInput}
+                        onChange={(e) => setClaveInput(e.target.value)}
+                        disabled={!aseguradoraSeleccionada}
+                        onKeyDown={(e) => e.key === 'Enter' && handleAgregarClave()}
+                      />
+                    </div>
 
-                                    return (
-                                      <div key={producto.id} className="col-md-6">
-                                        <div 
-                                          className={`card border ${productosSeleccionados.includes(producto.id) ? 'border-success bg-success bg-opacity-10' : 'border-light'} ${yaExiste ? 'opacity-50' : ''}`}
-                                          style={{ cursor: yaExiste ? 'not-allowed' : 'pointer' }}
-                                          onClick={() => !yaExiste && toggleProducto(producto.id)}
-                                        >
-                                          <div className="card-body p-2">
-                                            <div className="form-check">
-                                              <input
-                                                type="checkbox"
-                                                className="form-check-input"
-                                                checked={productosSeleccionados.includes(producto.id)}
-                                                onChange={() => !yaExiste && toggleProducto(producto.id)}
-                                                disabled={yaExiste}
-                                              />
-                                              <label className="form-check-label w-100">
-                                                <span className="badge bg-secondary me-1">{producto.codigo}</span>
-                                                <small>{producto.nombre}</small>
-                                                <span className="badge bg-primary ms-2">{comisionAseg}%</span>
-                                                {yaExiste && <span className="badge bg-warning ms-2">Ya agregado</span>}
-                                              </label>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                        
-                        <button 
-                          className="btn btn-primary w-100 mt-3"
-                          onClick={handleAgregarProductos}
-                          disabled={productosSeleccionados.length === 0}
-                        >
-                          <Plus size={20} className="me-2" />
-                          Agregar Productos Seleccionados
-                        </button>
-                      </div>
-                    )}
+                    <button 
+                      className="btn btn-primary w-100"
+                      onClick={handleAgregarClave}
+                      disabled={!aseguradoraSeleccionada || !claveInput.trim()}
+                    >
+                      <Plus size={20} className="me-2" />
+                      Agregar Clave
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Panel derecho - Lista de productos agregados */}
+              {/* Panel derecho - Lista de claves agregadas */}
               <div className="col-md-5">
                 <div className="card">
                   <div className="card-header bg-info text-white">
-                    <h6 className="mb-0">Productos Agregados ({productosTemporales.length})</h6>
+                    <h6 className="mb-0">Claves Agregadas ({clavesTemporales.length})</h6>
                   </div>
-                  <div className="card-body" style={{ maxHeight: '500px', overflowY: 'auto' }}>
-                    {productosTemporales.length === 0 ? (
-                      <div className="text-center text-muted py-5">
-                        <Package size={48} className="mb-2 opacity-50" />
-                        <p>No hay productos agregados</p>
+                  <div className="card-body" style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                    {clavesTemporales.length === 0 ? (
+                      <div className="text-center text-muted py-4">
+                        <Hash size={48} className="mb-2 opacity-50" />
+                        <p>No hay claves agregadas</p>
                       </div>
                     ) : (
                       <div className="list-group">
-                        {productosTemporales.map((item, index) => {
+                        {clavesTemporales.map((item, index) => {
                           const aseguradora = aseguradoras.find(a => a.id === item.aseguradoraId);
-                          const producto = tiposProductos.find(p => p.id === item.productoId);
-                          const comisionAseg = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
-                          
                           return (
                             <div key={index} className="list-group-item">
                               <div className="d-flex justify-content-between align-items-center">
@@ -408,15 +337,14 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
                                     <Building2 size={14} className="me-1" />
                                     {aseguradora?.nombre}
                                   </div>
-                                  <div className="text-success">
-                                    <Package size={14} className="me-1" />
-                                    {producto?.nombre}
-                                    <span className="badge bg-primary ms-2">{comisionAseg}%</span>
+                                  <div className="text-dark">
+                                    <Hash size={14} className="me-1" />
+                                    Clave: <strong>{item.clave}</strong>
                                   </div>
                                 </div>
                                 <button
                                   className="btn btn-sm btn-outline-danger"
-                                  onClick={() => handleEliminarProducto(index)}
+                                  onClick={() => handleEliminarClave(index)}
                                 >
                                   <Trash2 size={16} />
                                 </button>
@@ -439,10 +367,10 @@ const ModalSeleccionAseguradoraProductos = ({ show, onClose, onSave, productosAs
               type="button" 
               className="btn btn-success"
               onClick={handleGuardar}
-              disabled={productosTemporales.length === 0}
+              disabled={clavesTemporales.length === 0}
             >
               <Save size={20} className="me-2" />
-              Guardar Selección ({productosTemporales.length} productos)
+              Guardar ({clavesTemporales.length} {clavesTemporales.length === 1 ? 'clave' : 'claves'})
             </button>
           </div>
         </div>
@@ -688,11 +616,12 @@ const SistemaGestionPersonal = () => {
 
     const nuevasAutorizaciones = productosSeleccionadosTemp.map(key => {
       const [aseguradoraId, productoId] = key.split('|');
-      // Buscar la clave del agente para esta aseguradora/producto
+      const tieneProducto = productoId && productoId !== 'null' && productoId !== 'undefined';
+      // Buscar la clave del agente para esta aseguradora
       const prodAseg = (formulario.productosAseguradoras || []).find(
-        pa => String(pa.aseguradoraId) === String(aseguradoraId) && String(pa.productoId) === String(productoId)
+        pa => String(pa.aseguradoraId) === String(aseguradoraId) && (!tieneProducto || String(pa.productoId) === String(productoId))
       );
-      const comisionBase = obtenerComisionAseguradora(aseguradoraId, productoId, aseguradoras);
+      const comisionBase = tieneProducto ? obtenerComisionAseguradora(aseguradoraId, productoId, aseguradoras) : 0;
       return {
         id: Date.now() + Math.random(),
         vendedorId: vendedorSeleccionadoTemp,
@@ -733,7 +662,8 @@ const SistemaGestionPersonal = () => {
     }
 
     // Calcular comisiones estimadas (basado en un volumen de ventas hipotético)
-    formulario.productosAseguradoras.forEach(item => {
+    // Solo considerar entradas con productoId (auto-detectadas de pólizas)
+    formulario.productosAseguradoras.filter(item => item.productoId).forEach(item => {
       const producto = tiposProductos.find(p => p.id === item.productoId);
       const comisionBase = item.comisionPersonalizada || producto?.comisionBase || 0;
       const comisionAgente = (comisionBase * formulario.porcentajeComisionCompartida) / 100;
@@ -1111,14 +1041,24 @@ const SistemaGestionPersonal = () => {
     else mostrarAlertaTemp(`Error al ${accion} usuario`, 'danger');
   };
 
-  // Eliminar usuario permanentemente
+  // Eliminar usuario permanentemente (o desactivar si el backend no soporta DELETE)
   const confirmarEliminarDefinitivo = async (id) => {
     const usuario = usuarios.find(u => u.id === id);
     if (!usuario) return;
     if (!window.confirm(`¿Eliminar PERMANENTEMENTE a ${usuario.nombre} ${usuario.apellidoPaterno}? Esta acción no se puede deshacer.`)) return;
     const res = await eliminar(id);
-    if (res && res.success) mostrarAlertaTemp('Usuario eliminado permanentemente', 'success');
-    else mostrarAlertaTemp(res?.error || 'Error al eliminar usuario. Puede tener registros asociados (nóminas, comisiones). Desactívelo en su lugar.', 'danger');
+    if (res && res.success) {
+      mostrarAlertaTemp('Usuario eliminado permanentemente', 'success');
+    } else {
+      // Fallback: si DELETE no existe en el backend (404), desactivar en su lugar
+      console.warn('DELETE no disponible, desactivando usuario como fallback');
+      const resFallback = await actualizar(id, { ...usuario, activo: false });
+      if (resFallback && resFallback.success) {
+        mostrarAlertaTemp('El usuario fue desactivado (el servidor no permite eliminación permanente)', 'warning');
+      } else {
+        mostrarAlertaTemp(res?.error || 'Error al eliminar usuario. Puede tener registros asociados (nóminas, comisiones). Desactívelo en su lugar.', 'danger');
+      }
+    }
   };
 
   const ingresos = calcularIngresosEstimados();
@@ -1660,71 +1600,95 @@ const SistemaGestionPersonal = () => {
                                 <AlertCircle size={20} className="me-2" />
                                 No hay claves registradas. Agrega las aseguradoras y claves con las que trabajarás.
                               </div>
-                            ) : (
-                              <div className="table-responsive">
-                                <table className="table table-bordered">
-                                  <thead className="table-light">
-                                    <tr>
-                                      <th width="25%">Aseguradora</th>
-                                      <th width="25%">Clave</th>
-                                      <th width="25%">Producto</th>
-                                      <th width="25%">Comisión Base</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {formulario.productosAseguradoras.map((item, index) => {
-                                      const aseguradora = aseguradoras.find(a => String(a.id) === String(item.aseguradoraId));
-                                      const producto = tiposProductos.find(p => String(p.id) === String(item.productoId));
-                                      const comisionDeAseguradora = obtenerComisionAseguradora(item.aseguradoraId, item.productoId, aseguradoras);
-                                      
-                                      return (
-                                        <tr key={index}>
-                                          <td>
-                                            <span className={`badge bg-${aseguradora?.nombre.toLowerCase() === 'qualitas' ? 'primary' : aseguradora?.nombre.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
-                                              {aseguradora?.nombre || 'N/A'}
-                                            </span>
-                                          </td>
-                                          <td>
-                                            <input
-                                              type="text"
-                                              className="form-control form-control-sm"
-                                              value={item.clave || ''}
-                                              onChange={(e) => {
-                                                const nuevosProductos = [...formulario.productosAseguradoras];
-                                                nuevosProductos[index].clave = e.target.value;
-                                                setFormulario({...formulario, productosAseguradoras: nuevosProductos});
-                                              }}
-                                              placeholder="Clave del agente"
-                                            />
-                                          </td>
-                                          <td>
-                                            <small>{producto?.nombre || 'N/A'}</small>
-                                          </td>
-                                          <td>
-                                            <div className="input-group input-group-sm">
+                            ) : (() => {
+                              // Agrupar por aseguradoraId para mostrar una fila por aseguradora
+                              const porAseguradora = {};
+                              formulario.productosAseguradoras.forEach((item, index) => {
+                                const key = String(item.aseguradoraId);
+                                if (!porAseguradora[key]) {
+                                  porAseguradora[key] = { clave: item.clave || '', indices: [index], productos: [] };
+                                } else {
+                                  porAseguradora[key].indices.push(index);
+                                  if (!porAseguradora[key].clave && item.clave) porAseguradora[key].clave = item.clave;
+                                }
+                                if (item.productoId) {
+                                  const prod = tiposProductos.find(p => String(p.id) === String(item.productoId));
+                                  if (prod) porAseguradora[key].productos.push(prod.nombre);
+                                }
+                              });
+
+                              return (
+                                <div className="table-responsive">
+                                  <table className="table table-bordered">
+                                    <thead className="table-light">
+                                      <tr>
+                                        <th width="30%">Aseguradora</th>
+                                        <th width="30%">Clave</th>
+                                        <th width="30%">Productos</th>
+                                        <th width="10%" className="text-center">Acciones</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {Object.entries(porAseguradora).map(([asegId, grupo]) => {
+                                        const aseguradora = aseguradoras.find(a => String(a.id) === asegId);
+                                        const primerIndex = grupo.indices[0];
+                                        return (
+                                          <tr key={asegId}>
+                                            <td>
+                                              <span className={`badge bg-${aseguradora?.nombre?.toLowerCase() === 'qualitas' ? 'primary' : aseguradora?.nombre?.toLowerCase() === 'hdi' ? 'danger' : 'info'}`}>
+                                                {aseguradora?.nombre || 'N/A'}
+                                              </span>
+                                            </td>
+                                            <td>
                                               <input
-                                                type="number"
-                                                className="form-control"
-                                                value={item.comisionPersonalizada || comisionDeAseguradora || 0}
+                                                type="text"
+                                                className="form-control form-control-sm"
+                                                value={grupo.clave}
                                                 onChange={(e) => {
                                                   const nuevosProductos = [...formulario.productosAseguradoras];
-                                                  nuevosProductos[index].comisionPersonalizada = parseFloat(e.target.value) || 0;
+                                                  // Actualizar clave en TODAS las entradas de esta aseguradora
+                                                  grupo.indices.forEach(idx => {
+                                                    nuevosProductos[idx].clave = e.target.value;
+                                                  });
                                                   setFormulario({...formulario, productosAseguradoras: nuevosProductos});
                                                 }}
-                                                min="0"
-                                                max="100"
-                                                step="0.5"
+                                                placeholder="Clave del agente"
                                               />
-                                              <span className="input-group-text">%</span>
-                                            </div>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
+                                            </td>
+                                            <td>
+                                              {grupo.productos.length > 0 ? (
+                                                <div className="d-flex flex-wrap gap-1">
+                                                  {grupo.productos.map((nombre, i) => (
+                                                    <span key={i} className="badge bg-success bg-opacity-75">{nombre}</span>
+                                                  ))}
+                                                </div>
+                                              ) : (
+                                                <small className="text-muted fst-italic">Se agregarán al capturar pólizas</small>
+                                              )}
+                                            </td>
+                                            <td className="text-center">
+                                              <button
+                                                type="button"
+                                                className="btn btn-sm btn-outline-danger"
+                                                title="Eliminar clave"
+                                                onClick={() => {
+                                                  const nuevosProductos = formulario.productosAseguradoras.filter(
+                                                    (_, idx) => !grupo.indices.includes(idx)
+                                                  );
+                                                  setFormulario({...formulario, productosAseguradoras: nuevosProductos});
+                                                }}
+                                              >
+                                                <Trash2 size={14} />
+                                              </button>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              );
+                            })()}
                           </div>
                         )}
 

@@ -2120,11 +2120,14 @@ const ModuloNvoExpedientes = () => {
         }
         if (agenteMatch) {
           const nombre = `${agenteMatch.nombre || ''} ${agenteMatch.apellidoPaterno || ''} ${agenteMatch.apellidoMaterno || ''}`.trim();
-          // Usar codigoAgente del catálogo, o preservar clave_agente original del formulario/extractor
-          const codigo = agenteMatch.codigoAgente || datos.clave_agente || '';
-          datos.agente = codigo ? `${codigo} - ${nombre}` : nombre;
+          // Preservar clave_agente de la póliza, o extraerla del texto "CLAVE - Nombre"
+          let claveAseguradora = datos.clave_agente || '';
+          if (!claveAseguradora && datos.agente && datos.agente.includes(' - ')) {
+            claveAseguradora = datos.agente.split(' - ')[0].trim();
+          }
+          datos.agente = claveAseguradora ? `${claveAseguradora} - ${nombre}` : nombre;
           datos.agente_id = agenteMatch.id;
-          datos.clave_agente = codigo;
+          datos.clave_agente = claveAseguradora;
         }
       }
       
@@ -3105,6 +3108,15 @@ const ModuloNvoExpedientes = () => {
         contratante_es_asegurado: contratanteEsAsegurado,
         // Asegurar valores por defecto para campos numéricos
         periodo_gracia: expedienteCompleto.periodo_gracia ?? 14,
+        // Normalizar compañía para que coincida con dropdown de aseguradoras
+        compania: (() => {
+          const comp = expedienteCompleto.compania || '';
+          if (!comp) return '';
+          const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+          const companiasList = aseguradoras.map(a => a.nombre);
+          const match = companiasList.find(c => norm(c) === norm(comp) || norm(c).includes(norm(comp)) || norm(comp).includes(norm(c)));
+          return match || comp;
+        })(),
         // Asegurar strings vacíos en lugar de null para campos de texto
         numero_poliza: expedienteCompleto.numero_poliza || '',
         numero_endoso: expedienteCompleto.numero_endoso || '',
@@ -3112,8 +3124,14 @@ const ModuloNvoExpedientes = () => {
         agente_id: expedienteCompleto.agente_id || null,
         clave_agente: expedienteCompleto.clave_agente || '',
         sub_agente: expedienteCompleto.sub_agente || '',
-        // Campos de vehículo
-        marca: expedienteCompleto.marca || '',
+        // Campos de vehículo (normalizar marca para que coincida con dropdown)
+        marca: (() => {
+          const marcasBD = expedienteCompleto.marca || '';
+          if (!marcasBD) return '';
+          const listaMarcas = ['Acura','Audi','BMW','Buick','Cadillac','Chevrolet','Chrysler','Cupra','Dodge','Fiat','Ford','GMC','Honda','Hyundai','Infiniti','JAC','Jeep','KIA','Lincoln','Mazda','Mercedes-Benz','MG','Mini','Mitsubishi','Nissan','Peugeot','Porsche','RAM','Renault','SEAT','Subaru','Suzuki','Toyota','Volkswagen','Volvo'];
+          const match = listaMarcas.find(m => m.toLowerCase() === marcasBD.toLowerCase());
+          return match || marcasBD;
+        })(),
         modelo: expedienteCompleto.modelo || '',
         anio: expedienteCompleto.anio || '',
         placas: expedienteCompleto.placas || '',
@@ -3786,7 +3804,7 @@ const ModuloNvoExpedientes = () => {
           frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Cuatrimestral', 'Semestral']}
           periodosGracia={[0, 7, 14, 30]}
           estatusPago={['Pendiente', 'Por Vencer', 'Vencido', 'Pagado']}
-          marcasVehiculo={['Nissan', 'Volkswagen', 'Chevrolet', 'Toyota', 'Honda', 'Mazda', 'Ford']}
+          marcasVehiculo={['Acura','Audi','BMW','Buick','Cadillac','Chevrolet','Chrysler','Cupra','Dodge','Fiat','Ford','GMC','Honda','Hyundai','Infiniti','JAC','Jeep','KIA','Lincoln','Mazda','Mercedes-Benz','MG','Mini','Mitsubishi','Nissan','Peugeot','Porsche','RAM','Renault','SEAT','Subaru','Suzuki','Toyota','Volkswagen','Volvo']}
           tiposVehiculo={['Sedán', 'Hatchback', 'SUV', 'Pickup', 'Van']}
           tiposCobertura={['Amplia', 'Limitada', 'RC', 'Integral']}
           calculartermino_vigencia={calculartermino_vigencia}
@@ -3821,7 +3839,7 @@ const ModuloNvoExpedientes = () => {
           frecuenciasPago={['Mensual', 'Bimestral', 'Trimestral', 'Cuatrimestral', 'Semestral']}
           periodosGracia={[0, 7, 14, 30]}
           estatusPago={['Pendiente', 'Por Vencer', 'Vencido', 'Pagado']}
-          marcasVehiculo={['Nissan', 'Volkswagen', 'Chevrolet', 'Toyota', 'Honda', 'Mazda', 'Ford']}
+          marcasVehiculo={['Acura','Audi','BMW','Buick','Cadillac','Chevrolet','Chrysler','Cupra','Dodge','Fiat','Ford','GMC','Honda','Hyundai','Infiniti','JAC','Jeep','KIA','Lincoln','Mazda','Mercedes-Benz','MG','Mini','Mitsubishi','Nissan','Peugeot','Porsche','RAM','Renault','SEAT','Subaru','Suzuki','Toyota','Volkswagen','Volvo']}
           tiposVehiculo={['Sedán', 'Hatchback', 'SUV', 'Pickup', 'Van']}
           tiposCobertura={['Amplia', 'Limitada', 'RC', 'Integral']}
           calculartermino_vigencia={calculartermino_vigencia}

@@ -389,17 +389,20 @@ const Nomina = () => {
         };
       });
       
+      // Guardar todos (vendedores necesitan estar para recibir distribución)
+      // pero solo se MOSTRARÁN los que tienen actividad
       setDatosNomina(todosEmpleados);
       setAgentesRevisados(new Set());
       setNominaGenerada(true);
       
+      const conActividad = todosEmpleados.filter(emp => emp.sueldo > 0 || emp.comisiones > 0);
       if (tipoNomina === 'solo_sueldos') {
-        toast.success(`Nómina (Solo Sueldos) generada: ${todosEmpleados.length} empleados.`);
+        toast.success(`Nómina (Solo Sueldos) generada: ${conActividad.length} empleados con sueldo.`);
       } else {
         const polizasEncontradas = recibosPagadosEnPeriodo.length;
-        const agentesConComision = todosEmpleados.filter(a => a.perfil === 'Agente' && a.comisiones > 0).length;
-        const agentesConCompartidas = todosEmpleados.filter(a => a.perfil === 'Agente' && a.detalleComisiones.some(d => d.tipo === 'Compartida')).length;
-        toast.success(`Nómina generada: ${todosEmpleados.length} empleados, ${polizasEncontradas} pólizas.${agentesConCompartidas > 0 ? ` Revisa el detalle de ${agentesConCompartidas} agente(s) con comisiones compartidas.` : ''}`);
+        const agentesConComision = conActividad.filter(a => a.perfil === 'Agente' && a.comisiones > 0).length;
+        const agentesConCompartidas = conActividad.filter(a => a.perfil === 'Agente' && a.detalleComisiones.some(d => d.tipo === 'Compartida')).length;
+        toast.success(`Nómina generada: ${agentesConComision} agentes con comisiones, ${polizasEncontradas} pólizas.${agentesConCompartidas > 0 ? ` Revisa y aplica para distribuir a vendedores.` : ''}`);
       }
       
     } catch (error) {
@@ -597,7 +600,9 @@ const Nomina = () => {
     try {
       const nominaData = {
         fecha_inicio: fechaInicio, fecha_fin: fechaFin, tipo_periodo: 'Quincenal',
-        detalles: datosNomina.map(emp => ({
+        detalles: datosNomina
+          .filter(emp => emp.sueldo > 0 || emp.comisiones > 0 || emp.descuentos > 0 || emp.prestamo_nuevo > 0 || emp.cobro_prestamo > 0)
+          .map(emp => ({
           empleado_id: emp.empleado_id, sueldo: emp.sueldo, comisiones: emp.comisiones,
           descuentos: emp.descuentos, motivo_descuento: emp.motivo_descuento,
           prestamo_nuevo: emp.prestamo_nuevo, cobro_prestamo: emp.cobro_prestamo,
@@ -943,7 +948,10 @@ const Nomina = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {datosNomina.map((item, index) => {
+                      {datosNomina
+                        .filter(item => item.sueldo > 0 || item.comisiones > 0 || item.descuentos > 0 || item.prestamo_nuevo > 0 || item.cobro_prestamo > 0)
+                        .map((item, index) => {
+                        const realIndex = datosNomina.findIndex(d => d.empleado_id === item.empleado_id);
                         const esAgente = item.perfil === 'Agente';
                         const tieneComisiones = esAgente && item.detalleComisiones?.length > 0;
                         const yaRevisado = agentesRevisados.has(item.empleado_id);
@@ -986,16 +994,16 @@ const Nomina = () => {
                           <td className="text-end text-success fw-bold">{formatMoney(item.comisiones)}</td>
                           <td className="text-end fw-bold">{formatMoney(item.subtotal)}</td>
                           <td>
-                            <input type="number" className="form-control form-control-sm text-end" value={item.descuentos || ''} onChange={(e) => actualizarCampoNomina(index, 'descuentos', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" step="0.01" />
+                            <input type="number" className="form-control form-control-sm text-end" value={item.descuentos || ''} onChange={(e) => actualizarCampoNomina(realIndex, 'descuentos', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" step="0.01" />
                           </td>
                           <td className="text-end">
                             {item.saldo_prestamo > 0 ? <span className="text-danger">{formatMoney(item.saldo_prestamo)}</span> : <span className="text-muted">-</span>}
                           </td>
                           <td>
-                            <input type="number" className="form-control form-control-sm text-end" value={item.prestamo_nuevo || ''} onChange={(e) => actualizarCampoNomina(index, 'prestamo_nuevo', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" step="0.01" />
+                            <input type="number" className="form-control form-control-sm text-end" value={item.prestamo_nuevo || ''} onChange={(e) => actualizarCampoNomina(realIndex, 'prestamo_nuevo', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" step="0.01" />
                           </td>
                           <td>
-                            <input type="number" className="form-control form-control-sm text-end" value={item.cobro_prestamo || ''} onChange={(e) => actualizarCampoNomina(index, 'cobro_prestamo', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" max={item.saldo_prestamo || 999999} step="0.01" />
+                            <input type="number" className="form-control form-control-sm text-end" value={item.cobro_prestamo || ''} onChange={(e) => actualizarCampoNomina(realIndex, 'cobro_prestamo', parseFloat(e.target.value) || 0)} placeholder="0.00" min="0" max={item.saldo_prestamo || 999999} step="0.01" />
                           </td>
                           <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(item.total_pagar)}</td>
                         </tr>
@@ -1200,12 +1208,39 @@ const Nomina = () => {
                 <div className="text-center py-5">
                   <span className="spinner-border" /><p className="mt-2 text-muted">Cargando detalle...</p>
                 </div>
-              ) : (
+              ) : (() => {
+                const ORDEN_PERFIL = { 'Agente': 0, 'Vendedor': 1, 'Ejecutivo': 2, 'Administrador': 3 };
+                const detallesEnriquecidos = (detalleNominaConsulta.detalles || []).map(det => {
+                  const emp = empleados.find(e => e.id === det.empleado_id);
+                  return { ...det, _emp: emp, _perfil: emp?.perfil || '', _nombre: emp ? `${emp.nombre || ''} ${emp.apellidoPaterno || ''}`.trim() : `Empleado #${det.empleado_id}` };
+                });
+                const perfilesDisponibles = [...new Set(detallesEnriquecidos.map(d => d._perfil).filter(Boolean))].sort((a, b) => (ORDEN_PERFIL[a] ?? 9) - (ORDEN_PERFIL[b] ?? 9));
+                const filtroActivo = window._filtroPerfil || 'todos';
+                const detallesFiltrados = detallesEnriquecidos
+                  .filter(d => {
+                    const sueldo = parseFloat(d.sueldo || 0);
+                    const comisiones = parseFloat(d.comisiones || 0);
+                    if (sueldo === 0 && comisiones === 0) return false;
+                    if (filtroActivo === 'todos') return true;
+                    return d._perfil === filtroActivo;
+                  })
+                  .sort((a, b) => (ORDEN_PERFIL[a._perfil] ?? 9) - (ORDEN_PERFIL[b._perfil] ?? 9));
+                return (
+                <>
+                <div className="px-3 pt-2 pb-1 d-flex gap-1 flex-wrap align-items-center">
+                  <small className="text-muted me-1">Filtrar:</small>
+                  <button className={`btn btn-sm py-0 px-2 ${filtroActivo === 'todos' ? 'btn-dark' : 'btn-outline-dark'}`} style={{fontSize:'0.7rem'}} onClick={() => { window._filtroPerfil = 'todos'; setDetalleNominaConsulta({...detalleNominaConsulta}); }}>Todos</button>
+                  {perfilesDisponibles.map(p => (
+                    <button key={p} className={`btn btn-sm py-0 px-2 ${filtroActivo === p ? (p === 'Agente' ? 'btn-success' : p === 'Vendedor' ? 'btn-info' : 'btn-primary') : (p === 'Agente' ? 'btn-outline-success' : p === 'Vendedor' ? 'btn-outline-info' : 'btn-outline-primary')}`} style={{fontSize:'0.7rem'}} onClick={() => { window._filtroPerfil = p; setDetalleNominaConsulta({...detalleNominaConsulta}); }}>{p}s</button>
+                  ))}
+                  <small className="text-muted ms-auto" style={{fontSize:'0.7rem'}}>{detallesFiltrados.length} de {detallesEnriquecidos.length}</small>
+                </div>
                 <div className="table-responsive">
                   <table className="table table-striped table-hover table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
                     <thead className="table-dark">
                       <tr>
                         <th style={{ minWidth: '200px' }}>Empleado</th>
+                        <th style={{ width: '90px' }}>Perfil</th>
                         <th className="text-end" style={{ width: '100px' }}>Sueldo</th>
                         <th className="text-end" style={{ width: '100px' }}>Comisiones</th>
                         <th className="text-end" style={{ width: '100px' }}>Subtotal</th>
@@ -1216,9 +1251,9 @@ const Nomina = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {detalleNominaConsulta.detalles?.map((det) => {
-                        const emp = empleados.find(e => e.id === det.empleado_id);
-                        const nombre = emp ? `${emp.nombre || ''} ${emp.apellidoPaterno || ''}`.trim() : `Empleado #${det.empleado_id}`;
+                      {detallesFiltrados.map((det) => {
+                        const emp = det._emp;
+                        const nombre = det._nombre;
                         const sueldo = parseFloat(det.sueldo || 0);
                         const comisiones = parseFloat(det.comisiones || 0);
                         const subtotal = sueldo + comisiones;
@@ -1236,6 +1271,13 @@ const Nomina = () => {
                                 </button>
                               )}
                             </td>
+                            <td>
+                              {emp?.perfil === 'Agente' && <span className="badge bg-success" style={{fontSize: '0.7rem'}}>Agente</span>}
+                              {emp?.perfil === 'Vendedor' && <span className="badge bg-info" style={{fontSize: '0.7rem'}}>Vendedor</span>}
+                              {emp?.perfil === 'Administrador' && <span className="badge bg-dark" style={{fontSize: '0.7rem'}}>Admin</span>}
+                              {emp?.perfil === 'Ejecutivo' && <span className="badge bg-primary" style={{fontSize: '0.7rem'}}>Ejecutivo</span>}
+                              {!emp?.perfil && <span className="badge bg-secondary" style={{fontSize: '0.7rem'}}>-</span>}
+                            </td>
                             <td className="text-end">{formatMoney(sueldo)}</td>
                             <td className="text-end text-success fw-bold">{formatMoney(comisiones)}</td>
                             <td className="text-end fw-bold">{formatMoney(subtotal)}</td>
@@ -1250,6 +1292,7 @@ const Nomina = () => {
                     <tfoot className="table-light">
                       <tr>
                         <th className="text-end">TOTALES:</th>
+                        <th></th>
                         <th className="text-end">{formatMoney(nominaSeleccionada.total_sueldos)}</th>
                         <th className="text-end text-success">{formatMoney(nominaSeleccionada.total_comisiones)}</th>
                         <th className="text-end">{formatMoney(parseFloat(nominaSeleccionada.total_sueldos || 0) + parseFloat(nominaSeleccionada.total_comisiones || 0))}</th>
@@ -1261,7 +1304,9 @@ const Nomina = () => {
                     </tfoot>
                   </table>
                 </div>
-              )}
+                </>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -1293,6 +1338,8 @@ const Nomina = () => {
                         <tr>
                           <th style={{ fontSize: '0.65rem' }}>Aseg / Póliza</th>
                           <th style={{ fontSize: '0.65rem' }}>Producto / Asegurado</th>
+                          <th style={{ fontSize: '0.65rem' }}>Agente</th>
+                          <th style={{ fontSize: '0.65rem' }}>Clave</th>
                           <th style={{ fontSize: '0.65rem' }}>Tipo</th>
                           <th style={{ fontSize: '0.65rem' }}>Vendedor</th>
                           <th style={{ fontSize: '0.65rem' }}>Prima</th>
@@ -1316,6 +1363,8 @@ const Nomina = () => {
                               {com.tipo_cobertura && <small className="text-muted ms-1" style={{ fontSize: '0.55rem' }}>{com.tipo_cobertura}</small>}
                               {com.bien_asegurado && <div style={{ fontSize: '0.55rem' }} className="text-truncate" title={com.bien_asegurado}>{com.bien_asegurado} {com.anio ? `(${com.anio})` : ''}</div>}
                             </td>
+                            <td style={{ padding: '4px', fontSize: '0.6rem' }}>{com.nombre_agente || '-'}</td>
+                            <td style={{ padding: '4px', fontSize: '0.65rem' }}><strong>{com.clave || '-'}</strong></td>
                             <td style={{ padding: '4px', fontSize: '0.6rem' }}>
                               {com.es_comision_compartida ? <span className="badge bg-warning text-dark" style={{ fontSize: '0.55rem' }}>Compartida</span> : <span className="badge bg-secondary" style={{ fontSize: '0.55rem' }}>Directa</span>}
                             </td>
@@ -1332,7 +1381,7 @@ const Nomina = () => {
                       </tbody>
                       <tfoot className="table-light">
                         <tr>
-                          <th colSpan="7" className="text-end" style={{ fontSize: '0.65rem' }}>TOTALES:</th>
+                          <th colSpan="9" className="text-end" style={{ fontSize: '0.65rem' }}>TOTALES:</th>
                           <th className="text-success" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_agente || 0), 0))}</th>
                           <th></th>
                           <th className="text-info" style={{ fontSize: '0.65rem' }}>{formatMoney(comisionesConsulta.detalle.reduce((s, c) => s + parseFloat(c.comision_vendedor || 0), 0))}</th>
@@ -1417,6 +1466,8 @@ const Nomina = () => {
                       <tr>
                         <th style={{fontSize: '0.65rem'}}>Aseg / Póliza</th>
                         <th style={{fontSize: '0.65rem'}}>Producto / Asegurado</th>
+                        <th style={{fontSize: '0.65rem'}}>Agente</th>
+                        <th style={{fontSize: '0.65rem'}}>Clave</th>
                         <th style={{fontSize: '0.65rem'}}>Tipo</th>
                         <th style={{fontSize: '0.65rem'}}>Vendedor</th>
                         <th style={{fontSize: '0.65rem'}}>Prima</th>
@@ -1440,6 +1491,8 @@ const Nomina = () => {
                             {det.tipo_cobertura && <small className="text-muted ms-1" style={{fontSize: '0.55rem'}}>{det.tipo_cobertura}</small>}
                             {det.bien_asegurado && <div style={{fontSize: '0.55rem'}} className="text-truncate" title={det.bien_asegurado}>{det.bien_asegurado} {det.anio ? `(${det.anio})` : ''}</div>}
                           </td>
+                          <td style={{padding: '4px', fontSize: '0.6rem'}}>{det.nombreAgente || '-'}</td>
+                          <td style={{padding: '4px', fontSize: '0.65rem'}}><strong>{det.clave || '-'}</strong></td>
                           <td style={{padding: '4px', fontSize: '0.6rem'}}>
                             {det.tipo === 'Compartida' ? <span className="badge bg-warning text-dark" style={{fontSize: '0.55rem'}}>Compartida</span> : <span className="badge bg-secondary" style={{fontSize: '0.55rem'}}>Directa</span>}
                           </td>
@@ -1462,7 +1515,7 @@ const Nomina = () => {
                     </tbody>
                     <tfoot className="table-light">
                       <tr>
-                        <th colSpan="7" className="text-end" style={{fontSize: '0.65rem'}}>TOTALES:</th>
+                        <th colSpan="9" className="text-end" style={{fontSize: '0.65rem'}}>TOTALES:</th>
                         <th className="text-success" style={{fontSize: '0.65rem'}}>{formatMoney(detalleEditado.reduce((s, d) => s + (d.comisionAgente || 0), 0))}</th>
                         <th></th>
                         <th className="text-info" style={{fontSize: '0.65rem'}}>{formatMoney(detalleEditado.reduce((s, d) => s + (d.comisionVendedor || 0), 0))}</th>

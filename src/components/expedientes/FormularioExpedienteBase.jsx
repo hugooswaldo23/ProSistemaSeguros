@@ -235,9 +235,10 @@ const FormularioExpedienteBase = React.memo(({
     if (!agenteTexto || !agentes.length) return null;
 
     const codigoAgente = agenteTexto.trim().split(' ')[0];
-    let agenteEncontrado = agentes.find(a => 
-      a.codigoAgente && a.codigoAgente.toString() === codigoAgente
-    );
+    let agenteEncontrado = agentes.find(a => {
+      const cod = a.codigoAgente || a.codigo || '';
+      return cod && cod.toString() === codigoAgente;
+    });
     
     if (agenteEncontrado) return agenteEncontrado.id;
 
@@ -401,38 +402,22 @@ const FormularioExpedienteBase = React.memo(({
   }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, modoEdicion]);
 
   useEffect(() => {
-    if (formulario.agente && agentes.length > 0) {
-      // Intentar resolver por agente_id directo (viene del backend) o por texto
-      const agenteId = formulario.agente_id || extraerAgenteIdDelFormulario(formulario.agente);
-      
+    if (formulario.agente_id && agentes.length > 0) {
+      // Tenemos agente_id (del backend o del extractor) — resolver directamente
+      if (formulario.agente_id !== agenteIdSeleccionado) {
+        setAgenteIdSeleccionado(formulario.agente_id);
+        obtenerVendedoresPorAgente(formulario.agente_id);
+      }
+    } else if (formulario.agente && agentes.length > 0) {
+      // No tenemos agente_id pero sí texto — intentar resolver por texto
+      const agenteId = extraerAgenteIdDelFormulario(formulario.agente);
       if (agenteId && agenteId !== agenteIdSeleccionado) {
         setAgenteIdSeleccionado(agenteId);
         obtenerVendedoresPorAgente(agenteId);
-        // Sincronizar el texto del dropdown para que coincida con el formato de las opciones
-        const agenteEncontrado = agentes.find(a => a.id === agenteId);
-        if (agenteEncontrado) {
-          const nombre = `${agenteEncontrado.nombre || ''} ${agenteEncontrado.apellidoPaterno || ''} ${agenteEncontrado.apellidoMaterno || ''}`.trim();
-          // Usar codigoAgente del catálogo, o preservar clave_agente que ya trae el formulario (del extractor/BD)
-          const codigo = agenteEncontrado.codigoAgente || formulario.clave_agente || '';
-          const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
-          if (formulario.agente !== displayText) {
-            setFormulario(prev => ({ ...prev, agente: displayText, agente_id: agenteId, clave_agente: codigo }));
-          }
-        }
+        setFormulario(prev => ({ ...prev, agente_id: agenteId }));
       } else if (!agenteId) {
         setAgenteIdSeleccionado(null);
         setVendedores([]);
-      }
-    } else if (formulario.agente_id && agentes.length > 0) {
-      // Solo tenemos agente_id sin texto (caso edge)
-      const agenteEncontrado = agentes.find(a => a.id === formulario.agente_id);
-      if (agenteEncontrado) {
-        const nombre = `${agenteEncontrado.nombre || ''} ${agenteEncontrado.apellidoPaterno || ''} ${agenteEncontrado.apellidoMaterno || ''}`.trim();
-        const codigo = agenteEncontrado.codigoAgente || formulario.clave_agente || '';
-        const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
-        setAgenteIdSeleccionado(agenteEncontrado.id);
-        obtenerVendedoresPorAgente(agenteEncontrado.id);
-        setFormulario(prev => ({ ...prev, agente: displayText, agente_id: agenteEncontrado.id, clave_agente: codigo }));
       }
     } else {
       setAgenteIdSeleccionado(null);
@@ -1239,22 +1224,29 @@ const FormularioExpedienteBase = React.memo(({
                     <div className="d-flex gap-2">
                       <select
                         className={`form-select ${agenteIdSeleccionado ? 'is-valid' : ''}`}
-                        value={formulario.agente ?? ''}
+                        value={formulario.agente_id || ''}
                         onChange={(e) => {
-                          const valorSeleccionado = e.target.value;
-                          // Encontrar el agente seleccionado para setear agente_id
-                          const agenteSeleccionado = agentes.find(a => {
-                            const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
-                            const codigo = a.codigoAgente || '';
-                            const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
-                            return displayText === valorSeleccionado;
-                          });
-                          setFormulario(prev => ({ 
-                            ...prev, 
-                            agente: valorSeleccionado,
-                            agente_id: agenteSeleccionado?.id || null,
-                            clave_agente: agenteSeleccionado?.codigoAgente || ''
-                          }));
+                          const selectedId = e.target.value ? parseInt(e.target.value) : null;
+                          const agenteSeleccionado = agentes.find(a => a.id === selectedId);
+                          if (agenteSeleccionado) {
+                            const nombre = `${agenteSeleccionado.nombre || ''} ${agenteSeleccionado.apellidoPaterno || ''} ${agenteSeleccionado.apellidoMaterno || ''}`.trim();
+                            // Preservar clave_agente existente de la póliza, o usar la del agente
+                            const clave = formulario.clave_agente || '';
+                            const displayText = clave ? `${clave} - ${nombre}` : nombre;
+                            setFormulario(prev => ({ 
+                              ...prev, 
+                              agente: displayText,
+                              agente_id: selectedId,
+                              clave_agente: clave
+                            }));
+                          } else {
+                            setFormulario(prev => ({ 
+                              ...prev, 
+                              agente: '',
+                              agente_id: null,
+                              clave_agente: ''
+                            }));
+                          }
                         }}
                       >
                         <option value="">Seleccionar agente</option>
@@ -1262,10 +1254,10 @@ const FormularioExpedienteBase = React.memo(({
                           .filter(a => a.perfil === 'Agente')
                           .map(a => {
                             const nombre = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.trim();
-                            const codigo = a.codigoAgente || '';
+                            const codigo = a.codigoAgente || a.codigo || '';
                             const displayText = codigo ? `${codigo} - ${nombre}` : nombre;
                             return (
-                              <option key={a.id} value={displayText}>
+                              <option key={a.id} value={a.id}>
                                 {displayText}
                               </option>
                             );
