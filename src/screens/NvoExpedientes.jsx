@@ -2120,11 +2120,14 @@ const ModuloNvoExpedientes = () => {
         }
         if (agenteMatch) {
           const nombre = `${agenteMatch.nombre || ''} ${agenteMatch.apellidoPaterno || ''} ${agenteMatch.apellidoMaterno || ''}`.trim();
-          // Usar codigoAgente del catálogo, o preservar clave_agente original del formulario/extractor
-          const codigo = agenteMatch.codigoAgente || datos.clave_agente || '';
-          datos.agente = codigo ? `${codigo} - ${nombre}` : nombre;
+          // Preservar clave_agente de la póliza, o extraerla del texto "CLAVE - Nombre"
+          let claveAseguradora = datos.clave_agente || '';
+          if (!claveAseguradora && datos.agente && datos.agente.includes(' - ')) {
+            claveAseguradora = datos.agente.split(' - ')[0].trim();
+          }
+          datos.agente = claveAseguradora ? `${claveAseguradora} - ${nombre}` : nombre;
           datos.agente_id = agenteMatch.id;
-          datos.clave_agente = codigo;
+          datos.clave_agente = claveAseguradora;
         }
       }
       
