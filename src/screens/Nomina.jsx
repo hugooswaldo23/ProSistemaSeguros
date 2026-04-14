@@ -716,6 +716,23 @@ const Nomina = () => {
     setFechaPagoNomina(new Date().toISOString().split('T')[0]);
   };
 
+  const verComprobanteNomina = async (nominaId, detalleId) => {
+    try {
+      const response = await fetch(`${API_URL}/api/nominas/${nominaId}/detalles/${detalleId}/comprobante/url`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const url = data.url || data.signed_url || data.data?.url || data.data?.signed_url;
+        if (url) { window.open(url, '_blank'); return; }
+      }
+      toast.error('No se pudo obtener la URL del comprobante');
+    } catch (error) {
+      console.error('Error obteniendo comprobante:', error);
+      toast.error('Error al obtener comprobante');
+    }
+  };
+
   const aplicarPagoEmpleado = async () => {
     if (!pagoEmpleado || !nominaSeleccionada) return;
     const { detalle } = pagoEmpleado;
@@ -1603,9 +1620,9 @@ const Nomina = () => {
                                 <div>
                                   <span className="badge bg-success" style={{fontSize: '0.7rem'}}><CheckCircle2 size={12} className="me-1" />Pagado</span>
                                   {det.comprobante_url && (
-                                    <a href={det.comprobante_url} target="_blank" rel="noopener noreferrer" className="d-block mt-1" style={{fontSize: '0.6rem'}}>
-                                      <Image size={10} className="me-1" />Comprobante
-                                    </a>
+                                    <button className="btn btn-link p-0 d-block mt-1" style={{fontSize: '0.6rem'}} onClick={() => verComprobanteNomina(nominaSeleccionada.id, det.id)}>
+                                      <Image size={10} className="me-1" />Ver comprobante
+                                    </button>
                                   )}
                                 </div>
                               ) : nominaSeleccionada.estatus !== 'Pagada' ? (
