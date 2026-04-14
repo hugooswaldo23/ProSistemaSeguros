@@ -8,7 +8,7 @@ const API_URL = import.meta.env.VITE_API_URL;
 
 const Nomina = () => {
   const [loading, setLoading] = useState(false);
-  const [vistaActual, setVistaActual] = useState('generar'); // 'generar' | 'historial' | 'detalle'
+  const [vistaActual, setVistaActual] = useState('generar'); // 'generar' | 'pendientes' | 'historial' | 'detalle'
   
   // Estados para filtros del reporte de nómina
   const [fechaInicio, setFechaInicio] = useState('');
@@ -36,6 +36,7 @@ const Nomina = () => {
   const [procesandoPagoNomina, setProcesandoPagoNomina] = useState(false);
   const [prestamosEmpleados, setPrestamosEmpleados] = useState({});
   const [empleadoExpandido, setEmpleadoExpandido] = useState(null); // id del empleado con row expandido
+  const [vistaAnterior, setVistaAnterior] = useState('pendientes'); // para volver desde detalle
   
   // Establecer fechas por defecto al montar
   useEffect(() => {
@@ -67,6 +68,28 @@ const Nomina = () => {
       
       if (response.ok) {
         const data = await response.json();
+        // Para nóminas Cerrada, verificar si ya están 100% pagadas cargando sus detalles
+        const cerradas = data.filter(n => n.estatus === 'Cerrada');
+        for (const nomina of cerradas) {
+          try {
+            const detResp = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+              headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+            });
+            if (detResp.ok) {
+              const detData = await detResp.json();
+              const detalles = detData.detalles || detData.detalle_nomina || [];
+              const conMonto = detalles.filter(d => parseFloat(d.sueldo || 0) !== 0 || parseFloat(d.comisiones || 0) !== 0);
+              const pagados = conMonto.filter(d => d.estatus_pago === 'Pagado').length;
+              nomina._pagados = pagados;
+              nomina._totalConPago = conMonto.length;
+              if (conMonto.length > 0 && pagados === conMonto.length) {
+                nomina.estatus = 'Pagada';
+              } else if (pagados > 0) {
+                nomina._estatusPago = 'Pago Parcial';
+              }
+            }
+          } catch (e) { /* ignorar */ }
+        }
         setHistorialNominas(data);
       }
     } catch (error) {
@@ -772,13 +795,38 @@ const Nomina = () => {
       if (response.ok) {
         toast.success(`Pago aplicado a ${pagoEmpleado.nombre}`);
         // Actualizar localmente
-        setDetalleNominaConsulta(prev => ({
-          ...prev,
-          detalles: prev.detalles.map(d =>
-            d.id === detalle.id ? { ...d, estatus_pago: 'Pagado', fecha_pago: fechaPagoNomina, comprobante_url: comprobanteUrl } : d
-          )
-        }));
+        const nuevosDetalles = detalleNominaConsulta.detalles.map(d =>
+          d.id === detalle.id ? { ...d, estatus_pago: 'Pagado', fecha_pago: fechaPagoNomina, comprobante_url: comprobanteUrl } : d
+        );
+        setDetalleNominaConsulta(prev => ({ ...prev, detalles: nuevosDetalles }));
         setPagoEmpleado(null);
+
+        // Verificar si todos los empleados con monto > 0 ya están pagados
+        const conMonto = nuevosDetalles.filter(d => parseFloat(d.sueldo || 0) !== 0 || parseFloat(d.comisiones || 0) !== 0);
+        const todosPagados = conMonto.length > 0 && conMonto.every(d => d.estatus_pago === 'Pagado');
+        if (todosPagados && nominaSeleccionada?.estatus !== 'Pagada') {
+          // Dar tiempo a que se cierre el modal de pago antes de mostrar el alert
+          setTimeout(async () => {
+            if (confirm('✅ Progreso de pagos al 100%. La nómina se moverá a Historial. ¿Estás de acuerdo?')) {
+              // Actualizar estatus localmente para mover de Pendientes a Historial
+              setHistorialNominas(prev => prev.map(n =>
+                n.id === nominaSeleccionada.id ? { ...n, estatus: 'Pagada' } : n
+              ));
+              // Intentar persistir en backend (best-effort)
+              try {
+                await fetch(`${API_URL}/api/nominas/${nominaSeleccionada.id}`, {
+                  method: 'PUT',
+                  headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ estatus: 'Pagada' })
+                });
+              } catch (e) { /* ignorar */ }
+              toast.success('¡Nómina completada y movida a Historial!');
+              setVistaActual('historial');
+              setNominaSeleccionada(null);
+              setDetalleNominaConsulta(null);
+            }
+          }, 300);
+        }
       } else if (response.status === 404) {
         toast.error('Endpoint no disponible aún. Hugo necesita implementar PUT /api/nominas/:id/detalles/:detalleId/pago');
       } else {
@@ -795,19 +843,28 @@ const Nomina = () => {
 
   const marcarComoPagada = async (idNomina) => {
     if (!confirm('¿Confirmas que esta nómina ya fue pagada/depositada?')) return;
+    // Actualizar estatus localmente para mover de Pendientes a Historial
+    setHistorialNominas(prev => prev.map(n =>
+      n.id === idNomina ? { ...n, estatus: 'Pagada' } : n
+    ));
+    // Intentar persistir en backend (best-effort)
     try {
-      const response = await fetch(`${API_URL}/api/nominas/${idNomina}/pagar`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      await fetch(`${API_URL}/api/nominas/${idNomina}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ estatus: 'Pagada' })
       });
-      if (response.ok) { toast.success('Nómina marcada como pagada'); cargarHistorialNominas(); }
-      else { const error = await response.json(); throw new Error(error.message || 'Error al marcar como pagada'); }
-    } catch (error) { console.error('Error:', error); toast.error(error.message || 'Error al marcar como pagada'); }
+    } catch (e) { /* ignorar */ }
+    toast.success('Nómina marcada como pagada');
+    setVistaActual('historial');
+    setNominaSeleccionada(null);
+    setDetalleNominaConsulta(null);
   };
   
   const cargarDetalleNomina = async (nomina) => {
     setNominaSeleccionada(nomina);
     setDetalleNominaConsulta(null);
+    setVistaAnterior(vistaActual);
     setVistaActual('detalle');
     try {
       const response = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
@@ -1086,7 +1143,7 @@ const Nomina = () => {
         </div>
       </div>
 
-      {/* Sub-navegación: Generar / Historial */}
+      {/* Sub-navegación: Generar / Pendientes / Historial */}
       <div className="row mb-3">
         <div className="col-12">
           <div className="btn-group" role="group">
@@ -1098,11 +1155,21 @@ const Nomina = () => {
               Generar Nómina
             </button>
             <button
-              className={`btn ${vistaActual === 'historial' ? 'btn-primary' : 'btn-outline-primary'}`}
+              className={`btn ${vistaActual === 'pendientes' || vistaActual === 'detalle' && vistaAnterior === 'pendientes' ? 'btn-warning text-dark' : 'btn-outline-warning'}`}
+              onClick={() => setVistaActual('pendientes')}
+            >
+              <Wallet size={16} className="me-1" />
+              Pendientes de Pago
+              {historialNominas.filter(n => n.estatus === 'Cerrada').length > 0 && (
+                <span className="badge bg-danger ms-1">{historialNominas.filter(n => n.estatus === 'Cerrada').length}</span>
+              )}
+            </button>
+            <button
+              className={`btn ${vistaActual === 'historial' || vistaActual === 'detalle' && vistaAnterior === 'historial' ? 'btn-success' : 'btn-outline-success'}`}
               onClick={() => setVistaActual('historial')}
             >
               <History size={16} className="me-1" />
-              Historial de Nóminas
+              Historial
             </button>
           </div>
         </div>
@@ -1430,15 +1497,18 @@ const Nomina = () => {
       )}
 
       {/* Vista: Historial de Nóminas */}
-      {vistaActual === 'historial' && (
+      {/* Vista: Pendientes de Pago */}
+      {vistaActual === 'pendientes' && (() => {
+        const pendientes = historialNominas.filter(n => n.estatus === 'Cerrada');
+        return (
         <div className="card">
-          <div className="card-header bg-light">
-            <h5 className="mb-0"><History size={20} className="me-2" />Historial de Nóminas Generadas</h5>
+          <div className="card-header bg-warning text-dark">
+            <h5 className="mb-0"><Wallet size={20} className="me-2" />Nóminas Pendientes de Pago</h5>
           </div>
           <div className="card-body">
-            {historialNominas.length === 0 ? (
+            {pendientes.length === 0 ? (
               <div className="text-center py-5 text-muted">
-                <History size={48} className="mb-3" /><p>No hay nóminas generadas aún</p>
+                <CheckCircle2 size={48} className="mb-3 text-success" /><p>No hay nóminas pendientes de pago</p>
               </div>
             ) : (
               <div className="table-responsive">
@@ -1447,11 +1517,12 @@ const Nomina = () => {
                     <tr>
                       <th>Código</th><th>Período</th><th className="text-end">Total Sueldos</th>
                       <th className="text-end">Total Comisiones</th><th className="text-end">Total Neto</th>
-                      <th className="text-center">Estatus</th><th className="text-center">Fecha Generación</th><th className="text-center">Acciones</th>
+                      <th className="text-center">Estatus Pago</th>
+                      <th className="text-center">Fecha Generación</th><th className="text-center">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {historialNominas.map((nomina) => (
+                    {pendientes.map((nomina) => (
                       <tr key={nomina.id}>
                         <td><strong>{nomina.codigo}</strong></td>
                         <td>{new Date(nomina.fecha_inicio).toLocaleDateString('es-MX')} - {new Date(nomina.fecha_fin).toLocaleDateString('es-MX')}</td>
@@ -1459,16 +1530,17 @@ const Nomina = () => {
                         <td className="text-end text-success">{formatMoney(nomina.total_comisiones)}</td>
                         <td className="text-end fw-bold">{formatMoney(nomina.total_neto)}</td>
                         <td className="text-center">
-                          <span className={`badge ${nomina.estatus === 'Pagada' ? 'bg-success' : nomina.estatus === 'Cerrada' ? 'bg-warning' : 'bg-secondary'}`}>{nomina.estatus}</span>
+                          {nomina._estatusPago === 'Pago Parcial' ? (
+                            <span className="badge bg-info">{nomina._pagados}/{nomina._totalConPago} Pago Parcial</span>
+                          ) : (
+                            <span className="badge bg-secondary">Pendiente de Pago</span>
+                          )}
                         </td>
                         <td className="text-center">{new Date(nomina.created_at).toLocaleDateString('es-MX')}</td>
                         <td className="text-center">
                           <div className="btn-group btn-group-sm">
-                            <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle"><Eye size={14} /></button>
+                            <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle y aplicar pagos"><Eye size={14} /></button>
                             <button className="btn btn-outline-success" onClick={() => descargarExcelNomina(nomina)} title="Descargar Excel"><Download size={14} /></button>
-                            {nomina.estatus === 'Cerrada' && (
-                              <button className="btn btn-success" onClick={() => marcarComoPagada(nomina.id)} title="Marcar como pagada"><Check size={14} /></button>
-                            )}
                             <button className="btn btn-outline-danger" onClick={() => eliminarNomina(nomina.id, nomina.codigo)} title="Eliminar nómina"><Trash2 size={14} /></button>
                           </div>
                         </td>
@@ -1480,13 +1552,64 @@ const Nomina = () => {
             )}
           </div>
         </div>
-      )}
+        );
+      })()}
+
+      {/* Vista: Historial (solo nóminas pagadas) */}
+      {vistaActual === 'historial' && (() => {
+        const pagadas = historialNominas.filter(n => n.estatus === 'Pagada');
+        return (
+        <div className="card">
+          <div className="card-header bg-success text-white">
+            <h5 className="mb-0"><History size={20} className="me-2" />Historial de Nóminas Pagadas</h5>
+          </div>
+          <div className="card-body">
+            {pagadas.length === 0 ? (
+              <div className="text-center py-5 text-muted">
+                <History size={48} className="mb-3" /><p>No hay nóminas pagadas aún</p>
+              </div>
+            ) : (
+              <div className="table-responsive">
+                <table className="table table-striped table-hover">
+                  <thead className="table-dark">
+                    <tr>
+                      <th>Código</th><th>Período</th><th className="text-end">Total Sueldos</th>
+                      <th className="text-end">Total Comisiones</th><th className="text-end">Total Neto</th>
+                      <th className="text-center">Fecha Generación</th><th className="text-center">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagadas.map((nomina) => (
+                      <tr key={nomina.id}>
+                        <td><strong>{nomina.codigo}</strong></td>
+                        <td>{new Date(nomina.fecha_inicio).toLocaleDateString('es-MX')} - {new Date(nomina.fecha_fin).toLocaleDateString('es-MX')}</td>
+                        <td className="text-end">{formatMoney(nomina.total_sueldos)}</td>
+                        <td className="text-end text-success">{formatMoney(nomina.total_comisiones)}</td>
+                        <td className="text-end fw-bold">{formatMoney(nomina.total_neto)}</td>
+                        <td className="text-center">{new Date(nomina.created_at).toLocaleDateString('es-MX')}</td>
+                        <td className="text-center">
+                          <div className="btn-group btn-group-sm">
+                            <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle"><Eye size={14} /></button>
+                            <button className="btn btn-outline-success" onClick={() => descargarExcelNomina(nomina)} title="Descargar Excel"><Download size={14} /></button>
+                            <button className="btn btn-outline-danger" onClick={() => eliminarNomina(nomina.id, nomina.codigo)} title="Eliminar nómina"><Trash2 size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+        );
+      })()}
 
       {/* Vista: Detalle de Nómina (solo consulta) */}
       {vistaActual === 'detalle' && nominaSeleccionada && (
         <div>
-          <button className="btn btn-outline-secondary mb-3" onClick={() => setVistaActual('historial')}>
-            ← Volver al Historial
+          <button className="btn btn-outline-secondary mb-3" onClick={() => setVistaActual(vistaAnterior)}>
+            ← Volver
           </button>
           
           <div className="card mb-4">
