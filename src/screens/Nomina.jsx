@@ -37,6 +37,7 @@ const Nomina = () => {
   const [prestamosEmpleados, setPrestamosEmpleados] = useState({});
   const [empleadoExpandido, setEmpleadoExpandido] = useState(null); // id del empleado con row expandido
   const [vistaAnterior, setVistaAnterior] = useState('pendientes'); // para volver desde detalle
+  const [empleadosSeleccionados, setEmpleadosSeleccionados] = useState(new Set()); // IDs de empleados seleccionados para procesar
   
   // Establecer fechas por defecto al montar
   useEffect(() => {
@@ -421,6 +422,11 @@ const Nomina = () => {
       // pero solo se MOSTRARÁN los que tienen actividad
       setDatosNomina(todosEmpleados);
       setAgentesRevisados(new Set());
+      // Seleccionar por defecto todos los empleados con actividad
+      const idsConActividad = todosEmpleados
+        .filter(emp => emp.sueldo > 0 || emp.comisiones > 0)
+        .map(emp => emp.empleado_id);
+      setEmpleadosSeleccionados(new Set(idsConActividad));
       setNominaGenerada(true);
       
       const conActividad = todosEmpleados.filter(emp => emp.sueldo > 0 || emp.comisiones > 0);
@@ -585,9 +591,22 @@ const Nomina = () => {
       return nuevos;
     });
     
-    // Marcar agente como revisado
+    // Marcar agente como revisado y agregar vendedores con comisiones a seleccionados
     if (esAgente) {
       setAgentesRevisados(prev => new Set([...prev, agenteId]));
+      
+      // Agregar vendedores que recibieron comisiones al Set de seleccionados
+      const vendedoresConComision = detalleEditado
+        .filter(det => det.tipo === 'Compartida' && det.vendedorId && (det.comisionVendedor || 0) > 0)
+        .map(det => det.vendedorId);
+      if (vendedoresConComision.length > 0) {
+        setEmpleadosSeleccionados(prev => {
+          const nuevaSeleccion = new Set(prev);
+          vendedoresConComision.forEach(vid => nuevaSeleccion.add(vid));
+          return nuevaSeleccion;
+        });
+      }
+      
       toast.success(`Comisiones de ${empleadoDetalle.nombre} aplicadas y distribuidas a vendedores.`);
     } else {
       toast.success('Comisiones actualizadas.');
@@ -597,21 +616,27 @@ const Nomina = () => {
   
   const totales = useMemo(() => {
     if (!datosNomina.length) return { sueldos: 0, comisiones: 0, descuentos: 0, prestamos: 0, cobros: 0, neto: 0 };
+    // Solo contar empleados seleccionados
+    const seleccionados = datosNomina.filter(item => empleadosSeleccionados.has(item.empleado_id));
     return {
-      sueldos: datosNomina.reduce((sum, item) => sum + (item.sueldo || 0), 0),
-      comisiones: datosNomina.reduce((sum, item) => sum + (item.comisiones || 0), 0),
-      descuentos: datosNomina.reduce((sum, item) => sum + (item.descuentos || 0), 0),
-      prestamos: datosNomina.reduce((sum, item) => sum + (item.prestamo_nuevo || 0), 0),
-      cobros: datosNomina.reduce((sum, item) => sum + (item.cobro_prestamo || 0), 0),
-      neto: datosNomina.reduce((sum, item) => sum + (item.total_pagar || 0), 0)
+      sueldos: seleccionados.reduce((sum, item) => sum + (item.sueldo || 0), 0),
+      comisiones: seleccionados.reduce((sum, item) => sum + (item.comisiones || 0), 0),
+      descuentos: seleccionados.reduce((sum, item) => sum + (item.descuentos || 0), 0),
+      prestamos: seleccionados.reduce((sum, item) => sum + (item.prestamo_nuevo || 0), 0),
+      cobros: seleccionados.reduce((sum, item) => sum + (item.cobro_prestamo || 0), 0),
+      neto: seleccionados.reduce((sum, item) => sum + (item.total_pagar || 0), 0)
     };
-  }, [datosNomina]);
+  }, [datosNomina, empleadosSeleccionados]);
   
-  // Agentes con comisiones que necesitan revisión (todos, no solo compartidas)
+  // Agentes con comisiones que necesitan revisión (solo los seleccionados)
   const agentesPendientes = useMemo(() => {
     if (tipoNomina === 'solo_sueldos') return [];
-    return datosNomina.filter(emp => emp.perfil === 'Agente' && emp.detalleComisiones?.length > 0);
-  }, [datosNomina, tipoNomina]);
+    return datosNomina.filter(emp => 
+      emp.perfil === 'Agente' && 
+      emp.detalleComisiones?.length > 0 && 
+      empleadosSeleccionados.has(emp.empleado_id)
+    );
+  }, [datosNomina, tipoNomina, empleadosSeleccionados]);
   
   const todosAgentesRevisados = useMemo(() => {
     if (agentesPendientes.length === 0) return true;
@@ -624,12 +649,20 @@ const Nomina = () => {
   
   const guardarNomina = async () => {
     if (!datosNomina.length) { toast.error('No hay datos de nómina para guardar'); return null; }
+    // Verificar que haya empleados seleccionados
+    const empleadosAProcesar = datosNomina.filter(emp => 
+      empleadosSeleccionados.has(emp.empleado_id) && 
+      (emp.sueldo > 0 || emp.comisiones > 0 || emp.descuentos > 0 || emp.prestamo_nuevo > 0 || emp.cobro_prestamo > 0)
+    );
+    if (!empleadosAProcesar.length) { 
+      toast.error('No hay empleados seleccionados para procesar'); 
+      return null; 
+    }
     setLoading(true);
     try {
       const nominaData = {
         fecha_inicio: fechaInicio, fecha_fin: fechaFin, tipo_periodo: 'Quincenal',
-        detalles: datosNomina
-          .filter(emp => emp.sueldo > 0 || emp.comisiones > 0 || emp.descuentos > 0 || emp.prestamo_nuevo > 0 || emp.cobro_prestamo > 0)
+        detalles: empleadosAProcesar
           .map(emp => ({
           empleado_id: emp.empleado_id, sueldo: emp.sueldo, comisiones: emp.comisiones,
           descuentos: emp.descuentos, motivo_descuento: emp.motivo_descuento,
@@ -713,7 +746,7 @@ const Nomina = () => {
       if (response.ok) {
         toast.success('Nómina cerrada exitosamente. Las comisiones han sido registradas.');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
-        setAgentesRevisados(new Set());
+        setAgentesRevisados(new Set()); setEmpleadosSeleccionados(new Set());
         cargarHistorialNominas(); cargarPrestamosEmpleados();
       } else {
         const error = await response.json();
@@ -724,7 +757,7 @@ const Nomina = () => {
       if (error.message.includes('Failed to fetch') || error.message.includes('404')) {
         toast.success('Nómina cerrada exitosamente (modo desarrollo)');
         setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false);
-        setAgentesRevisados(new Set());
+        setAgentesRevisados(new Set()); setEmpleadosSeleccionados(new Set());
       } else {
         toast.error(error.message || 'Error al cerrar la nómina');
       }
@@ -907,7 +940,7 @@ const Nomina = () => {
   const cancelarNomina = () => {
     if (nominaGuardada && !confirm('La nómina ya fue guardada en BD. ¿Deseas descartarla?')) return;
     setNominaGenerada(false); setDatosNomina([]); setNominaId(null); setNominaGuardada(false); 
-    setEmpleadoExpandido(null); setAgentesRevisados(new Set());
+    setEmpleadoExpandido(null); setAgentesRevisados(new Set()); setEmpleadosSeleccionados(new Set());
   };
   
   const formatMoney = (value) => {
@@ -1308,6 +1341,22 @@ const Nomina = () => {
                   <table className="table table-striped table-hover table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
                     <thead className="table-dark">
                       <tr>
+                        <th className="text-center px-1" style={{ width: '30px' }}>
+                          <input 
+                            type="checkbox" 
+                            className="form-check-input m-0" 
+                            checked={datosNomina.filter(item => item.sueldo > 0 || item.comisiones > 0).length > 0 && datosNomina.filter(item => item.sueldo > 0 || item.comisiones > 0).every(item => empleadosSeleccionados.has(item.empleado_id))}
+                            onChange={(e) => {
+                              const conActividad = datosNomina.filter(item => item.sueldo > 0 || item.comisiones > 0);
+                              if (e.target.checked) {
+                                setEmpleadosSeleccionados(new Set(conActividad.map(item => item.empleado_id)));
+                              } else {
+                                setEmpleadosSeleccionados(new Set());
+                              }
+                            }}
+                            title="Seleccionar todos"
+                          />
+                        </th>
                         <th style={{ minWidth: '200px' }}>Empleado</th>
                         <th className="text-center" style={{ width: '80px' }}>Perfil</th>
                         <th className="text-end" style={{ width: '100px' }}>Sueldo</th>
@@ -1329,9 +1378,26 @@ const Nomina = () => {
                         const tieneComisiones = esAgente && item.detalleComisiones?.length > 0;
                         const yaRevisado = agentesRevisados.has(item.empleado_id);
                         const pendienteRevision = tieneComisiones && !yaRevisado;
+                        const estaSeleccionado = empleadosSeleccionados.has(item.empleado_id);
                         return (
                         <React.Fragment key={item.empleado_id}>
-                        <tr className={pendienteRevision ? 'table-warning' : ''}>
+                        <tr className={pendienteRevision ? 'table-warning' : ''} style={!estaSeleccionado ? { opacity: 0.5 } : {}}>
+                          <td className="text-center px-1" style={{ width: '30px' }}>
+                            <input 
+                              type="checkbox" 
+                              className="form-check-input m-0" 
+                              checked={estaSeleccionado}
+                              onChange={(e) => {
+                                const nuevaSeleccion = new Set(empleadosSeleccionados);
+                                if (e.target.checked) {
+                                  nuevaSeleccion.add(item.empleado_id);
+                                } else {
+                                  nuevaSeleccion.delete(item.empleado_id);
+                                }
+                                setEmpleadosSeleccionados(nuevaSeleccion);
+                              }}
+                            />
+                          </td>
                           <td>
                             <div className="d-flex justify-content-between align-items-center">
                               <div className="d-flex align-items-center">
@@ -1383,7 +1449,7 @@ const Nomina = () => {
                         {/* Fila expandida con desglose del empleado */}
                         {empleadoExpandido === item.empleado_id && (
                           <tr>
-                            <td colSpan="10" className="p-0">
+                            <td colSpan="11" className="p-0">
                               <div className="bg-light border-start border-4 border-primary p-3" style={{ fontSize: '0.8rem' }}>
                                 <div className="row g-2">
                                   {/* Columna Sueldo */}
@@ -1477,7 +1543,7 @@ const Nomina = () => {
                     </tbody>
                     <tfoot className="table-light">
                       <tr>
-                        <th colSpan="2" className="text-end">TOTALES:</th>
+                        <th colSpan="3" className="text-end">TOTALES:</th>
                         <th className="text-end">{formatMoney(totales.sueldos)}</th>
                         <th className="text-end text-success">{formatMoney(totales.comisiones)}</th>
                         <th className="text-end">{formatMoney(totales.sueldos + totales.comisiones)}</th>
