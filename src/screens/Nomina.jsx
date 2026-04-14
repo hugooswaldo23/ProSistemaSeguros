@@ -827,6 +827,28 @@ const Nomina = () => {
 
       if (response.ok) {
         toast.success(`Pago aplicado a ${pagoEmpleado.nombre}`);
+        
+        // Registrar egreso en corte diario
+        try {
+          await fetch(`${API_URL}/api/corte-diario`, {
+            method: 'POST',
+            headers: { 
+              'Authorization': `Bearer ${localStorage.getItem('ss_token')}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              tipo: 'egreso',
+              categoria: 'nomina',
+              monto: pagoEmpleado.totalPagar,
+              concepto: `Pago nómina ${nominaSeleccionada.codigo} - ${pagoEmpleado.nombre}`,
+              fecha: fechaPagoNomina,
+              referencia: `nomina_detalle:${detalle.id}`
+            })
+          });
+        } catch (e) {
+          console.warn('No se pudo registrar egreso en corte diario:', e);
+        }
+        
         // Actualizar localmente
         const nuevosDetalles = detalleNominaConsulta.detalles.map(d =>
           d.id === detalle.id ? { ...d, estatus_pago: 'Pagado', fecha_pago: fechaPagoNomina, comprobante_url: comprobanteUrl } : d
