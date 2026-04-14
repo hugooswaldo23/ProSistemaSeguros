@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { FileText, DollarSign, Download, Calendar, Plus, Eye, Lock, Check, History, AlertCircle, Wallet, Trash2, ChevronDown, ChevronUp, CheckCircle2, MessageCircle, Mail, Share2, Upload, Image } from 'lucide-react';
 import toast from 'react-hot-toast';
+import * as XLSX from 'xlsx';
 import { useEquipoDeTrabajo } from '../hooks/useEquipoDeTrabajo';
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -29,6 +30,10 @@ const Nomina = () => {
   const [empleadoDetalle, setEmpleadoDetalle] = useState(null);
   const [detalleEditado, setDetalleEditado] = useState([]);
   const [comisionesConsulta, setComisionesConsulta] = useState(null);
+  const [pagoEmpleado, setPagoEmpleado] = useState(null); // { detalle, nombre, totalPagar }
+  const [comprobantePagoNomina, setComprobantePagoNomina] = useState(null);
+  const [fechaPagoNomina, setFechaPagoNomina] = useState('');
+  const [procesandoPagoNomina, setProcesandoPagoNomina] = useState(false);
   const [prestamosEmpleados, setPrestamosEmpleados] = useState({});
   const [empleadoExpandido, setEmpleadoExpandido] = useState(null); // id del empleado con row expandido
   
@@ -705,6 +710,72 @@ const Nomina = () => {
     }
   };
   
+  const abrirModalPagoEmpleado = (det, nombre, totalPagar) => {
+    setPagoEmpleado({ detalle: det, nombre, totalPagar });
+    setComprobantePagoNomina(null);
+    setFechaPagoNomina(new Date().toISOString().split('T')[0]);
+  };
+
+  const aplicarPagoEmpleado = async () => {
+    if (!pagoEmpleado || !nominaSeleccionada) return;
+    const { detalle } = pagoEmpleado;
+    setProcesandoPagoNomina(true);
+    try {
+      // Subir comprobante si existe
+      let comprobanteUrl = null;
+      let comprobanteNombre = null;
+      if (comprobantePagoNomina) {
+        const formData = new FormData();
+        formData.append('file', comprobantePagoNomina);
+        formData.append('tipo', 'comprobante-nomina');
+        const uploadResp = await fetch(`${API_URL}/api/nominas/${nominaSeleccionada.id}/detalles/${detalle.id}/comprobante`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` },
+          body: formData
+        });
+        if (uploadResp.ok) {
+          const uploadData = await uploadResp.json();
+          comprobanteUrl = uploadData.url || uploadData.comprobante_url || '';
+          comprobanteNombre = comprobantePagoNomina.name;
+        }
+      }
+
+      // Marcar como pagado
+      const response = await fetch(`${API_URL}/api/nominas/${nominaSeleccionada.id}/detalles/${detalle.id}/pago`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          estatus_pago: 'Pagado',
+          fecha_pago: fechaPagoNomina,
+          comprobante_url: comprobanteUrl,
+          comprobante_nombre: comprobanteNombre
+        })
+      });
+
+      if (response.ok) {
+        toast.success(`Pago aplicado a ${pagoEmpleado.nombre}`);
+        // Actualizar localmente
+        setDetalleNominaConsulta(prev => ({
+          ...prev,
+          detalles: prev.detalles.map(d =>
+            d.id === detalle.id ? { ...d, estatus_pago: 'Pagado', fecha_pago: fechaPagoNomina, comprobante_url: comprobanteUrl } : d
+          )
+        }));
+        setPagoEmpleado(null);
+      } else if (response.status === 404) {
+        toast.error('Endpoint no disponible aún. Hugo necesita implementar PUT /api/nominas/:id/detalles/:detalleId/pago');
+      } else {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.message || 'Error al aplicar pago');
+      }
+    } catch (error) {
+      console.error('Error aplicando pago:', error);
+      toast.error(error.message || 'Error al aplicar pago');
+    } finally {
+      setProcesandoPagoNomina(false);
+    }
+  };
+
   const marcarComoPagada = async (idNomina) => {
     if (!confirm('¿Confirmas que esta nómina ya fue pagada/depositada?')) return;
     try {
@@ -768,7 +839,225 @@ const Nomina = () => {
   const formatMoney = (value) => {
     return `$${parseFloat(value || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
-  
+
+  const descargarExcelNomina = async (nomina) => {
+    try {
+      toast.loading('Generando Excel...', { id: 'excel' });
+      const response = await fetch(`${API_URL}/api/nominas/${nomina.id}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('ss_token')}` }
+      });
+      if (!response.ok) { toast.error('Error al obtener detalle', { id: 'excel' }); return; }
+      const data = await response.json();
+
+      const ORDEN_PERFIL = { 'Agente': 0, 'Vendedor': 1, 'Ejecutivo': 2, 'Administrador': 3 };
+      const periodo = `${new Date(nomina.fecha_inicio).toLocaleDateString('es-MX')} - ${new Date(nomina.fecha_fin).toLocaleDateString('es-MX')}`;
+      const num = (v) => parseFloat(v || 0);
+
+      // --- Hoja 1: Resumen por empleado ---
+      const resumenRows = [];
+      resumenRows.push(['Nómina:', nomina.codigo, '', 'Período:', periodo]);
+      resumenRows.push(['Estatus:', nomina.estatus, '', 'Generada:', new Date(nomina.created_at).toLocaleDateString('es-MX')]);
+      resumenRows.push([]); // fila vacía
+      resumenRows.push(['Empleado', 'Perfil', 'Sueldo', 'Comisiones', 'Subtotal', 'Descuentos', 'Préstamo (+)', 'Cobro (-)', 'Total Pagado']);
+
+      const detalles = (data.detalles || [])
+        .map(det => {
+          const emp = empleados.find(e => e.id === det.empleado_id);
+          const perfil = emp?.perfil || '';
+          const nombre = emp ? `${emp.nombre || ''} ${emp.apellidoPaterno || ''}`.trim() : `Empleado #${det.empleado_id}`;
+          return { ...det, perfil, nombre };
+        })
+        .filter(d => num(d.sueldo) !== 0 || num(d.comisiones) !== 0)
+        .sort((a, b) => (ORDEN_PERFIL[a.perfil] ?? 9) - (ORDEN_PERFIL[b.perfil] ?? 9));
+
+      detalles.forEach(det => {
+        const sueldo = num(det.sueldo);
+        const comisiones = num(det.comisiones);
+        const descuentos = num(det.descuentos);
+        const prestamoNuevo = num(det.prestamo_nuevo);
+        const cobroPrestamo = num(det.cobro_prestamo);
+        const totalPagar = num(det.total_pagar);
+        resumenRows.push([det.nombre, det.perfil, sueldo, comisiones, sueldo + comisiones, descuentos, prestamoNuevo, cobroPrestamo, totalPagar]);
+      });
+
+      resumenRows.push([]); // fila vacía
+      resumenRows.push(['TOTALES', '', num(nomina.total_sueldos), num(nomina.total_comisiones), num(nomina.total_sueldos) + num(nomina.total_comisiones), num(nomina.total_descuentos), num(nomina.total_prestamos_otorgados), num(nomina.total_prestamos_cobrados), num(nomina.total_neto)]);
+
+      const wsResumen = XLSX.utils.aoa_to_sheet(resumenRows);
+      // Ancho de columnas
+      wsResumen['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }];
+
+      // --- Hoja 2: Detalle de comisiones ---
+      const detalleRows = [];
+      detalleRows.push(['Empleado', 'Aseguradora', 'Póliza', 'Producto', 'Asegurado', 'Agente', 'Clave', 'Tipo', 'Vendedor', 'Prima', '%Comisión', '%Agente', '$Agente', '%Vendedor', '$Vendedor', 'Total Comisión']);
+
+      detalles.forEach(det => {
+        if (det.detalle_comisiones?.length > 0) {
+          det.detalle_comisiones.forEach(com => {
+            detalleRows.push([
+              det.nombre,
+              com.compania || '',
+              com.poliza || '',
+              com.producto || '',
+              com.bien_asegurado || '',
+              com.nombre_agente || '',
+              com.clave || '',
+              com.es_comision_compartida ? 'Compartida' : 'Directa',
+              com.nombre_vendedor || '',
+              num(com.prima),
+              num(com.porcentaje_aplicado),
+              com.porcentaje_agente != null ? num(com.porcentaje_agente) : '',
+              num(com.comision_agente),
+              com.porcentaje_vendedor != null ? num(com.porcentaje_vendedor) : '',
+              com.es_comision_compartida ? num(com.comision_vendedor) : '',
+              num(com.comision_total || com.monto_comision)
+            ]);
+          });
+        }
+      });
+
+      const wsDetalle = XLSX.utils.aoa_to_sheet(detalleRows);
+      wsDetalle['!cols'] = [{ wch: 28 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+
+      // Crear libro y descargar
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+      XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle Comisiones');
+
+      const fechaIni = nomina.fecha_inicio?.slice(0, 10) || '';
+      const fechaFn = nomina.fecha_fin?.slice(0, 10) || '';
+      XLSX.writeFile(wb, `Nomina_${nomina.codigo}_${fechaIni}_${fechaFn}.xlsx`);
+      toast.success('Excel descargado', { id: 'excel' });
+    } catch (error) {
+      console.error('Error generando Excel:', error);
+      toast.error('Error al generar Excel', { id: 'excel' });
+    }
+  };
+
+  const descargarExcelComisiones = () => {
+    if (!comisionesConsulta || !nominaSeleccionada) return;
+    const num = (v) => parseFloat(v || 0);
+    const periodo = `${new Date(nominaSeleccionada.fecha_inicio).toLocaleDateString('es-MX')} - ${new Date(nominaSeleccionada.fecha_fin).toLocaleDateString('es-MX')}`;
+
+    const rows = [];
+    rows.push(['REPORTE DE COMISIONES - DCPRO']);
+    rows.push([]);
+    rows.push(['Empleado:', comisionesConsulta.nombre]);
+    rows.push(['Nómina:', nominaSeleccionada.codigo]);
+    rows.push(['Período:', periodo]);
+    rows.push(['Total Comisiones:', num(comisionesConsulta.comisiones)]);
+    rows.push([]);
+    rows.push(['#', 'Aseguradora', 'Póliza', 'Producto', 'Asegurado', 'Agente', 'Clave', 'Tipo', 'Vendedor', 'Prima', '%Comisión', '%Agente', '$Agente', '%Vendedor', '$Vendedor', 'Total Comisión']);
+
+    comisionesConsulta.detalle.forEach((com, i) => {
+      rows.push([
+        i + 1,
+        com.compania || '',
+        com.poliza || '',
+        com.producto || '',
+        com.bien_asegurado || '',
+        com.nombre_agente || '',
+        com.clave || '',
+        com.es_comision_compartida ? 'Compartida' : 'Directa',
+        com.nombre_vendedor || '',
+        num(com.prima),
+        num(com.porcentaje_aplicado),
+        com.porcentaje_agente != null ? num(com.porcentaje_agente) : '',
+        num(com.comision_agente),
+        com.porcentaje_vendedor != null ? num(com.porcentaje_vendedor) : '',
+        com.es_comision_compartida ? num(com.comision_vendedor) : '',
+        num(com.comision_total || com.monto_comision)
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 4 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 20 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Comisiones');
+
+    const nombreLimpio = comisionesConsulta.nombre.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ ]/g, '').replace(/\s+/g, '_');
+    XLSX.writeFile(wb, `Comisiones_${nombreLimpio}_${nominaSeleccionada.codigo}.xlsx`);
+    toast.success('Excel de comisiones descargado');
+  };
+
+  const compartirComisionesWhatsApp = () => {
+    if (!comisionesConsulta || !nominaSeleccionada) return;
+    const emp = empleados.find(e => e.id === comisionesConsulta.empleado_id);
+    const telefono = emp?.telefono?.replace(/\D/g, '');
+    if (!telefono) { toast.error(`No se encontró teléfono para ${comisionesConsulta.nombre}`); return; }
+    const primerNombre = comisionesConsulta.nombre.split(' ')[0];
+
+    const periodo = `${new Date(nominaSeleccionada.fecha_inicio).toLocaleDateString('es-MX')} - ${new Date(nominaSeleccionada.fecha_fin).toLocaleDateString('es-MX')}`;
+    const numPolizas = comisionesConsulta.detalle.length;
+    let msg = `¡Hola ${primerNombre}! 👋\n\n`;
+    msg += `Te comparto el resumen de tus comisiones correspondientes al período *${periodo}* (${nominaSeleccionada.codigo}).\n\n`;
+    msg += `📊 *Resumen:*\n`;
+    msg += `• Pólizas: *${numPolizas}*\n`;
+    msg += `• Total Comisiones: *${formatMoney(comisionesConsulta.comisiones)}*\n\n`;
+    if (emp?.email) {
+      msg += `📧 Te envié el detalle completo con el desglose por póliza a tu correo (${emp.email}).\n\n`;
+    }
+    msg += `Si tienes alguna duda o aclaración, quedo pendiente. 🙂`;
+
+    const tel = telefono.startsWith('52') ? telefono : `52${telefono}`;
+    window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  const compartirComisionesEmail = () => {
+    if (!comisionesConsulta || !nominaSeleccionada) return;
+    const emp = empleados.find(e => e.id === comisionesConsulta.empleado_id);
+    const email = emp?.email;
+    if (!email) { toast.error(`No se encontró email para ${comisionesConsulta.nombre}`); return; }
+    const primerNombre = comisionesConsulta.nombre.split(' ')[0];
+
+    const periodo = `${new Date(nominaSeleccionada.fecha_inicio).toLocaleDateString('es-MX')} - ${new Date(nominaSeleccionada.fecha_fin).toLocaleDateString('es-MX')}`;
+    const perfil = emp?.perfil || '';
+    const subject = `Detalle de Comisiones | ${nominaSeleccionada.codigo} | ${periodo}`;
+    let body = `Hola ${primerNombre},\n\n`;
+    body += `Te comparto el detalle de las comisiones que tienes a procesar en este período.\n\n`;
+    body += `═══════════════════════════════════\n`;
+    body += `  REPORTE DE COMISIONES - DCPRO\n`;
+    body += `═══════════════════════════════════\n\n`;
+    body += `Nombre:   ${comisionesConsulta.nombre}\n`;
+    body += `Perfil:   ${perfil || '-'}\n`;
+    body += `Nómina:   ${nominaSeleccionada.codigo}\n`;
+    body += `Período:  ${periodo}\n`;
+    body += `Pólizas:  ${comisionesConsulta.detalle.length}\n\n`;
+    body += `───────────────────────────────────\n`;
+    body += `  DETALLE POR PÓLIZA\n`;
+    body += `───────────────────────────────────\n\n`;
+
+    comisionesConsulta.detalle.forEach((com, i) => {
+      body += `${i + 1}. ${com.compania || 'Sin aseguradora'}\n`;
+      body += `   Póliza:     ${com.poliza || '-'}\n`;
+      body += `   Producto:   ${com.producto || '-'}`;
+      if (com.bien_asegurado) body += ` | ${com.bien_asegurado}`;
+      body += `\n`;
+      body += `   Prima:      ${formatMoney(com.prima)}\n`;
+      body += `   % Comisión: ${com.porcentaje_aplicado || 0}%\n`;
+      body += `   Agente:     ${com.nombre_agente || '-'} (Clave: ${com.clave || '-'})\n`;
+      if (com.es_comision_compartida) {
+        body += `   Tipo:       Compartida\n`;
+        body += `   Vendedor:   ${com.nombre_vendedor || '-'}\n`;
+        body += `   → Agente:   ${formatMoney(com.comision_agente || 0)} (${com.porcentaje_agente || 0}%)\n`;
+        body += `   → Vendedor: ${formatMoney(com.comision_vendedor || 0)} (${com.porcentaje_vendedor || 0}%)\n`;
+      } else {
+        body += `   Tipo:       Directa\n`;
+        body += `   Comisión:   ${formatMoney(com.comision_total || com.monto_comision || 0)}\n`;
+      }
+      body += `\n`;
+    });
+
+    body += `═══════════════════════════════════\n`;
+    body += `  TOTAL COMISIONES: ${formatMoney(comisionesConsulta.comisiones)}\n`;
+    body += `═══════════════════════════════════\n\n`;
+    body += `Si tienes alguna duda o aclaración, no dudes en contactarnos.\n\n`;
+    body += `Saludos,\nDCPRO Administración`;
+
+    descargarExcelComisiones();
+    window.open(`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_self');
+  };
+
   return (
     <div className="container-fluid py-4">
       <div className="row mb-4">
@@ -1159,6 +1448,7 @@ const Nomina = () => {
                         <td className="text-center">
                           <div className="btn-group btn-group-sm">
                             <button className="btn btn-outline-primary" onClick={() => cargarDetalleNomina(nomina)} title="Ver detalle"><Eye size={14} /></button>
+                            <button className="btn btn-outline-success" onClick={() => descargarExcelNomina(nomina)} title="Descargar Excel"><Download size={14} /></button>
                             {nomina.estatus === 'Cerrada' && (
                               <button className="btn btn-success" onClick={() => marcarComoPagada(nomina.id)} title="Marcar como pagada"><Check size={14} /></button>
                             )}
@@ -1225,8 +1515,30 @@ const Nomina = () => {
                     return d._perfil === filtroActivo;
                   })
                   .sort((a, b) => (ORDEN_PERFIL[a._perfil] ?? 9) - (ORDEN_PERFIL[b._perfil] ?? 9));
+                const empleadosConPago = detallesEnriquecidos.filter(d => parseFloat(d.sueldo || 0) !== 0 || parseFloat(d.comisiones || 0) !== 0);
+                const pagados = empleadosConPago.filter(d => d.estatus_pago === 'Pagado').length;
+                const totalConPago = empleadosConPago.length;
+                const porcentajePagado = totalConPago > 0 ? Math.round((pagados / totalConPago) * 100) : 0;
                 return (
                 <>
+                {nominaSeleccionada.estatus !== 'Pagada' && (
+                  <div className="px-3 pt-2">
+                    <div className="d-flex justify-content-between align-items-center mb-1">
+                      <small className="text-muted"><Wallet size={14} className="me-1" />Progreso de Pagos</small>
+                      <small className="fw-bold">{pagados} de {totalConPago} pagados ({porcentajePagado}%)</small>
+                    </div>
+                    <div className="progress" style={{height: '8px'}}>
+                      <div className={`progress-bar ${porcentajePagado === 100 ? 'bg-success' : 'bg-warning'}`} role="progressbar" style={{width: `${porcentajePagado}%`}}></div>
+                    </div>
+                    {porcentajePagado === 100 && (
+                      <div className="text-center mt-2">
+                        <button className="btn btn-success btn-sm" onClick={() => marcarComoPagada(nominaSeleccionada.id)}>
+                          <CheckCircle2 size={14} className="me-1" />Todos pagados — Marcar nómina como Pagada
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="px-3 pt-2 pb-1 d-flex gap-1 flex-wrap align-items-center">
                   <small className="text-muted me-1">Filtrar:</small>
                   <button className={`btn btn-sm py-0 px-2 ${filtroActivo === 'todos' ? 'btn-dark' : 'btn-outline-dark'}`} style={{fontSize:'0.7rem'}} onClick={() => { window._filtroPerfil = 'todos'; setDetalleNominaConsulta({...detalleNominaConsulta}); }}>Todos</button>
@@ -1248,6 +1560,7 @@ const Nomina = () => {
                         <th className="text-end" style={{ width: '100px' }}>Préstamo (+)</th>
                         <th className="text-end" style={{ width: '100px' }}>Cobro (-)</th>
                         <th className="text-end" style={{ width: '120px' }}>Total Pagado</th>
+                        <th className="text-center" style={{ width: '100px' }}>Pago</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1266,7 +1579,7 @@ const Nomina = () => {
                             <td>
                               <strong>{nombre}</strong>
                               {det.detalle_comisiones?.length > 0 && (
-                                <button className="btn btn-sm btn-outline-success py-0 px-1 ms-2" style={{ fontSize: '0.65rem' }} onClick={() => setComisionesConsulta({ nombre, comisiones, detalle: det.detalle_comisiones })} title="Ver detalle de comisiones">
+                                <button className="btn btn-sm btn-outline-success py-0 px-1 ms-2" style={{ fontSize: '0.65rem' }} onClick={() => setComisionesConsulta({ nombre, comisiones, detalle: det.detalle_comisiones, empleado_id: det.empleado_id })} title="Ver detalle de comisiones">
                                   <Eye size={12} className="me-1" />{det.detalle_comisiones.length} pólizas
                                 </button>
                               )}
@@ -1285,6 +1598,24 @@ const Nomina = () => {
                             <td className="text-end text-warning">{prestamoNuevo > 0 ? formatMoney(prestamoNuevo) : '-'}</td>
                             <td className="text-end">{cobroPrestamo > 0 ? formatMoney(cobroPrestamo) : '-'}</td>
                             <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(totalPagar)}</td>
+                            <td className="text-center">
+                              {det.estatus_pago === 'Pagado' ? (
+                                <div>
+                                  <span className="badge bg-success" style={{fontSize: '0.7rem'}}><CheckCircle2 size={12} className="me-1" />Pagado</span>
+                                  {det.comprobante_url && (
+                                    <a href={det.comprobante_url} target="_blank" rel="noopener noreferrer" className="d-block mt-1" style={{fontSize: '0.6rem'}}>
+                                      <Image size={10} className="me-1" />Comprobante
+                                    </a>
+                                  )}
+                                </div>
+                              ) : nominaSeleccionada.estatus !== 'Pagada' ? (
+                                <button className="btn btn-outline-warning btn-sm py-0 px-2" style={{fontSize: '0.7rem'}} onClick={() => abrirModalPagoEmpleado(det, nombre, totalPagar)} title="Aplicar pago">
+                                  <Upload size={12} className="me-1" />Pagar
+                                </button>
+                              ) : (
+                                <span className="badge bg-warning text-dark" style={{fontSize: '0.7rem'}}>Pendiente</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
@@ -1300,6 +1631,7 @@ const Nomina = () => {
                         <th className="text-end text-warning">{formatMoney(nominaSeleccionada.total_prestamos_otorgados)}</th>
                         <th className="text-end">{formatMoney(nominaSeleccionada.total_prestamos_cobrados)}</th>
                         <th className="text-end text-primary" style={{ fontSize: '1.1rem' }}>{formatMoney(nominaSeleccionada.total_neto)}</th>
+                        <th></th>
                       </tr>
                     </tfoot>
                   </table>
@@ -1429,8 +1761,54 @@ const Nomina = () => {
                   </div>
                 )}
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setComisionesConsulta(null)}>Cerrar</button>
+              <div className="modal-footer d-flex justify-content-end gap-2">
+                  <button className="btn btn-success btn-sm" onClick={compartirComisionesWhatsApp} title="Compartir por WhatsApp">
+                    <MessageCircle size={14} className="me-1" />WhatsApp
+                  </button>
+                  <button className="btn btn-primary btn-sm" onClick={compartirComisionesEmail} title="Compartir por Email">
+                    <Mail size={14} className="me-1" />Email
+                  </button>
+                  <button className="btn btn-outline-dark btn-sm" onClick={descargarExcelComisiones} title="Descargar Excel de comisiones">
+                    <Download size={14} className="me-1" />Excel
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setComisionesConsulta(null)}>Cerrar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Aplicar Pago a Empleado */}
+      {pagoEmpleado && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1060 }} onClick={() => !procesandoPagoNomina && setPagoEmpleado(null)}>
+          <div className="modal-dialog modal-sm modal-dialog-centered" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-content">
+              <div className="modal-header bg-warning py-2">
+                <h6 className="modal-title mb-0"><Wallet size={16} className="me-2" />Aplicar Pago</h6>
+                <button type="button" className="btn-close" onClick={() => setPagoEmpleado(null)} disabled={procesandoPagoNomina}></button>
+              </div>
+              <div className="modal-body">
+                <div className="text-center mb-3">
+                  <strong>{pagoEmpleado.nombre}</strong>
+                  <div className="text-primary fw-bold" style={{fontSize: '1.2rem'}}>{formatMoney(pagoEmpleado.totalPagar)}</div>
+                </div>
+                <div className="mb-3">
+                  <label className="form-label" style={{fontSize: '0.85rem'}}>Fecha de pago</label>
+                  <input type="date" className="form-control form-control-sm" value={fechaPagoNomina} onChange={(e) => setFechaPagoNomina(e.target.value)} />
+                </div>
+                <div className="mb-3">
+                  <label className="form-label" style={{fontSize: '0.85rem'}}>Comprobante de pago</label>
+                  <input type="file" className="form-control form-control-sm" accept="image/*,.pdf" onChange={(e) => setComprobantePagoNomina(e.target.files[0] || null)} />
+                  {comprobantePagoNomina && (
+                    <small className="text-success"><CheckCircle2 size={12} className="me-1" />{comprobantePagoNomina.name}</small>
+                  )}
+                </div>
+              </div>
+              <div className="modal-footer py-2">
+                <button className="btn btn-secondary btn-sm" onClick={() => setPagoEmpleado(null)} disabled={procesandoPagoNomina}>Cancelar</button>
+                <button className="btn btn-success btn-sm" onClick={aplicarPagoEmpleado} disabled={procesandoPagoNomina || !fechaPagoNomina}>
+                  {procesandoPagoNomina ? <><span className="spinner-border spinner-border-sm me-1" />Procesando...</> : <><Check size={14} className="me-1" />Confirmar Pago</>}
+                </button>
               </div>
             </div>
           </div>
