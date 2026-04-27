@@ -350,3 +350,32 @@ export async function getGiroActividadListHDI(){
         return {success: false, message: error.message || 'Error al obtener giros'};
     }
 }
+
+export async function getPolicyByNum(data) {
+    try {
+        const url = `${API_URL}/api/multicotizador/poliza/recuperar`;
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: getAuthHeaders(true),
+            body: JSON.stringify(data)
+        });
+        const dataResponse = await response.json();
+        if (dataResponse.success == false) {
+            const errorText = await response.text();
+            let errorMessage = 'Error al recuperar la póliza';
+            
+            try {
+                const error = JSON.parse(errorText);
+                errorMessage = error.message || errorMessage;
+            } catch (e) {
+                errorMessage = errorText || errorMessage;
+            }
+            return {success: false, message: errorMessage || 'Error al recuperar la póliza'}
+        }
+
+        return { success: true, data: dataResponse}
+    } catch (error) {
+        return { success: false , message: error.message || 'Error al recuperar la póliza'};
+    }
+}

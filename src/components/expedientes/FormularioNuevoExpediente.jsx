@@ -15,6 +15,7 @@ import toast from 'react-hot-toast';
 import { validarContactoCliente } from '../../utils/validacionContacto';
 import FormularioExpedienteBase from './FormularioExpedienteBase';
 import ExtractorPolizasPDF from './ExtractorPolizasPDF';
+import ModalCargaPolizaByNum from './ModalCargaPolizaByNum';
 
 const API_URL = import.meta.env.VITE_API_URL;
 
@@ -57,7 +58,8 @@ const FormularioNuevoExpediente = ({
   expedienteAnterior = null,
   limpiarExpedienteAnterior = () => {},
   // 🆕 Callback para crear agente nuevo desde modo manual
-  onCrearAgenteNuevo
+  onCrearAgenteNuevo,
+  cargarExpedientes
 }) => {
   // Estados específicos para modo agregar
   const [mostrarModalSeleccion, setMostrarModalSeleccion] = useState(true);
@@ -65,6 +67,7 @@ const FormularioNuevoExpediente = ({
   const [mostrarExtractorPDF, setMostrarExtractorPDF] = useState(false);
   const [datosImportadosDesdePDF, setDatosImportadosDesdePDF] = useState(false);
   const [infoImportacion, setInfoImportacion] = useState(null);
+  const [mostrarModalCargaPolizaByNum, setMostrarModalCargaPolizaByNum] = useState(false);
 
   /**
    * Handler para seleccionar modo de captura
@@ -329,6 +332,11 @@ const FormularioNuevoExpediente = ({
     </div>
   );
 
+  //funcion modal carga por numero de poliza
+  const modalCargaPolizaByNumQ = () => {
+        setMostrarModalCargaPolizaByNum(true);
+  }
+
   return (
     <>
       {/* 🆕 Banner informativo de Renovación (si hay expediente anterior) */}
@@ -426,6 +434,18 @@ const FormularioNuevoExpediente = ({
                   }}
                 />
 
+                {/* Cargar por numero de poliza */}
+                <div className='row g-3 justify-content-end'>
+                  <div className="col-md-4 mb-2 d-flex justify-content-end">
+                    <button 
+                      type="button" 
+                      className="btn btn-outline-primary"
+                      onClick={modalCargaPolizaByNumQ}
+                    >
+                      Recuperar por póliza
+                    </button>
+                  </div>
+                </div>
                 <div className="row g-3">
                   {/* Opción Captura Manual */}
                   <div className="col-md-4">
@@ -589,6 +609,15 @@ const FormularioNuevoExpediente = ({
           agentes={agentes}
           aseguradoras={aseguradoras}
           tiposProductos={tiposProductos}
+        />
+      )}
+
+      {/* Modal de Carga por Número de Póliza */}
+      {mostrarModalCargaPolizaByNum && (
+        <ModalCargaPolizaByNum
+          onClose={() => setMostrarModalCargaPolizaByNum(false)}
+          setVistaActual={setVistaActual}
+          cargarExpedientes={cargarExpedientes}
         />
       )}
     </>

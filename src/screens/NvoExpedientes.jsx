@@ -3817,6 +3817,7 @@ const ModuloNvoExpedientes = () => {
             setFormularioNuevoAgente({ nombre: '', apellidoPaterno: '', apellidoMaterno: '', codigoAgente: '', email: '', telefonoMovil: '' });
             setMostrarModalNuevoAgente(true);
           }}
+          cargarExpedientes={recargarExpedientes}
         />
       )}
 
