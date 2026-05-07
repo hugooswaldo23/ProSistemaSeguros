@@ -55,6 +55,173 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Ref para el input file
   const fileInputRef = useRef(null);
   const yaAbriSelectorRef = useRef(false); // Bandera para evitar abrir selector múltiples veces
+
+  const esErrorClienteDuplicado = useCallback((error = '') => {
+    const mensaje = String(error).toLowerCase();
+    return mensaje.includes('ya existe un cliente con ese código')
+      || mensaje.includes('ya existe un cliente con ese codigo')
+      || mensaje.includes('ya existe un cliente con ese código o rfc')
+      || mensaje.includes('ya existe un cliente con ese codigo o rfc')
+      || mensaje.includes('cliente duplicado');
+  }, []);
+
+  const normalizarListaClientes = useCallback((payload) => {
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+
+    if (Array.isArray(payload?.data)) {
+      return payload.data;
+    }
+
+    return [];
+  }, []);
+
+  const obtenerClientesDesdeAPI = useCallback(async (queryParams = {}) => {
+    const params = new URLSearchParams();
+
+    Object.entries(queryParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params.set(key, String(value));
+      }
+    });
+
+    params.set('t', Date.now().toString());
+
+    const response = await fetch(`${API_URL}/api/clientes?${params.toString()}`, {
+      headers: getAuthHeaders()
+    });
+
+    if (!response.ok) {
+      console.error('❌ Error al obtener clientes:', response.status);
+      if (response.status === 401) {
+        throw new Error('Sesión expirada. Por favor cierra sesión e inicia sesión nuevamente.');
+      }
+      throw new Error(`Error HTTP: ${response.status}`);
+    }
+
+    const payload = await response.json();
+    return normalizarListaClientes(payload);
+  }, [normalizarListaClientes]);
+
+  const buscarClienteExistenteEnAPI = useCallback(async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
+    const variantesBusqueda = [];
+
+    if (rfc && rfc.trim() !== '') {
+      variantesBusqueda.push({ search: rfc.trim(), limit: 1000 });
+    }
+
+    if (curp && curp.trim() !== '') {
+      variantesBusqueda.push({ search: curp.trim(), limit: 1000 });
+    }
+
+    if (nombre && apellidoPaterno) {
+      variantesBusqueda.push({
+        search: `${nombre} ${apellidoPaterno} ${apellidoMaterno || ''}`.trim(),
+        limit: 1000
+      });
+    }
+
+    variantesBusqueda.push({ limit: 1000 });
+
+    const clientesMap = new Map();
+
+    for (const variante of variantesBusqueda) {
+      const clientes = await obtenerClientesDesdeAPI(variante);
+      clientes.forEach(cliente => {
+        clientesMap.set(cliente.id, cliente);
+      });
+    }
+
+    const clientes = Array.from(clientesMap.values());
+
+    if (rfc && rfc.trim() !== '') {
+      const rfcBusqueda = rfc.trim().toUpperCase();
+      const clientePorRFC = clientes.find(c => ((c.rfc || '').trim().toUpperCase() === rfcBusqueda));
+      if (clientePorRFC) return clientePorRFC;
+    }
+
+    if (curp && curp.trim() !== '') {
+      const curpBusqueda = curp.trim().toUpperCase();
+      const clientePorCURP = clientes.find(c => ((c.curp || '').trim().toUpperCase() === curpBusqueda));
+      if (clientePorCURP) return clientePorCURP;
+    }
+
+    if (nombre && apellidoPaterno) {
+      const nombreBusqueda = nombre.trim().toUpperCase();
+      const apellidoPaternoBusqueda = apellidoPaterno.trim().toUpperCase();
+      const apellidoMaternoBusqueda = apellidoMaterno ? apellidoMaterno.trim().toUpperCase() : '';
+
+      return clientes.find(c => {
+        const nombreCliente = (c.nombre || '').trim().toUpperCase();
+        const apellidoPaternoCliente = (c.apellido_paterno || c.apellidoPaterno || '').trim().toUpperCase();
+        const apellidoMaternoCliente = (c.apellido_materno || c.apellidoMaterno || '').trim().toUpperCase();
+
+        return nombreCliente === nombreBusqueda
+          && apellidoPaternoCliente === apellidoPaternoBusqueda
+          && apellidoMaternoCliente === apellidoMaternoBusqueda;
+      }) || null;
+    }
+
+    return null;
+  }, [obtenerClientesDesdeAPI]);
+
+  const generarCodigoClienteUnico = useCallback(() => {
+    const timestamp = Date.now().toString().slice(-9);
+    const sufijoAleatorio = Math.floor(100 + Math.random() * 900).toString();
+    return `CL${timestamp}${sufijoAleatorio}`;
+  }, []);
+
+  const crearClienteConFallback = useCallback(async (nuevoCliente, datosBusqueda = {}) => {
+    const { crearCliente } = await import('../../services/clientesService');
+
+    let payloadCliente = {
+      ...nuevoCliente,
+      codigo: nuevoCliente.codigo || generarCodigoClienteUnico()
+    };
+
+    let resultado = await crearCliente(payloadCliente);
+
+    if (resultado.success) {
+      return resultado;
+    }
+
+    if (!esErrorClienteDuplicado(resultado.error)) {
+      return resultado;
+    }
+
+    console.warn('⚠️ Backend reportó duplicado al crear cliente. Verificando si existe por RFC/nombre...');
+
+    const clienteExistente = await buscarClienteExistenteEnAPI(
+      datosBusqueda.rfc || payloadCliente.rfc,
+      datosBusqueda.curp,
+      datosBusqueda.nombre || payloadCliente.nombre,
+      datosBusqueda.apellidoPaterno || payloadCliente.apellidoPaterno,
+      datosBusqueda.apellidoMaterno || payloadCliente.apellidoMaterno
+    );
+
+    if (clienteExistente) {
+      console.log('✅ Cliente existente localizado tras respuesta de duplicado:', clienteExistente.id);
+      return { success: true, data: clienteExistente, clienteExistente: true };
+    }
+
+    for (let intento = 1; intento <= 3; intento += 1) {
+      payloadCliente = {
+        ...nuevoCliente,
+        codigo: generarCodigoClienteUnico()
+      };
+
+      console.warn(`⚠️ No existe cliente real. Reintentando creación con código explícito (${intento}/3):`, payloadCliente.codigo);
+
+      resultado = await crearCliente(payloadCliente);
+
+      if (resultado.success || !esErrorClienteDuplicado(resultado.error)) {
+        return resultado;
+      }
+    }
+
+    return resultado;
+  }, [buscarClienteExistenteEnAPI, esErrorClienteDuplicado, generarCodigoClienteUnico]);
   
   // Si hay un archivo pre-seleccionado, procesarlo inmediatamente
   useEffect(() => {
@@ -181,76 +348,6 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       // Crear textoCompleto con todas las páginas
       const textoCompleto = todasLasPaginas.map(p => p.texto).join('\n\n');
       
-      // Buscar cliente por RFC, CURP o nombre en la base de datos
-      const buscarClienteExistente = async (rfc, curp, nombre, apellidoPaterno, apellidoMaterno) => {
-        try {
-          const response = await fetch(`${API_URL}/api/clientes`, {
-            headers: getAuthHeaders()
-          });
-          if (!response.ok) {
-            console.error('❌ Error al obtener clientes:', response.status);
-            if (response.status === 401) {
-              throw new Error('Sesión expirada. Por favor cierra sesión e inicia sesión nuevamente.');
-            }
-            return null;
-          }
-          
-          const clientes = await response.json();
-          
-          // 1. PRIORIDAD 1: Buscar por RFC (más confiable)
-          if (rfc && rfc.trim() !== '') {
-            const rfcBusqueda = rfc.trim().toUpperCase();
-            const clientePorRFC = clientes.find(c => {
-              const rfcCliente = (c.rfc || '').trim().toUpperCase();
-              return rfcCliente === rfcBusqueda;
-            });
-            
-            if (clientePorRFC) return clientePorRFC;
-          }
-          
-          // 2. PRIORIDAD 2: Buscar por CURP (si no hay RFC)
-          if (curp && curp.trim() !== '') {
-            const curpBusqueda = curp.trim().toUpperCase();
-            const clientePorCURP = clientes.find(c => {
-              const curpCliente = (c.curp || '').trim().toUpperCase();
-              return curpCliente === curpBusqueda;
-            });
-            
-            if (clientePorCURP) return clientePorCURP;
-          }
-          
-          // 3. PRIORIDAD 3: Buscar por nombre completo (último recurso)
-          if (nombre && apellidoPaterno) {
-            const nombreBusqueda = nombre.trim().toUpperCase();
-            const apellidoPaternoBusqueda = apellidoPaterno.trim().toUpperCase();
-            const apellidoMaternoBusqueda = apellidoMaterno ? apellidoMaterno.trim().toUpperCase() : '';
-            
-            console.log(`🔍 Buscando por nombre: "${nombreBusqueda} ${apellidoPaternoBusqueda} ${apellidoMaternoBusqueda}"`);
-            
-            const clientePorNombre = clientes.find(c => {
-              const nombreCliente = (c.nombre || '').trim().toUpperCase();
-              const apellidoPaternoCliente = (c.apellido_paterno || c.apellidoPaterno || '').trim().toUpperCase();
-              const apellidoMaternoCliente = (c.apellido_materno || c.apellidoMaterno || '').trim().toUpperCase();
-              
-              const coincideNombre = nombreCliente === nombreBusqueda;
-              const coincidePaterno = apellidoPaternoCliente === apellidoPaternoBusqueda;
-              const coincideMaterno = !apellidoMaternoBusqueda || 
-                                     !apellidoMaternoCliente || 
-                                     apellidoMaternoCliente === apellidoMaternoBusqueda;
-              
-              return coincideNombre && coincidePaterno && coincideMaterno;
-            });
-            
-            if (clientePorNombre) return clientePorNombre;
-          }
-          
-          return null;
-        } catch (error) {
-          console.error('❌ Error buscando cliente:', error);
-          return null;
-        }
-      };
-
       // ==================== SISTEMA DE EXTRACCIÓN ====================
       let datosExtraidos = {};
 
@@ -353,7 +450,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       }
 
       // Buscar cliente existente
-      const clienteExistente = await buscarClienteExistente(
+      const clienteExistente = await buscarClienteExistenteEnAPI(
         datosExtraidos.rfc,
         datosExtraidos.curp,
         datosExtraidos.nombre,
@@ -545,7 +642,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         setErrores(['❌ Error al procesar el archivo PDF: ' + error.message]);
       }
     }
-  }, [metodoExtraccion]); // Agregar metodoExtraccion como dependencia
+  }, [buscarClienteExistenteEnAPI, metodoExtraccion]); // Agregar metodoExtraccion como dependencia
 
   const handleFileUpload = useCallback((e) => {
     const file = e.target.files[0];
@@ -641,8 +738,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       
       console.log(`📋 Creando cliente (${tipoPersonaDetectado}) | RFC: ${datosExtraidos.rfc} | ${tipoPersonaDetectado === 'Persona Moral' ? nuevoCliente.razonSocial : nuevoCliente.nombre}`);
       
-      const { crearCliente } = await import('../../services/clientesService');
-      const resultado = await crearCliente(nuevoCliente);
+      const resultado = await crearClienteConFallback(nuevoCliente, {
+        rfc: datosExtraidos.rfc,
+        curp: datosExtraidos.curp,
+        nombre: datosExtraidos.nombre,
+        apellidoPaterno: datosExtraidos.apellido_paterno,
+        apellidoMaterno: datosExtraidos.apellido_materno
+      });
       
       console.log('📡 Respuesta de crearCliente:', resultado);
       
@@ -772,7 +874,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     
     // Pasar al PASO 2: Validación de Agente
     setEstado('validando-agente');
-  }, [datosExtraidos]);
+  }, [crearClienteConFallback, datosExtraidos]);
 
   // ✅ FUNCIÓN SIMPLIFICADA: Asignar RFC y continuar con creación de cliente
   const handleSeleccionRFC = useCallback(async (opcion, rfcManual = '') => {
@@ -854,8 +956,13 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
     console.log('📋 Datos del cliente a crear:', nuevoCliente);
     
     try {
-      const { crearCliente } = await import('../../services/clientesService');
-      const resultado = await crearCliente(nuevoCliente);
+      const resultado = await crearClienteConFallback(nuevoCliente, {
+        rfc: rfcFinal,
+        curp: datosActualizados.curp,
+        nombre: datosActualizados.nombre,
+        apellidoPaterno: datosActualizados.apellido_paterno,
+        apellidoMaterno: datosActualizados.apellido_materno
+      });
       
       console.log('� Respuesta de crearCliente:', resultado);
       
@@ -910,7 +1017,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       toast.error('❌ Error al crear cliente');
       setEstado('error');
     }
-  }, [datosExtraidos]);
+  }, [crearClienteConFallback, datosExtraidos]);
 
   // PASO 2: Manejar decisión sobre el agente
   const handleDecisionAgente = useCallback(async (decision) => {

@@ -104,29 +104,12 @@ const CorteDiario = () => {
           const error = await response.json();
           throw new Error(error.message || 'Error al guardar');
         } else {
-          throw new Error('Endpoint no disponible');
+          throw new Error('Endpoint no disponible. Hugo debe implementar POST/PUT /api/corte-diario');
         }
       }
     } catch (error) {
       console.error('Error:', error);
-      if (error.message.includes('Failed to fetch') || error.message.includes('no disponible')) {
-        // Modo desarrollo
-        const nuevoMov = {
-          id: movimientoEditando?.id || Date.now(),
-          ...datos,
-          created_at: movimientoEditando?.created_at || new Date().toISOString()
-        };
-        
-        if (movimientoEditando) {
-          setMovimientos(prev => prev.map(m => m.id === nuevoMov.id ? nuevoMov : m));
-        } else {
-          setMovimientos(prev => [...prev, nuevoMov]);
-        }
-        toast.success(`Movimiento ${movimientoEditando ? 'actualizado' : 'registrado'} (modo desarrollo)`);
-        cerrarModal();
-      } else {
-        toast.error(error.message || 'Error al guardar movimiento');
-      }
+      toast.error(error.message || 'Error al guardar movimiento');
     } finally {
       setLoading(false);
     }
@@ -148,9 +131,8 @@ const CorteDiario = () => {
         throw new Error('Error al eliminar');
       }
     } catch (error) {
-      // Modo desarrollo
-      setMovimientos(prev => prev.filter(m => m.id !== id));
-      toast.success('Movimiento eliminado (modo desarrollo)');
+      console.error('Error:', error);
+      toast.error('Error al eliminar movimiento');
     }
   };
   
