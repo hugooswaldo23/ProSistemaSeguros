@@ -1779,16 +1779,16 @@ const Nomina = () => {
                   <table className="table table-striped table-hover table-bordered mb-0" style={{ fontSize: '0.85rem' }}>
                     <thead className="table-dark">
                       <tr>
-                        <th style={{ minWidth: '200px' }}>Empleado</th>
-                        <th style={{ width: '90px' }}>Perfil</th>
-                        <th className="text-end" style={{ width: '100px' }}>Sueldo</th>
-                        <th className="text-end" style={{ width: '100px' }}>Comisiones</th>
-                        <th className="text-end" style={{ width: '100px' }}>Subtotal</th>
-                        <th className="text-end" style={{ width: '100px' }}>Descuentos</th>
-                        <th className="text-end" style={{ width: '100px' }}>Préstamo (+)</th>
-                        <th className="text-end" style={{ width: '100px' }}>Cobro (-)</th>
-                        <th className="text-end" style={{ width: '120px' }}>Total Pagado</th>
-                        <th className="text-center" style={{ width: '100px' }}>Pago</th>
+                        <th style={{ minWidth: '160px' }}>Empleado</th>
+                        <th style={{ width: '80px' }}>Perfil</th>
+                        <th className="text-end" style={{ width: '90px' }}>Sueldo</th>
+                        <th className="text-end" style={{ width: '95px' }}>Comisiones</th>
+                        <th className="text-end" style={{ width: '95px' }}>Subtotal</th>
+                        <th className="text-end" style={{ width: '90px' }}>Descuentos</th>
+                        <th className="text-end" style={{ width: '90px' }}>Préstamo (+)</th>
+                        <th className="text-end" style={{ width: '80px' }}>Cobro (-)</th>
+                        <th className="text-end" style={{ width: '110px' }}>Total Pagado</th>
+                        <th className="text-center" style={{ width: '150px' }}>Pago</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1828,11 +1828,11 @@ const Nomina = () => {
                             <td className="text-end fw-bold text-primary" style={{ fontSize: '1rem' }}>{formatMoney(totalPagar)}</td>
                             <td className="text-center">
                               {det.estatus_pago === 'Pagado' ? (
-                                <div>
-                                  <span className="badge bg-success" style={{fontSize: '0.7rem'}}><CheckCircle2 size={12} className="me-1" />Pagado</span>
+                                <div className="d-flex align-items-center justify-content-center gap-1 flex-nowrap">
+                                  <span className="badge bg-success" style={{fontSize: '0.65rem'}}><CheckCircle2 size={10} className="me-1" />Pagado</span>
                                   {det.comprobante_url && (
-                                    <button className="btn btn-link p-0 d-block mt-1" style={{fontSize: '0.6rem'}} onClick={() => verComprobanteNomina(nominaSeleccionada.id, det.id)}>
-                                      <Image size={10} className="me-1" />Ver comprobante
+                                    <button className="btn btn-link p-0" style={{fontSize: '0.55rem', whiteSpace: 'nowrap'}} onClick={() => verComprobanteNomina(nominaSeleccionada.id, det.id)}>
+                                      <Image size={10} className="me-1" />Ver
                                     </button>
                                   )}
                                 </div>
