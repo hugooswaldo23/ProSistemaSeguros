@@ -512,6 +512,7 @@ const ModuloNvoExpedientes = () => {
       try {
         let tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS; // Default
         let descripcion = `Etapa cambiada de "${etapaAnterior}" a "${nuevoEstado}"`;
+        let debeRegistrarCambioEtapa = true;
         
         // Asignar tipo de evento específico según el cambio de etapa
         switch (nuevoEstado) {
@@ -537,23 +538,26 @@ const ModuloNvoExpedientes = () => {
           case 'Enviada al Cliente':
           case 'Renovación Enviada':
             // ⚠️ ESTOS eventos ya se registran en compartirPorWhatsApp/Email
-            // No duplicar eventos - salir sin registrar
-            return;
+            // No duplicar eventos, pero sí continuar con la recarga local
+            debeRegistrarCambioEtapa = false;
+            break;
           default:
             // Cualquier otra etapa usa el evento genérico
             tipoEvento = historialService.TIPOS_EVENTO.DATOS_ACTUALIZADOS;
             break;
         }
         
-        await historialService.registrarCambioEtapa(
-          expedienteId,
-          expedienteActual?.cliente_id,
-          etapaAnterior,
-          nuevoEstado,
-          'Sistema', // TODO: Obtener nombre del usuario actual
-          descripcion,
-          tipoEvento
-        );
+        if (debeRegistrarCambioEtapa) {
+          await historialService.registrarCambioEtapa(
+            expedienteId,
+            expedienteActual?.cliente_id,
+            etapaAnterior,
+            nuevoEstado,
+            'Sistema', // TODO: Obtener nombre del usuario actual
+            descripcion,
+            tipoEvento
+          );
+        }
           // Evento registrado
       } catch (error) {
         console.error('⚠️ Error al registrar cambio de etapa en historial:', error);
@@ -3269,8 +3273,21 @@ const ModuloNvoExpedientes = () => {
   }, [expedientes]);
 
   const verDetalles = useCallback(async (expediente) => {
-    // 🎯 CARGA LAZY: Cargar recibos solo cuando se necesita (ver detalle)
+    // 🎯 CARGA LAZY: Cargar expediente completo + recibos solo cuando se necesita (ver detalle)
     let expedienteConRecibos = { ...expediente };
+
+    try {
+      const expedienteResponse = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (expedienteResponse.ok) {
+        const expedienteData = await expedienteResponse.json();
+        expedienteConRecibos = expedienteData?.data ?? expedienteData ?? expedienteConRecibos;
+      }
+    } catch (error) {
+      console.warn('⚠️ [VER] Error al cargar expediente completo:', error);
+    }
     
     try {
       console.log('🔍 [VER] Cargando recibos con GET /api/recibos/:id...');

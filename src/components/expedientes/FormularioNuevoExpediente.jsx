@@ -215,6 +215,9 @@ const FormularioNuevoExpediente = ({
           color: aplicarSiVacio(datosPoliza.color, prev.color),
           tipo_vehiculo: aplicarSiVacio(datosPoliza.tipo_vehiculo, prev.tipo_vehiculo),
           tipo_cobertura: aplicarSiVacio(datosPoliza.tipo_cobertura, prev.tipo_cobertura),
+          coberturas: Array.isArray(datosPoliza.coberturas) && datosPoliza.coberturas.length > 0
+            ? datosPoliza.coberturas
+            : prev.coberturas,
           
           // Agente (forzar desde PDF)
           agente: agenteDisplay,
