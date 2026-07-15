@@ -188,6 +188,35 @@ const ListaExpedientes = React.memo(({
            etapa === 'Por Renovar';
   };
 
+  const polizasAnterioresRenovadasIds = React.useMemo(() => {
+    const ids = new Set();
+
+    expedientes.forEach((expediente) => {
+      if (expediente.renovacion_de) {
+        ids.add(String(expediente.renovacion_de));
+      }
+
+      if (expediente.renovada_por) {
+        ids.add(String(expediente.id));
+      }
+    });
+
+    return ids;
+  }, [expedientes]);
+
+  const esPolizaAnteriorRenovada = React.useCallback((expediente) => {
+    return polizasAnterioresRenovadasIds.has(String(expediente.id || ''));
+  }, [polizasAnterioresRenovadasIds]);
+
+  const tieneAlgunPagoAplicado = React.useCallback((expediente) => {
+    if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
+      return expediente.recibos.some(recibo => !!recibo.fecha_pago_real);
+    }
+
+    const estatusPago = (expediente.estatusPago || expediente.estatus_pago || '').toLowerCase().trim();
+    return estatusPago === 'pagado' || estatusPago === 'pagada';
+  }, []);
+
   // 📂 FILTROS DE PÓLIZAS POR CARPETA
   const expedientesFiltrados = React.useMemo(() => {
     switch (carpetaSeleccionada) {
@@ -196,6 +225,7 @@ const ListaExpedientes = React.memo(({
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
+          if (esPolizaAnteriorRenovada(exp)) return false;
           
           // Si está en proceso de renovación (cotización), no mostrar aquí
           if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
@@ -203,11 +233,16 @@ const ListaExpedientes = React.memo(({
           }
           
           const proximoRecibo = obtenerProximoReciboPendiente(exp);
+          const tienePagosAplicados = tieneAlgunPagoAplicado(exp);
+
+          if (!tienePagosAplicados) {
+            return true;
+          }
           
           // Si no hay recibos, usar lógica anterior de estatus
           if (!proximoRecibo) {
             const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-            return estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
+            return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
           }
           
           // Próximo recibo pendiente a 15 días o menos de vencer (pero no vencido aún)
@@ -219,6 +254,7 @@ const ListaExpedientes = React.memo(({
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
+          if (esPolizaAnteriorRenovada(exp)) return false;
           
           // Si está en proceso de renovación (cotización), no mostrar en vigentes
           if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
@@ -226,6 +262,11 @@ const ListaExpedientes = React.memo(({
           }
           
           const proximoRecibo = obtenerProximoReciboPendiente(exp);
+          const tienePagosAplicados = tieneAlgunPagoAplicado(exp);
+
+          if (!tienePagosAplicados) {
+            return false;
+          }
           
           // Si tiene recibos, verificar que el próximo pendiente esté a más de 15 días
           if (proximoRecibo) {
@@ -262,8 +303,10 @@ const ListaExpedientes = React.memo(({
         });
       
       case 'renovadas':
-        // TODO: Implementar reglas para Renovadas
-        return expedientes.filter(exp => exp.etapa_activa === 'Renovada');
+        return expedientes.filter(exp => {
+          if (exp.etapa_activa === 'Cancelada') return false;
+          return exp.etapa_activa === 'Renovada' || esPolizaAnteriorRenovada(exp);
+        });
       
       case 'en_proceso_renovacion':
         // 🔄 Pólizas con proceso de renovación YA iniciado
@@ -271,6 +314,7 @@ const ListaExpedientes = React.memo(({
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
+          if (esPolizaAnteriorRenovada(exp)) return false;
           
           const etapa = exp.etapa_activa || '';
           // Incluir si tiene etapa de proceso de renovación activo
@@ -285,6 +329,7 @@ const ListaExpedientes = React.memo(({
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
           if (exp.etapa_activa === 'Renovada') return false;
+          if (esPolizaAnteriorRenovada(exp)) return false;
           
           const etapa = exp.etapa_activa || '';
           
@@ -324,6 +369,7 @@ const ListaExpedientes = React.memo(({
         // Pólizas con estatus "Vencido" o con recibo vencido
         return expedientes.filter(exp => {
           if (exp.etapa_activa === 'Cancelada') return false;
+          if (esPolizaAnteriorRenovada(exp)) return false;
           
           // Verificar si tiene recibo vencido
           const proximoRecibo = obtenerProximoReciboPendiente(exp);
@@ -344,7 +390,7 @@ const ListaExpedientes = React.memo(({
       default:
         return expedientes;
     }
-  }, [expedientes, carpetaSeleccionada]);
+  }, [expedientes, carpetaSeleccionada, esPolizaAnteriorRenovada, tieneAlgunPagoAplicado]);
   
   // 📂 CONTADORES DE PÓLIZAS POR CARPETA
   const contadores = React.useMemo(() => {
@@ -355,16 +401,22 @@ const ListaExpedientes = React.memo(({
       en_proceso: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
+        if (esPolizaAnteriorRenovada(exp)) return false;
         
         if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
           return false;
         }
         
         const proximoRecibo = obtenerProximoReciboPendiente(exp);
+        const tienePagosAplicados = tieneAlgunPagoAplicado(exp);
+
+        if (!tienePagosAplicados) {
+          return true;
+        }
         
         if (!proximoRecibo) {
           const estatusPago = (exp.estatusPago || exp.estatus_pago || '').toLowerCase().trim();
-          return estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
+          return estatusPago === 'pendiente' || estatusPago === 'por vencer' || estatusPago === 'pago por vencer';
         }
         
         return proximoRecibo.diasRestantes <= 15 && proximoRecibo.diasRestantes >= 0;
@@ -374,6 +426,7 @@ const ListaExpedientes = React.memo(({
       vigentes: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
+        if (esPolizaAnteriorRenovada(exp)) return false;
         
         // Si está en proceso de renovación (cotización), no contar en vigentes
         if (esEtapaProcesoRenovacion(exp.etapa_activa)) {
@@ -381,6 +434,11 @@ const ListaExpedientes = React.memo(({
         }
         
         const proximoRecibo = obtenerProximoReciboPendiente(exp);
+        const tienePagosAplicados = tieneAlgunPagoAplicado(exp);
+
+        if (!tienePagosAplicados) {
+          return false;
+        }
         
         if (proximoRecibo) {
           return proximoRecibo.diasRestantes > 15;
@@ -413,12 +471,16 @@ const ListaExpedientes = React.memo(({
         return true;
       }).length,
       
-      renovadas: expedientes.filter(exp => exp.etapa_activa === 'Renovada').length,
+      renovadas: expedientes.filter(exp => {
+        if (exp.etapa_activa === 'Cancelada') return false;
+        return exp.etapa_activa === 'Renovada' || esPolizaAnteriorRenovada(exp);
+      }).length,
       
       // 🔄 Pólizas con proceso de renovación YA iniciado (FLUJO 1)
       en_proceso_renovacion: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
+        if (esPolizaAnteriorRenovada(exp)) return false;
         
         const etapa = exp.etapa_activa || '';
         return etapa === 'En Cotización - Renovación' ||
@@ -431,6 +493,7 @@ const ListaExpedientes = React.memo(({
       por_renovar: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
         if (exp.etapa_activa === 'Renovada') return false;
+        if (esPolizaAnteriorRenovada(exp)) return false;
         
         const etapa = exp.etapa_activa || '';
         
@@ -468,6 +531,7 @@ const ListaExpedientes = React.memo(({
       // Pólizas con estatus "Vencido" o con recibo vencido
       vencidas: expedientes.filter(exp => {
         if (exp.etapa_activa === 'Cancelada') return false;
+        if (esPolizaAnteriorRenovada(exp)) return false;
         
         // Verificar si tiene recibo vencido
         const proximoRecibo = obtenerProximoReciboPendiente(exp);
@@ -482,15 +546,51 @@ const ListaExpedientes = React.memo(({
       // Pólizas canceladas
       canceladas: expedientes.filter(exp => exp.etapa_activa === 'Cancelada').length
     };
-  }, [expedientes]);
+  }, [expedientes, esPolizaAnteriorRenovada, tieneAlgunPagoAplicado]);
+
+  const expedientesConCamposBusqueda = React.useMemo(() => {
+    return expedientesFiltrados.map((expediente) => {
+      const cliente = clientesMap[expediente.cliente_id];
+      const nombreCliente = cliente
+        ? (cliente.razon_social || cliente.razonSocial || `${cliente.nombre || ''} ${cliente.apellido_paterno || cliente.apellidoPaterno || ''} ${cliente.apellido_materno || cliente.apellidoMaterno || ''}`.trim())
+        : (expediente.razon_social || `${expediente.nombre || ''} ${expediente.apellido_paterno || ''} ${expediente.apellido_materno || ''}`.trim());
+      const nombreContacto = cliente
+        ? `${cliente.contacto_nombre || cliente.contactoNombre || ''} ${cliente.contacto_apellido_paterno || cliente.contactoApellidoPaterno || ''} ${cliente.contacto_apellido_materno || cliente.contactoApellidoMaterno || ''}`.trim()
+        : '';
+      const emailBusqueda = cliente?.contacto_email || cliente?.contactoEmail || cliente?.email || expediente.email || '';
+      const telefonosBusqueda = [
+        cliente?.contacto_telefono_movil,
+        cliente?.contactoTelefonoMovil,
+        cliente?.contacto_telefono_fijo,
+        cliente?.contactoTelefonoFijo,
+        cliente?.telefonoMovil,
+        cliente?.telefono_movil,
+        cliente?.telefonoFijo,
+        cliente?.telefono_fijo,
+        expediente.telefono_movil,
+        expediente.telefono_fijo
+      ].filter(Boolean).join(' ');
+
+      return {
+        ...expediente,
+        cliente_busqueda: nombreCliente,
+        contacto_busqueda: nombreContacto,
+        email_busqueda: emailBusqueda,
+        telefonos_busqueda: telefonosBusqueda
+      };
+    });
+  }, [expedientesFiltrados, clientesMap]);
   
-  const paginacion = usePaginacion(expedientesFiltrados, 10, {
+  const paginacion = usePaginacion(expedientesConCamposBusqueda, 10, {
     camposBusqueda: [
       'numero_poliza', 'compania', 'producto', 'tipo_cobertura',
       'marca', 'modelo', 'anio', 'numero_serie', 'placas',
       'agente', 'sub_agente', 'endoso', 'inciso',
-      'contratante', 'asegurado', 'rfc'
-    ]
+      'contratante', 'asegurado', 'rfc',
+      'nombre', 'apellido_paterno', 'apellido_materno', 'razon_social',
+      'cliente_busqueda', 'contacto_busqueda', 'email_busqueda', 'telefonos_busqueda'
+    ],
+    normalizarEspacios: true
   });
 
   // Detectar 3 tipos de duplicados (excluir Renovadas: es normal que compartan VIN con la nueva)
@@ -498,6 +598,20 @@ const ListaExpedientes = React.memo(({
     const polizasDuplicadas = [];
     const vinsDuplicados = [];
     const polizasVinDistinto = [];
+
+    const esParDeRenovacion = (expedienteA, expedienteB) => {
+      const idA = String(expedienteA.id || '');
+      const idB = String(expedienteB.id || '');
+      const renovacionDeA = String(expedienteA.renovacion_de || '');
+      const renovacionDeB = String(expedienteB.renovacion_de || '');
+      const renovadaPorA = String(expedienteA.renovada_por || '');
+      const renovadaPorB = String(expedienteB.renovada_por || '');
+
+      return renovacionDeA === idB ||
+             renovacionDeB === idA ||
+             renovadaPorA === idB ||
+             renovadaPorB === idA;
+    };
 
     // Filtrar: no analizar pólizas con etapa "Renovada" (comparten VIN con su renovación)
     const activos = expedientes.filter(e => e.etapa_activa !== 'Renovada');
@@ -513,6 +627,10 @@ const ListaExpedientes = React.memo(({
         if (index >= otroIndex || !otro.numero_poliza) return;
 
         const otroVin = otro.numero_serie?.trim() || '';
+
+        if (esParDeRenovacion(exp, otro)) {
+          return;
+        }
 
         // Regla 1: Misma póliza + mismo VIN (duplicada completa)
         if (exp.numero_poliza === otro.numero_poliza &&
@@ -824,6 +942,7 @@ const ListaExpedientes = React.memo(({
                 </thead>
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
+                    const mostrarEtiquetaRenovadaVigente = esPolizaAnteriorRenovada(expediente);
                     // Buscar agente: por agente_id, por clave extraída del texto, o por nombre
                     const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
                     const agenteInfo = (expediente.agente_id && agentes.find(a => a.id === expediente.agente_id))
@@ -875,6 +994,13 @@ const ListaExpedientes = React.memo(({
                             )}
                             {expediente.inciso && (
                               <div><small className="text-muted">Inc: {expediente.inciso}</small></div>
+                            )}
+                            {mostrarEtiquetaRenovadaVigente && expediente.termino_vigencia && (
+                              <div>
+                                <small className="text-info fw-semibold">
+                                  Renovada, vigente hasta {utils.formatearFecha(expediente.termino_vigencia, 'cortaY')}
+                                </small>
+                              </div>
                             )}
                             {/* Fechas de captura y emisión */}
                             <div style={{ marginTop: '4px', fontSize: '0.7rem', lineHeight: '1.3' }}>
@@ -1080,8 +1206,14 @@ const ListaExpedientes = React.memo(({
                               // 3. Botón AUTORIZAR: "Cotización Enviada" → "Por Emitir - Renovación"
                               const puedeAutorizar = etapaActual === 'Cotización Enviada';
                               
-                              // 4. Botón CARGAR PÓLIZA: "Por Emitir - Renovación" → Crear nuevo expediente
-                              const puedeCargarPoliza = etapaActual === 'Por Emitir - Renovación';
+                              // 4. Botón CARGAR PÓLIZA: disponible durante todo el proceso de renovación
+                              // para permitir capturar la póliza emitida aunque el flujo haya iniciado por cotización.
+                              const puedeCargarPoliza = [
+                                'En Cotización - Renovación',
+                                'Cotización Lista',
+                                'Cotización Enviada',
+                                'Por Emitir - Renovación'
+                              ].includes(etapaActual);
                               
                               return (
                                 <>
@@ -1240,6 +1372,7 @@ const ListaExpedientes = React.memo(({
             {/* Vista Móvil - Cards */}
             <div className="d-lg-none p-3">
               {paginacion.itemsPaginados.map((expediente) => {
+                const mostrarEtiquetaRenovadaVigente = esPolizaAnteriorRenovada(expediente);
                 // Extraer clave del agente del campo expediente.agente
                 const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
                 const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
@@ -1263,6 +1396,13 @@ const ListaExpedientes = React.memo(({
                               {expediente.endoso && expediente.inciso && ' | '}
                               {expediente.inciso && `Inc: ${expediente.inciso}`}
                             </small>
+                          )}
+                          {mostrarEtiquetaRenovadaVigente && expediente.termino_vigencia && (
+                            <div>
+                              <small className="text-info fw-semibold">
+                                Renovada, vigente hasta {utils.formatearFecha(expediente.termino_vigencia, 'cortaY')}
+                              </small>
+                            </div>
                           )}
                         </div>
                         <Badge tipo="etapa" valor={calcularEtapaReal(expediente)} />
@@ -1476,7 +1616,12 @@ const ListaExpedientes = React.memo(({
                           const puedeAutorizar = etapaActual === 'Cotización Enviada';
                           
                           // 4. Botón CARGAR PÓLIZA
-                          const puedeCargarPoliza = etapaActual === 'Por Emitir - Renovación';
+                          const puedeCargarPoliza = [
+                            'En Cotización - Renovación',
+                            'Cotización Lista',
+                            'Cotización Enviada',
+                            'Por Emitir - Renovación'
+                          ].includes(etapaActual);
                           
                           return (
                             <>

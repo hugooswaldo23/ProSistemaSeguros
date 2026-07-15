@@ -71,6 +71,7 @@ export const TIPOS_EVENTO = {
   COTIZACION_RENOVACION_ENVIADA: 'cotizacion_renovacion_enviada',
   RENOVACION_PENDIENTE_EMISION: 'renovacion_pendiente_emision',
   RENOVACION_EMITIDA: 'renovacion_emitida',
+  RENOVACION_ENVIADA: 'renovacion_enviada',
   RENOVACION_PAGADA: 'renovacion_pagada', // 🆕 Renovación pagada
   PAGO_RENOVACION_REGISTRADO: 'pago_renovacion_registrado',
   RENOVACION_VIGENTE: 'renovacion_vigente',
@@ -141,6 +142,7 @@ export const obtenerEstiloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: { icon: '📧', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: { icon: '⏳', color: '#f59e0b', bgColor: '#fef3c7' },
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: { icon: '📄', color: '#8b5cf6', bgColor: '#ede9fe' },
+    [TIPOS_EVENTO.RENOVACION_ENVIADA]: { icon: '📬', color: '#0ea5e9', bgColor: '#dbeafe' },
     [TIPOS_EVENTO.RENOVACION_PAGADA]: { icon: '✅', color: '#059669', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: { icon: '💰', color: '#10b981', bgColor: '#d1fae5' },
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: { icon: '🔁', color: '#059669', bgColor: '#d1fae5' },
@@ -208,6 +210,7 @@ export const obtenerTituloEvento = (tipoEvento) => {
     [TIPOS_EVENTO.COTIZACION_RENOVACION_ENVIADA]: 'Cotización de Renovación Enviada',
     [TIPOS_EVENTO.RENOVACION_PENDIENTE_EMISION]: 'Renovación Pendiente de Emisión',
     [TIPOS_EVENTO.RENOVACION_EMITIDA]: 'Renovación Emitida',
+    [TIPOS_EVENTO.RENOVACION_ENVIADA]: 'Renovación Enviada al Cliente',
     [TIPOS_EVENTO.RENOVACION_PAGADA]: 'Renovación Pagada',
     [TIPOS_EVENTO.PAGO_RENOVACION_REGISTRADO]: 'Pago de Renovación Registrado',
     [TIPOS_EVENTO.RENOVACION_VIGENTE]: 'Renovación Vigente',
@@ -437,6 +440,35 @@ export const registrarRenovacionAutorizada = async (expediente) => {
       compania: expediente.compania,
       vigencia_anterior: vigencia,
       cliente_nombre: expediente.nombre || expediente.razon_social || 'Sin nombre'
+    }
+  });
+};
+
+/**
+ * Registrar evento de Renovación Enviada al Cliente
+ */
+export const registrarRenovacionEnviadaCliente = async (expediente, canal, destinatario = {}) => {
+  const vigencia = obtenerVigenciaTexto(expediente.inicio_vigencia, expediente.termino_vigencia);
+  const usuario = obtenerUsuarioActual();
+
+  return registrarEvento({
+    expediente_id: expediente.id,
+    cliente_id: expediente.cliente_id,
+    tipo_evento: TIPOS_EVENTO.RENOVACION_ENVIADA,
+    usuario_nombre: usuario.nombre,
+    usuario_id: usuario.id,
+    metodo_contacto: canal,
+    destinatario_nombre: destinatario.nombre || null,
+    destinatario_contacto: destinatario.contacto || null,
+    descripcion: `Renovación emitida enviada al cliente | ${expediente.compania || 'Sin aseguradora'} | Póliza: ${expediente.numero_poliza || 'S/N'} | Vía ${canal}${destinatario.nombre ? ` | Para: ${destinatario.nombre}` : ''}`,
+    datos_adicionales: {
+      numero_poliza: expediente.numero_poliza,
+      compania: expediente.compania,
+      canal,
+      vigencia_nueva: vigencia,
+      cliente_nombre: expediente.nombre || expediente.razon_social || 'Sin nombre',
+      destinatario_nombre: destinatario.nombre || null,
+      destinatario_contacto: destinatario.contacto || null
     }
   });
 };

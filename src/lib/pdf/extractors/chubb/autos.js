@@ -273,7 +273,25 @@ export async function extraer(ctx) {
   const fecha_captura = new Date().toISOString().split('T')[0];
 
   // ==================== FECHA LÍMITE DE PAGO ====================
-  const textoFinanciero = textoAvisoDeCobro || textoPagina1 || textoCompleto;
+  const textoAvisoPrincipal = (() => {
+    if (Array.isArray(todasLasPaginas) && todasLasPaginas.length > 0) {
+      const avisoPrincipal = todasLasPaginas.find((pagina) =>
+        /AVISO\s+DE\s+COBRO/i.test(pagina.texto) &&
+        /Serie\s+del\s+aviso[:\s]*1\s*\/\s*\d+/i.test(pagina.texto)
+      );
+      if (avisoPrincipal) return avisoPrincipal.texto;
+
+      const avisoFallback = todasLasPaginas.find((pagina) =>
+        /AVISO\s+DE\s+COBRO/i.test(pagina.texto) &&
+        /Serie\s+del\s+aviso/i.test(pagina.texto)
+      );
+      if (avisoFallback) return avisoFallback.texto;
+    }
+
+    return textoAvisoDeCobro || textoPagina1 || textoCompleto;
+  })();
+
+  const textoFinanciero = textoAvisoPrincipal;
   
   // Helper: Monto desde línea con etiqueta, tolerando desfasado
   // CHUBB: Solo PRIMA NETA e IVA tienen valor ANTES de la etiqueta
@@ -394,7 +412,7 @@ export async function extraer(ctx) {
   }
 
   // Helper: buscar un monto específico por etiqueta en el texto, línea por línea
-  const buscarMontoPorEtiquetaExacta = (texto, etiquetaRegex, nombre) => {
+  const buscarMontoPorEtiquetaExacta = (texto, etiquetaRegex, nombre, permitirCero = false) => {
     const lineas = texto.split(/\r?\n/);
     for (let i = 0; i < lineas.length; i++) {
       if (!etiquetaRegex.test(lineas[i])) continue;
@@ -409,7 +427,7 @@ export async function extraer(ctx) {
       const montoEnLinea = lineas[i].match(new RegExp(etiquetaRegex.source + '[\\s:]*\\$?\\s*([\\d,]+\\.\\d{2})', 'i'));
       if (montoEnLinea) {
         const val = parseFloat(montoEnLinea[1].replace(/,/g, ''));
-        if (val > 0) {
+        if (val > 0 || (permitirCero && val === 0)) {
           console.log(`  ✅ Monto en misma línea: $${montoEnLinea[1]}`);
           return montoEnLinea[1].replace(/,/g, '');
         }
@@ -422,7 +440,7 @@ export async function extraer(ctx) {
         const montoAnterior = lineaAnterior.match(/^[\$\s]*([\d,]+\.\d{2})$/);
         if (montoAnterior) {
           const val = parseFloat(montoAnterior[1].replace(/,/g, ''));
-          if (val > 0) {
+          if (val > 0 || (permitirCero && val === 0)) {
             console.log(`  ✅ Monto en línea anterior (i-${back}): $${montoAnterior[1]}`);
             return montoAnterior[1].replace(/,/g, '');
           }
@@ -434,7 +452,8 @@ export async function extraer(ctx) {
         const valoresSig = lineas[i + 1].match(/(\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2})/g);
         if (valoresSig && valoresSig.length >= 1) {
           const monto = valoresSig[valoresSig.length - 1].replace(/,/g, '');
-          if (parseFloat(monto) > 0) {
+          const valorMonto = parseFloat(monto);
+          if (valorMonto > 0 || (permitirCero && valorMonto === 0)) {
             console.log(`  ✅ Monto en siguiente línea (col ${valoresSig.length}): $${monto}`);
             return monto;
           }
@@ -449,7 +468,7 @@ export async function extraer(ctx) {
   const totalAnualStr = buscarMontoPorEtiquetaExacta(textoCompleto, /Prima\s+total/i, 'Prima total (anual)');
   
   // PASO B: Buscar "Total a pagar" → primer recibo (buscar en aviso de cobro primero, luego completo)
-  const textoBuscarRecibo = textoAvisoDeCobro || textoCompleto;
+  const textoBuscarRecibo = textoAvisoPrincipal || textoCompleto;
   const totalPrimerReciboStr = buscarMontoPorEtiquetaExacta(textoBuscarRecibo, /Total\s+a\s+pagar/i, 'Total a pagar (recibo)');
 
   console.log(`\n📊 RESULTADOS CLAVE:`);
@@ -472,11 +491,11 @@ export async function extraer(ctx) {
     );
     const textoCaratula = paginaConPrimaTotal ? paginaConPrimaTotal.texto : textoCompleto;
     
-    prima_neta = buscarMontoPorEtiquetaExacta(textoCaratula, /Prima\s+neta/i, 'Prima neta (anual)');
-    otros_servicios = buscarMontoPorEtiquetaExacta(textoCaratula, /Otros\s+descuentos/i, 'Otros descuentos (anual)');
-    cargo_pago_fraccionado = buscarMontoPorEtiquetaExacta(textoCaratula, /Financiamiento/i, 'Financiamiento (anual)');
-    gastos_expedicion = buscarMontoPorEtiquetaExacta(textoCaratula, /Gastos\s+de\s+expedici/i, 'Gastos expedición (anual)');
-    iva = buscarMontoPorEtiquetaExacta(textoCaratula, /I\.V\.A\./i, 'IVA (anual)');
+    prima_neta = buscarMontoPorEtiquetaExacta(textoCaratula, /Prima\s+neta/i, 'Prima neta (anual)', true);
+    otros_servicios = buscarMontoPorEtiquetaExacta(textoCaratula, /Otros\s+descuentos/i, 'Otros descuentos (anual)', true);
+    cargo_pago_fraccionado = buscarMontoPorEtiquetaExacta(textoCaratula, /Financiamiento/i, 'Financiamiento (anual)', true);
+    gastos_expedicion = buscarMontoPorEtiquetaExacta(textoCaratula, /Gastos\s+de\s+expedici/i, 'Gastos expedición (anual)', true);
+    iva = buscarMontoPorEtiquetaExacta(textoCaratula, /I\.V\.A\./i, 'IVA (anual)', true);
     
     console.log('✅ Desglose anual:', { prima_neta, otros_servicios, cargo_pago_fraccionado, gastos_expedicion, iva, total });
   } else if (totalReciboNum > 0) {
@@ -987,12 +1006,12 @@ export async function extraer(ctx) {
   // ==================== PASO 5B: RECIBOS FRACCIONADOS DESDE AVISO DE COBRO ====================
   // Chubb: La carátula tiene montos ANUALES, el Aviso de Cobro tiene montos POR RECIBO.
   // Si es fraccionado, extraer "Total a pagar" del Aviso de Cobro como primer_pago.
-  if (tipo_pago === 'Fraccionado' && textoAvisoDeCobro) {
+  if (tipo_pago === 'Fraccionado' && textoAvisoPrincipal) {
     console.log('\n📋 PASO 5B: EXTRAER MONTOS DE RECIBO DESDE AVISO DE COBRO');
     console.log('─────────────────────────────────────────────────────────');
 
     // Buscar "Total a pagar" línea por línea (maneja formatos vertical y horizontal)
-    const lineasAviso = textoAvisoDeCobro.split(/\r?\n/);
+    const lineasAviso = textoAvisoPrincipal.split(/\r?\n/);
     let totalPrimerRecibo = '';
 
     for (let i = 0; i < lineasAviso.length; i++) {
@@ -1037,7 +1056,7 @@ export async function extraer(ctx) {
         primer_pago = totalPrimerRecibo;
 
         // Calcular pagos subsecuentes: (total anual - primer recibo) / (num_recibos - 1)
-        const serieMatch = textoAvisoDeCobro.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
+        const serieMatch = textoAvisoPrincipal.match(/Serie\s+del\s+aviso[:\s]*(\d+)\s*\/\s*(\d+)/i);
         const numRecibos = serieMatch ? parseInt(serieMatch[2]) : 0;
 
         if (numRecibos > 1) {

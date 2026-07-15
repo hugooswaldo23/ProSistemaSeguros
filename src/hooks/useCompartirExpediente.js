@@ -294,17 +294,15 @@ export const useCompartirExpediente = ({
 
       // Crear la URL de WhatsApp
       const url = `https://wa.me/${telefonoLimpio}?text=${encodeURIComponent(mensaje)}`;
+      const nombreFinalDestinatario = destinatarioCompartirSeleccionado
+        ? destinatarioCompartirSeleccionado.nombre
+        : nombreDestinatario;
       
       // Abrir WhatsApp
       window.open(url, '_blank');
       
       // Registrar evento en el historial de trazabilidad (log único y completo)
       try {
-        // 🔧 USAR NOMBRE CORRECTO DEL DESTINATARIO FINAL (después del modal)
-        const nombreFinalDestinatario = destinatarioCompartirSeleccionado 
-          ? destinatarioCompartirSeleccionado.nombre 
-          : nombreDestinatario;
-          
         await historialService.registrarEnvioDocumento(
           expediente.id,
           expediente.cliente_id,
@@ -328,8 +326,17 @@ export const useCompartirExpediente = ({
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
         toast.success(`✅ Póliza enviada por WhatsApp.\n📬 Etapa avanzada a "Enviada al Cliente"`);
       } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION || expediente.etapa_activa === 'Renovación Emitida') {
-        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
-        toast.success(`✅ Renovación enviada por WhatsApp.\n📬 Etapa avanzada a "Renovación Enviada"`);
+        if (expediente.etapa_activa === 'Renovación Emitida') {
+          await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+          await historialService.registrarRenovacionEnviadaCliente(
+            expediente,
+            'WhatsApp',
+            { nombre: nombreFinalDestinatario, contacto: telefono }
+          );
+          toast.success(`✅ Renovación enviada por WhatsApp.\n📬 Etapa avanzada a "Renovación Enviada"`);
+        } else {
+          toast.success('✅ Renovación enviada por WhatsApp');
+        }
       } else {
         toast.success('✅ Mensaje enviado por WhatsApp');
       }
@@ -496,8 +503,17 @@ export const useCompartirExpediente = ({
         await cambiarEstadoExpediente(expediente.id, 'Enviada al Cliente');
         toast.success('✅ Póliza enviada por Email.\n📬 Etapa avanzada a "Enviada al Cliente"');
       } else if (tipoMensaje === notificacionesService.TIPOS_MENSAJE.RENOVACION_EMISION || expediente.etapa_activa === 'Renovación Emitida') {
-        await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
-        toast.success('✅ Renovación enviada por Email.\n📬 Etapa avanzada a "Renovación Enviada"');
+        if (expediente.etapa_activa === 'Renovación Emitida') {
+          await cambiarEstadoExpediente(expediente.id, 'Renovación Enviada');
+          await historialService.registrarRenovacionEnviadaCliente(
+            expediente,
+            'Email',
+            { nombre: nombreFinalDestinatario, contacto: email }
+          );
+          toast.success('✅ Renovación enviada por Email.\n📬 Etapa avanzada a "Renovación Enviada"');
+        } else {
+          toast.success('✅ Renovación enviada por Email');
+        }
       } else {
         toast.success('✅ Mensaje enviado por Email');
       }
