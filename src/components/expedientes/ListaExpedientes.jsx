@@ -19,6 +19,85 @@ import { usePaginacion } from '../../hooks/usePaginacion';
 import Paginacion from '../common/Paginacion';
 import CalendarioPagos from './CalendarioPagos';
 
+const normalizarTextoAgente = (texto = '') => {
+  return String(texto)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const obtenerNombreCompletoAgente = (agente = {}) => {
+  return [agente.nombre, agente.apellidoPaterno, agente.apellido_materno, agente.apellidoMaterno, agente.apellido_paterno]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const obtenerTokensSignificativosAgente = (texto = '') => {
+  const stopwords = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'Y', 'MC', 'MAC']);
+  return normalizarTextoAgente(texto)
+    .split(' ')
+    .filter(token => token.length >= 4 && !stopwords.has(token));
+};
+
+const buscarAgentePorTexto = (agentes = [], agenteTexto = '') => {
+  if (!agenteTexto || !agentes.length) return null;
+
+  const nombreNormalizado = normalizarTextoAgente(agenteTexto);
+  let agenteEncontrado = agentes.find(a => {
+    if (a.perfil !== 'Agente') return false;
+    return normalizarTextoAgente(obtenerNombreCompletoAgente(a)) === nombreNormalizado;
+  });
+  if (agenteEncontrado) return agenteEncontrado;
+
+  const tokens = obtenerTokensSignificativosAgente(agenteTexto);
+  if (tokens.length < 2) return null;
+
+  const candidatos = agentes.filter(a => {
+    if (a.perfil !== 'Agente') return false;
+    const nombreCompleto = normalizarTextoAgente(obtenerNombreCompletoAgente(a));
+    return tokens.every(token => nombreCompleto.includes(token));
+  });
+
+  return candidatos.length === 1 ? candidatos[0] : null;
+};
+
+const obtenerAgenteInfoExpediente = (expediente, agentes = []) => {
+  const textoAgente = String(expediente?.agente || '').trim();
+
+  if (textoAgente) {
+    const partes = textoAgente.split('-');
+    if (partes.length >= 2) {
+      return {
+        claveAgente: partes[0].trim(),
+        nombreFuente: partes.slice(1).join('-').trim()
+      };
+    }
+
+    return {
+      claveAgente: expediente?.clave_agente || '',
+      nombreFuente: textoAgente
+    };
+  }
+
+  if (expediente?.agente_id) {
+    const agente = agentes.find(a => String(a.id) === String(expediente.agente_id));
+    if (agente) {
+      return {
+        claveAgente: expediente?.clave_agente || agente.codigoAgente || agente.codigo || '',
+        nombreFuente: obtenerNombreCompletoAgente(agente)
+      };
+    }
+  }
+
+  return {
+    claveAgente: expediente?.clave_agente || '',
+    nombreFuente: ''
+  };
+};
+
 // 👇 COPIAR AQUÍ desde Expedientes.jsx líneas 2677 hasta 4393
 const ListaExpedientes = React.memo(({ 
   expedientes,
@@ -943,20 +1022,9 @@ const ListaExpedientes = React.memo(({
                 <tbody>
                   {paginacion.itemsPaginados.map((expediente) => {
                     const mostrarEtiquetaRenovadaVigente = esPolizaAnteriorRenovada(expediente);
-                    // Buscar agente: por agente_id, por clave extraída del texto, o por nombre
-                    const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
-                    const agenteInfo = (expediente.agente_id && agentes.find(a => a.id === expediente.agente_id))
-                      || agentes.find(a => a.codigoAgente && a.codigoAgente === claveAgenteExpediente)
-                      || (() => {
-                        // Fallback: buscar por nombre cuando el texto no tiene formato "código - nombre"
-                        if (!expediente.agente || expediente.agente.includes('-')) return null;
-                        const textoLimpio = expediente.agente.toLowerCase().trim();
-                        return agentes.find(a => {
-                          if (a.perfil !== 'Agente') return false;
-                          const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase().trim();
-                          return textoLimpio === nombreCompleto || nombreCompleto.includes(textoLimpio) || textoLimpio.includes(nombreCompleto);
-                        });
-                      })();
+                    const agenteInfo = expediente.agente_id
+                      ? agentes.find(a => String(a.id) === String(expediente.agente_id)) || null
+                      : null;
                     
                     // Detectar tipo de duplicado para este expediente
                     const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
@@ -1061,27 +1129,19 @@ const ListaExpedientes = React.memo(({
                             let apellidoAgente = '';
                             let nombreVendedor = '';
                             let apellidoVendedor = '';
+                            const agenteExpediente = obtenerAgenteInfoExpediente(expediente, agentes);
                             
-                            // Obtener información del agente
-                            if (agenteInfo) {
-                              claveAgente = agenteInfo.codigoAgente || '';
-                              const nombreCompleto = (agenteInfo.nombre || '').trim();
-                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
-                              apellidoAgente = agenteInfo.apellidoPaterno || '';
-                            } else if (expediente.agente) {
-                              const textoAgente = expediente.agente || '';
-                              const partes = textoAgente.split('-');
-                              if (partes.length >= 2) {
-                                claveAgente = partes[0].trim();
-                                const nombreCompleto = partes.slice(1).join('-').trim();
-                                const palabras = nombreCompleto.split(/\s+/);
-                                nombreAgente = palabras[0] || '';
-                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
-                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
-                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
-                              } else {
-                                claveAgente = textoAgente;
-                              }
+                            if (agenteExpediente.nombreFuente) {
+                              claveAgente = agenteExpediente.claveAgente;
+                              const palabras = agenteExpediente.nombreFuente.split(/\s+/);
+                              nombreAgente = palabras[0] || '';
+                              apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                            } else if (agenteInfo) {
+                              claveAgente = expediente.clave_agente || agenteInfo.codigoAgente || agenteInfo.codigo || '';
+                              const nombreCompleto = obtenerNombreCompletoAgente(agenteInfo);
+                              const palabras = nombreCompleto.split(/\s+/);
+                              nombreAgente = palabras[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || agenteInfo.apellido_paterno || palabras[palabras.length - 1] || '';
                             }
                             
                             // Obtener información del vendedor
@@ -1373,9 +1433,9 @@ const ListaExpedientes = React.memo(({
             <div className="d-lg-none p-3">
               {paginacion.itemsPaginados.map((expediente) => {
                 const mostrarEtiquetaRenovadaVigente = esPolizaAnteriorRenovada(expediente);
-                // Extraer clave del agente del campo expediente.agente
-                const claveAgenteExpediente = expediente.agente ? expediente.agente.split('-')[0].trim() : '';
-                const agenteInfo = agentes.find(a => a.codigoAgente === claveAgenteExpediente);
+                const agenteInfo = expediente.agente_id
+                  ? agentes.find(a => String(a.id) === String(expediente.agente_id)) || null
+                  : null;
                 const vendedorInfo = (expediente.vendedor_id && vendedoresMap) ? vendedoresMap[expediente.vendedor_id] : null;
                 const esDuplicadaCompleta = analisisDuplicados.polizasDuplicadas.find(d => d.id === expediente.id);
                 const esVinDuplicado = analisisDuplicados.vinsDuplicados.find(d => d.id === expediente.id);
@@ -1471,27 +1531,19 @@ const ListaExpedientes = React.memo(({
                             let apellidoAgente = '';
                             let nombreVendedor = '';
                             let apellidoVendedor = '';
+                            const agenteExpediente = obtenerAgenteInfoExpediente(expediente, agentes);
                             
-                            // Obtener información del agente
-                            if (agenteInfo) {
-                              claveAgente = agenteInfo.codigoAgente || '';
-                              const nombreCompleto = (agenteInfo.nombre || '').trim();
-                              nombreAgente = nombreCompleto.split(/\s+/)[0] || '';
-                              apellidoAgente = agenteInfo.apellidoPaterno || '';
-                            } else if (expediente.agente) {
-                              const textoAgente = expediente.agente || '';
-                              const partes = textoAgente.split('-');
-                              if (partes.length >= 2) {
-                                claveAgente = partes[0].trim();
-                                const nombreCompleto = partes.slice(1).join('-').trim();
-                                const palabras = nombreCompleto.split(/\s+/);
-                                nombreAgente = palabras[0] || '';
-                                // Para "CESAR PAUL MENDOZA GARCIA" -> tomar penúltimo (MENDOZA)
-                                // Para "CESAR MENDOZA" -> tomar último (MENDOZA)
-                                apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
-                              } else {
-                                claveAgente = textoAgente;
-                              }
+                            if (agenteExpediente.nombreFuente) {
+                              claveAgente = agenteExpediente.claveAgente;
+                              const palabras = agenteExpediente.nombreFuente.split(/\s+/);
+                              nombreAgente = palabras[0] || '';
+                              apellidoAgente = palabras.length >= 3 ? palabras[palabras.length - 2] : (palabras[palabras.length - 1] || '');
+                            } else if (agenteInfo) {
+                              claveAgente = expediente.clave_agente || agenteInfo.codigoAgente || agenteInfo.codigo || '';
+                              const nombreCompleto = obtenerNombreCompletoAgente(agenteInfo);
+                              const palabras = nombreCompleto.split(/\s+/);
+                              nombreAgente = palabras[0] || '';
+                              apellidoAgente = agenteInfo.apellidoPaterno || agenteInfo.apellido_paterno || palabras[palabras.length - 1] || '';
                             }
                             
                             // Obtener información del vendedor

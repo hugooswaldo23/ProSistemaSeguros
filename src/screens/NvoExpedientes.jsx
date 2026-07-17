@@ -37,6 +37,69 @@ const getAuthHeaders = (includeJson = false) => {
   return headers;
 };
 
+const normalizarTextoAgente = (texto = '') => {
+  return String(texto)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const obtenerNombreCompletoAgente = (agente = {}) => {
+  return [agente.nombre, agente.apellidoPaterno, agente.apellido_paterno, agente.apellidoMaterno, agente.apellido_materno]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const removerCodigoInicialAgente = (texto = '') => {
+  return String(texto)
+    .replace(/^\s*[A-Z0-9]+\s*-\s*/i, '')
+    .trim();
+};
+
+const obtenerTokensSignificativosAgente = (texto = '') => {
+  const stopwords = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'Y', 'MC', 'MAC']);
+  return normalizarTextoAgente(texto)
+    .split(' ')
+    .filter(token => token.length >= 4 && !stopwords.has(token));
+};
+
+const buscarAgentePorTexto = (agentes = [], agenteTexto = '') => {
+  if (!agenteTexto || !agentes.length) return null;
+
+  const textoOriginal = String(agenteTexto).trim();
+  const codigoAgente = textoOriginal.split(' ')[0];
+  const nombreSinCodigo = removerCodigoInicialAgente(textoOriginal);
+  const nombreNormalizado = normalizarTextoAgente(nombreSinCodigo);
+
+  let agenteEncontrado = agentes.find(a => {
+    const cod = a.codigoAgente || a.codigo || '';
+    return cod && String(cod).trim().toUpperCase() === codigoAgente.toUpperCase();
+  });
+  if (agenteEncontrado) return agenteEncontrado;
+
+  agenteEncontrado = agentes.find(a => {
+    if (a.perfil !== 'Agente') return false;
+    const nombreCompleto = normalizarTextoAgente(obtenerNombreCompletoAgente(a));
+    const nombreCorto = normalizarTextoAgente(a.nombre || '');
+    return nombreCompleto === nombreNormalizado || nombreCorto === nombreNormalizado;
+  });
+  if (agenteEncontrado) return agenteEncontrado;
+
+  const tokens = obtenerTokensSignificativosAgente(nombreSinCodigo);
+  if (tokens.length < 2) return null;
+
+  const candidatos = agentes.filter(a => {
+    if (a.perfil !== 'Agente') return false;
+    const nombreCompleto = normalizarTextoAgente(obtenerNombreCompletoAgente(a));
+    return tokens.every(token => nombreCompleto.includes(token));
+  });
+
+  return candidatos.length === 1 ? candidatos[0] : null;
+};
+
 // Estado inicial del formulario
 const estadoInicialFormulario = {
   id: null,
@@ -2103,24 +2166,12 @@ const ModuloNvoExpedientes = () => {
       
       // 🔄 NORMALIZAR AGENTE: asegurar formato "CÓDIGO - Nombre" antes de guardar
       if (datos.agente && agentes.length > 0) {
-        // Intentar encontrar el agente por agente_id o por texto
         let agenteMatch = null;
         if (datos.agente_id) {
-          agenteMatch = agentes.find(a => a.id === datos.agente_id);
+          agenteMatch = agentes.find(a => a.id === datos.agente_id) || null;
         }
         if (!agenteMatch) {
-          // Buscar por código (primer token del texto)
-          const primerToken = datos.agente.trim().split(/[\s-]/)[0];
-          agenteMatch = agentes.find(a => a.codigoAgente && a.codigoAgente.toString() === primerToken);
-        }
-        if (!agenteMatch) {
-          // Buscar por nombre parcial
-          const textoLimpio = datos.agente.toLowerCase().trim().replace(/^\d+\s*-?\s*/, '');
-          agenteMatch = agentes.find(a => {
-            if (a.perfil !== 'Agente') return false;
-            const nombreCompleto = `${a.nombre || ''} ${a.apellidoPaterno || ''} ${a.apellidoMaterno || ''}`.toLowerCase().trim();
-            return textoLimpio === nombreCompleto || nombreCompleto.includes(textoLimpio) || textoLimpio.includes(nombreCompleto);
-          });
+          agenteMatch = buscarAgentePorTexto(agentes, datos.agente);
         }
         if (agenteMatch) {
           const nombre = `${agenteMatch.nombre || ''} ${agenteMatch.apellidoPaterno || ''} ${agenteMatch.apellidoMaterno || ''}`.trim();
