@@ -33,7 +33,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@5.4.296/b
 
 // 👇 COPIAR AQUÍ desde Expedientes.jsx líneas 96 hasta 2258
 // ============= COMPONENTE EXTRACTOR PDF =============
-const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [] }) => {
+const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = [], aseguradoras = [], tiposProductos = [], forcedAseguradora = null, forcedProducto = 'autos' }) => {
   const [estado, setEstado] = useState('seleccionando-metodo'); // seleccionando-metodo, esperando, procesando, validando-cliente, validando-agente, preview-datos, error, capturando-rfc
   const [metodoExtraccion, setMetodoExtraccion] = useState(null); // 'auto' o 'openai'
   const [archivo, setArchivo] = useState(null);
@@ -55,6 +55,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
   // Ref para el input file
   const fileInputRef = useRef(null);
   const yaAbriSelectorRef = useRef(false); // Bandera para evitar abrir selector múltiples veces
+  const esAjusteEconomico = datosExtraidos?.es_endoso_economico === true || datosExtraidos?.tipo_endoso === 'ajuste_economico';
 
   const esErrorClienteDuplicado = useCallback((error = '') => {
     const mensaje = String(error).toLowerCase();
@@ -383,10 +384,20 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         } else {
           // Usar el sistema automático (regex)
           console.log('⚙️ Usando extractor automático...');
-          const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
           const { loadExtractor } = await import('../../lib/pdf/extractors/registry.js');
-          
-          const deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
+          let deteccion;
+
+          if (forcedAseguradora) {
+            deteccion = {
+              aseguradora: String(forcedAseguradora).toUpperCase(),
+              producto: forcedProducto || 'autos'
+            };
+            console.log('🎯 Forzando extractor por contexto del flujo:', deteccion);
+          } else {
+            const { detectarAseguradoraYProducto } = await import('../../lib/pdf/detectorLigero.js');
+            deteccion = detectarAseguradoraYProducto(textoPagina1, textoCompleto);
+          }
+
           const moduloExtractor = await loadExtractor(deteccion.aseguradora, deteccion.producto);
           
           if (moduloExtractor && moduloExtractor.extraer) {
@@ -568,6 +579,15 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         });
       }
       
+      // Para el ajuste económico de Qualitas no se revalida cliente/agente.
+      if (resultado.es_endoso_economico === true || resultado.tipo_endoso === 'ajuste_economico') {
+        setAgenteEncontrado(null);
+        setClaveYaExiste(false);
+        setEstado('preview-datos');
+        console.log('✅ Ajuste económico detectado. Se omite validación de cliente y agente.');
+        return;
+      }
+
       // Buscar agente en el equipo de trabajo (búsqueda preliminar)
       let agenteEncontradoEnBD = null;
       let claveYaExisteEnBD = false;
@@ -1686,11 +1706,20 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
         cliente_id: clienteEncontrado?.id || datosExtraidos.cliente_id || null,
         agente_id: agenteEncontrado?.id || datosExtraidos.agente_id || null
       };
+
+      if (datosExtraidos.es_endoso_economico === true || datosExtraidos.tipo_endoso === 'ajuste_economico') {
+        delete datosConCliente.cliente_existente;
+        delete datosConCliente.cliente_id;
+        delete datosConCliente.agente_id;
+        delete datosConCliente.clave_agente;
+        delete datosConCliente.agente;
+        delete datosConCliente.sub_agente;
+      }
       
       // Cliente vinculado
 
       // Si tenemos clienteEncontrado, usar sus datos normalizados (ya en camelCase)
-      if (clienteEncontrado) {
+      if (clienteEncontrado && !(datosExtraidos.es_endoso_economico === true || datosExtraidos.tipo_endoso === 'ajuste_economico')) {
         console.log('✅ Aplicando datos del cliente normalizado:', {
           razonSocial: clienteEncontrado.razonSocial,
           nombreComercial: clienteEncontrado.nombreComercial,
@@ -1890,7 +1919,7 @@ const ExtractorPolizasPDF = React.memo(({ onDataExtracted, onClose, agentes = []
       onDataExtracted(datosConCliente);
       onClose();
     }
-  }, [datosExtraidos, clienteEncontrado, onDataExtracted, onClose, archivo, informacionArchivo]);
+  }, [datosExtraidos, clienteEncontrado, agenteEncontrado, onDataExtracted, onClose, archivo, informacionArchivo]);
 
   return (
     <div className="modal d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>

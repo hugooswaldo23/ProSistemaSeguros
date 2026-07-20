@@ -9,10 +9,54 @@
 
 const API_URL = import.meta.env.VITE_API_URL;
 
-const getAuthHeaders = () => {
+const getAuthHeaders = (includeJson = false) => {
   const token = localStorage.getItem('ss_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 };
+
+async function leerRespuestaComoJson(response, errorGenerico) {
+  const contentType = response.headers.get('content-type') || '';
+  const bodyText = await response.text();
+
+  if (!bodyText) {
+    if (!response.ok) {
+      throw new Error(errorGenerico);
+    }
+    return {};
+  }
+
+  if (!contentType.toLowerCase().includes('application/json')) {
+    if (/<!doctype html|<html|<body/i.test(bodyText)) {
+      throw new Error('El endpoint histórico de PDF devolvió HTML en lugar de JSON. Revisa backend/proxy para /poliza/url-by-key.');
+    }
+    throw new Error(errorGenerico);
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    throw new Error(errorGenerico);
+  }
+}
+
+function normalizarPdfKey(pdfKey) {
+  const valor = String(pdfKey || '').trim();
+  if (!valor) return '';
+
+  if (!/^https?:\/\//i.test(valor)) {
+    return valor.replace(/^\/+/, '');
+  }
+
+  try {
+    const url = new URL(valor);
+    return decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+  } catch {
+    return valor;
+  }
+}
 
 /**
  * Subir PDF de póliza al servidor (S3)
@@ -99,14 +143,44 @@ export async function obtenerURLFirmadaPDF(expedienteId, expiration = 3600) {
     );
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await leerRespuestaComoJson(response, 'Error al obtener URL del PDF');
       throw new Error(error.message || 'Error al obtener URL del PDF');
     }
 
-    const data = await response.json();
+    const data = await leerRespuestaComoJson(response, 'Error al obtener URL del PDF');
     return data.data;
   } catch (error) {
     console.error('Error en obtenerURLFirmadaPDF:', error);
+    throw error;
+  }
+}
+
+export async function obtenerURLFirmadaPDFPorKey(expedienteId, pdfKey, expiration = 3600) {
+  try {
+    const pdfKeyNormalizada = normalizarPdfKey(pdfKey);
+
+    if (!pdfKeyNormalizada) {
+      throw new Error('No se encontró la llave del PDF histórico');
+    }
+
+    const response = await fetch(
+      `${API_URL}/api/expedientes/${expedienteId}/poliza/url-by-key?expiration=${expiration}`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(true),
+        body: JSON.stringify({ pdf_key: pdfKeyNormalizada })
+      }
+    );
+
+    if (!response.ok) {
+      const error = await leerRespuestaComoJson(response, 'Error al obtener URL del PDF histórico');
+      throw new Error(error.message || 'Error al obtener URL del PDF histórico');
+    }
+
+    const data = await leerRespuestaComoJson(response, 'Error al obtener URL del PDF histórico');
+    return data.data;
+  } catch (error) {
+    console.error('Error en obtenerURLFirmadaPDFPorKey:', error);
     throw error;
   }
 }

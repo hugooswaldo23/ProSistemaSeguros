@@ -7,6 +7,8 @@
  * @module extractors/qualitas/autos
  */
 
+import { esEndosoEconomicoQualitas, extraerEndosoEconomicoQualitas } from './endoso-economico.js';
+
 /**
  * Extrae un dato usando expresión regular
  * @param {RegExp} patron - Patrón regex
@@ -34,6 +36,11 @@ function extraerDato(patron, texto, grupo = 1) {
  */
 export async function extraer(ctx) {
   console.log('🎯 Extractor Qualitas Autos - Iniciando...');
+
+  if (esEndosoEconomicoQualitas(ctx)) {
+    console.log('🧾 Qualitas detectado como endoso económico A-AJUSTE. Delegando a extractor dedicado...');
+    return extraerEndosoEconomicoQualitas(ctx);
+  }
   
   const { textoCompleto, textoPagina1, textoPagina2 } = ctx;
   
@@ -209,7 +216,7 @@ export async function extraer(ctx) {
     endosoNum = lineaNumeros1[2];
     incisoNum = lineaNumeros1[3];
   }
-  
+
   const planMatch = textoQualitas.match(/PLAN:\s*([A-Z]+)/i) || textoPagina1.match(/PLAN:\s*([A-Z]+)/i);
   
   // ==================== CURP ====================
