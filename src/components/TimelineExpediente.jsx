@@ -412,7 +412,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                       </div>
                       
                       {/* Vista mejorada para eventos de captura Y edición */}
-                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf' || evento.tipo_evento === 'edicion_manual_expediente') ? (
+                      {(evento.tipo_evento === 'captura_manual' || evento.tipo_evento === 'captura_extractor_pdf' || evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') ? (
                         <div className="mb-1">
                           {(() => {
                             // Helper functions
@@ -490,14 +490,14 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                               return (
                                 <>
                                   {/* 1. Método de captura (SOLO para captura, no para edición) */}
-                                  {evento.datos_adicionales?.metodo_captura && evento.tipo_evento !== 'edicion_manual_expediente' && (
+                                  {evento.datos_adicionales?.metodo_captura && evento.tipo_evento !== 'edicion_manual_expediente' && evento.tipo_evento !== 'endoso_aplicado' && (
                                     <div className="text-muted">
                                       📋 Método: <strong className="text-dark">{evento.datos_adicionales.metodo_captura}</strong>
                                     </div>
                                   )}
                                   
                                   {/* Fecha de edición (solo para edición) */}
-                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.fecha_edicion && (
+                                  {(evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') && evento.datos_adicionales?.fecha_edicion && (
                                     <div className="text-muted">
                                       🕐 Fecha edición: <strong className="text-dark">{new Date(evento.datos_adicionales.fecha_edicion).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })}</strong>
                                     </div>
@@ -523,9 +523,42 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                       📄 Póliza: <strong className="text-dark">{evento.datos_adicionales.numero_poliza}</strong>
                                     </div>
                                   )}
+
+                                  {evento.tipo_evento !== 'edicion_manual_expediente' && evento.tipo_evento !== 'endoso_aplicado' && evento.datos_adicionales?.pdf_documento && (
+                                    <div className="text-muted">
+                                      📎 PDF: {' '}
+                                      {evento.datos_adicionales.pdf_documento.nuevo_key ? (
+                                        <span
+                                          className="text-success"
+                                          style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                                          onClick={async () => {
+                                            try {
+                                              const data = expedienteData?.pdf_key === evento.datos_adicionales.pdf_documento.nuevo_key
+                                                ? await pdfService.obtenerURLFirmadaPDF(expedienteId)
+                                                : await pdfService.obtenerURLFirmadaPDFPorKey(expedienteId, evento.datos_adicionales.pdf_documento.nuevo_key);
+                                              window.open(data.signed_url, '_blank');
+                                            } catch (err) {
+                                              toast.error('Error al abrir PDF: ' + err.message);
+                                            }
+                                          }}
+                                          title={expedienteData?.pdf_key === evento.datos_adicionales.pdf_documento.nuevo_key ? 'Clic para ver PDF vigente' : 'Clic para ver PDF histórico'}
+                                        >
+                                          {evento.datos_adicionales.pdf_documento.nuevo}
+                                        </span>
+                                      ) : (
+                                        <span
+                                          className="text-dark"
+                                          style={{ cursor: 'help', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+                                          title="PDF histórico registrado en trazabilidad. Apertura directa pendiente de endpoint por pdf_key."
+                                        >
+                                          {evento.datos_adicionales.pdf_documento.nuevo}
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
                                   
                                   {/* ✨ CAMBIOS DE PÓLIZA (para edicion_manual_expediente) */}
-                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.poliza_cambios?.cambios_detallados && 
+                                  {(evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') && evento.datos_adicionales?.poliza_cambios?.cambios_detallados && 
                                    Object.keys(evento.datos_adicionales.poliza_cambios.cambios_detallados).length > 0 && (
                                     <>
                                       <div className="text-muted mt-2 mb-1"><strong>📋 Cambios en póliza:</strong></div>
@@ -548,7 +581,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                   )}
                                   
                                   {/* ✨ CAMBIOS DE CLIENTE (para edicion_manual_expediente) */}
-                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.cliente_cambios?.cambios_detallados && 
+                                  {(evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') && evento.datos_adicionales?.cliente_cambios?.cambios_detallados && 
                                    Object.keys(evento.datos_adicionales.cliente_cambios.cambios_detallados).length > 0 && (
                                     <>
                                       <div className="text-muted mt-2 mb-1"><strong>👤 Cambios en datos del cliente:</strong></div>
@@ -564,7 +597,7 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                   )}
                                   
                                   {/* ✨ CAMBIOS EN RECIBOS (para edicion_manual_expediente) - Formato igual que captura */}
-                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.recibos_cambios?.cambios_detallados && 
+                                  {(evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') && evento.datos_adicionales?.recibos_cambios?.cambios_detallados && 
                                    evento.datos_adicionales.recibos_cambios.cambios_detallados.length > 0 && (
                                     <>
                                       <div className="text-muted mt-2 mb-1"><strong>📋 Recibos de pago modificados:</strong></div>
@@ -585,15 +618,35 @@ const TimelineExpediente = ({ expedienteId, expedienteData = null }) => {
                                   )}
                                   
                                   {/* ✨ CAMBIOS EN PDF (para edicion_manual_expediente) */}
-                                  {evento.tipo_evento === 'edicion_manual_expediente' && evento.datos_adicionales?.pdf_cambios && (
+                                  {(evento.tipo_evento === 'edicion_manual_expediente' || evento.tipo_evento === 'endoso_aplicado') && evento.datos_adicionales?.pdf_cambios && (
                                     <div className="text-muted mt-2">
                                       📄 <strong>{evento.datos_adicionales.pdf_cambios.descripcion}:</strong>{' '}
                                       {evento.datos_adicionales.pdf_cambios.anterior ? (
                                         <>
                                           <span 
                                             className="text-danger" 
-                                            style={{ cursor: 'help', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
-                                            title="📋 PDF anterior guardado en historial. Funcionalidad de consulta pendiente de implementación en backend."
+                                            style={{ cursor: (evento.datos_adicionales.pdf_cambios.anterior_key || evento.datos_adicionales.pdf_cambios.anterior_url) ? 'pointer' : 'help', textDecoration: 'underline', textDecorationStyle: (evento.datos_adicionales.pdf_cambios.anterior_key || evento.datos_adicionales.pdf_cambios.anterior_url) ? 'solid' : 'dotted' }}
+                                            title={(evento.datos_adicionales.pdf_cambios.anterior_key || evento.datos_adicionales.pdf_cambios.anterior_url) ? 'Clic para ver PDF anterior' : 'PDF anterior guardado en historial. Apertura pendiente de referencia utilizable.'}
+                                            onClick={async () => {
+                                              const pdfAnteriorKey = evento.datos_adicionales.pdf_cambios.anterior_key;
+                                              const pdfAnteriorUrl = evento.datos_adicionales.pdf_cambios.anterior_url;
+                                              if (!pdfAnteriorKey && !pdfAnteriorUrl) return;
+                                              try {
+                                                const data = await pdfService.obtenerURLFirmadaPDFPorKey(expedienteId, pdfAnteriorKey || pdfAnteriorUrl);
+                                                window.open(data.signed_url, '_blank');
+                                              } catch (err) {
+                                                if (pdfAnteriorUrl) {
+                                                  try {
+                                                    const data = await pdfService.obtenerURLFirmadaPDFPorKey(expedienteId, pdfAnteriorUrl);
+                                                    window.open(data.signed_url, '_blank');
+                                                    return;
+                                                  } catch {
+                                                    // Continuar para mostrar el error original
+                                                  }
+                                                }
+                                                toast.error('Error al abrir PDF anterior: ' + err.message);
+                                              }
+                                            }}
                                           >
                                             {evento.datos_adicionales.pdf_cambios.anterior}
                                           </span> → <span 

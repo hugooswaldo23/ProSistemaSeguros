@@ -2267,11 +2267,12 @@ const ModuloNvoExpedientes = () => {
       const cambioTotal = datos._total_changed === true;
       const cambioPrimerPago = datos._primer_pago_changed === true;
       const cambioPagosSubsecuentes = datos._pagos_subsecuentes_changed === true;
+      const tieneRecibosComplementarios = datos._tiene_recibos_complementarios === true;
       
       const debeRegenerarRecibos = (
         cambioInicioVigencia || cambioPeriodoGracia || cambioTipoPago || 
         cambioFrecuenciaPago || cambioTotal || cambioPrimerPago || cambioPagosSubsecuentes
-      );
+      ) && !tieneRecibosComplementarios;
       
       // Limpiar campos temporales y banderas
       delete datos._fechaManual;
@@ -2284,11 +2285,21 @@ const ModuloNvoExpedientes = () => {
       delete datos._total_changed;
       delete datos._primer_pago_changed;
       delete datos._pagos_subsecuentes_changed;
+      delete datos._modo_endoso;
+      delete datos._esperando_recargo_fraccionado;
+      delete datos._recargo_fraccionado_por_parcialidad;
+      delete datos._tiene_recibos_complementarios;
+      delete datos._tipo_endoso_economico_cargado;
+      delete datos._numero_endoso_economico;
       delete datos.cliente;
       delete datos.historial;
       
       // 📄 En modo edición, NO enviar campos de PDF (se actualizan por separado al subir)
       // Esto evita sobrescribir el pdf_key nuevo con el viejo
+      delete datos.__pdfFile;
+      delete datos.__pdfNombre;
+      delete datos.__pdfSize;
+
       if (modoEdicion) {
         delete datos.pdf_key;
         delete datos.pdf_url;
@@ -2441,11 +2452,13 @@ const ModuloNvoExpedientes = () => {
       console.log('📄 expedienteId:', expedienteId);
       console.log('📄 ==============================');
       
+      let pdfSubidoInfo = null;
       if (!modoEdicion && window._selectedPDFFile) {
         try {
           console.log('📤 Subiendo PDF del extractor a S3...');
           const pdfData = await pdfService.subirPDFPoliza(expedienteId, window._selectedPDFFile);
           console.log('✅ PDF subido correctamente:', pdfData);
+          pdfSubidoInfo = pdfData;
           
           // Limpiar archivo temporal
           window._selectedPDFFile = null;
@@ -2879,6 +2892,16 @@ const ModuloNvoExpedientes = () => {
                 }
                 return null;
               })(),
+
+              ...(pdfSubidoInfo && {
+                pdf_documento: {
+                  descripcion: 'PDF de póliza inicial cargado',
+                  nuevo: pdfSubidoInfo.pdf_nombre,
+                  nuevo_key: pdfSubidoInfo.pdf_key,
+                  size: pdfSubidoInfo.pdf_size
+                }
+              }),
+
               monto_total: datos.total || null,
               monto_primer_pago: datos.tipo_pago === 'Fraccionado' ? datos.primer_pago : datos.total,
               monto_pagos_subsecuentes: datos.tipo_pago === 'Fraccionado' ? datos.pagos_subsecuentes : null,
@@ -3174,10 +3197,16 @@ const ModuloNvoExpedientes = () => {
         })(),
         // Asegurar strings vacíos en lugar de null para campos de texto
         numero_poliza: expedienteCompleto.numero_poliza || '',
-        numero_endoso: expedienteCompleto.numero_endoso || '',
+        numero_endoso: expedienteCompleto.numero_endoso || expedienteCompleto.endoso || '',
         agente: expedienteCompleto.agente || '',
         agente_id: expedienteCompleto.agente_id || null,
-        clave_agente: expedienteCompleto.clave_agente || '',
+        clave_agente: expedienteCompleto.clave_agente || (() => {
+          const agenteTexto = String(expedienteCompleto.agente || '').trim();
+          if (agenteTexto.includes(' - ')) {
+            return agenteTexto.split(' - ')[0].trim();
+          }
+          return '';
+        })(),
         sub_agente: expedienteCompleto.sub_agente || '',
         // Campos de vehículo (normalizar marca para que coincida con dropdown)
         marca: (() => {
@@ -3194,7 +3223,7 @@ const ModuloNvoExpedientes = () => {
         color: expedienteCompleto.color || '',
         tipo_vehiculo: expedienteCompleto.tipo_vehiculo || '',
         tipo_cobertura: expedienteCompleto.tipo_cobertura || '',
-        suma_asegurada: expedienteCompleto.suma_asegurada || '',
+        suma_asegurada: expedienteCompleto.suma_asegurada || expedienteCompleto.sumaAsegurada || expedienteCompleto.suma_aseg || '',
         conductor_habitual: expedienteCompleto.conductor_habitual || '',
         edad_conductor: expedienteCompleto.edad_conductor || '',
         licencia_conducir: expedienteCompleto.licencia_conducir || ''

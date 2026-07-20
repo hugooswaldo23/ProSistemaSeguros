@@ -76,6 +76,8 @@ const CalendarioPagos = ({
 
   // Determinar número de pagos: 1 para Anual, según frecuencia para Fraccionado
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
+  const tieneRecibosComplementarios = Array.isArray(expediente.recibos)
+    && expediente.recibos.some(r => r.es_endoso_complementario || r.numero_mostrar);
   
   // 🔥 useMemo para recalcular pagos cuando cambien las dependencias importantes
   const pagos = React.useMemo(() => {
@@ -84,7 +86,7 @@ const CalendarioPagos = ({
     // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
     if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
       pagosList = expediente.recibos
-        .filter(r => r.numero_recibo <= numeroPagos)
+        .filter(r => tieneRecibosComplementarios || r.numero_recibo <= numeroPagos)
         .map(r => {
           // IMPORTANTE: Solo usar estatusBackend si el recibo tiene estatus del backend
           // Si no tiene estatus, dejarlo sin estatusBackend para que se calcule en frontend
@@ -93,6 +95,9 @@ const CalendarioPagos = ({
           
           return {
             numero: r.numero_recibo,
+            numeroMostrar: r.numero_mostrar || String(r.numero_recibo),
+            esEndosoComplementario: Boolean(r.es_endoso_complementario),
+            numeroBase: r.numero_base || r.numero_recibo,
             fecha: r.fecha_vencimiento,
             monto: parseFloat(r.monto).toFixed(2),
             estatusBackend: estatusNormalizado, // Puede ser null si no viene del backend
@@ -241,7 +246,7 @@ const CalendarioPagos = ({
     const tieneFechaPagoReal = !!pago.fecha_pago_real;
     const forzarPagado = tieneRecibosBackend
       ? tieneFechaPagoReal
-      : pago.numero <= ultimoReciboPagado;
+      : (!pago.esEndosoComplementario && pago.numero <= ultimoReciboPagado);
 
     // 🔥 Si el recibo viene del backend con estatus, usarlo directamente
     if (pago.estatusBackend && !forzarPagado) {
@@ -352,7 +357,7 @@ const CalendarioPagos = ({
     if (!file || !reciboSeleccionado) return;
 
     // En pólizas fraccionadas, las aseguradoras emiten un solo PDF con todos los recibos
-    const replicarEnTodos = esFraccionado && numeroPagos > 1;
+    const replicarEnTodos = esFraccionado && numeroPagos > 1 && !tieneRecibosComplementarios;
     const recibosDestino = replicarEnTodos
       ? Array.from({ length: numeroPagos }, (_, i) => i + 1)
       : [reciboSeleccionado];
@@ -468,7 +473,7 @@ const CalendarioPagos = ({
       <div className="card-header bg-primary text-white">
         <h6 className="mb-0">
           📅 Calendario de Pagos - {esAnual ? 'Anual' : frecuencia}
-          <small className="ms-2">({numeroPagos} {numeroPagos === 1 ? 'pago' : 'pagos'} en el año)</small>
+          <small className="ms-2">({pagos.length} {pagos.length === 1 ? 'cobro' : 'cobros'}{tieneRecibosComplementarios ? ' en seguimiento' : ' en el año'})</small>
         </h6>
       </div>
       <div className="card-body p-3">
@@ -490,7 +495,7 @@ const CalendarioPagos = ({
                 <div className="card-body text-center p-2">
                   <small className="d-block mb-1">✅ Pagado</small>
                   <h5 className="mb-0">{utils.formatearMoneda(totalPagado)}</h5>
-                  <small className="d-block mt-1">{pagosRealizados} de {numeroPagos}</small>
+                  <small className="d-block mt-1">{pagosRealizados} de {pagos.length}</small>
                 </div>
               </div>
             </div>
@@ -557,8 +562,15 @@ const CalendarioPagos = ({
                 const fueRemovido = pagosRemovidos[pago.numero];
                 
                 return (
-                <tr key={pago.numero} className={pago.pagado ? 'table-success' : ''}>
-                  <td><strong>#{pago.numero}</strong></td>
+                <tr key={`${pago.numero}-${pago.numeroMostrar || pago.numero}`} className={pago.pagado ? 'table-success' : ''}>
+                  <td>
+                    <strong>#{pago.numeroMostrar || pago.numero}</strong>
+                    {pago.esEndosoComplementario && (
+                      <span className="badge bg-warning text-dark ms-1" style={{ fontSize: '0.6rem' }}>
+                        Endoso
+                      </span>
+                    )}
+                  </td>
                   <td>{utils.formatearFecha(pago.fecha, 'larga')}</td>
                   <td>{pago.pagado && pago.fecha_pago_real ? utils.formatearFecha(pago.fecha_pago_real.split('T')[0], 'larga') : '—'}</td>
                   <td><strong>${pago.monto}</strong></td>
@@ -583,7 +595,7 @@ const CalendarioPagos = ({
                   {/* Columna: Póliza PDF (solo en primer recibo) */}
                   {expediente?.pdf_url && (
                     <td className="text-center">
-                      {pago.numero === 1 ? (
+                      {String(pago.numeroBase || pago.numero) === '1' && !pago.esEndosoComplementario ? (
                         <button
                           className="btn btn-sm btn-outline-info"
                           style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }}

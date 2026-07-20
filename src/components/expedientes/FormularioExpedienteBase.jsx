@@ -201,6 +201,29 @@ const FormularioExpedienteBase = React.memo(({
   // Estados para archivos adjuntos en modo manual
   const [recibosAdjuntos, setRecibosAdjuntos] = useState({}); // {numero: {nombre, archivo}}
   const [polizaPDFManual, setPolizaPDFManual] = useState(null); // {nombre, archivo}
+
+  const limpiarCamposFraccionadosEdicion = useCallback((baseFormulario, overrides = {}) => {
+    if (!modoEdicion) {
+      return {
+        ...baseFormulario,
+        ...overrides
+      };
+    }
+
+    return {
+      ...baseFormulario,
+      ...overrides,
+      cargo_pago_fraccionado: '',
+      subtotal: '',
+      iva: '',
+      total: '',
+      recibos: [],
+      primer_pago: '',
+      pagos_subsecuentes: '',
+      _esperando_recargo_fraccionado: true,
+      _recargo_fraccionado_por_parcialidad: true
+    };
+  }, [modoEdicion]);
   const fileInputReciboRef = useRef(null);
   const fileInputPolizaRef = useRef(null);
   const [reciboSeleccionadoManual, setReciboSeleccionadoManual] = useState(null);
@@ -304,13 +327,48 @@ const FormularioExpedienteBase = React.memo(({
   // Efecto para cargar vendedores cuando cambia el agente
   // Auto-calcular IVA, subtotal y total cuando cambien los montos
   useEffect(() => {
+    if (modoEdicion && formulario._esperando_recargo_fraccionado) {
+      if (formulario.subtotal || formulario.total || formulario.iva) {
+        setFormulario(prev => ({
+          ...prev,
+          subtotal: '',
+          iva: '',
+          total: ''
+        }));
+      }
+      return;
+    }
+
     const primaNeta = parseFloat(formulario.prima_neta) || 0;
     const recargo = parseFloat(formulario.cargo_pago_fraccionado) || 0;
     const gastosExp = parseFloat(formulario.gastos_expedicion) || 0;
+    const numRecibos = formulario.tipo_pago === 'Fraccionado'
+      ? (CONSTANTS.PAGOS_POR_FRECUENCIA[formulario.frecuenciaPago] || 0)
+      : 0;
 
-    const nuevoSubtotal = primaNeta + recargo + gastosExp;
-    const nuevoIva = nuevoSubtotal * 0.16;
-    const nuevoTotal = nuevoSubtotal + nuevoIva;
+    let nuevoSubtotal = 0;
+    let nuevoIva = 0;
+    let nuevoTotal = 0;
+
+    if (modoEdicion && formulario._recargo_fraccionado_por_parcialidad && numRecibos > 0) {
+      const primaPorRecibo = primaNeta / numRecibos;
+      const recargoPorRecibo = recargo / numRecibos;
+      const subtotalBaseAnual = primaNeta + recargo + gastosExp;
+      const totalPrimerRecibo = parseFloat(((primaPorRecibo + recargoPorRecibo + gastosExp) * 1.16).toFixed(2));
+      const totalSubsecuente = parseFloat(((primaPorRecibo + recargoPorRecibo) * 1.16).toFixed(2));
+
+      nuevoSubtotal = subtotalBaseAnual;
+      nuevoTotal = totalPrimerRecibo + (totalSubsecuente * (numRecibos - 1));
+      nuevoIva = nuevoTotal - nuevoSubtotal;
+    } else {
+      const recargoTotal = modoEdicion && formulario._recargo_fraccionado_por_parcialidad && numRecibos > 0
+        ? recargo * numRecibos
+        : recargo;
+
+      nuevoSubtotal = primaNeta + recargoTotal + gastosExp;
+      nuevoIva = nuevoSubtotal * 0.16;
+      nuevoTotal = nuevoSubtotal + nuevoIva;
+    }
 
     const subtotalStr = nuevoSubtotal > 0 ? nuevoSubtotal.toFixed(2) : '';
     const ivaStr = nuevoIva > 0 ? nuevoIva.toFixed(2) : '';
@@ -325,30 +383,41 @@ const FormularioExpedienteBase = React.memo(({
         _total_changed: true
       }));
     }
-  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion]);
+  }, [formulario.prima_neta, formulario.cargo_pago_fraccionado, formulario.gastos_expedicion, formulario._esperando_recargo_fraccionado, formulario.subtotal, formulario.total, formulario.iva, modoEdicion]);
 
   // 🧾 Ref para evitar regenerar recibos en la carga inicial del modo edición
   const frecuenciaInicialRef = useRef(null);
   const tipoPagoInicialRef = useRef(null);
   const totalInicialRef = useRef(null);
   const gastosInicialRef = useRef(null);
+  const recargoInicialRef = useRef(null);
   const fechaInicialRef = useRef(null);
+  const fechaVencimientoInicialRef = useRef(null);
   const primeraRenderizacionRef = useRef(true);
 
   // 🧾 Auto-generar recibos con montos y fechas calculados (manual + edición)
   useEffect(() => {
     const esManual = formulario._metodo_captura === 'manual';
+    const sincronizarReferenciaEdicion = () => {
+      frecuenciaInicialRef.current = formulario.frecuenciaPago;
+      tipoPagoInicialRef.current = formulario.tipo_pago;
+      totalInicialRef.current = formulario.total;
+      gastosInicialRef.current = formulario.gastos_expedicion;
+      recargoInicialRef.current = formulario.cargo_pago_fraccionado;
+      fechaInicialRef.current = formulario.inicio_vigencia;
+      fechaVencimientoInicialRef.current = formulario.fecha_vencimiento_pago;
+    };
+
+    if (modoEdicion && formulario._tiene_recibos_complementarios) {
+      return;
+    }
     
     // En modo edición sin _metodo_captura: permitir recalcular solo si el usuario cambió frecuencia o tipo_pago
     if (modoEdicion && !esManual) {
       if (primeraRenderizacionRef.current) {
         // Primera renderización en edición: guardar valores iniciales, no regenerar
         primeraRenderizacionRef.current = false;
-        frecuenciaInicialRef.current = formulario.frecuenciaPago;
-        tipoPagoInicialRef.current = formulario.tipo_pago;
-        totalInicialRef.current = formulario.total;
-        gastosInicialRef.current = formulario.gastos_expedicion;
-        fechaInicialRef.current = formulario.inicio_vigencia;
+        sincronizarReferenciaEdicion();
         return;
       }
       // Regenerar si el usuario cambió frecuencia, tipo_pago, montos o fechas
@@ -356,7 +425,9 @@ const FormularioExpedienteBase = React.memo(({
         formulario.tipo_pago !== tipoPagoInicialRef.current ||
         formulario.total !== totalInicialRef.current ||
         formulario.gastos_expedicion !== gastosInicialRef.current ||
-        formulario.inicio_vigencia !== fechaInicialRef.current;
+        formulario.cargo_pago_fraccionado !== recargoInicialRef.current ||
+        formulario.inicio_vigencia !== fechaInicialRef.current ||
+        formulario.fecha_vencimiento_pago !== fechaVencimientoInicialRef.current;
       if (!algoCambio) return;
     }
     
@@ -368,6 +439,19 @@ const FormularioExpedienteBase = React.memo(({
     const esFraccionado = tipoPago === 'Fraccionado';
     
     if (!esAnual && !esFraccionado) return;
+
+    if (modoEdicion && esFraccionado && (formulario._esperando_recargo_fraccionado || !String(formulario.cargo_pago_fraccionado ?? '').trim())) {
+      if (formulario.recibos?.length || formulario.primer_pago || formulario.pagos_subsecuentes) {
+        sincronizarReferenciaEdicion();
+        setFormulario(prev => ({
+          ...prev,
+          recibos: [],
+          primer_pago: '',
+          pagos_subsecuentes: ''
+        }));
+      }
+      return;
+    }
     
     const numRecibos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
     if (numRecibos === 0) return;
@@ -383,6 +467,15 @@ const FormularioExpedienteBase = React.memo(({
       if (numRecibos === 1) {
         // Pago anual: un solo recibo con el total
         montoPrimerRecibo = total.toFixed(2);
+      } else if (modoEdicion && formulario._recargo_fraccionado_por_parcialidad) {
+        const primaNetaAnual = parseFloat(formulario.prima_neta) || 0;
+        const recargoAnual = parseFloat(formulario.cargo_pago_fraccionado) || 0;
+        const recargoPorRecibo = recargoAnual / numRecibos;
+        const primaPorRecibo = primaNetaAnual / numRecibos;
+        const subtotalPrimerRecibo = primaPorRecibo + recargoPorRecibo + gastos;
+        const subtotalSubsecuente = primaPorRecibo + recargoPorRecibo;
+        montoPrimerRecibo = (subtotalPrimerRecibo * 1.16).toFixed(2);
+        montoSubsecuente = (subtotalSubsecuente * 1.16).toFixed(2);
       } else {
         // Fraccionado: repartir (total - gastos) entre N recibos, gastos van en el primero
         const baseRepartible = total - gastos;
@@ -429,15 +522,43 @@ const FormularioExpedienteBase = React.memo(({
         fecha_vencimiento: fechaRecibo
       });
     }
+
+    const firmaRecibosActuales = JSON.stringify((formulario.recibos || []).map(recibo => ({
+      numero_recibo: recibo.numero_recibo,
+      monto: String(recibo.monto || ''),
+      fecha_vencimiento: recibo.fecha_vencimiento || ''
+    })));
+    const firmaNuevosRecibos = JSON.stringify(nuevosRecibos.map(recibo => ({
+      numero_recibo: recibo.numero_recibo,
+      monto: String(recibo.monto || ''),
+      fecha_vencimiento: recibo.fecha_vencimiento || ''
+    })));
+
+    const primerPagoFinal = montoPrimerRecibo || '';
+    const pagosSubFinal = montoSubsecuente || montoPrimerRecibo || '';
+
+    if (
+      firmaRecibosActuales === firmaNuevosRecibos &&
+      String(formulario.primer_pago || '') === primerPagoFinal &&
+      String(formulario.pagos_subsecuentes || '') === pagosSubFinal
+    ) {
+      if (modoEdicion) {
+        sincronizarReferenciaEdicion();
+      }
+      return;
+    }
     
     // Sincronizar primer_pago y pagos_subsecuentes para que el backend calcule correctamente
+    if (modoEdicion) {
+      sincronizarReferenciaEdicion();
+    }
     setFormulario(prev => ({ 
       ...prev, 
       recibos: nuevosRecibos,
-      primer_pago: montoPrimerRecibo || '',
-      pagos_subsecuentes: montoSubsecuente || montoPrimerRecibo || ''
+      primer_pago: primerPagoFinal,
+      pagos_subsecuentes: pagosSubFinal
     }));
-  }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, modoEdicion]);
+  }, [formulario.tipo_pago, formulario.frecuenciaPago, formulario._metodo_captura, formulario.total, formulario.gastos_expedicion, formulario.cargo_pago_fraccionado, formulario.inicio_vigencia, formulario.fecha_vencimiento_pago, formulario.recibos, formulario.primer_pago, formulario.pagos_subsecuentes, modoEdicion]);
 
   useEffect(() => {
     if (formulario.agente_id && agentes.length > 0) {
@@ -1447,10 +1568,17 @@ const FormularioExpedienteBase = React.memo(({
                     step="0.01"
                     className="form-control"
                     value={formulario.cargo_pago_fraccionado ?? ''}
-                    onChange={(e) => setFormulario(prev => ({ ...prev, cargo_pago_fraccionado: e.target.value }))}
+                    onChange={(e) => setFormulario(prev => ({ 
+                      ...prev, 
+                      cargo_pago_fraccionado: e.target.value,
+                      _esperando_recargo_fraccionado: modoEdicion && formulario.tipo_pago === 'Fraccionado' ? e.target.value === '' : false
+                    }))}
                     placeholder="0.00"
                   />
                 </div>
+                {modoEdicion && formulario.tipo_pago === 'Fraccionado' && formulario._esperando_recargo_fraccionado && (
+                  <small className="text-muted">Captura el nuevo recargo para recalcular total y recibos.</small>
+                )}
               </div>
               <div className="col-md-6">
                 <label className="form-label">Gastos de Expedición</label>
@@ -1602,12 +1730,13 @@ const FormularioExpedienteBase = React.memo(({
                   onChange={(e) => {
                     const tipo = e.target.value;
                     const esAnual = tipo === 'Anual' || /pago\s+unico|pago\s+único/i.test(tipo);
-                    const nuevoFormulario = {
-                      ...formulario,
+                    const nuevoFormulario = limpiarCamposFraccionadosEdicion(formulario, {
                       tipo_pago: tipo,
                       frecuenciaPago: esAnual ? 'Anual' : formulario.frecuenciaPago,
+                      _esperando_recargo_fraccionado: !esAnual,
+                      _recargo_fraccionado_por_parcialidad: !esAnual,
                       _tipo_pago_changed: true // Marcar cambio para forzar recálculo de recibos
-                    };
+                    });
                     const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                     setFormulario(formularioActualizado);
                   }}
@@ -1625,11 +1754,12 @@ const FormularioExpedienteBase = React.memo(({
                     className="form-select"
                     value={formulario.frecuenciaPago}
                     onChange={(e) => {
-                      const nuevoFormulario = { 
-                        ...formulario, 
+                      const nuevoFormulario = limpiarCamposFraccionadosEdicion(formulario, { 
                         frecuenciaPago: e.target.value,
+                        _esperando_recargo_fraccionado: true,
+                        _recargo_fraccionado_por_parcialidad: true,
                         _frecuencia_pago_changed: true // Marcar cambio para forzar recálculo de recibos
-                      };
+                      });
                       const formularioActualizado = actualizarCalculosAutomaticos(nuevoFormulario);
                       setFormulario(formularioActualizado);
                     }}
