@@ -117,8 +117,21 @@ const FormularioEditarExpediente = ({
   const handleDatosExtraidosEndoso = useCallback((datosExtraidos) => {
     const esQualitas = String(datosExtraidos.compania || formulario.compania || '').toLowerCase().includes('qualitas');
     const esAjusteEconomico = datosExtraidos.es_endoso_economico === true || datosExtraidos.tipo_endoso === 'ajuste_economico';
-    const cambioTipoPago = Boolean(datosExtraidos.tipo_pago && datosExtraidos.tipo_pago !== (formularioOriginal?.tipo_pago || formulario.tipo_pago));
-    const cambioFrecuencia = Boolean(datosExtraidos.frecuenciaPago && datosExtraidos.frecuenciaPago !== (formularioOriginal?.frecuenciaPago || formulario.frecuenciaPago));
+    const tipoPagoOriginal = formularioOriginal?.tipo_pago ?? formularioOriginal?.tipoPago ?? formulario.tipo_pago ?? formulario.tipoPago;
+    const frecuenciaOriginal = formularioOriginal?.frecuenciaPago ?? formularioOriginal?.frecuencia_pago ?? formulario.frecuenciaPago ?? formulario.frecuencia_pago;
+    const cambioTipoPago = Boolean(datosExtraidos.tipo_pago && datosExtraidos.tipo_pago !== tipoPagoOriginal);
+    const cambioFrecuencia = Boolean(datosExtraidos.frecuenciaPago && datosExtraidos.frecuenciaPago !== frecuenciaOriginal);
+    const tieneDatosCobranza = Boolean(
+      datosExtraidos.tipo_pago ||
+      datosExtraidos.frecuenciaPago ||
+      datosExtraidos.primer_pago ||
+      datosExtraidos.pagos_subsecuentes ||
+      datosExtraidos.cargo_pago_fraccionado ||
+      datosExtraidos.gastos_expedicion ||
+      datosExtraidos.total ||
+      (Array.isArray(datosExtraidos.recibos) && datosExtraidos.recibos.length > 0)
+    );
+    const requiereAjusteEconomico = esQualitas && (cambioTipoPago || cambioFrecuencia || tieneDatosCobranza);
 
     if (requiereAjusteEconomicoQualitas && !esAjusteEconomico) {
       toast.error('El segundo archivo debe ser el endoso económico de Qualitas (A-AJUSTE).');
@@ -234,7 +247,7 @@ const FormularioEditarExpediente = ({
       compania: datosExtraidos.compania || formulario.compania,
       cambiosCobranza: Boolean(datosExtraidos.tipo_pago || datosExtraidos.frecuenciaPago || datosExtraidos.total || datosExtraidos.primer_pago || datosExtraidos.pagos_subsecuentes)
     });
-    setRequiereAjusteEconomicoQualitas(esQualitas && (cambioTipoPago || cambioFrecuencia));
+    setRequiereAjusteEconomicoQualitas(requiereAjusteEconomico);
     setMostrarExtractorEndoso(false);
     toast.success(
       esQualitas && (cambioTipoPago || cambioFrecuencia)
