@@ -78,6 +78,8 @@ const CalendarioPagos = ({
   const numeroPagos = esAnual ? 1 : (CONSTANTS.PAGOS_POR_FRECUENCIA[frecuencia] || 0);
   const tieneRecibosComplementarios = Array.isArray(expediente.recibos)
     && expediente.recibos.some(r => r.es_endoso_complementario || r.numero_mostrar);
+  const mostrarTodosLosRecibosGuardados = Array.isArray(expediente.recibos)
+    && expediente.recibos.length > numeroPagos;
   
   // 🔥 useMemo para recalcular pagos cuando cambien las dependencias importantes
   const pagos = React.useMemo(() => {
@@ -86,7 +88,7 @@ const CalendarioPagos = ({
     // 🔥 PRIORIDAD: Si el backend envía los recibos, usarlos directamente
     if (expediente.recibos && Array.isArray(expediente.recibos) && expediente.recibos.length > 0) {
       pagosList = expediente.recibos
-        .filter(r => tieneRecibosComplementarios || r.numero_recibo <= numeroPagos)
+        .filter(r => mostrarTodosLosRecibosGuardados || tieneRecibosComplementarios || r.numero_recibo <= numeroPagos)
         .map(r => {
           // IMPORTANTE: Solo usar estatusBackend si el recibo tiene estatus del backend
           // Si no tiene estatus, dejarlo sin estatusBackend para que se calcule en frontend
@@ -149,7 +151,18 @@ const CalendarioPagos = ({
       }
     }
     
-    return pagosList;
+    return [...pagosList].sort((pagoA, pagoB) => {
+      const fechaA = pagoA.fecha ? new Date(`${pagoA.fecha}T00:00:00`) : null;
+      const fechaB = pagoB.fecha ? new Date(`${pagoB.fecha}T00:00:00`) : null;
+      const tiempoA = fechaA && !Number.isNaN(fechaA.getTime()) ? fechaA.getTime() : Number.MAX_SAFE_INTEGER;
+      const tiempoB = fechaB && !Number.isNaN(fechaB.getTime()) ? fechaB.getTime() : Number.MAX_SAFE_INTEGER;
+
+      if (tiempoA !== tiempoB) {
+        return tiempoA - tiempoB;
+      }
+
+      return (pagoA.numero || 0) - (pagoB.numero || 0);
+    });
   }, [
     expediente.inicio_vigencia,
     expediente.tipo_pago,
@@ -169,6 +182,14 @@ const CalendarioPagos = ({
     frecuencia,
     calcularProximoPago
   ]);
+
+  const totalCalendario = React.useMemo(() => {
+    return pagos.reduce((acumulado, pago) => acumulado + (parseFloat(pago.monto) || 0), 0);
+  }, [pagos]);
+
+  const totalMostrado = tieneRecibosComplementarios
+    ? totalCalendario
+    : (parseFloat(expediente.total) || totalCalendario);
 
   // 📸 Notificar que se calcularon los recibos (cada vez que cambien fechas clave)
   const recibosCalculadosRef = React.useRef(false);
@@ -483,8 +504,8 @@ const CalendarioPagos = ({
             <div className="col">
               <div className="card bg-light h-100">
                 <div className="card-body text-center p-2">
-                  <small className="text-muted d-block mb-1">Total Anual</small>
-                  <h5 className="mb-0 text-primary">{utils.formatearMoneda(expediente.total)}</h5>
+                  <small className="text-muted d-block mb-1">{tieneRecibosComplementarios ? 'Total Cobranza' : 'Total Anual'}</small>
+                  <h5 className="mb-0 text-primary">{utils.formatearMoneda(totalMostrado)}</h5>
                 </div>
               </div>
             </div>
@@ -758,11 +779,11 @@ const CalendarioPagos = ({
                 );
               })}
             </tbody>
-            {expediente.total && (
+            {totalMostrado > 0 && (
               <tfoot>
                 <tr className="table-info">
-                  <td colSpan="3" className="text-end"><strong>Total Anual:</strong></td>
-                  <td colSpan={modoPreGuardado ? 2 : 3}><strong>{utils.formatearMoneda(expediente.total)}</strong></td>
+                  <td colSpan="3" className="text-end"><strong>{tieneRecibosComplementarios ? 'Total Cobranza:' : 'Total Anual:'}</strong></td>
+                  <td colSpan={modoPreGuardado ? 2 : 3}><strong>{utils.formatearMoneda(totalMostrado)}</strong></td>
                 </tr>
               </tfoot>
             )}
