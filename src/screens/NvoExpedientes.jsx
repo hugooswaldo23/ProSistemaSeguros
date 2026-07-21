@@ -37,6 +37,57 @@ const getAuthHeaders = (includeJson = false) => {
   return headers;
 };
 
+const normalizarRecibosDetalle = (recibos) => {
+  let recibosArray = recibos;
+
+  if (typeof recibosArray === 'string') {
+    try {
+      recibosArray = JSON.parse(recibosArray);
+    } catch {
+      recibosArray = [];
+    }
+  }
+
+  if (!Array.isArray(recibosArray)) {
+    return [];
+  }
+
+  return recibosArray.map(recibo => ({
+    ...recibo,
+    fecha_vencimiento: recibo.fecha_vencimiento ? String(recibo.fecha_vencimiento).split('T')[0] : '',
+    fecha_pago_real: recibo.fecha_pago_real ? String(recibo.fecha_pago_real).split('T')[0] : ''
+  }));
+};
+
+const tieneRecibosComplementarios = (recibos = []) => {
+  return normalizarRecibosDetalle(recibos).some(
+    recibo => recibo.es_endoso_complementario || recibo.numero_mostrar
+  );
+};
+
+const combinarRecibosDetalle = (recibosExpediente = [], recibosApi = []) => {
+  const recibosBase = normalizarRecibosDetalle(recibosExpediente);
+  const recibosBackend = normalizarRecibosDetalle(recibosApi);
+  const conservarBaseMasCompleta = recibosBase.length > recibosBackend.length;
+
+  if (recibosBase.length === 0) {
+    return recibosBackend;
+  }
+
+  if (!tieneRecibosComplementarios(recibosBase) && !conservarBaseMasCompleta) {
+    return recibosBackend.length > 0 ? recibosBackend : recibosBase;
+  }
+
+  const recibosApiPorNumero = new Map(
+    recibosBackend.map(recibo => [String(recibo.numero_recibo), recibo])
+  );
+
+  return recibosBase.map(recibo => ({
+    ...recibo,
+    ...(recibosApiPorNumero.get(String(recibo.numero_recibo)) || {})
+  }));
+};
+
 const normalizarTextoAgente = (texto = '') => {
   return String(texto)
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -302,9 +353,13 @@ const ModuloNvoExpedientes = () => {
         // 🔥 CARGAR RECIBOS PARA CADA EXPEDIENTE FRACCIONADO
         const expedientesConRecibos = await Promise.all(
           expedientesData.map(async (exp) => {
-            // Solo cargar recibos si es pago fraccionado
-            if ((exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') && 
-                (exp.frecuenciaPago || exp.frecuencia_pago)) {
+            const recibosPersistidos = normalizarRecibosDetalle(exp.recibos);
+            const requiereRecibos = (
+              (exp.tipo_pago === 'Fraccionado' || exp.forma_pago?.toUpperCase() === 'FRACCIONADO') &&
+              (exp.frecuenciaPago || exp.frecuencia_pago)
+            ) || tieneRecibosComplementarios(recibosPersistidos);
+
+            if (requiereRecibos) {
               try {
                 const recibosResponse = await fetch(`${API_URL}/api/recibos/${exp.id}`, {
                   headers: getAuthHeaders()
@@ -313,12 +368,16 @@ const ModuloNvoExpedientes = () => {
                 if (recibosResponse.ok) {
                   const recibosData = await recibosResponse.json();
                   const recibosArray = recibosData?.data || recibosData || [];
-                  exp.recibos = Array.isArray(recibosArray) ? recibosArray : [];
+                  exp.recibos = combinarRecibosDetalle(recibosPersistidos, recibosArray);
+                } else {
+                  exp.recibos = recibosPersistidos;
                 }
               } catch (error) {
                 console.warn(`⚠️ Error al cargar recibos para expediente ${exp.id}:`, error);
-                exp.recibos = [];
+                exp.recibos = recibosPersistidos;
               }
+            } else {
+              exp.recibos = recibosPersistidos;
             }
             return exp;
           })
@@ -411,8 +470,19 @@ const ModuloNvoExpedientes = () => {
   useEffect(() => {
     if (expedienteSeleccionado && expedientes.length > 0) {
       const actualizado = expedientes.find(exp => exp.id === expedienteSeleccionado.id);
-      if (actualizado && JSON.stringify(actualizado) !== JSON.stringify(expedienteSeleccionado)) {
-        setExpedienteSeleccionado(actualizado);
+      if (actualizado) {
+        const recibosSincronizados = tieneRecibosComplementarios(expedienteSeleccionado.recibos)
+          ? combinarRecibosDetalle(expedienteSeleccionado.recibos, actualizado.recibos)
+          : normalizarRecibosDetalle(actualizado.recibos);
+
+        const expedienteActualizado = {
+          ...actualizado,
+          recibos: recibosSincronizados
+        };
+
+        if (JSON.stringify(expedienteActualizado) !== JSON.stringify(expedienteSeleccionado)) {
+          setExpedienteSeleccionado(expedienteActualizado);
+        }
       }
     }
   }, [expedientes]);
@@ -3182,7 +3252,6 @@ const ModuloNvoExpedientes = () => {
         coberturas: coberturasParseadas,
         asegurados: aseguradosParseados,
         recibos: recibosParseados,
-        asegurados: aseguradosParseados,
         contratante_es_asegurado: contratanteEsAsegurado,
         // Asegurar valores por defecto para campos numéricos
         periodo_gracia: expedienteCompleto.periodo_gracia ?? 14,
@@ -3354,7 +3423,10 @@ const ModuloNvoExpedientes = () => {
 
   const verDetalles = useCallback(async (expediente) => {
     // 🎯 CARGA LAZY: Cargar expediente completo + recibos solo cuando se necesita (ver detalle)
-    let expedienteConRecibos = { ...expediente };
+    let expedienteConRecibos = {
+      ...expediente,
+      recibos: normalizarRecibosDetalle(expediente.recibos)
+    };
 
     try {
       const expedienteResponse = await fetch(`${API_URL}/api/expedientes/${expediente.id}`, {
@@ -3364,6 +3436,7 @@ const ModuloNvoExpedientes = () => {
       if (expedienteResponse.ok) {
         const expedienteData = await expedienteResponse.json();
         expedienteConRecibos = expedienteData?.data ?? expedienteData ?? expedienteConRecibos;
+        expedienteConRecibos.recibos = normalizarRecibosDetalle(expedienteConRecibos.recibos);
       }
     } catch (error) {
       console.warn('⚠️ [VER] Error al cargar expediente completo:', error);
@@ -3376,16 +3449,15 @@ const ModuloNvoExpedientes = () => {
       });
       if (recibosResponse.ok) {
         const recibosData = await recibosResponse.json();
-        const recibosArray = recibosData?.data || recibosData || [];
+        const recibosArray = normalizarRecibosDetalle(recibosData?.data || recibosData || []);
         
         if (Array.isArray(recibosArray)) {
-
-          expedienteConRecibos.recibos = recibosArray;
+          expedienteConRecibos.recibos = combinarRecibosDetalle(expedienteConRecibos.recibos, recibosArray);
         }
       }
     } catch (error) {
       console.warn('⚠️ [VER] Error al cargar recibos:', error);
-      expedienteConRecibos.recibos = [];
+      expedienteConRecibos.recibos = normalizarRecibosDetalle(expedienteConRecibos.recibos);
     }
     
     setExpedienteSeleccionado(expedienteConRecibos);
