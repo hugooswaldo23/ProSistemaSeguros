@@ -42,10 +42,11 @@ const CalendarioPagos = ({
           subidos[r.numero_recibo] = { subido: true, nombre: r.recibo_pago_nombre || 'recibo' };
         }
       });
-      if (Object.keys(subidos).length > 0) {
-        setRecibosSubidos(prev => ({ ...subidos, ...prev }));
-      }
+      setRecibosSubidos(subidos);
+      return;
     }
+
+    setRecibosSubidos({});
   }, [expediente?.id, expediente?.recibos]);
 
   // Normalizar campos (aceptar múltiples nombres)
@@ -370,30 +371,24 @@ const CalendarioPagos = ({
 
   /**
    * Procesa el archivo seleccionado y lo sube a S3 (o lo guarda localmente si es pre-guardado)
-   * Para pólizas fraccionadas: replica el mismo archivo en todos los recibos
-   * (las aseguradoras emiten un solo PDF con todos los recibos de todas las fracciones)
    */
   const handleArchivoRecibo = async (e) => {
     const file = e.target.files?.[0];
     if (!file || !reciboSeleccionado) return;
 
-    // En pólizas fraccionadas, las aseguradoras emiten un solo PDF con todos los recibos
-    const replicarEnTodos = esFraccionado && numeroPagos > 1 && !tieneRecibosComplementarios;
-    const recibosDestino = replicarEnTodos
-      ? Array.from({ length: numeroPagos }, (_, i) => i + 1)
-      : [reciboSeleccionado];
+    const numeroDestino = reciboSeleccionado;
 
     // === Modo pre-guardado: guardar archivo localmente, no subir a S3 ===
     if (modoPreGuardado) {
       setRecibosSubidos(prev => {
-        const nuevos = { ...prev };
-        recibosDestino.forEach(num => {
-          nuevos[num] = {
+        const nuevos = {
+          ...prev,
+          [numeroDestino]: {
             subido: true,
             nombre: file.name,
             archivo: file
-          };
-        });
+          }
+        };
         // Notificar al padre los archivos pendientes
         if (onRecibosArchivos) {
           const archivos = {};
@@ -404,47 +399,24 @@ const CalendarioPagos = ({
         }
         return nuevos;
       });
-      if (replicarEnTodos) {
-        toast.success(`📎 Recibo adjuntado en los ${numeroPagos} recibos - se subirá al guardar`);
-      } else {
-        toast.success(`📎 Recibo #${reciboSeleccionado} adjuntado - se subirá al guardar`);
-      }
+      toast.success(`📎 Recibo #${numeroDestino} adjuntado - se subirá al guardar`);
       setReciboSeleccionado(null);
       return;
     }
 
     // === Modo normal: subir directamente a S3 ===
-    setSubiendoRecibo(reciboSeleccionado);
+    setSubiendoRecibo(numeroDestino);
     try {
-      // Subir al recibo seleccionado primero
-      await subirReciboPago(expediente.id, reciboSeleccionado, file);
-
-      // Si es fraccionado, replicar en los demás recibos
-      if (replicarEnTodos) {
-        const otrosRecibos = recibosDestino.filter(n => n !== reciboSeleccionado);
-        for (const num of otrosRecibos) {
-          try {
-            await subirReciboPago(expediente.id, num, file);
-          } catch (err) {
-            console.warn(`⚠️ Error replicando recibo #${num}:`, err.message);
-          }
-        }
-      }
+      await subirReciboPago(expediente.id, numeroDestino, file);
       
-      // Marcar todos los recibos destino como subidos
       setRecibosSubidos(prev => {
-        const nuevos = { ...prev };
-        recibosDestino.forEach(num => {
-          nuevos[num] = { subido: true, nombre: file.name };
-        });
-        return nuevos;
+        return {
+          ...prev,
+          [numeroDestino]: { subido: true, nombre: file.name }
+        };
       });
 
-      if (replicarEnTodos) {
-        toast.success(`✅ Recibo subido en los ${numeroPagos} recibos`);
-      } else {
-        toast.success(`✅ Recibo #${reciboSeleccionado} subido correctamente`);
-      }
+      toast.success(`✅ Recibo #${numeroDestino} subido correctamente`);
     } catch (error) {
       console.error('❌ Error al subir recibo:', error);
       toast.error(`Error al subir recibo: ${error.message}`);
